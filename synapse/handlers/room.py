@@ -1260,9 +1260,22 @@ class RoomCreationHandler:
                 creation_content,
                 is_public,
                 room_version,
+                config.get("fi.mau.origin_server_ts"),
+                config.get("fi.mau.room_id"),
             )
             (create_event, _) = creation_event_with_context
             room_id = create_event.room_id
+        elif "room_id" in config or "fi.mau.room_id" in config:
+            room_id = config.get("fi.mau.room_id") or config["room_id"]
+            try:
+                await self.store.store_room(
+                    room_id=room_id,
+                    room_creator_user_id=user_id,
+                    is_public=is_public,
+                    room_version=room_version,
+                )
+            except StoreError:
+                raise SynapseError(409, "Room ID already in use", errcode="M_CONFLICT")
         else:
             room_id = await self._generate_and_create_room_id(
                 creator_id=user_id,
@@ -1393,23 +1406,30 @@ class RoomCreationHandler:
         creation_content: JsonDict,
         is_public: bool,
         room_version: RoomVersion,
+        origin_server_ts: int | None = None,
+        expected_room_id: str | None = None,
     ) -> tuple[EventBase, synapse.events.snapshot.EventContext]:
+        event_dict = {
+            "content": creation_content,
+            "sender": creator.user.to_string(),
+            "type": EventTypes.Create,
+            "state_key": "",
+        }
+        if origin_server_ts is not None:
+            event_dict["origin_server_ts"] = origin_server_ts
         (
             creation_event,
             new_unpersisted_context,
         ) = await self.event_creation_handler.create_event(
             creator,
-            {
-                "content": creation_content,
-                "sender": creator.user.to_string(),
-                "type": EventTypes.Create,
-                "state_key": "",
-            },
+            event_dict,
             prev_event_ids=[],
             depth=1,
             state_map={},
             for_batch=False,
         )
+        if expected_room_id and creation_event.room_id != expected_room_id:
+            raise SynapseError(400, "Room ID mismatch", errcode="M_BAD_PARAM")
         await self.store.store_room(
             room_id=creation_event.room_id,
             room_creator_user_id=creator.user.to_string(),
