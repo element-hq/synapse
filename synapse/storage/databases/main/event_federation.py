@@ -55,6 +55,7 @@ from synapse.util.caches.descriptors import cached
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
+from synapse.util.metrics import Measure
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -414,12 +415,15 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         room = await self.get_room(room_id)  # type: ignore[attr-defined]
         if room["has_auth_chain_index"]:
             try:
-                return await self.db_pool.runInteraction(
-                    "get_auth_chain_difference_chains",
-                    self._get_auth_chain_difference_using_cover_index_txn,
-                    room_id,
-                    state_sets,
-                )
+                with Measure(self.hs.get_clock(), "rei:gacd") as m:
+                    r = await self.db_pool.runInteraction(
+                        "get_auth_chain_difference_chains",
+                        self._get_auth_chain_difference_using_cover_index_txn,
+                        room_id,
+                        state_sets,
+                    )
+                    logger.info("REI: resources %r", m.get_resource_usage())
+                    return r
             except _NoChainCoverIndex:
                 # For whatever reason we don't actually have a chain cover index
                 # for the events in question, so we fall back to the old method.
