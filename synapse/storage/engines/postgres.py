@@ -75,6 +75,10 @@ class PostgresEngine(
         )
         self.config = database_config
 
+    def set_statement_timeout(self, cursor: Cursor, statement_timeout: int) -> None:
+        """Configure the current cursor's statement timeout."""
+        cursor.execute("SET statement_timeout TO ?", (statement_timeout,))
+
     @property
     def single_threaded(self) -> bool:
         return False
@@ -183,7 +187,7 @@ class PostgresEngine(
 
         # Abort really long-running statements and turn them into errors.
         if self.statement_timeout is not None:
-            cursor.execute("SET statement_timeout TO ?", (self.statement_timeout,))
+            self.set_statement_timeout(cursor.txn, self.statement_timeout)
 
         cursor.close()
         db_conn.commit()
