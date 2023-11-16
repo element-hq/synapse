@@ -58,6 +58,7 @@ import platform
 import re
 import subprocess
 import sys
+from argparse import ArgumentParser
 from collections import defaultdict
 from itertools import chain
 from pathlib import Path
@@ -1024,6 +1025,14 @@ def generate_worker_log_config(
 
 
 def main(args: List[str], environ: MutableMapping[str, str]) -> None:
+    parser = ArgumentParser()
+    parser.add_argument(
+        "--generate-only",
+        action="store_true",
+        help="Only generate configuration; don't run Synapse.",
+    )
+    opts = parser.parse_args(args)
+
     config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
@@ -1065,6 +1074,10 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
     else:
         log("Worker config exists—not regenerating")
 
+    if opts.generate_only:
+        log("--generate-only: won't run Synapse")
+        return
+
     # Lifted right out of start.py
     jemallocpath = "/usr/lib/%s-linux-gnu/libjemalloc.so.2" % (platform.machine(),)
 
@@ -1087,4 +1100,4 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv, os.environ)
+    main(sys.argv[1:], os.environ)
