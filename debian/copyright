@@ -1,6 +1,6 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: synapse
-Source: https://github.com/matrix-org/synapse
+Source: https://github.com/vector-im/synapse
 
 Files: *
 Copyright: 2014-2017, OpenMarket Ltd, 2017-2018 New Vector Ltd

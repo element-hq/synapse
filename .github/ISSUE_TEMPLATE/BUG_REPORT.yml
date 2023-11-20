@@ -71,7 +71,7 @@ body:
       label: Installation Method
       options:
         - Docker (matrixdotorg/synapse)
-        - Debian packages from packages.matrix.org
+        - Debian packages from packages.element.io
         - pip (from PyPI)
         - Other (please mention below)
         - I don't know
