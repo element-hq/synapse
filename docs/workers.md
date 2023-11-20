@@ -62,8 +62,8 @@ pip install "matrix-synapse[redis]"
 
 Note that these dependencies are included when synapse is installed with `pip
 install matrix-synapse[all]`. They are also included in the debian packages from
-`matrix.org` and in the docker images at
-https://hub.docker.com/r/matrixdotorg/synapse/.
+`packages.element.io` and in the docker images at
+https://hub.docker.com/r/ectorim/synapse/.
 
 To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
@@ -629,7 +629,7 @@ worker application type.
 
 You can designate generic worker to sending push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
-[sygnal](https://github.com/matrix-org/sygnal) and email.
+[sygnal](https://github.com/vector-im/sygnal) and email.
 
 This will stop the main process sending push notifications.
 

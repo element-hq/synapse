@@ -79,9 +79,9 @@ phonenumbers = [
 We can see this pinned version inside the docker image for that release:
 
 ```
-$ docker pull matrixdotorg/synapse:v1.57.0
+$ docker pull vectorim/synapse:v1.97.0
 ...
-$ docker run --entrypoint pip matrixdotorg/synapse:v1.57.0 show phonenumbers
+$ docker run --entrypoint pip vectorim/synapse:v1.97.0 show phonenumbers
 Name: phonenumbers
 Version: 8.12.44
 Summary: Python version of Google's common library for parsing, formatting, storing and validating international phone numbers.

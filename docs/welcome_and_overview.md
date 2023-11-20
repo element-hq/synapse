@@ -1,8 +1,7 @@
 # Introduction
 
 Welcome to the documentation repository for Synapse, a 
-[Matrix](https://matrix.org) homeserver implementation developed by the matrix.org core 
-team.
+[Matrix](https://matrix.org) homeserver implementation developed by Element.
 
 ## Installing and using Synapse
 
@@ -60,17 +59,6 @@ following documentation:
 
 * And finally, contribute to this documentation! The source for which is
   [located here](https://github.com/matrix-org/synapse/tree/develop/docs).
-
-## Donating to Synapse development
-
-Want to help keep Synapse going but don't know how to code? Synapse is a
-[Matrix.org Foundation](https://matrix.org) project. Consider becoming a
-supporter on [Liberapay](https://liberapay.com/matrixdotorg),
-[Patreon](https://patreon.com/matrixdotorg) or through
-[PayPal](https://paypal.me/matrixdotorg) via a one-time donation.
-
-If you are an organisation or enterprise and would like to sponsor development,
-reach out to us over email at: support (at) matrix.org
 
 ## Reporting a security vulnerability
 
