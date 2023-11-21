@@ -356,6 +356,10 @@ def setup_logging(
         sys.argv[0],
         SYNAPSE_VERSION,
     )
+    logging.warning("Copyright (c) 2023 New Vector, Inc")
+    logging.warning(
+        "Licensed under the AGPL 3.0 license. Website: https://github.com/vector-im/synapse"
+    )
     logging.info("Server hostname: %s", config.server.server_name)
     logging.info("Instance name: %s", hs.get_instance_name())
     logging.info("Twisted reactor: %s", type(reactor).__name__)
