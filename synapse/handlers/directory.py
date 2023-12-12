@@ -167,7 +167,7 @@ class DirectoryHandler:
 
             if not self.config.roomdirectory.is_alias_creation_allowed(
                 user_id, room_id, room_alias_str
-            ):
+            ) and not is_admin:
                 # Let's just return a generic message, as there may be all sorts of
                 # reasons why we said no. TODO: Allow configurable error messages
                 # per alias creation rule?
@@ -494,7 +494,7 @@ class DirectoryHandler:
 
             if not self.config.roomdirectory.is_publishing_room_allowed(
                 user_id, room_id, room_aliases
-            ):
+            ) and not await self.auth.is_server_admin(requester):
                 # Let's just return a generic message, as there may be all sorts of
                 # reasons why we said no. TODO: Allow configurable error messages
                 # per alias creation rule?

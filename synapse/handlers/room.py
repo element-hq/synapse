@@ -1298,7 +1298,7 @@ class RoomCreationHandler:
                 room_aliases.append(room_alias.to_string())
             if not self.config.roomdirectory.is_publishing_room_allowed(
                 user_id, room_id, room_aliases
-            ):
+            ) and not is_requester_admin:
                 # allow room creation to continue but do not publish room
                 await self.store.set_room_is_public(room_id, False)
 
