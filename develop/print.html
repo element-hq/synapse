@@ -198,7 +198,7 @@ following documentation:</p>
 <li>
 <p>Read the <a href="development/contributing_guide.html">Contributing Guide</a>. It is meant
 to walk new contributors through the process of developing and submitting a
-change to the Synapse codebase (which is <a href="https://github.com/element.-hq/synapse">hosted on
+change to the Synapse codebase (which is <a href="https://github.com/element-hq/synapse">hosted on
 GitHub</a>).</p>
 </li>
 <li>
@@ -208,9 +208,9 @@ how to <a href="development/contributing_guide.html#run-the-linters">lint</a> an
 <a href="development/contributing_guide.html#8-test-test-test">test</a> your code.</p>
 </li>
 <li>
-<p>Look at <a href="https://github.com/element.-hq/synapse/issues">the issue tracker</a> for
+<p>Look at <a href="https://github.com/element-hq/synapse/issues">the issue tracker</a> for
 bugs to fix or features to add. If you're new, it may be best to start with
-those labeled <a href="https://github.com/element.-hq/synapse/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">good first
+those labeled <a href="https://github.com/element-hq/synapse/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">good first
 issue</a>.</p>
 </li>
 <li>
@@ -226,7 +226,7 @@ do so!</p>
 </li>
 <li>
 <p>And finally, contribute to this documentation! The source for which is
-<a href="https://github.com/element.-hq/synapse/tree/develop/docs">located here</a>.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/docs">located here</a>.</p>
 </li>
 </ul>
 <h2 id="reporting-a-security-vulnerability"><a class="header" href="#reporting-a-security-vulnerability">Reporting a security vulnerability</a></h2>
@@ -2503,7 +2503,7 @@ becomes stable.</p>
 <p>As announced with the release of <a href="upgrade.html#deprecation-of-the-user_may_create_room_with_invites-module-callback">Synapse 1.47.0</a>,
 the deprecated <code>user_may_create_room_with_invites</code> module callback has been removed.</p>
 <p>Modules relying on it can instead implement <a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API to infer whether the invite is happening while creating a room (see <a href="https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89">this function</a>
 as an example). Alternately, modules can also implement <a href="https://element-hq.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room"><code>on_create_room</code></a>.</p>
 <h1 id="upgrading-to-v1520"><a class="header" href="#upgrading-to-v1520">Upgrading to v1.52.0</a></h1>
@@ -2540,7 +2540,7 @@ longer supported upstream.</p>
 <p>The <code>user_may_create_room_with_invites</code> is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
 <a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API method to infer whether the invite is happening in the context of creating a
 room.</p>
 <p>We plan to remove this callback in January 2022.</p>
@@ -2573,8 +2573,8 @@ federation requests.</p>
 <a href="https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
 <h2 id="user-interactive-authentication-fallback-templates-can-now-display-errors"><a class="header" href="#user-interactive-authentication-fallback-templates-can-now-display-errors">User-interactive authentication fallback templates can now display errors</a></h2>
 <p>This may affect you if you make use of custom HTML templates for the
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
 <p>The template is now provided an <code>error</code> variable if the authentication
 process failed. See the default templates linked above for an example.</p>
 <h2 id="removal-of-out-of-date-email-pushers"><a class="header" href="#removal-of-out-of-date-email-pushers">Removal of out-of-date email pushers</a></h2>
@@ -2958,7 +2958,7 @@ endpoint can be handled</p>
 update your reverse proxy configuration to reflect this change.</p>
 <h2 id="new-html-templates"><a class="header" href="#new-html-templates">New HTML templates</a></h2>
 <p>A new HTML template,
-<a href="https://github.com/element.-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
 has been added to the <code>synapse/res/templates</code> directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.</p>
@@ -3038,7 +3038,7 @@ INSERT INTO background_updates (update_name, progress_json, depends_on) VALUES
 is configured to use SSO and a custom
 <code>sso_redirect_confirm_template_dir</code> configuration then these templates
 will need to be copied from
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
 <h2 id="synapse-sso-plugins-method-deprecation"><a class="header" href="#synapse-sso-plugins-method-deprecation">Synapse SSO Plugins Method Deprecation</a></h2>
 <p>Plugins using the <code>complete_sso_login</code> method of
 <code>synapse.module_api.ModuleApi</code> should update to using the async/await
@@ -3169,7 +3169,7 @@ included.</p>
 <p>Synapse will expect these files to exist inside the configured template
 directory, and <strong>will fail to start</strong> if they are absent. To view the
 default templates, see
-<a href="https://github.com/element.-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
+<a href="https://github.com/element-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
 <h2 id="3pid-verification-changes"><a class="header" href="#3pid-verification-changes">3pid verification changes</a></h2>
 <p><strong>Note: As of this release, users will be unable to add phone numbers or
 email addresses to their accounts, without changes to the Synapse
@@ -4933,7 +4933,7 @@ caches:
 </code></pre>
 <p>If you are running multiple workers, you must individually update the worker
 config file and send this signal to each worker process.</p>
-<p>If you're using the <a href="https://github.com/element.-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service">example systemd service</a>
+<p>If you're using the <a href="https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service">example systemd service</a>
 file in Synapse's <code>contrib</code> directory, you can send a <code>SIGHUP</code> signal by using
 <code>systemctl reload matrix-synapse</code>.</p>
 <hr />
@@ -7823,7 +7823,7 @@ remote endpoint at 10.1.2.3:9999.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="templates"><a class="header" href="#templates">Templates</a></h1>
 <p>Synapse uses parametrised templates to generate the content of emails it sends and
 webpages it shows to users.</p>
-<p>By default, Synapse will use the templates listed <a href="https://github.com/element.-hq/synapse/tree/master/synapse/res/templates">here</a>.
+<p>By default, Synapse will use the templates listed <a href="https://github.com/element-hq/synapse/tree/master/synapse/res/templates">here</a>.
 Server admins can configure an additional directory for Synapse to look for templates
 in, allowing them to specify custom templates:</p>
 <pre><code class="language-yaml">templates:
@@ -8902,7 +8902,7 @@ usually returned as part of the <a href="https://spec.matrix.org/latest/client-s
 <h3 id="default-openid-mapping-provider"><a class="header" href="#default-openid-mapping-provider">Default OpenID Mapping Provider</a></h3>
 <p>Synapse has a built-in OpenID mapping provider if a custom provider isn't
 specified in the config. It is located at
-<a href="https://github.com/element.-hq/synapse/blob/develop/synapse/handlers/oidc.py"><code>synapse.handlers.oidc.JinjaOidcMappingProvider</code></a>.</p>
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/handlers/oidc.py"><code>synapse.handlers.oidc.JinjaOidcMappingProvider</code></a>.</p>
 <h2 id="saml-mapping-providers"><a class="header" href="#saml-mapping-providers">SAML Mapping Providers</a></h2>
 <p>The SAML mapping provider can be customized by editing the
 <a href="usage/configuration/config_documentation.html#saml2_config"><code>saml2_config.user_mapping_provider.module</code></a>
@@ -9017,7 +9017,7 @@ complete registration using methods from the <code>ModuleApi</code>.</p>
 <h3 id="default-saml-mapping-provider"><a class="header" href="#default-saml-mapping-provider">Default SAML Mapping Provider</a></h3>
 <p>Synapse has a built-in SAML mapping provider if a custom provider isn't
 specified in the config. It is located at
-<a href="https://github.com/element.-hq/synapse/blob/develop/synapse/handlers/saml.py"><code>synapse.handlers.saml.DefaultSamlMappingProvider</code></a>.</p>
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/handlers/saml.py"><code>synapse.handlers.saml.DefaultSamlMappingProvider</code></a>.</p>
 <div style="break-before: page; page-break-before: always;"></div><h2 style="color:red">
 This page of the Synapse documentation is now deprecated. For up to date
 documentation on setting up or writing a password auth provider module, please see
@@ -9477,7 +9477,7 @@ database and shows a success page.</p>
 <p>To enable this, first create templates for the policy and success pages.
 These should be stored on the local filesystem.</p>
 <p>These templates use the <a href="http://jinja.pocoo.org">Jinja2</a> templating language,
-and <a href="https://github.com/element.-hq/synapse/tree/develop/docs/privacy_policy_templates/">docs/privacy_policy_templates</a>
+and <a href="https://github.com/element-hq/synapse/tree/develop/docs/privacy_policy_templates/">docs/privacy_policy_templates</a>
 gives examples of the sort of thing that can be done.</p>
 <p>Note that the templates must be stored under a name giving the language of the
 template - currently this must always be <code>en</code> (for &quot;English&quot;);
@@ -9958,7 +9958,7 @@ the <code>synapse.module_api.ModuleApi</code> class. The configuration is a dict
 either the output of the module's <code>parse_config</code> static method (see below), or the
 configuration associated with the module in Synapse's configuration file.</p>
 <p>See the documentation for the <code>ModuleApi</code> class
-<a href="https://github.com/element.-hq/synapse/blob/master/synapse/module_api/__init__.py">here</a>.</p>
+<a href="https://github.com/element-hq/synapse/blob/master/synapse/module_api/__init__.py">here</a>.</p>
 <h2 id="when-synapse-runs-with-several-modules-configured"><a class="header" href="#when-synapse-runs-with-several-modules-configured">When Synapse runs with several modules configured</a></h2>
 <p>If Synapse is running with other modules configured, the order each module appears in
 within the <code>modules</code> section of the Synapse configuration file might restrict what it can
@@ -11983,9 +11983,9 @@ managing workers. It provides a <code>matrix-synapse</code> service for the mast
 well as a <code>matrix-synapse-worker@</code> service template for any workers you
 require. Additionally, to group the required services, it sets up a
 <code>matrix-synapse.target</code>.</p>
-<p>See the folder <a href="https://github.com/element.-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
+<p>See the folder <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
 for the systemd unit files.</p>
-<p>The folder <a href="https://github.com/element.-hq/synapse/tree/develop/docs/systemd-with-workers/workers/">workers</a>
+<p>The folder <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/workers/">workers</a>
 contains an example configuration for the <code>generic_worker</code> worker.</p>
 <h2 id="synapse-configuration-files"><a class="header" href="#synapse-configuration-files">Synapse configuration files</a></h2>
 <p>See <a href="systemd-with-workers/../workers.html">the worker documentation</a> for information on how to set up the
@@ -12012,7 +12012,7 @@ the provided <code>*.service</code> files accordingly.</p>
 <h2 id="set-up"><a class="header" href="#set-up">Set up</a></h2>
 <ol>
 <li>Adjust synapse configuration files as above.</li>
-<li>Copy the <code>*.service</code> and <code>*.target</code> files in <a href="https://github.com/element.-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
+<li>Copy the <code>*.service</code> and <code>*.target</code> files in <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
 to <code>/etc/systemd/system</code>.</li>
 <li>Run <code>systemctl daemon-reload</code> to tell systemd to load the new unit files.</li>
 <li>Run <code>systemctl enable matrix-synapse.service</code>. This will configure the
@@ -12047,7 +12047,7 @@ systemctl restart matrix-synapse.target
 <h2 id="hardening"><a class="header" href="#hardening">Hardening</a></h2>
 <p><strong>Optional:</strong> If further hardening is desired, the file
 <code>override-hardened.conf</code> may be copied from
-<a href="https://github.com/element.-hq/synapse/tree/develop/contrib/systemd/">contrib/systemd/override-hardened.conf</a>
+<a href="https://github.com/element-hq/synapse/tree/develop/contrib/systemd/">contrib/systemd/override-hardened.conf</a>
 in this repository to the location
 <code>/etc/systemd/system/matrix-synapse.service.d/override-hardened.conf</code> (the
 directory may have to be created). It enables certain sandboxing features in
@@ -15608,8 +15608,8 @@ the listener port configured with the <code>metrics</code> resource.</p>
 <p>Restart Prometheus.</p>
 </li>
 <li>
-<p>Consider using the <a href="https://github.com/element.-hq/synapse/tree/master/contrib/grafana/">grafana dashboard</a>
-and required <a href="https://github.com/element.-hq/synapse/tree/master/contrib/prometheus/">recording rules</a></p>
+<p>Consider using the <a href="https://github.com/element-hq/synapse/tree/master/contrib/grafana/">grafana dashboard</a>
+and required <a href="https://github.com/element-hq/synapse/tree/master/contrib/prometheus/">recording rules</a></p>
 </li>
 </ol>
 <h2 id="monitoring-workers"><a class="header" href="#monitoring-workers">Monitoring workers</a></h2>
@@ -15938,11 +15938,11 @@ registered accounts on the homeserver.</p>
 <p>It is possible to monitor much of the internal state of Synapse using <a href="https://prometheus.io">Prometheus</a>
 metrics and <a href="https://grafana.com/">Grafana</a>.
 A guide for configuring Synapse to provide metrics is available <a href="usage/administration/../../metrics-howto.html">here</a>
-and information on setting up Grafana is <a href="https://github.com/element.-hq/synapse/tree/master/contrib/grafana">here</a>.
+and information on setting up Grafana is <a href="https://github.com/element-hq/synapse/tree/master/contrib/grafana">here</a>.
 In this setup, Prometheus will periodically scrape the information Synapse provides and
 store a record of it over time. Grafana is then used as an interface to query and
 present this information through a series of pretty graphs.</p>
-<p>Once you have grafana set up, and assuming you're using <a href="https://github.com/element.-hq/synapse/blob/master/contrib/grafana/synapse.json">our grafana dashboard template</a>, look for the following graphs when debugging a slow/overloaded Synapse:</p>
+<p>Once you have grafana set up, and assuming you're using <a href="https://github.com/element-hq/synapse/blob/master/contrib/grafana/synapse.json">our grafana dashboard template</a>, look for the following graphs when debugging a slow/overloaded Synapse:</p>
 <h2 id="message-event-send-time"><a class="header" href="#message-event-send-time">Message Event Send Time</a></h2>
 <p><img src="https://user-images.githubusercontent.com/1342360/82239409-a1c8e900-9930-11ea-8081-e4614e0c63f4.png" alt="image" /></p>
 <p>This, along with the CPU and Memory graphs, is a good way to check the general health of your Synapse instance. It represents how long it takes for a user on your homeserver to send a message.</p>
@@ -15969,7 +15969,7 @@ present this information through a series of pretty graphs.</p>
 <p>This is quite a useful graph. It shows how many times Synapse attempts to retrieve a piece of data from a cache which the cache did not contain, thus resulting in a call to the database. We can see here that the <code>_get_joined_profile_from_event_id</code> cache is being requested a lot, and often the data we're after is not cached.</p>
 <p>Cross-referencing this with the Eviction Rate graph, which shows that entries are being evicted from <code>_get_joined_profile_from_event_id</code> quite often:</p>
 <p><img src="https://user-images.githubusercontent.com/1342360/82240766-de95df80-9932-11ea-8c15-5acfc57c48da.png" alt="image" /></p>
-<p>we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available <a href="https://github.com/element.-hq/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642">here</a> (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.</p>
+<p>we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available <a href="https://github.com/element-hq/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642">here</a> (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.</p>
 <h2 id="forward-extremities"><a class="header" href="#forward-extremities">Forward Extremities</a></h2>
 <p><img src="https://user-images.githubusercontent.com/1342360/82241440-13566680-9934-11ea-8b88-ba468db937ed.png" alt="image" /></p>
 <p>Forward extremities are the leaf events at the end of a DAG in a room, aka events that have no children. The more that exist in a room, the more <a href="https://spec.matrix.org/v1.1/server-server-api/#room-state-resolution">state resolution</a> that Synapse needs to perform (hint: it's an expensive operation). While Synapse has code to prevent too many of these existing at one time in a room, bugs can sometimes make them crop up again.</p>
@@ -16180,7 +16180,7 @@ WHERE room_stats_state.room_id = event_json.room_id&quot; | psql -d synapse -h l
 <h2 id="compression-tool"><a class="header" href="#compression-tool">Compression tool</a></h2>
 <p>There is a tool at https://github.com/matrix-org/rust-synapse-compress-state which can compress the <code>state_groups_state</code> on a room by-room basis (essentially, it reduces the number of &quot;full&quot; state groups). This can result in dramatic reductions of the storage used.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="request-log-format"><a class="header" href="#request-log-format">Request log format</a></h1>
-<p>HTTP request logs are written by synapse (see <a href="https://github.com/element.-hq/synapse/tree/develop/synapse/http/site.py"><code>synapse/http/site.py</code></a> for details).</p>
+<p>HTTP request logs are written by synapse (see <a href="https://github.com/element-hq/synapse/tree/develop/synapse/http/site.py"><code>synapse/http/site.py</code></a> for details).</p>
 <p>See the following for how to decode the dense data available from the default logging configuration.</p>
 <pre><code>2020-10-01 12:00:00,000 - synapse.access.http.8008 - 311 - INFO - PUT-1000- 192.168.0.1 - 8008 - {another-matrix-server.com} Processed request: 0.100sec/-0.000sec (0.000sec, 0.000sec) (0.001sec/0.090sec/3) 11B !200 &quot;PUT /_matrix/federation/v1/send/1600000000000 HTTP/1.1&quot; &quot;Synapse/1.20.1&quot; [0 dbevts]
 -AAAAAAAAAAAAAAAAAAAAA-   -BBBBBBBBBBBBBBBBBBBBBB-   -C-   -DD-   -EEEEEE-  -FFFFFFFFF-   -GG-    -HHHHHHHHHHHHHHHHHHHHHHH-                     -IIIIII- -JJJJJJJ-  -KKKKKK-, -LLLLLL-  -MMMMMMM- -NNNNNN- O  -P- -QQ-  -RRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRRR-   -SSSSSSSSSSSS-   -TTTTTT-
@@ -17065,10 +17065,10 @@ before. Here, by way of an arbitrary example, is the top of <code>git log --grap
 <p>Note how the commit comment explains clearly what is changing and why. Also
 note the <em>absence</em> of merge commits, as well as the absence of commits called
 things like (to pick a few culprits):
-<a href="https://github.com/element.-hq/synapse/commit/84691da6c">“pep8”</a>, <a href="https://github.com/element.-hq/synapse/commit/474810d9d">“fix broken
+<a href="https://github.com/element-hq/synapse/commit/84691da6c">“pep8”</a>, <a href="https://github.com/element-hq/synapse/commit/474810d9d">“fix broken
 test”</a>,
-<a href="https://github.com/element.-hq/synapse/commit/c9d72e457">“oops”</a>,
-<a href="https://github.com/element.-hq/synapse/commit/836358823">“typo”</a>, or <a href="https://github.com/element.-hq/synapse/commit/707374d5d">“Who's
+<a href="https://github.com/element-hq/synapse/commit/c9d72e457">“oops”</a>,
+<a href="https://github.com/element-hq/synapse/commit/836358823">“typo”</a>, or <a href="https://github.com/element-hq/synapse/commit/707374d5d">“Who's
 the president?”</a>.</p>
 <p>There are a number of reasons why keeping a clean commit history is a good
 thing:</p>
@@ -18544,7 +18544,7 @@ minimal.</p>
 the classes interact, can be found in
 <code>synapse/replication/tcp/__init__.py</code></p>
 <div style="break-before: page; page-break-before: always;"></div><h2 id="streams"><a class="header" href="#streams">Streams</a></h2>
-<p>Synapse has a concept of &quot;streams&quot;, which are roughly described in <a href="https://github.com/element.-hq/synapse/blob/develop/synapse/storage/util/id_generators.py"><code>id_generators.py</code></a>.
+<p>Synapse has a concept of &quot;streams&quot;, which are roughly described in <a href="https://github.com/element-hq/synapse/blob/develop/synapse/storage/util/id_generators.py"><code>id_generators.py</code></a>.
 Generally speaking, streams are a series of notifications that something in Synapse's database has changed that the application might need to respond to.
 For example:</p>
 <ul>
@@ -18552,9 +18552,9 @@ For example:</p>
 <li>The account data stream reports changes to users' <a href="https://spec.matrix.org/v1.7/client-server-api/#client-config">account data</a>.</li>
 <li>The to-device stream reports when a device has a new <a href="https://spec.matrix.org/v1.7/client-server-api/#send-to-device-messaging">to-device message</a>.</li>
 </ul>
-<p>See <a href="https://github.com/element.-hq/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py"><code>synapse.replication.tcp.streams</code></a> for the full list of streams.</p>
+<p>See <a href="https://github.com/element-hq/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py"><code>synapse.replication.tcp.streams</code></a> for the full list of streams.</p>
 <p>It is very helpful to understand the streams mechanism when working on any part of Synapse that needs to respond to changes—especially if those changes are made by different workers.
-To that end, let's describe streams formally, paraphrasing from the docstring of <a href="https://github.com/element.-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96"><code>AbstractStreamIdGenerator</code></a>.</p>
+To that end, let's describe streams formally, paraphrasing from the docstring of <a href="https://github.com/element-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96"><code>AbstractStreamIdGenerator</code></a>.</p>
 <h3 id="definition"><a class="header" href="#definition">Definition</a></h3>
 <p>A stream is an append-only log <code>T1, T2, ..., Tn, ...</code> of facts<sup class="footnote-reference"><a href="#1">1</a></sup> which grows over time.
 Only &quot;writers&quot; can add facts to a stream, and there may be multiple writers.</p>

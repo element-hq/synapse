@@ -163,11 +163,11 @@
 <p>It is possible to monitor much of the internal state of Synapse using <a href="https://prometheus.io">Prometheus</a>
 metrics and <a href="https://grafana.com/">Grafana</a>.
 A guide for configuring Synapse to provide metrics is available <a href="../../metrics-howto.html">here</a>
-and information on setting up Grafana is <a href="https://github.com/element.-hq/synapse/tree/master/contrib/grafana">here</a>.
+and information on setting up Grafana is <a href="https://github.com/element-hq/synapse/tree/master/contrib/grafana">here</a>.
 In this setup, Prometheus will periodically scrape the information Synapse provides and
 store a record of it over time. Grafana is then used as an interface to query and
 present this information through a series of pretty graphs.</p>
-<p>Once you have grafana set up, and assuming you're using <a href="https://github.com/element.-hq/synapse/blob/master/contrib/grafana/synapse.json">our grafana dashboard template</a>, look for the following graphs when debugging a slow/overloaded Synapse:</p>
+<p>Once you have grafana set up, and assuming you're using <a href="https://github.com/element-hq/synapse/blob/master/contrib/grafana/synapse.json">our grafana dashboard template</a>, look for the following graphs when debugging a slow/overloaded Synapse:</p>
 <h2 id="message-event-send-time"><a class="header" href="#message-event-send-time">Message Event Send Time</a></h2>
 <p><img src="https://user-images.githubusercontent.com/1342360/82239409-a1c8e900-9930-11ea-8081-e4614e0c63f4.png" alt="image" /></p>
 <p>This, along with the CPU and Memory graphs, is a good way to check the general health of your Synapse instance. It represents how long it takes for a user on your homeserver to send a message.</p>
@@ -194,7 +194,7 @@ present this information through a series of pretty graphs.</p>
 <p>This is quite a useful graph. It shows how many times Synapse attempts to retrieve a piece of data from a cache which the cache did not contain, thus resulting in a call to the database. We can see here that the <code>_get_joined_profile_from_event_id</code> cache is being requested a lot, and often the data we're after is not cached.</p>
 <p>Cross-referencing this with the Eviction Rate graph, which shows that entries are being evicted from <code>_get_joined_profile_from_event_id</code> quite often:</p>
 <p><img src="https://user-images.githubusercontent.com/1342360/82240766-de95df80-9932-11ea-8c15-5acfc57c48da.png" alt="image" /></p>
-<p>we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available <a href="https://github.com/element.-hq/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642">here</a> (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.</p>
+<p>we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available <a href="https://github.com/element-hq/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642">here</a> (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.</p>
 <h2 id="forward-extremities"><a class="header" href="#forward-extremities">Forward Extremities</a></h2>
 <p><img src="https://user-images.githubusercontent.com/1342360/82241440-13566680-9934-11ea-8b88-ba468db937ed.png" alt="image" /></p>
 <p>Forward extremities are the leaf events at the end of a DAG in a room, aka events that have no children. The more that exist in a room, the more <a href="https://spec.matrix.org/v1.1/server-server-api/#room-state-resolution">state resolution</a> that Synapse needs to perform (hint: it's an expensive operation). While Synapse has code to prevent too many of these existing at one time in a room, bugs can sometimes make them crop up again.</p>

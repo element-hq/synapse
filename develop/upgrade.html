@@ -955,7 +955,7 @@ becomes stable.</p>
 <p>As announced with the release of <a href="#deprecation-of-the-user_may_create_room_with_invites-module-callback">Synapse 1.47.0</a>,
 the deprecated <code>user_may_create_room_with_invites</code> module callback has been removed.</p>
 <p>Modules relying on it can instead implement <a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API to infer whether the invite is happening while creating a room (see <a href="https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89">this function</a>
 as an example). Alternately, modules can also implement <a href="https://element-hq.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room"><code>on_create_room</code></a>.</p>
 <h1 id="upgrading-to-v1520"><a class="header" href="#upgrading-to-v1520">Upgrading to v1.52.0</a></h1>
@@ -992,7 +992,7 @@ longer supported upstream.</p>
 <p>The <code>user_may_create_room_with_invites</code> is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
 <a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API method to infer whether the invite is happening in the context of creating a
 room.</p>
 <p>We plan to remove this callback in January 2022.</p>
@@ -1025,8 +1025,8 @@ federation requests.</p>
 <a href="https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
 <h2 id="user-interactive-authentication-fallback-templates-can-now-display-errors"><a class="header" href="#user-interactive-authentication-fallback-templates-can-now-display-errors">User-interactive authentication fallback templates can now display errors</a></h2>
 <p>This may affect you if you make use of custom HTML templates for the
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
 <p>The template is now provided an <code>error</code> variable if the authentication
 process failed. See the default templates linked above for an example.</p>
 <h2 id="removal-of-out-of-date-email-pushers"><a class="header" href="#removal-of-out-of-date-email-pushers">Removal of out-of-date email pushers</a></h2>
@@ -1410,7 +1410,7 @@ endpoint can be handled</p>
 update your reverse proxy configuration to reflect this change.</p>
 <h2 id="new-html-templates"><a class="header" href="#new-html-templates">New HTML templates</a></h2>
 <p>A new HTML template,
-<a href="https://github.com/element.-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
 has been added to the <code>synapse/res/templates</code> directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.</p>
@@ -1490,7 +1490,7 @@ INSERT INTO background_updates (update_name, progress_json, depends_on) VALUES
 is configured to use SSO and a custom
 <code>sso_redirect_confirm_template_dir</code> configuration then these templates
 will need to be copied from
-<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
 <h2 id="synapse-sso-plugins-method-deprecation"><a class="header" href="#synapse-sso-plugins-method-deprecation">Synapse SSO Plugins Method Deprecation</a></h2>
 <p>Plugins using the <code>complete_sso_login</code> method of
 <code>synapse.module_api.ModuleApi</code> should update to using the async/await
@@ -1621,7 +1621,7 @@ included.</p>
 <p>Synapse will expect these files to exist inside the configured template
 directory, and <strong>will fail to start</strong> if they are absent. To view the
 default templates, see
-<a href="https://github.com/element.-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
+<a href="https://github.com/element-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
 <h2 id="3pid-verification-changes"><a class="header" href="#3pid-verification-changes">3pid verification changes</a></h2>
 <p><strong>Note: As of this release, users will be unable to add phone numbers or
 email addresses to their accounts, without changes to the Synapse
