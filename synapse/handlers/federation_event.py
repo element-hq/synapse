@@ -94,7 +94,7 @@ from synapse.types import (
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer, concurrently_execute
-from synapse.util.iterutils import batch_iter, partition, sorted_topologically_batched
+from synapse.util.iterutils import batch_iter, partition, sorted_topologically
 from synapse.util.retryutils import NotRetryingDestination
 from synapse.util.stringutils import shortstr
 
@@ -1678,30 +1678,18 @@ class FederationEventHandler:
 
         # We need to persist an event's auth events before the event.
         auth_graph = {
-            ev: [event_map[e_id] for e_id in ev.auth_event_ids() if e_id in event_map]
+            ev.event_id: [e_id for e_id in ev.auth_event_ids() if e_id in event_map]
             for ev in event_map.values()
         }
-        for roots in sorted_topologically_batched(event_map.values(), auth_graph):
-            if not roots:
-                # if *none* of the remaining events are ready, that means
-                # we have a loop. This either means a bug in our logic, or that
-                # somebody has managed to create a loop (which requires finding a
-                # hash collision in room v2 and later).
-                logger.warning(
-                    "Loop found in auth events while fetching missing state/auth "
-                    "events: %s",
-                    shortstr(event_map.keys()),
-                )
-                return
+        sorted_auth_event_ids = sorted_topologically(event_map.keys(), auth_graph)
+        sorted_auth_events = [event_map[e_id] for e_id in sorted_auth_event_ids]
+        logger.info(
+            "Persisting %i remaining outliers: %s",
+            len(sorted_auth_events),
+            shortstr(e.event_id for e in sorted_auth_events),
+        )
 
-            logger.info(
-                "Persisting %i of %i remaining outliers: %s",
-                len(roots),
-                len(event_map),
-                shortstr(e.event_id for e in roots),
-            )
-
-            await self._auth_and_persist_outliers_inner(room_id, roots)
+        await self._auth_and_persist_outliers_inner(room_id, sorted_auth_events)
 
     async def _auth_and_persist_outliers_inner(
         self, room_id: str, fetched_events: Collection[EventBase]
@@ -1722,13 +1710,21 @@ class FederationEventHandler:
         """
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
-        auth_events = {
+        auth_event_ids = {
             aid for event in fetched_events for aid in event.auth_event_ids()
         }
-        persisted_events = await self._store.get_events(
-            auth_events,
-            allow_rejected=True,
-        )
+        auth_map = {
+            ev.event_id: ev for ev in fetched_events if ev.event_id in auth_event_ids
+        }
+
+        missing_events = auth_event_ids.difference(auth_map)
+        if missing_events:
+            persisted_events = await self._store.get_events(
+                missing_events,
+                allow_rejected=True,
+                redact_behaviour=EventRedactBehaviour.as_is,
+            )
+            auth_map.update(persisted_events)
 
         events_and_contexts_to_persist: List[Tuple[EventBase, EventContext]] = []
 
@@ -1736,7 +1732,7 @@ class FederationEventHandler:
             with nested_logging_context(suffix=event.event_id):
                 auth = []
                 for auth_event_id in event.auth_event_ids():
-                    ae = persisted_events.get(auth_event_id)
+                    ae = auth_map.get(auth_event_id)
                     if not ae:
                         # the fact we can't find the auth event doesn't mean it doesn't
                         # exist, which means it is premature to reject `event`. Instead we
@@ -1755,7 +1751,9 @@ class FederationEventHandler:
                 context = EventContext.for_outlier(self._storage_controllers)
                 try:
                     validate_event_for_room_version(event)
-                    await check_state_independent_auth_rules(self._store, event)
+                    await check_state_independent_auth_rules(
+                        self._store, event, batched_auth_events=auth_map
+                    )
                     check_state_dependent_auth_rules(event, auth)
                 except AuthError as e:
                     logger.warning("Rejecting %r because %s", event, e)
