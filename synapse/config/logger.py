@@ -358,7 +358,7 @@ def setup_logging(
     )
     logging.warning("Copyright (c) 2023 New Vector, Inc")
     logging.warning(
-        "Licensed under the AGPL 3.0 license. Website: https://github.com/vector-im/synapse"
+        "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
     logging.info("Server hostname: %s", config.server.server_name)
     logging.info("Instance name: %s", hs.get_instance_name())
