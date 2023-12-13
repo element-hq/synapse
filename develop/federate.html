@@ -203,7 +203,7 @@ in the HTTP library used by Synapse, 308 redirects are currently not followed by
 federating servers, which can cause <code>M_UNKNOWN</code> or <code>401 Unauthorized</code> errors. This
 may affect users who are redirecting apex-to-www (e.g. <code>example.com</code> -&gt; <code>www.example.com</code>),
 and especially users of the Kubernetes <em>Nginx Ingress</em> module, which uses 308 redirect
-codes by default. For those Kubernetes users, <a href="https://stackoverflow.com/a/52617528/5096871">this Stackoverflow post</a> 
+codes by default. For those Kubernetes users, <a href="https://stackoverflow.com/a/52617528/5096871">this Stackoverflow post</a>
 might be helpful. For other users, switching to a <code>301 Moved Permanently</code> code may be
 an option. 308 redirect codes will be supported properly in a future
 release of Synapse.</p>
@@ -211,7 +211,7 @@ release of Synapse.</p>
 <p>If you want to get up and running quickly with a trio of homeservers in a
 private federation, there is a script in the <code>demo</code> directory. This is mainly
 useful just for development purposes. See
-<a href="https://matrix-org.github.io/synapse/develop/development/demo.html">demo scripts</a>.</p>
+<a href="https://element-hq.github.io/synapse/develop/development/demo.html">demo scripts</a>.</p>
 
                     </main>
 
