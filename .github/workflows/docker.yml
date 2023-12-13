@@ -58,7 +58,7 @@ jobs:
         with:
           images: |
             docker.io/matrixdotorg/synapse
-            ghcr.io/matrix-org/synapse
+            ghcr.io/element-hq/synapse
           flavor: |
             latest=false
           tags: |

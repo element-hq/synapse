@@ -237,7 +237,7 @@ Alongside all that, join our developer community on Matrix:
   :alt: (Rendered documentation on GitHub Pages)
   :target: https://matrix-org.github.io/synapse/latest/
 
-.. |license| image:: https://img.shields.io/github/license/matrix-org/synapse
+.. |license| image:: https://img.shields.io/github/license/element-hq/synapse
   :alt: (check license in LICENSE file)
   :target: LICENSE
 

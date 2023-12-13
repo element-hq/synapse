@@ -110,13 +110,13 @@ date.
 ## App service query parameter authorization is now a configuration option
 
 Synapse v1.81.0 deprecated application service authorization via query parameters as this is
-considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via 
+considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via
 [the `Authorization` header](https://spec.matrix.org/v1.6/application-service-api/#authorization)], making the insecure
-query parameter authorization redundant. Since removing the ability to continue to use query parameters could break 
-backwards compatibility it has now been put behind a configuration option, `use_appservice_legacy_authorization`.  
-This option defaults to false, but can be activated by adding 
+query parameter authorization redundant. Since removing the ability to continue to use query parameters could break
+backwards compatibility it has now been put behind a configuration option, `use_appservice_legacy_authorization`.
+This option defaults to false, but can be activated by adding
 ```yaml
-use_appservice_legacy_authorization: true 
+use_appservice_legacy_authorization: true
 ```
 to your configuration.
 
@@ -184,7 +184,7 @@ When using workers,
 * `worker_replication_host`
 * `worker_replication_http_port`
 * `worker_replication_http_tls`
- 
+
 should now be removed from individual worker YAML configurations and the main process should instead be added to the `instance_map`
 in the shared YAML configuration, using the name `main`.
 
@@ -260,7 +260,7 @@ worker_listeners:
 worker_log_config: /etc/matrix-synapse/generic-worker-log.yaml
 
 ```
-Notes: 
+Notes:
 * `tls` is optional but mirrors the functionality of `worker_replication_http_tls`
 
 
@@ -352,8 +352,8 @@ and device replication will resume as normal.
 
 ## Minimum version of Poetry is now 1.3.2
 
-The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, [since 
-Synapse 1.67](#upgrading-to-v1670)). If you have used `poetry install` to 
+The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, [since
+Synapse 1.67](#upgrading-to-v1670)). If you have used `poetry install` to
 install Synapse from a source checkout, you should upgrade poetry: see its
 [installation instructions](https://python-poetry.org/docs/#installation).
 For all other installation methods, no acction is required.
@@ -1068,7 +1068,7 @@ As announced with the release of [Synapse 1.47.0](#deprecation-of-the-user_may_c
 the deprecated `user_may_create_room_with_invites` module callback has been removed.
 
 Modules relying on it can instead implement [`user_may_invite`](https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
-and use the [`get_room_state`](https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
+and use the [`get_room_state`](https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
 module API to infer whether the invite is happening while creating a room (see [this function](https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89)
 as an example). Alternately, modules can also implement [`on_create_room`](https://matrix-org.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room).
 
@@ -1124,7 +1124,7 @@ Any scripts still using the above APIs should be converted to use the
 The `user_may_create_room_with_invites` is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
 [`user_may_invite`](https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite)
-and use the [`get_room_state`](https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
+and use the [`get_room_state`](https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876)
 module API method to infer whether the invite is happening in the context of creating a
 room.
 
@@ -1171,8 +1171,8 @@ Any scripts still using the above APIs should be converted to use the
 ## User-interactive authentication fallback templates can now display errors
 
 This may affect you if you make use of custom HTML templates for the
-[reCAPTCHA (`synapse/res/templates/recaptcha.html`)](https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/recaptcha.html) or
-[terms (`synapse/res/templates/terms.html`)](https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/terms.html) fallback pages.
+[reCAPTCHA (`synapse/res/templates/recaptcha.html`)](https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html) or
+[terms (`synapse/res/templates/terms.html`)](https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/terms.html) fallback pages.
 
 The template is now provided an `error` variable if the authentication
 process failed. See the default templates linked above for an example.
@@ -1671,7 +1671,7 @@ update your reverse proxy configuration to reflect this change.
 ## New HTML templates
 
 A new HTML template,
-[password_reset_confirmation.html](https://github.com/matrix-org/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html),
+[password_reset_confirmation.html](https://github.com/element.-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html),
 has been added to the `synapse/res/templates` directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.
@@ -1770,7 +1770,7 @@ New templates (`sso_auth_confirm.html`, `sso_auth_success.html`, and
 is configured to use SSO and a custom
 `sso_redirect_confirm_template_dir` configuration then these templates
 will need to be copied from
-[`synapse/res/templates`](https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates) into that directory.
+[`synapse/res/templates`](https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates) into that directory.
 
 ## Synapse SSO Plugins Method Deprecation
 
@@ -1923,7 +1923,7 @@ included.
 Synapse will expect these files to exist inside the configured template
 directory, and **will fail to start** if they are absent. To view the
 default templates, see
-[synapse/res/templates](https://github.com/matrix-org/synapse/tree/master/synapse/res/templates).
+[synapse/res/templates](https://github.com/element.-hq/synapse/tree/master/synapse/res/templates).
 
 ## 3pid verification changes
 

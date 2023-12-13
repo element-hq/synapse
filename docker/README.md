@@ -78,7 +78,7 @@ The following environment variables are supported in `generate` mode:
 
 ## Postgres
 
-By default the config will use SQLite. See the [docs on using Postgres](https://github.com/matrix-org/synapse/blob/develop/docs/postgres.md) for more info on how to use Postgres. Until this section is improved [this issue](https://github.com/matrix-org/synapse/issues/8304) may provide useful information.
+By default the config will use SQLite. See the [docs on using Postgres](https://github.com/element-hq/synapse/blob/develop/docs/postgres.md) for more info on how to use Postgres. Until this section is improved [this issue](https://github.com/element-hq/synapse/issues/8304) may provide useful information.
 
 ## Running synapse
 
@@ -151,7 +151,7 @@ is suitable for local testing, but for any practical use, you will either need
 to use a reverse proxy, or configure Synapse to expose an HTTPS port.
 
 For documentation on using a reverse proxy, see
-https://github.com/matrix-org/synapse/blob/master/docs/reverse_proxy.md.
+https://github.com/element.-hq/synapse/blob/master/docs/reverse_proxy.md.
 
 For more information on enabling TLS support in synapse itself, see
 https://matrix-org.github.io/synapse/latest/setup/installation.html#tls-certificates. Of
