@@ -151,7 +151,7 @@ is suitable for local testing, but for any practical use, you will either need
 to use a reverse proxy, or configure Synapse to expose an HTTPS port.
 
 For documentation on using a reverse proxy, see
-https://github.com/element.-hq/synapse/blob/master/docs/reverse_proxy.md.
+https://github.com/element-hq/synapse/blob/master/docs/reverse_proxy.md.
 
 For more information on enabling TLS support in synapse itself, see
 https://element-hq.github.io/synapse/latest/setup/installation.html#tls-certificates. Of

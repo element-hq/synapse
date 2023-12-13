@@ -3,7 +3,7 @@
 Synapse uses parametrised templates to generate the content of emails it sends and
 webpages it shows to users.
 
-By default, Synapse will use the templates listed [here](https://github.com/element.-hq/synapse/tree/master/synapse/res/templates).
+By default, Synapse will use the templates listed [here](https://github.com/element-hq/synapse/tree/master/synapse/res/templates).
 Server admins can configure an additional directory for Synapse to look for templates
 in, allowing them to specify custom templates:
 

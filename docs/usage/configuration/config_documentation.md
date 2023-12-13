@@ -1416,7 +1416,7 @@ kill -HUP [PID_OF_SYNAPSE_PROCESS]
 If you are running multiple workers, you must individually update the worker
 config file and send this signal to each worker process.
 
-If you're using the [example systemd service](https://github.com/element.-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
+If you're using the [example systemd service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
 file in Synapse's `contrib` directory, you can send a `SIGHUP` signal by using
 `systemctl reload matrix-synapse`.
 
