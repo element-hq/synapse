@@ -124,10 +124,10 @@
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/development/contributing_guide.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/development/contributing_guide.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -162,14 +162,15 @@
                         <h1 id="contributing"><a class="header" href="#contributing">Contributing</a></h1>
 <p>This document aims to get you started with contributing to Synapse!</p>
 <h1 id="1-who-can-contribute-to-synapse"><a class="header" href="#1-who-can-contribute-to-synapse">1. Who can contribute to Synapse?</a></h1>
-<p>Everyone is welcome to contribute code to <a href="https://github.com/matrix-org">matrix.org
-projects</a>, provided that they are willing to
+<p>Everyone is welcome to contribute code to <a href="https://github.com/element-hq/synapse">Synapse</a>,
+provided that they are willing to
 license their contributions under the same license as the project itself. We
 follow a simple 'inbound=outbound' model for contributions: the act of
 submitting an 'inbound' contribution means that the contributor agrees to
 license the code under the same terms as the project's overall 'outbound'
 license - in our case, this is almost always Apache Software License v2 (see
-<a href="https://github.com/matrix-org/synapse/blob/develop/LICENSE">LICENSE</a>).</p>
+<a href="https://github.com/element-hq/synapse/blob/develop/LICENSE">LICENSE</a>).</p>
+<p>TODO THIS NEEDS UPDATING</p>
 <h1 id="2-what-do-i-need"><a class="header" href="#2-what-do-i-need">2. What do I need?</a></h1>
 <p>If you are running Windows, the Windows Subsystem for Linux (WSL) is strongly
 recommended for development. More information about WSL can be found at
@@ -222,8 +223,8 @@ cp docs/sample_log_config.yaml log_config.yaml
 <ul>
 <li>Set a <code>server_name</code></li>
 <li>Adjusting paths to be correct for your system like the <code>log_config</code> to point to the log config you just copied</li>
-<li>Using a <a href="https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#database">PostgreSQL database instead of SQLite</a></li>
-<li>Adding a <a href="https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret"><code>registration_shared_secret</code></a> so you can use <a href="https://matrix-org.github.io/synapse/latest/setup/installation.html#registering-a-user"><code>register_new_matrix_user</code> command</a>.</li>
+<li>Using a <a href="https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#database">PostgreSQL database instead of SQLite</a></li>
+<li>Adding a <a href="https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret"><code>registration_shared_secret</code></a> so you can use <a href="https://vector-im.github.io/synapse/latest/setup/installation.html#registering-a-user"><code>register_new_matrix_user</code> command</a>.</li>
 </ul>
 <p>And then run Synapse with the following command:</p>
 <pre><code class="language-sh">poetry run python -m synapse.app.homeserver -c homeserver.yaml
@@ -236,19 +237,19 @@ resolve any issues and re-run until successful.</p>
 <h1 id="5-get-in-touch"><a class="header" href="#5-get-in-touch">5. Get in touch.</a></h1>
 <p>Join our developer community on Matrix: <a href="https://matrix.to/#/#synapse-dev:matrix.org">#synapse-dev:matrix.org</a>!</p>
 <h1 id="6-pick-an-issue"><a class="header" href="#6-pick-an-issue">6. Pick an issue.</a></h1>
-<p>Fix your favorite problem or perhaps find a <a href="https://github.com/matrix-org/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22">Good First Issue</a>
+<p>Fix your favorite problem or perhaps find a <a href="https://github.com/element-hq/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22">Good First Issue</a>
 to work on.</p>
 <h1 id="7-turn-coffee-into-code-and-documentation"><a class="header" href="#7-turn-coffee-into-code-and-documentation">7. Turn coffee into code and documentation!</a></h1>
 <p>There is a growing amount of documentation located in the
-<a href="https://github.com/matrix-org/synapse/tree/develop/docs"><code>docs</code></a>
-directory, with a rendered version <a href="https://matrix-org.github.io/synapse">available online</a>.
+<a href="https://github.com/element-hq/synapse/tree/develop/docs"><code>docs</code></a>
+directory, with a rendered version <a href="https://vector-im.github.io/synapse">available online</a>.
 This documentation is intended primarily for sysadmins running their
 own Synapse instance, as well as developers interacting externally with
 Synapse.
-<a href="https://github.com/matrix-org/synapse/tree/develop/docs/development"><code>docs/development</code></a>
+<a href="https://github.com/element-hq/synapse/tree/develop/docs/development"><code>docs/development</code></a>
 exists primarily to house documentation for
 Synapse developers.
-<a href="https://github.com/matrix-org/synapse/tree/develop/docs/admin_api"><code>docs/admin_api</code></a> houses documentation
+<a href="https://github.com/element-hq/synapse/tree/develop/docs/admin_api"><code>docs/admin_api</code></a> houses documentation
 regarding Synapse's Admin API, which is used mostly by sysadmins and external
 service developers.</p>
 <p>Synapse's code style is documented <a href="../code_style.html">here</a>. Please follow
@@ -256,12 +257,9 @@ it, including the conventions for <a href="../code_style.html#configuration-code
 options and documentation</a>.</p>
 <p>We welcome improvements and additions to our documentation itself! When
 writing new pages, please
-<a href="https://github.com/matrix-org/synapse/tree/develop/docs#adding-to-the-documentation">build <code>docs</code> to a book</a>
+<a href="https://github.com/element-hq/synapse/tree/develop/docs#adding-to-the-documentation">build <code>docs</code> to a book</a>
 to check that your contributions render correctly. The docs are written in
 <a href="https://guides.github.com/features/mastering-markdown/">GitHub-Flavoured Markdown</a>.</p>
-<p>Some documentation also exists in <a href="https://github.com/matrix-org/synapse/wiki">Synapse's GitHub
-Wiki</a>, although this is primarily
-contributed to by community authors.</p>
 <p>When changes are made to any Rust code then you must call either <code>poetry install</code>
 or <code>maturin develop</code> (if installed) to rebuild the Rust code. Using <a href="https://github.com/PyO3/maturin"><code>maturin</code></a>
 is quicker than <code>poetry install</code>, so is recommended when making frequent
@@ -376,7 +374,7 @@ configuration:</p>
 <li>To run with Postgres, supply the <code>-e POSTGRES=1 -e MULTI_POSTGRES=1</code> environment flags.</li>
 <li>To run with Synapse in worker mode, supply the <code>-e WORKERS=1 -e REDIS=1</code> environment flags (in addition to the Postgres flags).</li>
 </ul>
-<p>For more details about other configurations, see the <a href="https://github.com/matrix-org/sytest/blob/develop/docker/README.md">Docker-specific documentation in the SyTest repo</a>.</p>
+<p>For more details about other configurations, see the <a href="https://github.com/vector-im/sytest/blob/develop/docker/README.md">Docker-specific documentation in the SyTest repo</a>.</p>
 <h2 id="run-the-integration-tests-complement"><a class="header" href="#run-the-integration-tests-complement">Run the integration tests (<a href="https://github.com/matrix-org/complement">Complement</a>).</a></h2>
 <p><a href="https://github.com/matrix-org/complement">Complement</a> is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests.</p>
 <p>It's often nice to develop on Synapse and write Complement tests at the same time.
@@ -398,7 +396,7 @@ Here is how to run your local Synapse checkout against your local Complement che
 <li>If setting <code>WORKERS=1</code>, optionally set <code>WORKER_TYPES=</code> to declare which worker
 types you wish to test. A simple comma-delimited string containing the worker types
 defined from the <code>WORKERS_CONFIG</code> template in
-<a href="https://github.com/matrix-org/synapse/blob/develop/docker/configure_workers_and_start.py#L54">here</a>.
+<a href="https://github.com/element-hq/synapse/blob/develop/docker/configure_workers_and_start.py#L54">here</a>.
 A safe example would be <code>WORKER_TYPES=&quot;federation_inbound, federation_sender, synchrotron&quot;</code>.
 See the <a href="../workers.html">worker documentation</a> for additional information on workers.</li>
 </ul>
@@ -452,7 +450,7 @@ in the format of <code>PRnumber.type</code>. The type can be one of the followin
 <li><code>removal</code> (also used for deprecations)</li>
 <li><code>misc</code> (for internal-only changes)</li>
 </ul>
-<p>This file will become part of our <a href="https://github.com/matrix-org/synapse/blob/master/CHANGES.md">changelog</a> at the next
+<p>This file will become part of our <a href="https://github.com/element-hq/synapse/blob/master/CHANGES.md">changelog</a> at the next
 release, so the content of the file should be a short description of your
 change in the same style as the rest of the changelog. The file can contain Markdown
 formatting, and must end with a full stop (.) or an exclamation mark (!) for
@@ -480,7 +478,7 @@ chicken-and-egg problem.</p>
 add the changelog file to your branch, or:</p>
 </li>
 <li>
-<p>Look at the <a href="https://github.com/matrix-org/synapse/issues?q=">list of all
+<p>Look at the <a href="https://github.com/element-hq/synapse/issues?q=">list of all
 issues/PRs</a>, add one to the
 highest number you see, and quickly open the PR before somebody else claims
 your number.</p>

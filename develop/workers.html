@@ -124,10 +124,10 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/workers.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/workers.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -204,8 +204,8 @@ virtualenv, these can be installed with:</p>
 <pre><code class="language-sh">pip install &quot;matrix-synapse[redis]&quot;
 </code></pre>
 <p>Note that these dependencies are included when synapse is installed with <code>pip install matrix-synapse[all]</code>. They are also included in the debian packages from
-<code>matrix.org</code> and in the docker images at
-https://hub.docker.com/r/matrixdotorg/synapse/.</p>
+<code>packages.matrix.org</code> and in the docker images at
+https://hub.docker.com/r/ectorim/synapse/.</p>
 <p>To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
 the correct worker, or to the main synapse instance. See
@@ -230,7 +230,7 @@ file suitable for use with workers:</p>
 for the main process</li>
 <li>Secondly, you need to enable
 <a href="usage/configuration/config_documentation.html#redis">redis-based replication</a></li>
-<li>You will need to add an <a href="usage/configuration/config_documentation.html#instance_map"><code>instance_map</code></a> 
+<li>You will need to add an <a href="usage/configuration/config_documentation.html#instance_map"><code>instance_map</code></a>
 with the <code>main</code> process defined, as well as the relevant connection information from
 it's HTTP <code>replication</code> listener (defined in step 1 above).
 <ul>
@@ -546,7 +546,7 @@ of the main process to a particular worker.</p>
 <li>An <a href="usage/configuration/config_documentation.html#listeners">HTTP <code>replication</code> listener</a> configured,</li>
 <li>Have a <a href="usage/configuration/config_documentation.html#worker_name"><code>worker_name</code></a>
 and be listed in the <a href="usage/configuration/config_documentation.html#instance_map"><code>instance_map</code></a>
-config. </li>
+config.</li>
 <li>Have the main process declared on the <a href="usage/configuration/config_documentation.html#instance_map"><code>instance_map</code></a> as well.</li>
 </ul>
 <p>Note: The same worker can handle multiple streams, but unless otherwise documented,
@@ -711,7 +711,7 @@ worker application type.</p>
 <h4 id="push-notifications"><a class="header" href="#push-notifications">Push Notifications</a></h4>
 <p>You can designate generic worker to sending push notifications to
 a <a href="https://spec.matrix.org/v1.5/push-gateway-api/">push gateway</a> such as
-<a href="https://github.com/matrix-org/sygnal">sygnal</a> and email.</p>
+<a href="https://github.com/vector-im/sygnal">sygnal</a> and email.</p>
 <p>This will stop the main process sending push notifications.</p>
 <p>The workers responsible for sending push notifications can be defined using the
 <a href="usage/configuration/config_documentation.html#pusher_instances"><code>pusher_instances</code></a>

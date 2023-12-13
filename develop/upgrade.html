@@ -124,10 +124,10 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -276,12 +276,12 @@ date.</p>
 <h1 id="upgrading-to-v1900"><a class="header" href="#upgrading-to-v1900">Upgrading to v1.90.0</a></h1>
 <h2 id="app-service-query-parameter-authorization-is-now-a-configuration-option"><a class="header" href="#app-service-query-parameter-authorization-is-now-a-configuration-option">App service query parameter authorization is now a configuration option</a></h2>
 <p>Synapse v1.81.0 deprecated application service authorization via query parameters as this is
-considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via 
+considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via
 <a href="https://spec.matrix.org/v1.6/application-service-api/#authorization">the <code>Authorization</code> header</a>], making the insecure
-query parameter authorization redundant. Since removing the ability to continue to use query parameters could break 
-backwards compatibility it has now been put behind a configuration option, <code>use_appservice_legacy_authorization</code>.<br />
-This option defaults to false, but can be activated by adding </p>
-<pre><code class="language-yaml">use_appservice_legacy_authorization: true 
+query parameter authorization redundant. Since removing the ability to continue to use query parameters could break
+backwards compatibility it has now been put behind a configuration option, <code>use_appservice_legacy_authorization</code>.
+This option defaults to false, but can be activated by adding</p>
+<pre><code class="language-yaml">use_appservice_legacy_authorization: true
 </code></pre>
 <p>to your configuration.</p>
 <h1 id="upgrading-to-v1890"><a class="header" href="#upgrading-to-v1890">Upgrading to v1.89.0</a></h1>
@@ -389,7 +389,7 @@ worker_listeners:
 worker_log_config: /etc/matrix-synapse/generic-worker-log.yaml
 
 </code></pre>
-<p>Notes: </p>
+<p>Notes:</p>
 <ul>
 <li><code>tls</code> is optional but mirrors the functionality of <code>worker_replication_http_tls</code></li>
 </ul>
@@ -452,8 +452,8 @@ and vice versa.</p>
 <p>Once all workers are upgraded to v1.76 (or downgraded to v1.75), account data
 and device replication will resume as normal.</p>
 <h2 id="minimum-version-of-poetry-is-now-132"><a class="header" href="#minimum-version-of-poetry-is-now-132">Minimum version of Poetry is now 1.3.2</a></h2>
-<p>The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, <a href="#upgrading-to-v1670">since 
-Synapse 1.67</a>). If you have used <code>poetry install</code> to 
+<p>The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, <a href="#upgrading-to-v1670">since
+Synapse 1.67</a>). If you have used <code>poetry install</code> to
 install Synapse from a source checkout, you should upgrade poetry: see its
 <a href="https://python-poetry.org/docs/#installation">installation instructions</a>.
 For all other installation methods, no acction is required.</p>
@@ -955,7 +955,7 @@ becomes stable.</p>
 <p>As announced with the release of <a href="#deprecation-of-the-user_may_create_room_with_invites-module-callback">Synapse 1.47.0</a>,
 the deprecated <code>user_may_create_room_with_invites</code> module callback has been removed.</p>
 <p>Modules relying on it can instead implement <a href="https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API to infer whether the invite is happening while creating a room (see <a href="https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89">this function</a>
 as an example). Alternately, modules can also implement <a href="https://matrix-org.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room"><code>on_create_room</code></a>.</p>
 <h1 id="upgrading-to-v1520"><a class="header" href="#upgrading-to-v1520">Upgrading to v1.52.0</a></h1>
@@ -992,7 +992,7 @@ longer supported upstream.</p>
 <p>The <code>user_may_create_room_with_invites</code> is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
 <a href="https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+and use the <a href="https://github.com/element.-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API method to infer whether the invite is happening in the context of creating a
 room.</p>
 <p>We plan to remove this callback in January 2022.</p>
@@ -1025,8 +1025,8 @@ federation requests.</p>
 <a href="https://matrix-org.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
 <h2 id="user-interactive-authentication-fallback-templates-can-now-display-errors"><a class="header" href="#user-interactive-authentication-fallback-templates-can-now-display-errors">User-interactive authentication fallback templates can now display errors</a></h2>
 <p>This may affect you if you make use of custom HTML templates for the
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
+<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
+<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
 <p>The template is now provided an <code>error</code> variable if the authentication
 process failed. See the default templates linked above for an example.</p>
 <h2 id="removal-of-out-of-date-email-pushers"><a class="header" href="#removal-of-out-of-date-email-pushers">Removal of out-of-date email pushers</a></h2>
@@ -1410,7 +1410,7 @@ endpoint can be handled</p>
 update your reverse proxy configuration to reflect this change.</p>
 <h2 id="new-html-templates"><a class="header" href="#new-html-templates">New HTML templates</a></h2>
 <p>A new HTML template,
-<a href="https://github.com/matrix-org/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
+<a href="https://github.com/element.-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
 has been added to the <code>synapse/res/templates</code> directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.</p>
@@ -1490,7 +1490,7 @@ INSERT INTO background_updates (update_name, progress_json, depends_on) VALUES
 is configured to use SSO and a custom
 <code>sso_redirect_confirm_template_dir</code> configuration then these templates
 will need to be copied from
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
+<a href="https://github.com/element.-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
 <h2 id="synapse-sso-plugins-method-deprecation"><a class="header" href="#synapse-sso-plugins-method-deprecation">Synapse SSO Plugins Method Deprecation</a></h2>
 <p>Plugins using the <code>complete_sso_login</code> method of
 <code>synapse.module_api.ModuleApi</code> should update to using the async/await
@@ -1621,7 +1621,7 @@ included.</p>
 <p>Synapse will expect these files to exist inside the configured template
 directory, and <strong>will fail to start</strong> if they are absent. To view the
 default templates, see
-<a href="https://github.com/matrix-org/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
+<a href="https://github.com/element.-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
 <h2 id="3pid-verification-changes"><a class="header" href="#3pid-verification-changes">3pid verification changes</a></h2>
 <p><strong>Note: As of this release, users will be unable to add phone numbers or
 email addresses to their accounts, without changes to the Synapse

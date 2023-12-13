@@ -124,10 +124,10 @@
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/setup/installation.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/setup/installation.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -178,9 +178,9 @@ that your email address is probably <code>user@example.com</code> rather than
 for most users.</p>
 <h4 id="docker-images-and-ansible-playbooks"><a class="header" href="#docker-images-and-ansible-playbooks">Docker images and Ansible playbooks</a></h4>
 <p>There is an official synapse image available at
-<a href="https://hub.docker.com/r/matrixdotorg/synapse">https://hub.docker.com/r/matrixdotorg/synapse</a> or at <a href="https://ghcr.io/matrix-org/synapse"><code>ghcr.io/matrix-org/synapse</code></a>
+<a href="https://hub.docker.com/r/vectorim/synapse">https://hub.docker.com/r/vectorim/synapse</a> or at <a href="https://ghcr.io/element-hq/synapse"><code>ghcr.io/element-hq/synapse</code></a>
 which can be used with the docker-compose file available at
-<a href="https://github.com/matrix-org/synapse/tree/develop/contrib/docker">contrib/docker</a>.
+<a href="https://github.com/element-hq/synapse/tree/develop/contrib/docker">contrib/docker</a>.
 Further information on this including configuration options is available in the README
 on hub.docker.com.</p>
 <p>Alternatively, Andreas Peters (previously Silvio Fricke) has contributed a
@@ -197,6 +197,7 @@ For more details, see
 <p>Matrix.org provides Debian/Ubuntu packages of Synapse, for the amd64
 architecture via <a href="https://packages.matrix.org/debian/">https://packages.matrix.org/debian/</a>.</p>
 <p>To install the latest release:</p>
+<p>TODO UPDATE ALL THIS</p>
 <pre><code class="language-sh">sudo apt install -y lsb-release wget apt-transport-https
 sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
 echo &quot;deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ $(lsb_release -cs) main&quot; |
@@ -463,11 +464,11 @@ TLS-enabled listener like so:</li>
 <ul>
 <li>
 <p>You will also need to add the options <code>tls_certificate_path</code> and
-<code>tls_private_key_path</code>. to your configuration file. You will need to manage provisioning of 
+<code>tls_private_key_path</code>. to your configuration file. You will need to manage provisioning of
 these certificates yourself.</p>
 </li>
 <li>
-<p>You can find more information about these options as well as how to configure synapse in the 
+<p>You can find more information about these options as well as how to configure synapse in the
 <a href="../usage/configuration/config_documentation.html">configuration manual</a>.</p>
 <p>If you are using your own certificate, be sure to use a <code>.pem</code> file that
 includes the full certificate chain including any intermediate certificates
