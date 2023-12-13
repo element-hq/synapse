@@ -4253,7 +4253,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Triangular growth may indicate a problem with federation sending from the remote host --- but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
+          "description": "Triangular growth may indicate a problem with federation sending from the remote host --- but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -4375,7 +4375,7 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "description": "Triangular growth may indicate a problem with federation senders on the monitored instance---but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
+          "description": "Triangular growth may indicate a problem with federation senders on the monitored instance---but it may also be the case that everyone is asleep and no messages are being sent.\n\nSee https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#federation_metrics_domains",
           "fieldConfig": {
             "defaults": {
               "color": {

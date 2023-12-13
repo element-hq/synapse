@@ -60,7 +60,7 @@ DEFAULT_LOG_CONFIG = Template(
 # be ingested by ELK stacks. See [2] for details.
 #
 # [1]: https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema
-# [2]: https://matrix-org.github.io/synapse/latest/structured_logging.html
+# [2]: https://element-hq.github.io/synapse/latest/structured_logging.html
 
 version: 1
 
@@ -138,7 +138,7 @@ removed in Synapse 1.3.0. You should instead set up a separate log configuration
 STRUCTURED_ERROR = """\
 Support for the structured configuration option was removed in Synapse 1.54.0.
 You should instead use the standard logging configuration. See
-https://matrix-org.github.io/synapse/v1.54/structured_logging.html
+https://element-hq.github.io/synapse/v1.54/structured_logging.html
 """
 
 

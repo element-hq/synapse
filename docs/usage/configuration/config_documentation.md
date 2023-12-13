@@ -549,7 +549,7 @@ listeners:
   # that unwraps TLS.
   #
   # If you plan to use a reverse proxy, please see
-  # https://matrix-org.github.io/synapse/latest/reverse_proxy.html.
+  # https://element-hq.github.io/synapse/latest/reverse_proxy.html.
   #
   - port: 8008
     tls: false
@@ -581,7 +581,7 @@ listeners:
   # conflicts, and providing enhanced security through system file permissions.
   #
   # Note that x_forwarded will default to true, when using a UNIX socket. Please see
-  # https://matrix-org.github.io/synapse/latest/reverse_proxy.html.
+  # https://element-hq.github.io/synapse/latest/reverse_proxy.html.
   #
   - path: /run/synapse/main_public.sock
     type: http

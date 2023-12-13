@@ -45,7 +45,7 @@ logger = logging.Logger(__name__)
 DIRECT_TCP_ERROR = """
 Using direct TCP replication for workers is no longer supported.
 
-Please see https://matrix-org.github.io/synapse/latest/upgrade.html#direct-tcp-replication-is-no-longer-supported-migrate-to-redis
+Please see https://element-hq.github.io/synapse/latest/upgrade.html#direct-tcp-replication-is-no-longer-supported-migrate-to-redis
 """
 
 # by default, we attempt to listen on both '::' *and* '0.0.0.0' because some OSes
@@ -168,7 +168,7 @@ ROOM_COMPLEXITY_TOO_GREAT = (
 METRICS_PORT_WARNING = """\
 The metrics_port configuration option is deprecated in Synapse 0.31 in favour of
 a listener. Please see
-https://matrix-org.github.io/synapse/latest/metrics-howto.html
+https://element-hq.github.io/synapse/latest/metrics-howto.html
 on how to configure the new listener.
 --------------------------------------------------------------------------------"""
 

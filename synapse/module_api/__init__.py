@@ -1269,7 +1269,7 @@ class ModuleApi:
             f: The function to call repeatedly. f can be either synchronous or
                 asynchronous, and must follow Synapse's logcontext rules.
                 More info about logcontexts is available at
-                https://matrix-org.github.io/synapse/latest/log_contexts.html
+                https://element-hq.github.io/synapse/latest/log_contexts.html
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
@@ -1325,7 +1325,7 @@ class ModuleApi:
             f: The function to call once. f can be either synchronous or
                 asynchronous, and must follow Synapse's logcontext rules.
                 More info about logcontexts is available at
-                https://matrix-org.github.io/synapse/latest/log_contexts.html
+                https://element-hq.github.io/synapse/latest/log_contexts.html
             *args: Positional arguments to pass to function.
             desc: The background task's description. Default to the function's name.
             **kwargs: Keyword arguments to pass to function.

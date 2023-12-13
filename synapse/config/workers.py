@@ -54,13 +54,13 @@ _MISSING_MAIN_PROCESS_INSTANCE_MAP_DATA = """
 Missing data for a worker to connect to main process. Please include '%s' in the
 `instance_map` declared in your shared yaml configuration as defined in configuration
 documentation here:
-`https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#instance_map`
+`https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#instance_map`
 """
 
 WORKER_REPLICATION_SETTING_DEPRECATED_MESSAGE = """
 '%s' is no longer a supported worker setting, please place '%s' onto your shared
 configuration under `main` inside the `instance_map`. See workers documentation here:
-`https://matrix-org.github.io/synapse/latest/workers.html#worker-configuration`
+`https://element-hq.github.io/synapse/latest/workers.html#worker-configuration`
 """
 
 # This allows for a handy knob when it's time to change from 'master' to

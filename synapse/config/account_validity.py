@@ -30,7 +30,7 @@ This server's configuration file is using the deprecated 'template_dir' setting 
 'account_validity' section. Support for this setting has been deprecated and will be
 removed in a future version of Synapse. Server admins should instead use the new
 'custom_template_directory' setting documented here:
-https://matrix-org.github.io/synapse/latest/templates.html
+https://element-hq.github.io/synapse/latest/templates.html
 ---------------------------------------------------------------------------------------"""
 
 

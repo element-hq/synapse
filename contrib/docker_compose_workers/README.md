@@ -69,7 +69,7 @@ redis:
   host: redis
   port: 6379
   # dbid:  <redis_logical_db_id>
-  # password: <secret_password>  
+  # password: <secret_password>
   # use_tls: True
   # certificate_file: <path_to_certificate>
   # private_key_file: <path_to_private_key>
@@ -113,4 +113,4 @@ federation_sender_instances:
 
 ## Other Worker types
 
-Using the concepts shown here it is possible to create other worker types in Docker Compose. See the [Workers](https://matrix-org.github.io/synapse/latest/workers.html#available-worker-applications) documentation for a list of available workers.
+Using the concepts shown here it is possible to create other worker types in Docker Compose. See the [Workers](https://element-hq.github.io/synapse/latest/workers.html#available-worker-applications) documentation for a list of available workers.

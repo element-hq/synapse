@@ -132,7 +132,7 @@ CONFIG_FILE_HEADER = """\
 #
 # For more information on how to configure Synapse, including a complete accounting of
 # each option, go to docs/usage/configuration/config_documentation.md or
-# https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html
+# https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html
 """
 
 

@@ -82,7 +82,7 @@ the callback name as the argument name and the function as its value. A
 `register_[...]_callbacks` method exists for each category.
 
 Callbacks for each category can be found on their respective page of the
-[Synapse documentation website](https://matrix-org.github.io/synapse).
+[Synapse documentation website](https://element-hq.github.io/synapse).
 
 ## Caching
 

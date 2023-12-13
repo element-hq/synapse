@@ -1,13 +1,13 @@
 # Synapse Documentation
 
-**The documentation is currently hosted [here](https://matrix-org.github.io/synapse).**
+**The documentation is currently hosted [here](https://element-hq.github.io/synapse).**
 Please update any links to point to the new website instead.
 
 ## About
 
 This directory currently holds a series of markdown files documenting how to install, use
-and develop Synapse. The documentation is readable directly from this repository, but it is 
-recommended to instead browse through the [website](https://matrix-org.github.io/synapse) for 
+and develop Synapse. The documentation is readable directly from this repository, but it is
+recommended to instead browse through the [website](https://element-hq.github.io/synapse) for
 easier discoverability.
 
 ## Adding to the documentation
@@ -50,7 +50,7 @@ build the documentation with:
 mdbook build
 ```
 
-The rendered contents will be outputted to a new `book/` directory at the root of the repository. Please note that 
+The rendered contents will be outputted to a new `book/` directory at the root of the repository. Please note that
 index.html is not built by default, it is created by copying over the file `welcome_and_overview.html` to `index.html`
 during deployment. Thus, when running `mdbook serve` locally the book will initially show a 404 in place of the index
 due to the above. Do not be alarmed!

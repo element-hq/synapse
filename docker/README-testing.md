@@ -15,7 +15,7 @@ and run Synapse against Complement.
 Consult the [contributing guide][guideComplementSh] for instructions on how to use it.
 
 
-[guideComplementSh]: https://matrix-org.github.io/synapse/latest/development/contributing_guide.html#run-the-integration-tests-complement
+[guideComplementSh]: https://element-hq.github.io/synapse/latest/development/contributing_guide.html#run-the-integration-tests-complement
 
 ## Building and running the images manually
 
