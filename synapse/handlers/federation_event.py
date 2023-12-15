@@ -1691,30 +1691,15 @@ class FederationEventHandler:
 
         await self._auth_and_persist_outliers_inner(room_id, sorted_auth_events)
 
-    async def _auth_and_persist_outliers_inner(
-        self, room_id: str, fetched_events: Collection[EventBase]
-    ) -> None:
-        """Helper for _auth_and_persist_outliers
-
-        Persists a batch of events where we have (theoretically) already persisted all
-        of their auth events.
-
-        Marks the events as outliers, auths them, persists them to the database, and,
-        where appropriate (eg, an invite), awakes the notifier.
-
-        Params:
-            origin: where the events came from
-            room_id: the room that the events are meant to be in (though this has
-               not yet been checked)
-            fetched_events: the events to persist
-        """
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
         auth_event_ids = {
-            aid for event in fetched_events for aid in event.auth_event_ids()
+            aid for event in sorted_auth_events for aid in event.auth_event_ids()
         }
         auth_map = {
-            ev.event_id: ev for ev in fetched_events if ev.event_id in auth_event_ids
+            ev.event_id: ev
+            for ev in sorted_auth_events
+            if ev.event_id in auth_event_ids
         }
 
         missing_events = auth_event_ids.difference(auth_map)
@@ -1770,7 +1755,7 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for event in fetched_events:
+        for event in sorted_auth_events:
             await prep(event)
 
         await self.persist_events_and_notify(
