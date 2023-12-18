@@ -7,10 +7,9 @@ This document aims to get you started with contributing to Synapse!
 Everyone is welcome to contribute code to
 [Synapse](https://github.com/element-hq/synapse), provided that they are willing
 to license their contributions to agree to a [Contributor License
-Agreement](https://static.element.io/legal/contributor-license-agreement.pdf)
-(CLA). This ensures that their contribution will be made available under an
-OSI-approved open-source license, currently Affero General Public License v3
-(AGPLv3).
+Agreement](https://cla-assistant.io/element-hq/synapse) (CLA). This ensures that
+their contribution will be made available under an OSI-approved open-source
+license, currently Affero General Public License v3 (AGPLv3).
 
 # 2. What do I need?
 
@@ -497,12 +496,12 @@ separate pull requests.)
 ## Sign off
 
 After you make a PR a comment from @CLAassistant will appear asking you to sign
-the [CLA](https://static.element.io/legal/contributor-license-agreement.pdf).
+the [CLA](https://cla-assistant.io/element-hq/synapse).
 This will link a page to allow you to confirm that you have read and agreed to
 the CLA by signing in with GitHub.
 
 Alternatively, you can sign off before opening a PR by going to
-[https://cla-assistant.io/element-hq/synapse].
+[https://cla-assistant.io/element-hq/synapse](https://cla-assistant.io/element-hq/synapse).
 
 We accept contributions under a legally identifiable name, such as
 your name on government documentation or common-law names (names
