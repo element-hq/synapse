@@ -501,33 +501,14 @@ the [CLA](https://static.element.io/legal/contributor-license-agreement.pdf).
 This will link a page to allow you to confirm that you have read and agreed to
 the CLA by signing in with GitHub.
 
-We also require that you confirm your name by including the line in your commit
-or pull request comment:
-
-```
-Signed-off-by: Your Name <your@email.example.org>
-```
+Alternatively, you can sign off before opening a PR by going to
+[https://cla-assistant.io/element-hq/synapse].
 
 We accept contributions under a legally identifiable name, such as
 your name on government documentation or common-law names (names
 claimed by legitimate usage or repute). Unfortunately, we cannot
 accept anonymous contributions at this time.
 
-Git allows you to add this signoff automatically when using the `-s`
-flag to `git commit`, which uses the name and email set in your
-`user.name` and `user.email` git configs.
-
-### Private Sign off
-
-If you would like to provide your legal name privately to the Matrix.org
-Foundation (instead of in a public commit or comment), you can do so
-by emailing your legal name and a link to the pull request to
-[dco@matrix.org](mailto:dco@matrix.org?subject=Private%20sign%20off).
-It helps to include "sign off" or similar in the subject line. You will then
-be instructed further.
-
-Once private sign off is complete, doing so for future contributions will not
-be required.
 
 # 10. Turn feedback into better code.
 
