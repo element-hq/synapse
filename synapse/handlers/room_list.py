@@ -54,6 +54,8 @@ REMOTE_ROOM_LIST_POLL_INTERVAL = 60 * 1000
 # This is used to indicate we should only return rooms published to the main list.
 EMPTY_THIRD_PARTY_ID = ThirdPartyInstanceID(None, None)
 
+# Maximum number of local public rooms returned over the CS or SS API
+MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
@@ -103,6 +105,12 @@ class RoomListHandler:
             network_tuple,
         )
 
+        capped_limit: int = (
+            MAX_PUBLIC_ROOMS_IN_RESPONSE
+            if limit is None or limit > MAX_PUBLIC_ROOMS_IN_RESPONSE
+            else limit
+        )
+
         if search_filter or from_federation_origin is not None:
             # We explicitly don't bother caching searches or requests for
             # appservice specific lists.
@@ -110,18 +118,18 @@ class RoomListHandler:
             logger.info("Bypassing cache as search request.")
 
             return await self._get_public_room_list(
-                limit,
+                capped_limit,
                 since_token,
                 search_filter,
                 network_tuple=network_tuple,
                 from_federation_origin=from_federation_origin,
             )
 
-        key = (limit, since_token, network_tuple)
+        key = (capped_limit, since_token, network_tuple)
         return await self.response_cache.wrap(
             key,
             self._get_public_room_list,
-            limit,
+            capped_limit,
             since_token,
             network_tuple=network_tuple,
             from_federation_origin=from_federation_origin,
