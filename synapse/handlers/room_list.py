@@ -74,7 +74,7 @@ class RoomListHandler:
         since_token: Optional[str] = None,
         search_filter: Optional[dict] = None,
         network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation: bool = False,
+        from_federation_origin: Optional[str] = None,
     ) -> JsonDict:
         """Generate a local public room list.
 
@@ -89,7 +89,8 @@ class RoomListHandler:
                 This can be (None, None) to indicate the main list, or a particular
                 appservice and network id to use an appservice specific one.
                 Setting to None returns all public rooms across all lists.
-            from_federation: true iff the request comes from the federation API
+            from_federation_origin: the server name of the requester, or None
+                if the request is not from federation.
         """
         if not self.enable_room_list_search:
             return {"chunk": [], "total_room_count_estimate": 0}
@@ -112,7 +113,7 @@ class RoomListHandler:
                 since_token,
                 search_filter,
                 network_tuple=network_tuple,
-                from_federation=from_federation,
+                from_federation_origin=from_federation_origin,
             )
 
         key = (limit, since_token, network_tuple)
@@ -122,7 +123,7 @@ class RoomListHandler:
             limit,
             since_token,
             network_tuple=network_tuple,
-            from_federation=from_federation,
+            from_federation_origin=from_federation_origin,
         )
 
     async def _get_public_room_list(
@@ -131,7 +132,7 @@ class RoomListHandler:
         since_token: Optional[str] = None,
         search_filter: Optional[dict] = None,
         network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation: bool = False,
+        from_federation_origin: Optional[str] = None,
     ) -> JsonDict:
         """Generate a public room list.
         Args:
@@ -142,8 +143,8 @@ class RoomListHandler:
                 This can be (None, None) to indicate the main list, or a particular
                 appservice and network id to use an appservice specific one.
                 Setting to None returns all public rooms across all lists.
-            from_federation: Whether this request originated from a
-                federating server or a client. Used for room filtering.
+            from_federation_origin: the server name of the requester, or None
+                if the request is not from federation.
         """
 
         # Pagination tokens work by storing the room ID sent in the last batch,
@@ -174,7 +175,8 @@ class RoomListHandler:
             probing_limit,
             bounds=bounds,
             forwards=forwards,
-            ignore_non_federatable=from_federation,
+            ignore_non_federatable=from_federation_origin
+            is not None,  # TODO apply acls
         )
 
         def build_room_entry(room: LargestRoomStats) -> JsonDict:
@@ -245,9 +247,12 @@ class RoomListHandler:
 
         response["chunk"] = [build_room_entry(r) for r in results]
 
+        # We can't efficiently count the total number of rooms that are not
+        # blocked by ACLs, but this is just an estimate so that should be
+        # good enough.
         response["total_room_count_estimate"] = await self.store.count_public_rooms(
             network_tuple,
-            ignore_non_federatable=from_federation,
+            ignore_non_federatable=from_federation_origin is not None,
             search_filter=search_filter,
         )
 
