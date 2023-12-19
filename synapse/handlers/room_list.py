@@ -137,7 +137,7 @@ class RoomListHandler:
 
     async def _get_public_room_list(
         self,
-        limit: Optional[int] = None,
+        limit: int,
         since_token: Optional[str] = None,
         search_filter: Optional[dict] = None,
         network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
@@ -176,7 +176,7 @@ class RoomListHandler:
             has_batch_token = False
 
         # we request one more than wanted to see if there are more pages to come
-        probing_limit = limit + 1 if limit is not None else None
+        probing_limit = limit + 1
 
         results = await self.store.get_largest_public_rooms(
             network_tuple,
@@ -208,16 +208,14 @@ class RoomListHandler:
 
         response: JsonDict = {}
         num_results = len(results)
-        if limit is not None:
-            more_to_come = num_results == probing_limit
 
-            # Depending on direction we trim either the front or back.
-            if forwards:
-                results = results[:limit]
-            else:
-                results = results[-limit:]
+        more_to_come = num_results == probing_limit
+
+        # Depending on direction we trim either the front or back.
+        if forwards:
+            results = results[:limit]
         else:
-            more_to_come = False
+            results = results[-limit:]
 
         if num_results > 0:
             final_entry = results[-1]
