@@ -103,7 +103,7 @@ class RoomListHandler:
             network_tuple,
         )
 
-        if search_filter and from_federation_origin is not None:
+        if search_filter or from_federation_origin is not None:
             # We explicitly don't bother caching searches or requests for
             # appservice specific lists.
             # We also don't bother caching requests from federated homeservers.
