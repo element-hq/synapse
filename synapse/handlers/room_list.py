@@ -176,8 +176,16 @@ class RoomListHandler:
             forwards = True
             has_batch_token = False
 
-        # we request one more than wanted to see if there are more pages to come
-        probing_limit = limit + 1
+        if from_federation_origin is None:
+            # Client-Server API:
+            # we request one more than wanted to see if there are more pages to come
+            probing_limit = limit + 1
+        else:
+            # Federation API:
+            # we request a handful more in case any get filtered out by ACLs
+            # as a best easy effort attempt to return the full number of entries
+            # specified by `limit`.
+            probing_limit = limit + 10
 
         results = await self.store.get_largest_public_rooms(
             network_tuple,
