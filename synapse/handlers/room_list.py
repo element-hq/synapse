@@ -19,7 +19,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 import attr
 import msgpack
@@ -56,6 +56,7 @@ EMPTY_THIRD_PARTY_ID = ThirdPartyInstanceID(None, None)
 
 # Maximum number of local public rooms returned over the CS or SS API
 MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
+
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
@@ -184,8 +185,7 @@ class RoomListHandler:
             probing_limit,
             bounds=bounds,
             forwards=forwards,
-            ignore_non_federatable=from_federation_origin
-            is not None,  # TODO apply acls
+            ignore_non_federatable=from_federation_origin is not None,
         )
 
         def build_room_entry(room: LargestRoomStats) -> JsonDict:
@@ -206,53 +206,97 @@ class RoomListHandler:
             # Filter out Nones – rather omit the field altogether
             return {k: v for k, v in entry.items() if v is not None}
 
-        response: JsonDict = {}
+        # Build a list of up to `limit` entries.
+        room_entries: List[JsonDict] = []
+        rooms_iterator = results if forwards else reversed(results)
+
+        # Track the first and last 'considered' rooms so that we can provide correct
+        # next_batch/prev_batch tokens.
+        # This is needed because the loop might finish early when
+        # `len(room_entries) >= limit` and we might be left with rooms we didn't
+        # 'consider' (iterate over) and we should save those rooms for the next
+        # batch.
+        first_considered_room: Optional[LargestRoomStats] = None
+        last_considered_room: Optional[LargestRoomStats] = None
+        cut_off_due_to_limit: bool = False
+
+        for room_result in rooms_iterator:
+            if len(room_entries) >= limit:
+                cut_off_due_to_limit = True
+                break
+
+            if first_considered_room is None:
+                first_considered_room = room_result
+            last_considered_room = room_result
+
+            if from_federation_origin is not None:
+                # If this is a federated request, apply server ACLs if the room has any set
+                acl_evaluator = (
+                    await self._storage_controllers.state.get_server_acl_for_room(
+                        room_result.room_id
+                    )
+                )
+
+                if acl_evaluator is not None:
+                    if not acl_evaluator.server_matches_acl_event(
+                        from_federation_origin
+                    ):
+                        # the requesting server is ACL blocked by the room,
+                        # don't show in directory
+                        continue
+
+            room_entries.append(build_room_entry(room_result))
+
+        if not forwards:
+            # If we are paginating backwards, we still return the chunk in
+            # biggest-first order, so reverse again.
+            room_entries.reverse()
+            # Swap the order of first/last considered rooms.
+            first_considered_room, last_considered_room = (
+                last_considered_room,
+                first_considered_room,
+            )
+
+        response: JsonDict = {
+            "chunk": room_entries,
+        }
         num_results = len(results)
 
-        more_to_come = num_results == probing_limit
-
-        # Depending on direction we trim either the front or back.
-        if forwards:
-            results = results[:limit]
-        else:
-            results = results[-limit:]
+        more_to_come_from_database = num_results == probing_limit
 
         if num_results > 0:
-            final_entry = results[-1]
-            initial_entry = results[0]
-
+            assert first_considered_room is not None
+            assert last_considered_room is not None
             if forwards:
                 if has_batch_token:
                     # If there was a token given then we assume that there
                     # must be previous results.
                     response["prev_batch"] = RoomListNextBatch(
-                        last_joined_members=initial_entry.joined_members,
-                        last_room_id=initial_entry.room_id,
+                        last_joined_members=first_considered_room.joined_members,
+                        last_room_id=first_considered_room.room_id,
                         direction_is_forward=False,
                     ).to_token()
 
-                if more_to_come:
+                if more_to_come_from_database or cut_off_due_to_limit:
                     response["next_batch"] = RoomListNextBatch(
-                        last_joined_members=final_entry.joined_members,
-                        last_room_id=final_entry.room_id,
+                        last_joined_members=last_considered_room.joined_members,
+                        last_room_id=last_considered_room.room_id,
                         direction_is_forward=True,
                     ).to_token()
-            else:
+            else:  # backwards
                 if has_batch_token:
                     response["next_batch"] = RoomListNextBatch(
-                        last_joined_members=final_entry.joined_members,
-                        last_room_id=final_entry.room_id,
+                        last_joined_members=last_considered_room.joined_members,
+                        last_room_id=last_considered_room.room_id,
                         direction_is_forward=True,
                     ).to_token()
 
-                if more_to_come:
+                if more_to_come_from_database or cut_off_due_to_limit:
                     response["prev_batch"] = RoomListNextBatch(
-                        last_joined_members=initial_entry.joined_members,
-                        last_room_id=initial_entry.room_id,
+                        last_joined_members=first_considered_room.joined_members,
+                        last_room_id=first_considered_room.room_id,
                         direction_is_forward=False,
                     ).to_token()
-
-        response["chunk"] = [build_room_entry(r) for r in results]
 
         # We can't efficiently count the total number of rooms that are not
         # blocked by ACLs, but this is just an estimate so that should be
