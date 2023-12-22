@@ -42,7 +42,7 @@ from unpaddedbase64 import encode_base64
 
 from synapse.api.constants import RelationTypes
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
-from synapse.types import JsonDict, RoomStreamToken, StrCollection
+from synapse.types import JsonDict, StrCollection
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
 from synapse.util.stringutils import strtobool
@@ -210,12 +210,6 @@ class _EventInternalMetadata:
 
     device_id: DictProperty[str] = DictProperty("device_id")
     """The device ID of the user who sent this event, if any."""
-
-    # XXX: These are set by StreamWorkerStore._set_before_and_after.
-    # I'm pretty sure that these are never persisted to the database, so shouldn't
-    # be here
-    before: DictProperty[RoomStreamToken] = DictProperty("before")
-    after: DictProperty[RoomStreamToken] = DictProperty("after")
 
     def get_dict(self) -> JsonDict:
         return dict(self._dict)

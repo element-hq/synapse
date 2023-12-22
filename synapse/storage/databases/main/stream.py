@@ -705,8 +705,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        self._set_before_and_after(ret, rows, topo_order=False)
-
         if order.lower() == "desc":
             ret.reverse()
 
@@ -793,8 +791,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        self._set_before_and_after(ret, rows, topo_order=False)
-
         return ret
 
     async def get_recent_events_for_room(
@@ -819,8 +815,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         events = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
-
-        self._set_before_and_after(events, rows)
 
         return events, token
 
@@ -1093,30 +1087,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # lookup a `room_id` which does not exist, `rows` will look like
         # `[(None,)]`
         return rows[0][0] if rows[0][0] is not None else 0
-
-    @staticmethod
-    def _set_before_and_after(
-        events: List[EventBase], rows: List[_EventDictReturn], topo_order: bool = True
-    ) -> None:
-        """Inserts ordering information to events' internal metadata from
-        the DB rows.
-
-        Args:
-            events
-            rows
-            topo_order: Whether the events were ordered topologically or by stream
-                ordering. If true then all rows should have a non null
-                topological_ordering.
-        """
-        for event, row in zip(events, rows):
-            stream = row.stream_ordering
-            if topo_order and row.topological_ordering:
-                topo: Optional[int] = row.topological_ordering
-            else:
-                topo = None
-            internal = event.internal_metadata
-            internal.before = RoomStreamToken(topological=topo, stream=stream - 1)
-            internal.after = RoomStreamToken(topological=topo, stream=stream)
 
     async def get_events_around(
         self,
@@ -1557,8 +1527,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         events = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
-
-        self._set_before_and_after(events, rows)
 
         return events, token
 

@@ -208,7 +208,12 @@ class AdminHandler:
                 if not events:
                     break
 
-                from_key = events[-1].internal_metadata.after
+                last_event = events[-1]
+                assert last_event.internal_metadata.stream_ordering
+                from_key = RoomStreamToken(
+                    stream=last_event.internal_metadata.stream_ordering,
+                    topological=last_event.depth,
+                )
 
                 events = await filter_events_for_client(
                     self._storage_controllers, user_id, events

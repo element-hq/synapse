@@ -1750,7 +1750,12 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
                 events[:] = events[:limit]
 
             if events:
-                end_key = events[-1].internal_metadata.after
+                last_event = events[-1]
+                assert last_event.internal_metadata.stream_ordering
+                end_key = RoomStreamToken(
+                    stream=last_event.internal_metadata.stream_ordering,
+                    topological=last_event.depth,
+                )
             else:
                 end_key = to_key
 
