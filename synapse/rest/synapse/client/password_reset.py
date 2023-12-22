@@ -106,7 +106,7 @@ class PasswordResetSubmitTokenResource(DirectServeHtmlResource):
                     return (
                         302,
                         (
-                            b'You are being redirected to <a src="%s">%s</a>.'
+                            b'You are being redirected to <a href="%s">%s</a>.'
                             % (next_link_bytes, next_link_bytes)
                         ),
                     )
