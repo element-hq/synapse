@@ -162,7 +162,7 @@ class ClientDirectoryListServer(RestServlet):
         # temporarily block publishing rooms to public directory for non-admins
         # patch date 12/12/23
         if content.visibility == "public":
-            is_admin = await self.is_server_admin(requester)
+            is_admin = await self.auth.is_server_admin(requester)
             if not is_admin:
                 raise AuthError(
                     403,
