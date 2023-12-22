@@ -216,7 +216,6 @@ class _EventInternalMetadata:
     # be here
     before: DictProperty[RoomStreamToken] = DictProperty("before")
     after: DictProperty[RoomStreamToken] = DictProperty("after")
-    order: DictProperty[Tuple[int, int]] = DictProperty("order")
 
     def get_dict(self) -> JsonDict:
         return dict(self._dict)

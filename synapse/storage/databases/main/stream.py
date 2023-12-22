@@ -1117,7 +1117,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             internal = event.internal_metadata
             internal.before = RoomStreamToken(topological=topo, stream=stream - 1)
             internal.after = RoomStreamToken(topological=topo, stream=stream)
-            internal.order = (int(topo) if topo else 0, int(stream))
 
     async def get_events_around(
         self,
