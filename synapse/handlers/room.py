@@ -1754,7 +1754,6 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
                 assert last_event.internal_metadata.stream_ordering
                 end_key = RoomStreamToken(
                     stream=last_event.internal_metadata.stream_ordering,
-                    topological=last_event.depth,
                 )
             else:
                 end_key = to_key
