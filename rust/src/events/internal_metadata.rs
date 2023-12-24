@@ -30,6 +30,8 @@
 //! attributes, but for small number of keys is actually faster than using a
 //! hash or btree map.
 
+use std::{num::NonZeroI64, ops::Deref};
+
 use anyhow::Context;
 use pyo3::{
     exceptions::PyAttributeError, pyclass, pymethods, types::PyDict, IntoPy, PyAny, PyObject,
@@ -40,14 +42,14 @@ use pyo3::{
 #[derive(Clone)]
 enum EventInternalMetadataData {
     OutOfBandMembership(bool),
-    SendOnBehalfOf(String),
+    SendOnBehalfOf(Box<str>),
     RecheckRedaction(bool),
     SoftFailed(bool),
     ProactivelySend(bool),
     Redacted(bool),
-    TxnId(String),
+    TxnId(Box<str>),
     TokenId(i64),
-    DeviceId(String),
+    DeviceId(Box<str>),
 }
 
 impl EventInternalMetadataData {
@@ -83,7 +85,8 @@ impl EventInternalMetadataData {
 
             "send_on_behalf_of" => EventInternalMetadataData::SendOnBehalfOf(
                 value
-                    .extract()
+                    .extract::<String>()
+                    .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "recheck_redaction" => EventInternalMetadataData::RecheckRedaction(
@@ -108,7 +111,8 @@ impl EventInternalMetadataData {
             ),
             "txn_id" => EventInternalMetadataData::TxnId(
                 value
-                    .extract()
+                    .extract::<String>()
+                    .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             "token_id" => EventInternalMetadataData::TokenId(
@@ -118,7 +122,8 @@ impl EventInternalMetadataData {
             ),
             "device_id" => EventInternalMetadataData::DeviceId(
                 value
-                    .extract()
+                    .extract::<String>()
+                    .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
             _ => return Ok(None),
@@ -177,7 +182,7 @@ pub struct EventInternalMetadata {
 
     /// The stream ordering of this event. None, until it has been persisted.
     #[pyo3(get, set)]
-    stream_ordering: Option<i64>,
+    stream_ordering: Option<NonZeroI64>,
 
     /// whether this event is an outlier (ie, whether we have the state at that
     /// point in the DAG)
@@ -189,13 +194,15 @@ pub struct EventInternalMetadata {
 impl EventInternalMetadata {
     #[new]
     fn new(dict: &PyDict) -> PyResult<Self> {
-        let mut data = Vec::new();
+        let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
             if let Some(entry) = EventInternalMetadataData::from_python_pair(key, value)? {
                 data.push(entry);
             }
         }
+
+        data.shrink_to_fit();
 
         Ok(EventInternalMetadata {
             data,
@@ -252,8 +259,9 @@ impl EventInternalMetadata {
     ///
     /// returns a str with the name of the server this event is sent on behalf
     /// of.
-    fn get_send_on_behalf_of(&self) -> Option<&String> {
-        get_property_opt!(self, SendOnBehalfOf)
+    fn get_send_on_behalf_of(&self) -> Option<&str> {
+        let s = get_property_opt!(self, SendOnBehalfOf);
+        s.map(|a| a.deref())
     }
 
     /// Whether the redaction event needs to be rechecked when fetching
@@ -319,12 +327,13 @@ impl EventInternalMetadata {
     }
 
     #[getter(send_on_behalf_of)]
-    fn getter_send_on_behalf_of(&self) -> PyResult<&String> {
-        get_property!(self, SendOnBehalfOf)
+    fn getter_send_on_behalf_of(&self) -> PyResult<&str> {
+        let s = get_property!(self, SendOnBehalfOf)?;
+        Ok(s)
     }
     #[setter]
     fn set_send_on_behalf_of(&mut self, obj: String) {
-        set_property!(self, SendOnBehalfOf, obj);
+        set_property!(self, SendOnBehalfOf, obj.into_boxed_str());
     }
 
     #[getter]
@@ -369,12 +378,13 @@ impl EventInternalMetadata {
 
     /// The transaction ID, if it was set when the event was created.
     #[getter]
-    fn get_txn_id(&self) -> PyResult<&String> {
-        get_property!(self, TxnId)
+    fn get_txn_id(&self) -> PyResult<&str> {
+        let s = get_property!(self, TxnId)?;
+        Ok(s)
     }
     #[setter]
     fn set_txn_id(&mut self, obj: String) {
-        set_property!(self, TxnId, obj);
+        set_property!(self, TxnId, obj.into_boxed_str());
     }
 
     /// The access token ID of the user who sent this event, if any.
@@ -390,11 +400,12 @@ impl EventInternalMetadata {
 
     /// The device ID of the user who sent this event, if any.
     #[getter]
-    fn get_device_id(&self) -> PyResult<&String> {
-        get_property!(self, DeviceId)
+    fn get_device_id(&self) -> PyResult<&str> {
+        let s = get_property!(self, DeviceId)?;
+        Ok(s)
     }
     #[setter]
     fn set_device_id(&mut self, obj: String) {
-        set_property!(self, DeviceId, obj);
+        set_property!(self, DeviceId, obj.into_boxed_str());
     }
 }
