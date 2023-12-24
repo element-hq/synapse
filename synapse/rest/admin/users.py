@@ -107,7 +107,7 @@ class UsersRestServletV2(RestServlet):
             )
 
         user_id = parse_string(request, "user_id")
-        name = parse_string(request, "name")
+        name = parse_string(request, "name", encoding="utf-8")
 
         guests = parse_boolean(request, "guests", default=True)
         if self._msc3861_enabled and guests:
