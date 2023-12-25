@@ -1,0 +1,2 @@
+Fix a bug that prevented users from being queried by display name if it contains non-ASCII characters.
+
