@@ -331,7 +331,6 @@ class PasswordResetTestCase(unittest.HomeserverTestCase):
     def test_password_reset_redirection(self) -> None:
         """Test basic password reset flow"""
         old_password = "monkey"
-        new_password = "kangeroo"
 
         user_id = self.register_user("kermit", old_password)
         self.login("kermit", old_password)
