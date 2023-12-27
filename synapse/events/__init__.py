@@ -288,9 +288,6 @@ class EventBase(metaclass=abc.ABCMeta):
 
         return template_json
 
-    def __getitem__(self, field: str) -> Any | None:
-        return self._dict[field]
-
     def __contains__(self, field: str) -> bool:
         return field in self._dict
 
