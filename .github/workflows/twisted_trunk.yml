@@ -22,17 +22,17 @@ concurrency:
 
 jobs:
   check_repo:
-    # Prevent this workflow from running on any fork of Synapse other than matrix-org/synapse, as it is
+    # Prevent this workflow from running on any fork of Synapse other than element-hq/synapse, as it is
     # only useful to the Synapse core team.
     # All other workflow steps depend on this one, thus if 'should_run_workflow' is not 'true', the rest
     # of the workflow will be skipped as well.
-    if: github.repository == 'matrix-org/synapse'
+    if: github.repository == 'element-hq/synapse'
     runs-on: ubuntu-latest
     outputs:
       should_run_workflow: ${{ steps.check_condition.outputs.should_run_workflow }}
     steps:
       - id: check_condition
-        run: echo "should_run_workflow=${{ github.repository == 'matrix-org/synapse' }}" >> "$GITHUB_OUTPUT"
+        run: echo "should_run_workflow=${{ github.repository == 'element-hq/synapse' }}" >> "$GITHUB_OUTPUT"
 
   mypy:
     needs: check_repo
@@ -171,7 +171,7 @@ jobs:
       - name: Prepare Complement's Prerequisites
         run: synapse/.ci/scripts/setup_complement_prerequisites.sh
 
-      - uses: actions/setup-go@v4
+      - uses: actions/setup-go@v5
         with:
           cache-dependency-path: complement/go.sum
           go-version-file: complement/go.mod

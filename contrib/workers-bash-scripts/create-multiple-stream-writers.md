@@ -1,6 +1,6 @@
 # Creating multiple stream writers with a bash script
 
-This script creates multiple [stream writer](https://github.com/matrix-org/synapse/blob/develop/docs/workers.md#stream-writers) workers.
+This script creates multiple [stream writer](https://github.com/element-hq/synapse/blob/develop/docs/workers.md#stream-writers) workers.
 
 Stream writers require both replication and HTTP listeners.
 
@@ -8,7 +8,7 @@ It also prints out the example lines for Synapse main configuration file.
 
 Remember to route necessary endpoints directly to a worker associated with it.
 
-If you run the script as-is, it will create workers with the replication listener starting from port 8034 and another, regular http listener starting from 8044. If you don't need all of the stream writers listed in the script, just remove them from the ```STREAM_WRITERS``` array. 
+If you run the script as-is, it will create workers with the replication listener starting from port 8034 and another, regular http listener starting from 8044. If you don't need all of the stream writers listed in the script, just remove them from the ```STREAM_WRITERS``` array.
 
 Hint: Note that `worker_pid_file` is required if `worker_daemonize` is `true`. Uncomment and/or modify the line if needed.
 
@@ -71,7 +71,7 @@ cat << EXAMPLECONFIG
 # Don't forget to configure your reverse proxy and
 # necessary endpoints to their respective worker.
 
-# See https://github.com/matrix-org/synapse/blob/develop/docs/workers.md
+# See https://github.com/element-hq/synapse/blob/develop/docs/workers.md
 # for more information.
 
 # Remember: Under NO circumstances should the replication
@@ -102,7 +102,7 @@ You should receive an output similar to the following:
 # Don't forget to configure your reverse proxy and
 # necessary endpoints to their respective worker.
 
-# See https://github.com/matrix-org/synapse/blob/develop/docs/workers.md
+# See https://github.com/element-hq/synapse/blob/develop/docs/workers.md
 # for more information
 
 # Remember: Under NO circumstances should the replication
@@ -138,14 +138,14 @@ Simply copy-and-paste the output to an appropriate place in your Synapse main co
 
 ## Write directly to Synapse configuration file
 
-You could also write the output directly to homeserver main configuration file. **This, however, is not recommended** as even a small typo (such as replacing >> with >) can erase the entire ```homeserver.yaml```. 
+You could also write the output directly to homeserver main configuration file. **This, however, is not recommended** as even a small typo (such as replacing >> with >) can erase the entire ```homeserver.yaml```.
 
 If you do this, back up your original configuration file first:
 
 ```console
 # Back up homeserver.yaml first
-cp /etc/matrix-synapse/homeserver.yaml /etc/matrix-synapse/homeserver.yaml.bak 
+cp /etc/matrix-synapse/homeserver.yaml /etc/matrix-synapse/homeserver.yaml.bak
 
 # Create workers and write output to your homeserver.yaml
-./create_stream_writers.sh >> /etc/matrix-synapse/homeserver.yaml 
+./create_stream_writers.sh >> /etc/matrix-synapse/homeserver.yaml
 ```

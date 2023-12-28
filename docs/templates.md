@@ -3,7 +3,7 @@
 Synapse uses parametrised templates to generate the content of emails it sends and
 webpages it shows to users.
 
-By default, Synapse will use the templates listed [here](https://github.com/matrix-org/synapse/tree/master/synapse/res/templates).
+By default, Synapse will use the templates listed [here](https://github.com/element-hq/synapse/tree/master/synapse/res/templates).
 Server admins can configure an additional directory for Synapse to look for templates
 in, allowing them to specify custom templates:
 
@@ -128,7 +128,7 @@ registration and password reset:
   page above.
   When rendering, `password_reset_success.html` is given no variable, and
   `password_reset_failure.html` is given a `failure_reason`, which contains the reason
-  for the password reset failure. 
+  for the password reset failure.
 * `registration_success.html` and `registration_failure.html`: HTML pages for success and
   failure that a user will see when they follow the link in an address verification email
   sent during registration.

@@ -6,10 +6,10 @@ well as a `matrix-synapse-worker@` service template for any workers you
 require. Additionally, to group the required services, it sets up a
 `matrix-synapse.target`.
 
-See the folder [system](https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/system/)
+See the folder [system](https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/)
 for the systemd unit files.
 
-The folder [workers](https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/workers/)
+The folder [workers](https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/workers/)
 contains an example configuration for the `generic_worker` worker.
 
 ## Synapse configuration files
@@ -33,7 +33,7 @@ There is no need for a separate configuration file for the master process.
 ## Set up
 
 1. Adjust synapse configuration files as above.
-1. Copy the `*.service` and `*.target` files in [system](https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/system/)
+1. Copy the `*.service` and `*.target` files in [system](https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/)
 to `/etc/systemd/system`.
 1. Run `systemctl daemon-reload` to tell systemd to load the new unit files.
 1. Run `systemctl enable matrix-synapse.service`. This will configure the
@@ -74,7 +74,7 @@ systemctl restart matrix-synapse.target
 
 **Optional:** If further hardening is desired, the file
 `override-hardened.conf` may be copied from
-[contrib/systemd/override-hardened.conf](https://github.com/matrix-org/synapse/tree/develop/contrib/systemd/)
+[contrib/systemd/override-hardened.conf](https://github.com/element-hq/synapse/tree/develop/contrib/systemd/)
 in this repository to the location
 `/etc/systemd/system/matrix-synapse.service.d/override-hardened.conf` (the
 directory may have to be created). It enables certain sandboxing features in

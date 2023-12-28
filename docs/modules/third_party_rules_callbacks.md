@@ -224,7 +224,7 @@ wishing this callback to be called on every profile change are encouraged to dis
 per-room profiles globally using the `allow_per_room_profiles` configuration setting in
 Synapse's configuration file.
 This callback is not called when registering a user, even when setting it through the
-[`get_displayname_for_registration`](https://matrix-org.github.io/synapse/latest/modules/password_auth_provider_callbacks.html#get_displayname_for_registration)
+[`get_displayname_for_registration`](https://element-hq.github.io/synapse/latest/modules/password_auth_provider_callbacks.html#get_displayname_for_registration)
 module callback.
 
 If multiple modules implement this callback, Synapse runs them all in order.

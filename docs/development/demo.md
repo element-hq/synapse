@@ -2,7 +2,7 @@
 
 **DO NOT USE THESE DEMO SERVERS IN PRODUCTION**
 
-Requires you to have a [Synapse development environment setup](https://matrix-org.github.io/synapse/develop/development/contributing_guide.html#4-install-the-dependencies).
+Requires you to have a [Synapse development environment setup](https://element-hq.github.io/synapse/develop/development/contributing_guide.html#4-install-the-dependencies).
 
 The demo setup allows running three federation Synapse servers, with server
 names `localhost:8480`, `localhost:8481`, and `localhost:8482`.
