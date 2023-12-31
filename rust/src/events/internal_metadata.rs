@@ -33,6 +33,7 @@
 use std::{num::NonZeroI64, ops::Deref};
 
 use anyhow::Context;
+use log::warn;
 use pyo3::{
     exceptions::PyAttributeError, pyclass, pymethods, types::PyDict, IntoPy, PyAny, PyObject,
     PyResult, Python,
@@ -197,8 +198,12 @@ impl EventInternalMetadata {
         let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
-            if let Some(entry) = EventInternalMetadataData::from_python_pair(key, value)? {
-                data.push(entry);
+            match EventInternalMetadataData::from_python_pair(key, value) {
+                Ok(Some(entry)) => data.push(entry),
+                Ok(None) => {}
+                Err(err) => {
+                    warn!("Ignoring internal metadata field '{key}', as failed to convert to Rust due to {err}")
+                }
             }
         }
 
