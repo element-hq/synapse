@@ -6,10 +6,14 @@ This document aims to get you started with contributing to Synapse!
 
 Everyone is welcome to contribute code to
 [Synapse](https://github.com/element-hq/synapse), provided that they are willing
-to license their contributions to agree to a [Contributor License
+to license their contributions to Element under a [Contributor License
 Agreement](https://cla-assistant.io/element-hq/synapse) (CLA). This ensures that
 their contribution will be made available under an OSI-approved open-source
 license, currently Affero General Public License v3 (AGPLv3).
+
+Please see the
+[Element blog post](https://element.io/blog/synapse-now-lives-at-github-com-element-hq-synapse/)
+for the full rationale.
 
 # 2. What do I need?
 
