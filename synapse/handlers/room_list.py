@@ -272,19 +272,33 @@ class RoomListHandler:
 
         more_to_come_from_database = num_results == probing_limit
 
+        if forwards and has_batch_token:
+            # If there was a token given then we assume that there
+            # must be previous results, even if there were no results in this batch.
+            if first_considered_room is not None:
+                response["prev_batch"] = RoomListNextBatch(
+                    last_joined_members=first_considered_room.joined_members,
+                    last_room_id=first_considered_room.room_id,
+                    direction_is_forward=False,
+                ).to_token()
+            else:
+                # If we didn't find any results this time,
+                # we don't have an actual room ID to put in the token.
+                # So instead we re-use the room ID from last time but make the
+                # bound inclusive, by tacking on a 0x01 byte at the end
+                # (s+"\x00" is the first string following s, but we can't use "\x00"
+                # in Postgres, so use "\x01" anyway.)
+                assert batch_token is not None
+                response["prev_batch"] = RoomListNextBatch(
+                    last_joined_members=batch_token.last_joined_members,
+                    last_room_id=batch_token.last_room_id + "\x01",
+                    direction_is_forward=False,
+                ).to_token()
+
         if num_results > 0:
             assert first_considered_room is not None
             assert last_considered_room is not None
             if forwards:
-                if has_batch_token:
-                    # If there was a token given then we assume that there
-                    # must be previous results.
-                    response["prev_batch"] = RoomListNextBatch(
-                        last_joined_members=first_considered_room.joined_members,
-                        last_room_id=first_considered_room.room_id,
-                        direction_is_forward=False,
-                    ).to_token()
-
                 if more_to_come_from_database or cut_off_due_to_limit:
                     response["next_batch"] = RoomListNextBatch(
                         last_joined_members=last_considered_room.joined_members,
