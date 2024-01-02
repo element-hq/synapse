@@ -574,7 +574,7 @@ class DirectServeHtmlResource(_AsyncResource):
         assert isinstance(response_object, bytes)
         html_bytes = response_object
 
-        respond_with_html_bytes(request, 200, html_bytes)
+        respond_with_html_bytes(request, code, html_bytes)
 
     def _send_error_response(
         self,
