@@ -12,7 +12,7 @@ on:
 permissions:
   contents: read
   packages: write
-
+  id-token: write # needed for signing the images with GitHub OIDC Token
 jobs:
   build:
     runs-on: ubuntu-latest
