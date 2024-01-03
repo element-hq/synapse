@@ -505,7 +505,7 @@ This will link a page to allow you to confirm that you have read and agreed to
 the CLA by signing in with GitHub.
 
 Alternatively, you can sign off before opening a PR by going to
-[https://cla-assistant.io/element-hq/synapse](https://cla-assistant.io/element-hq/synapse).
+<https://cla-assistant.io/element-hq/synapse>.
 
 We accept contributions under a legally identifiable name, such as
 your name on government documentation or common-law names (names
