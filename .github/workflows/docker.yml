@@ -29,6 +29,9 @@ jobs:
       - name: Inspect builder
         run: docker buildx inspect
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.3.0
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -68,6 +71,7 @@ jobs:
             type=pep440,pattern={{raw}}
 
       - name: Build and push all platforms
+        id: build-and-push
         uses: docker/build-push-action@v5
         with:
           push: true
@@ -82,3 +86,14 @@ jobs:
           # https://github.com/rust-lang/cargo/issues/10583
           build-args: |
             CARGO_NET_GIT_FETCH_WITH_CLI=true
+
+      - name: Sign the images with GitHub OIDC Token
+        env:
+          DIGEST: ${{ steps.build-and-push.outputs.digest }}
+          TAGS: ${{ steps.set-tag.outputs.tags }}
+        run: |
+          images=""
+          for tag in ${TAGS}; do
+            images+="${tag}@${DIGEST} "
+          done
+          cosign sign --yes ${images}
