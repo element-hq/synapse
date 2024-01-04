@@ -1863,7 +1863,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
         #
@@ -1874,7 +1874,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         self._add_new_user(room_id, "@bob:server3")
 
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server3"}, states=[expected_state]
+            destinations=("server3",), states=[expected_state]
         )
 
     def test_remote_gets_presence_when_local_user_joins(self) -> None:
@@ -1927,7 +1927,12 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2", "server3"}, states=[expected_state]
+            destinations=(
+                "server2",
+                "server3",
+            ),
+            states=[expected_state],
+        )
 
     def test_remote_joins_with_previously_shared_rooms_do_not_send_presence(
         self,
@@ -1982,7 +1987,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
         # Don't forget to reset the Mock or we get old data
@@ -2010,7 +2015,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server3"}, states=[expected_state]
+            destinations=("server3",), states=[expected_state]
         )
 
         # Now add bob to the first room, no presence should be sent as he is already in
@@ -2066,7 +2071,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
         # Don't forget to reset the Mock or we get old data
@@ -2090,7 +2095,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
     def test_remote_gets_presence_after_local_join_leave_join(self) -> None:
@@ -2139,7 +2144,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
         # Don't forget to reset the Mock or we get old data
@@ -2165,7 +2170,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(expected_state.state, PresenceState.ONLINE)
         self.federation_sender.send_presence_to_destinations.assert_called_once_with(
-            destinations={"server2"}, states=[expected_state]
+            destinations=("server2",), states=[expected_state]
         )
 
     def _add_new_user(self, room_id: str, user_id: str) -> None:
