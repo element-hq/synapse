@@ -1582,13 +1582,25 @@ class PresenceHandler(BasePresenceHandler):
         #   2. presence states of newly joined users to all remote servers in
         #      the room.
         #
-        # TODO: Only send presence states to remote hosts that don't already
-        # have them (because they already share rooms).
+        # But only to remote hosts that don't already have them
+        #  (because they already share rooms).
 
         # Get all the users who were already in the room, by fetching the
         # current users in the room and removing the newly joined users.
         users = await self.store.get_users_in_room(room_id)
         prev_users = set(users) - newly_joined_users
+
+        # Get all the rooms that all users are in, which *will* include this room
+        users_to_rooms_dict = await self.store.get_rooms_for_users(users)
+
+        # Build a quick reference map of rooms to users in them
+        rooms_to_users_dict: Dict[str, Set[str]] = {}
+        for user_id, room_ids in users_to_rooms_dict.items():
+            for room in room_ids:
+                rooms_to_users_dict.setdefault(room, set()).add(user_id)
+
+        # Drop this room, as it's not needed
+        del rooms_to_users_dict[room_id]
 
         # Construct sets for all the local users and remote hosts that were
         # already in the room
@@ -1600,32 +1612,95 @@ class PresenceHandler(BasePresenceHandler):
             else:
                 prev_remote_hosts.add(get_domain_from_id(user_id))
 
-        # Similarly, construct sets for all the local users and remote hosts
-        # that were *not* already in the room. Care needs to be taken with the
-        # calculating the remote hosts, as a host may have already been in the
-        # room even if there is a newly joined user from that host.
-        newly_joined_local_users = []
-        newly_joined_remote_hosts = set()
+        # map of user_id -> Set[host1, host2, ...]
+        newly_joined_local_users: Dict[str, Set[str]] = {}
+
+        # newly joined remote users only need presence sent to them from local users
+        # they've never seen before
+        # map of remote_user_id -> Set[local_user1, local_user2, ...]
+        newly_joined_remote_users: Dict[str, Set[str]] = {}
+
+        # Similarly to above, construct sets for all the local users and remote users
+        # that were *not* already in the room.
         for user_id in newly_joined_users:
             if self.is_mine_id(user_id):
-                newly_joined_local_users.append(user_id)
+                # We give this user all the hosts that were already in this room, then
+                # deduct hosts based on other rooms this user is in
+                new_local_user = newly_joined_local_users.setdefault(
+                    user_id, set(prev_remote_hosts)
+                )
+
+                this_users_other_rooms = users_to_rooms_dict.get(user_id, frozenset())
+                for room in this_users_other_rooms:
+                    if room == room_id:
+                        # Skip the current room,
+                        # * it's not in rooms_to_hosts
+                        # * it's represented by prev_remote_hosts
+                        continue
+
+                    new_local_user.difference_update(
+                        {
+                            get_domain_from_id(user)
+                            for user in rooms_to_users_dict.get(room, set())
+                        }
+                    )
+
             else:
+                # Give this user all the prev_local_users, then deduct those users as
+                # they are found in other rooms.
+                new_remote_user = newly_joined_remote_users.setdefault(
+                    user_id, set(prev_local_users)
+                )
+
+                # This is a convenient shortcut to avoid processing a remote user
                 host = get_domain_from_id(user_id)
                 if host not in prev_remote_hosts:
-                    newly_joined_remote_hosts.add(host)
+                    this_users_other_rooms = users_to_rooms_dict.get(
+                        user_id, frozenset()
+                    )
 
-        # Send presence states of all local users in the room to newly joined
-        # remote servers. (We actually only send states for local users already
-        # in the room, as we'll send states for newly joined local users below.)
-        if prev_local_users and newly_joined_remote_hosts:
-            local_states = await self.current_state_for_users(prev_local_users)
+                    for room in this_users_other_rooms:
+                        if room == room_id:
+                            # Skip this room,
+                            # * it's not in rooms_to_users_dict
+                            # * it's represented by prev_local_users
+                            continue
+
+                        other_rooms_users = rooms_to_users_dict.get(room, set())
+                        for local_user in other_rooms_users:
+                            if not self.is_mine_id(local_user):
+                                continue
+                            if local_user in prev_local_users:
+                                new_remote_user.discard(local_user)
+
+        # There are now two maps of users. Compile a list of:
+        # * previous local users that need presence sent to newly joined remote hosts
+        # * previous remote hosts that need presence from newly joined local users
+        # Which if you think about it, is really the same thing
+        # * a map of hosts that are receiving presence from local users
+
+        # map of (host1, host2, ...) -> {local_user1, local_user2, ...}
+        hosts_to_local_users: Dict[Tuple[str, ...], Set[str]] = {}
+
+        for local_user, prev_hosts in newly_joined_local_users.items():
+            new_host_key = tuple(sorted(prev_hosts))
+            hosts_to_local_users.setdefault(new_host_key, set()).add(local_user)
+
+        for remote_user, old_local_users in newly_joined_remote_users.items():
+            new_host_key = (get_domain_from_id(remote_user),)
+            hosts_to_local_users.setdefault(new_host_key, set()).update(old_local_users)
+
+        # Send presence states of local users to all appropriate remote servers in
+        # the room
+        now = self.clock.time_msec()
+        for hosts_to_send_to, user_ids in hosts_to_local_users.items():
+            local_states = await self.current_state_for_users(user_ids)
 
             # Filter out old presence, i.e. offline presence states where
             # the user hasn't been active for a week. We can change this
             # depending on what we want the UX to be, but at the least we
             # should filter out offline presence where the state is just the
             # default state.
-            now = self.clock.time_msec()
             states = [
                 state
                 for state in local_states.values()
@@ -1635,19 +1710,8 @@ class PresenceHandler(BasePresenceHandler):
             ]
 
             await self._federation_queue.send_presence_to_destinations(
-                destinations=newly_joined_remote_hosts,
+                destinations=hosts_to_send_to,
                 states=states,
-            )
-
-        # Send presence states of newly joined users to all remote servers in
-        # the room
-        if newly_joined_local_users and (
-            prev_remote_hosts or newly_joined_remote_hosts
-        ):
-            local_states = await self.current_state_for_users(newly_joined_local_users)
-            await self._federation_queue.send_presence_to_destinations(
-                destinations=prev_remote_hosts | newly_joined_remote_hosts,
-                states=list(local_states.values()),
             )
 
 
