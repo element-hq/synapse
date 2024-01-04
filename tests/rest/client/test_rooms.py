@@ -2172,7 +2172,7 @@ class RoomMessageListTestCase(RoomBase):
             % (
                 self.room_id,
                 first_token_str,
-                json.dumps({"types": ['f.message.*']}),
+                json.dumps({"types": ["f.message.*"]}),
             ),
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
