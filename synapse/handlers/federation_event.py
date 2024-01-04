@@ -1689,8 +1689,6 @@ class FederationEventHandler:
             shortstr(e.event_id for e in sorted_auth_events),
         )
 
-        await self._auth_and_persist_outliers_inner(room_id, sorted_auth_events)
-
         # get all the auth events for all the events in this batch. By now, they should
         # have been persisted.
         auth_event_ids = {
