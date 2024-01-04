@@ -2159,19 +2159,12 @@ class RoomMessageListTestCase(RoomBase):
         # Send a first message in the room, which will be removed by the purge.
         self.helper.send(self.room_id, "message 1", type="f.message.1")
         self.helper.send(self.room_id, "message 1", type="f.message.2")
-
-        first_event_id = self.helper.send(self.room_id, "message 1")["event_id"]
-        first_token = self.get_success(
-            store.get_topological_token_for_event(first_event_id)
-        )
-        first_token_str = self.get_success(first_token.to_string(store))
-
+        self.helper.send(self.room_id, "not returned in filter")
         channel = self.make_request(
             "GET",
-            "/rooms/%s/messages?access_token=x&from=%s&dir=b&filter=%s"
+            "/rooms/%s/messages?access_token=x&dir=b&filter=%s"
             % (
                 self.room_id,
-                first_token_str,
                 json.dumps({"types": ["f.message.*"]}),
             ),
         )
