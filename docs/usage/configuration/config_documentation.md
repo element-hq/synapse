@@ -2680,7 +2680,7 @@ Example configuration:
 refreshable_access_token_lifetime: 10m
 ```
 ---
-### `refresh_token_lifetime: 24h`
+### `refresh_token_lifetime`
 
 Time that a refresh token remains valid for (provided that it is not
 exchanged for another one first).
