@@ -2155,7 +2155,6 @@ class RoomMessageListTestCase(RoomBase):
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
 
     def test_room_message_filter_wildcard(self) -> None:
-        store = self.hs.get_datastores().main
         # Send a first message in the room, which will be removed by the purge.
         self.helper.send(self.room_id, "message 1", type="f.message.1")
         self.helper.send(self.room_id, "message 1", type="f.message.2")
