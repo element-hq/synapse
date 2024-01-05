@@ -1744,7 +1744,7 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
 
             # We know stream_ordering must be not None here, as its been
             # persisted, but mypy doesn't know that
-            events.sort(key=lambda e: e.internal_metadata.stream_ordering or 0)
+            events.sort(key=lambda e: cast(int, e.internal_metadata.stream_ordering))
 
             if limit:
                 events[:] = events[:limit]
