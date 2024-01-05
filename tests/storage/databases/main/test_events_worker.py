@@ -324,7 +324,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
         )
 
         self.event_ids: List[str] = []
-        for idx in range(20):
+        for idx in range(1, 21):  # Stream ordering starts at 1.
             event_json = {
                 "type": f"test {idx}",
                 "room_id": self.room_id,
