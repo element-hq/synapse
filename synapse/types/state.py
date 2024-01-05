@@ -584,6 +584,17 @@ class StateFilter:
         # local users only
         return False
 
+    def __contains__(self, key: Tuple[str, str]) -> bool:
+        typ, state_key = key
+        if typ in self.types:
+            state_keys = self.types[typ]
+            if state_keys is None or state_key in state_keys:
+                return True
+        elif self.include_others:
+            return True
+
+        return False
+
 
 _ALL_STATE_FILTER = StateFilter(types=immutabledict(), include_others=True)
 _ALL_NON_MEMBER_STATE_FILTER = StateFilter(
