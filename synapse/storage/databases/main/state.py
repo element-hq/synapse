@@ -24,6 +24,7 @@ from typing import (
     Any,
     Collection,
     Dict,
+    FrozenSet,
     Iterable,
     List,
     Mapping,
@@ -52,7 +53,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
-from synapse.types import JsonDict, JsonMapping, StateMap
+from synapse.types import JsonDict, JsonMapping, StateMap, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util.caches import intern_string
 from synapse.util.caches.descriptors import cached, cachedList
@@ -317,6 +318,19 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return await self.db_pool.runInteraction(
             "get_partial_current_state_ids", _get_current_state_ids_txn
         )
+
+    async def check_if_events_in_current_state(
+        self, event_ids: StrCollection
+    ) -> FrozenSet[str]:
+        rows = await self.db_pool.simple_select_many_batch(
+            table="current_state_events",
+            column="event_id",
+            iterable=event_ids,
+            retcols=("event_id",),
+            desc="check_if_events_in_current_state",
+        )
+
+        return frozenset(event_id for event_id, in rows)
 
     # FIXME: how should this be cached?
     @cancellable
