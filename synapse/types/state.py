@@ -591,6 +591,9 @@ class StateFilter:
 
         typ, state_key = key
 
+        if not isinstance(typ, str) or not isinstance(state_key, str):
+            return False
+
         if typ in self.types:
             state_keys = self.types[typ]
             if state_keys is None or state_key in state_keys:
