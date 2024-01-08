@@ -116,7 +116,7 @@ class RoomListHandler:
             # We explicitly don't bother caching searches or requests for
             # appservice specific lists.
             # We also don't bother caching requests from federated homeservers.
-            logger.info("Bypassing cache as search request.")
+            logger.debug("Bypassing cache as search or federation request.")
 
             return await self._get_public_room_list(
                 capped_limit,
