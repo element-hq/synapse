@@ -44,6 +44,7 @@ from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.ratelimiting import RatelimitSettings
 from synapse.events import EventBase
 from synapse.types import JsonDict, Requester, StrCollection
+from synapse.types.state import StateFilter
 from synapse.util.caches.response_cache import ResponseCache
 
 if TYPE_CHECKING:
@@ -546,7 +547,16 @@ class RoomSummaryHandler:
         Returns:
              True if the room is accessible to the requesting user or server.
         """
-        state_ids = await self._storage_controllers.state.get_current_state_ids(room_id)
+        event_types = [
+            (EventTypes.JoinRules, ""),
+            (EventTypes.RoomHistoryVisibility, ""),
+        ]
+        if requester:
+            event_types.append((EventTypes.Member, requester))
+
+        state_ids = await self._storage_controllers.state.get_current_state_ids(
+            room_id, state_filter=StateFilter.from_types(event_types)
+        )
 
         # If there's no state for the room, it isn't known.
         if not state_ids:
