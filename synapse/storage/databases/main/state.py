@@ -765,7 +765,7 @@ class StateMapWrapper(Dict[StateKey, str]):
             raise Exception("State map was filtered and doesn't include: %s", key)
         return super().get(key, default)
 
-    def __contains__(self, key: object) -> bool:
+    def __contains__(self, key: Any) -> bool:
         if key not in self.state_filter:
             raise Exception("State map was filtered and doesn't include: %s", key)
 
