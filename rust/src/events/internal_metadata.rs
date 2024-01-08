@@ -55,19 +55,31 @@ enum EventInternalMetadataData {
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
-    fn to_python_pair(&self, py: Python<'_>) -> (&'static str, PyObject) {
+    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a PyString, PyObject) {
         match self {
             EventInternalMetadataData::OutOfBandMembership(o) => {
-                ("out_of_band_membership", o.into_py(py))
+                (pyo3::intern!(py, "out_of_band_membership"), o.into_py(py))
             }
-            EventInternalMetadataData::SendOnBehalfOf(o) => ("send_on_behalf_of", o.into_py(py)),
-            EventInternalMetadataData::RecheckRedaction(o) => ("recheck_redaction", o.into_py(py)),
-            EventInternalMetadataData::SoftFailed(o) => ("soft_failed", o.into_py(py)),
-            EventInternalMetadataData::ProactivelySend(o) => ("proactively_send", o.into_py(py)),
-            EventInternalMetadataData::Redacted(o) => ("redacted", o.into_py(py)),
-            EventInternalMetadataData::TxnId(o) => ("txn_id", o.into_py(py)),
-            EventInternalMetadataData::TokenId(o) => ("token_id", o.into_py(py)),
-            EventInternalMetadataData::DeviceId(o) => ("device_id", o.into_py(py)),
+            EventInternalMetadataData::SendOnBehalfOf(o) => {
+                (pyo3::intern!(py, "send_on_behalf_of"), o.into_py(py))
+            }
+            EventInternalMetadataData::RecheckRedaction(o) => {
+                (pyo3::intern!(py, "recheck_redaction"), o.into_py(py))
+            }
+            EventInternalMetadataData::SoftFailed(o) => {
+                (pyo3::intern!(py, "soft_failed"), o.into_py(py))
+            }
+            EventInternalMetadataData::ProactivelySend(o) => {
+                (pyo3::intern!(py, "proactively_send"), o.into_py(py))
+            }
+            EventInternalMetadataData::Redacted(o) => {
+                (pyo3::intern!(py, "redacted"), o.into_py(py))
+            }
+            EventInternalMetadataData::TxnId(o) => (pyo3::intern!(py, "txn_id"), o.into_py(py)),
+            EventInternalMetadataData::TokenId(o) => (pyo3::intern!(py, "token_id"), o.into_py(py)),
+            EventInternalMetadataData::DeviceId(o) => {
+                (pyo3::intern!(py, "device_id"), o.into_py(py))
+            }
         }
     }
 
