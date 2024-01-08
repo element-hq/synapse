@@ -1147,10 +1147,7 @@ class FederationEventHandler:
             )
 
             # state_maps is a list of mappings from (type, state_key) to event_id
-            state_maps: List[StateMap[str]] = list(ours.values())
-
-            # we don't need this any more, let's delete it.
-            del ours
+            state_maps: List[StateMap[str]] = []
 
             # Ask the remote server for the states we don't
             # know about
@@ -1168,6 +1165,17 @@ class FederationEventHandler:
                     )
 
                     state_maps.append(remote_state_map)
+
+            # Get the state of the events we know about. We do this *after*
+            # trying to fetch missing state over federation as that might fail
+            # and then we can skip loading the local state.
+            ours = await self._state_storage_controller.get_state_groups_ids(
+                room_id, seen, await_full_state=False
+            )
+            state_maps.extend(ours.values())
+
+            # we don't need this any more, let's delete it.
+            del ours
 
             room_version = await self._store.get_room_version_id(room_id)
             state_map = await self._state_resolution_handler.resolve_events_with_store(
@@ -1299,7 +1307,7 @@ class FederationEventHandler:
                 destination=destination, room_id=room_id, event_ids=missing_event_ids
             )
 
-        # We now need to fill out the state map, which involves fetching the
+        # We now need to fill out the state map, which involves loading the local state.he
         # type and state key for each event ID in the state.
         state_map = {}
 
