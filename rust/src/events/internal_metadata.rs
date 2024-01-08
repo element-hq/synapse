@@ -98,7 +98,7 @@ impl EventInternalMetadataData {
 
             "send_on_behalf_of" => EventInternalMetadataData::SendOnBehalfOf(
                 value
-                    .extract::<String>()
+                    .extract()
                     .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
@@ -124,7 +124,7 @@ impl EventInternalMetadataData {
             ),
             "txn_id" => EventInternalMetadataData::TxnId(
                 value
-                    .extract::<String>()
+                    .extract()
                     .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
@@ -135,7 +135,7 @@ impl EventInternalMetadataData {
             ),
             "device_id" => EventInternalMetadataData::DeviceId(
                 value
-                    .extract::<String>()
+                    .extract()
                     .map(String::into_boxed_str)
                     .with_context(|| format!("'{key_str}' has invalid type"))?,
             ),
