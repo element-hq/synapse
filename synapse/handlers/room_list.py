@@ -284,14 +284,13 @@ class RoomListHandler:
             else:
                 # If we didn't find any results this time,
                 # we don't have an actual room ID to put in the token.
-                # So instead we re-use the room ID from last time but make the
-                # bound inclusive, by tacking on a 0x01 byte at the end
-                # (s+"\x00" is the first string following s, but we can't use "\x00"
-                # in Postgres, so use "\x01" anyway.)
-                assert batch_token is not None
+                # But since `first_considered_room` is None, we know that we have
+                # reached the end of the results.
+                # So we can use a token of (0, empty room ID) to paginate from the end
+                # next time.
                 response["prev_batch"] = RoomListNextBatch(
-                    last_joined_members=batch_token.last_joined_members,
-                    last_room_id=batch_token.last_room_id + "\x01",
+                    last_joined_members=0,
+                    last_room_id="",
                     direction_is_forward=False,
                 ).to_token()
 
