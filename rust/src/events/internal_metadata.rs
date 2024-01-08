@@ -35,8 +35,10 @@ use std::{num::NonZeroI64, ops::Deref};
 use anyhow::Context;
 use log::warn;
 use pyo3::{
-    exceptions::PyAttributeError, pyclass, pymethods, types::PyDict, IntoPy, PyAny, PyObject,
-    PyResult, Python,
+    exceptions::PyAttributeError,
+    pyclass, pymethods,
+    types::{PyDict, PyString},
+    IntoPy, PyAny, PyObject, PyResult, Python,
 };
 
 /// Definitions of the various fields of the internal metadata.
