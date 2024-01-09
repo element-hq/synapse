@@ -1,14 +1,14 @@
 ## Understanding Synapse through Grafana graphs
 
-It is possible to monitor much of the internal state of Synapse using [Prometheus](https://prometheus.io) 
-metrics and [Grafana](https://grafana.com/). 
-A guide for configuring Synapse to provide metrics is available [here](../../metrics-howto.md) 
-and information on setting up Grafana is [here](https://github.com/matrix-org/synapse/tree/master/contrib/grafana).
+It is possible to monitor much of the internal state of Synapse using [Prometheus](https://prometheus.io)
+metrics and [Grafana](https://grafana.com/).
+A guide for configuring Synapse to provide metrics is available [here](../../metrics-howto.md)
+and information on setting up Grafana is [here](https://github.com/element-hq/synapse/tree/master/contrib/grafana).
 In this setup, Prometheus will periodically scrape the information Synapse provides and
 store a record of it over time. Grafana is then used as an interface to query and
 present this information through a series of pretty graphs.
 
-Once you have grafana set up, and assuming you're using [our grafana dashboard template](https://github.com/matrix-org/synapse/blob/master/contrib/grafana/synapse.json), look for the following graphs when debugging a slow/overloaded Synapse:
+Once you have grafana set up, and assuming you're using [our grafana dashboard template](https://github.com/element-hq/synapse/blob/master/contrib/grafana/synapse.json), look for the following graphs when debugging a slow/overloaded Synapse:
 
 ## Message Event Send Time
 
@@ -57,7 +57,7 @@ Cross-referencing this with the Eviction Rate graph, which shows that entries ar
 
 ![image](https://user-images.githubusercontent.com/1342360/82240766-de95df80-9932-11ea-8c15-5acfc57c48da.png)
 
-we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available [here](https://github.com/matrix-org/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642) (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.
+we should probably consider raising the size of that cache by raising its cache factor (a multiplier value for the size of an individual cache). Information on doing so is available [here](https://github.com/element-hq/synapse/blob/ee421e524478c1ad8d43741c27379499c2f6135c/docs/sample_config.yaml#L608-L642) (note that the configuration of individual cache factors through the configuration file is available in Synapse v1.14.0+, whereas doing so through environment variables has been supported for a very long time). Note that this will increase Synapse's overall memory usage.
 
 ## Forward Extremities
 
@@ -71,14 +71,13 @@ If a room has >10 forward extremities, it's worth checking which room is the cul
 
 ![image](https://user-images.githubusercontent.com/1342360/82241911-da6ac180-9934-11ea-9a0d-a311fe22acd0.png)
 
-Large spikes in garbage collection times (bigger than shown here, I'm talking in the 
-multiple seconds range), can cause lots of problems in Synapse performance. It's more an 
+Large spikes in garbage collection times (bigger than shown here, I'm talking in the
+multiple seconds range), can cause lots of problems in Synapse performance. It's more an
 indicator of problems, and a symptom of other problems though, so check other graphs for what might be causing it.
 
 ## Final Thoughts
 
-If you're still having performance problems with your Synapse instance and you've 
+If you're still having performance problems with your Synapse instance and you've
 tried everything you can, it may just be a lack of system resources. Consider adding
-more CPU and RAM, and make use of [worker mode](../../workers.md) 
+more CPU and RAM, and make use of [worker mode](../../workers.md)
 to make use of multiple CPU cores / multiple machines for your homeserver.
-

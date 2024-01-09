@@ -1,16 +1,22 @@
-# Copyright 2018 New Vector Ltd
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 
 from typing import Any, Optional
 
@@ -38,6 +44,14 @@ class ServerNoticesConfig(Config):
         server_notices_room_name (str|None):
             The name to use for the server notices room.
             None if server notices are not enabled.
+
+        server_notices_room_avatar_url (str|None):
+            The avatar URL to use for the server notices room.
+            None if server notices are not enabled.
+
+        server_notices_room_topic (str|None):
+            The topic to use for the server notices room.
+            None if server notices are not enabled.
     """
 
     section = "servernotices"
@@ -48,6 +62,8 @@ class ServerNoticesConfig(Config):
         self.server_notices_mxid_display_name: Optional[str] = None
         self.server_notices_mxid_avatar_url: Optional[str] = None
         self.server_notices_room_name: Optional[str] = None
+        self.server_notices_room_avatar_url: Optional[str] = None
+        self.server_notices_room_topic: Optional[str] = None
         self.server_notices_auto_join: bool = False
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
@@ -63,4 +79,6 @@ class ServerNoticesConfig(Config):
         self.server_notices_mxid_avatar_url = c.get("system_mxid_avatar_url", None)
         # todo: i18n
         self.server_notices_room_name = c.get("room_name", "Server Notices")
+        self.server_notices_room_avatar_url = c.get("room_avatar_url", None)
+        self.server_notices_room_topic = c.get("room_topic", None)
         self.server_notices_auto_join = c.get("auto_join", False)

@@ -30,7 +30,7 @@ msgid ""
 "The name that this homeserver will appear as, to clients and other servers "
 "via federation. This is normally the public hostname of the server running "
 "synapse, but can be different if you set up delegation. Please refer to the "
-"delegation documentation in this case: https://github.com/matrix-org/synapse/"
+"delegation documentation in this case: https://github.com/element-hq/synapse/"
 "blob/master/docs/delegate.md."
 msgstr ""
 

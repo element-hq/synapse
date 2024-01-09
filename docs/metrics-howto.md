@@ -87,8 +87,8 @@
 
 1.  Restart Prometheus.
 
-1.  Consider using the [grafana dashboard](https://github.com/matrix-org/synapse/tree/master/contrib/grafana/)
-    and required [recording rules](https://github.com/matrix-org/synapse/tree/master/contrib/prometheus/) 
+1.  Consider using the [grafana dashboard](https://github.com/element-hq/synapse/tree/master/contrib/grafana/)
+    and required [recording rules](https://github.com/element-hq/synapse/tree/master/contrib/prometheus/)
 
 ## Monitoring workers
 

@@ -1,0 +1,1 @@
+Filter out rooms from the room directory being served to other homeservers when those rooms block that homeserver by their Access Control Lists.

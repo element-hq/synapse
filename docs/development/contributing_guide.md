@@ -4,14 +4,16 @@ This document aims to get you started with contributing to Synapse!
 
 # 1. Who can contribute to Synapse?
 
-Everyone is welcome to contribute code to [matrix.org
-projects](https://github.com/matrix-org), provided that they are willing to
-license their contributions under the same license as the project itself. We
-follow a simple 'inbound=outbound' model for contributions: the act of
-submitting an 'inbound' contribution means that the contributor agrees to
-license the code under the same terms as the project's overall 'outbound'
-license - in our case, this is almost always Apache Software License v2 (see
-[LICENSE](https://github.com/matrix-org/synapse/blob/develop/LICENSE)).
+Everyone is welcome to contribute code to
+[Synapse](https://github.com/element-hq/synapse), provided that they are willing
+to license their contributions to Element under a [Contributor License
+Agreement](https://cla-assistant.io/element-hq/synapse) (CLA). This ensures that
+their contribution will be made available under an OSI-approved open-source
+license, currently Affero General Public License v3 (AGPLv3).
+
+Please see the
+[Element blog post](https://element.io/blog/synapse-now-lives-at-github-com-element-hq-synapse/)
+for the full rationale.
 
 # 2. What do I need?
 
@@ -97,8 +99,8 @@ Now edit `homeserver.yaml`, things you might want to change include:
 
 - Set a `server_name`
 - Adjusting paths to be correct for your system like the `log_config` to point to the log config you just copied
-- Using a [PostgreSQL database instead of SQLite](https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
-- Adding a [`registration_shared_secret`](https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://matrix-org.github.io/synapse/latest/setup/installation.html#registering-a-user).
+- Using a [PostgreSQL database instead of SQLite](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
+- Adding a [`registration_shared_secret`](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://vector-im.github.io/synapse/latest/setup/installation.html#registering-a-user).
 
 And then run Synapse with the following command:
 
@@ -122,22 +124,22 @@ Join our developer community on Matrix: [#synapse-dev:matrix.org](https://matrix
 
 # 6. Pick an issue.
 
-Fix your favorite problem or perhaps find a [Good First Issue](https://github.com/matrix-org/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22)
+Fix your favorite problem or perhaps find a [Good First Issue](https://github.com/element-hq/synapse/issues?q=is%3Aopen+is%3Aissue+label%3A%22Good+First+Issue%22)
 to work on.
 
 
 # 7. Turn coffee into code and documentation!
 
 There is a growing amount of documentation located in the
-[`docs`](https://github.com/matrix-org/synapse/tree/develop/docs)
-directory, with a rendered version [available online](https://matrix-org.github.io/synapse).
+[`docs`](https://github.com/element-hq/synapse/tree/develop/docs)
+directory, with a rendered version [available online](https://vector-im.github.io/synapse).
 This documentation is intended primarily for sysadmins running their
 own Synapse instance, as well as developers interacting externally with
 Synapse.
-[`docs/development`](https://github.com/matrix-org/synapse/tree/develop/docs/development)
+[`docs/development`](https://github.com/element-hq/synapse/tree/develop/docs/development)
 exists primarily to house documentation for
 Synapse developers.
-[`docs/admin_api`](https://github.com/matrix-org/synapse/tree/develop/docs/admin_api) houses documentation
+[`docs/admin_api`](https://github.com/element-hq/synapse/tree/develop/docs/admin_api) houses documentation
 regarding Synapse's Admin API, which is used mostly by sysadmins and external
 service developers.
 
@@ -147,13 +149,9 @@ options and documentation](../code_style.md#configuration-code-and-documentation
 
 We welcome improvements and additions to our documentation itself! When
 writing new pages, please
-[build `docs` to a book](https://github.com/matrix-org/synapse/tree/develop/docs#adding-to-the-documentation)
+[build `docs` to a book](https://github.com/element-hq/synapse/tree/develop/docs#adding-to-the-documentation)
 to check that your contributions render correctly. The docs are written in
 [GitHub-Flavoured Markdown](https://guides.github.com/features/mastering-markdown/).
-
-Some documentation also exists in [Synapse's GitHub
-Wiki](https://github.com/matrix-org/synapse/wiki), although this is primarily
-contributed to by community authors.
 
 When changes are made to any Rust code then you must call either `poetry install`
 or `maturin develop` (if installed) to rebuild the Rust code. Using [`maturin`](https://github.com/PyO3/maturin)
@@ -331,7 +329,7 @@ This configuration should generally cover your needs.
 - To run with Postgres, supply the `-e POSTGRES=1 -e MULTI_POSTGRES=1` environment flags.
 - To run with Synapse in worker mode, supply the `-e WORKERS=1 -e REDIS=1` environment flags (in addition to the Postgres flags).
 
-For more details about other configurations, see the [Docker-specific documentation in the SyTest repo](https://github.com/matrix-org/sytest/blob/develop/docker/README.md).
+For more details about other configurations, see the [Docker-specific documentation in the SyTest repo](https://github.com/vector-im/sytest/blob/develop/docker/README.md).
 
 
 ## Run the integration tests ([Complement](https://github.com/matrix-org/complement)).
@@ -365,7 +363,7 @@ The above will run a monolithic (single-process) Synapse with SQLite as the data
   - If setting `WORKERS=1`, optionally set `WORKER_TYPES=` to declare which worker
     types you wish to test. A simple comma-delimited string containing the worker types
     defined from the `WORKERS_CONFIG` template in
-    [here](https://github.com/matrix-org/synapse/blob/develop/docker/configure_workers_and_start.py#L54).
+    [here](https://github.com/element-hq/synapse/blob/develop/docker/configure_workers_and_start.py#L54).
     A safe example would be `WORKER_TYPES="federation_inbound, federation_sender, synchrotron"`.
     See the [worker documentation](../workers.md) for additional information on workers.
 - Passing `ASYNCIO_REACTOR=1` as an environment variable to use the Twisted asyncio reactor instead of the default one.
@@ -434,7 +432,7 @@ in the format of `PRnumber.type`. The type can be one of the following:
 * `misc` (for internal-only changes)
 
 This file will become part of our [changelog](
-https://github.com/matrix-org/synapse/blob/master/CHANGES.md) at the next
+https://github.com/element-hq/synapse/blob/master/CHANGES.md) at the next
 release, so the content of the file should be a short description of your
 change in the same style as the rest of the changelog. The file can contain Markdown
 formatting, and must end with a full stop (.) or an exclamation mark (!) for
@@ -466,7 +464,7 @@ There are two options for solving this:
    add the changelog file to your branch, or:
 
 1. Look at the [list of all
-   issues/PRs](https://github.com/matrix-org/synapse/issues?q=), add one to the
+   issues/PRs](https://github.com/element-hq/synapse/issues?q=), add one to the
    highest number you see, and quickly open the PR before somebody else claims
    your number.
 
@@ -501,81 +499,19 @@ separate pull requests.)
 
 ## Sign off
 
-In order to have a concrete record that your contribution is intentional
-and you agree to license it under the same terms as the project's license, we've adopted the
-same lightweight approach that the Linux Kernel
-[submitting patches process](
-https://www.kernel.org/doc/html/latest/process/submitting-patches.html#sign-your-work-the-developer-s-certificate-of-origin>),
-[Docker](https://github.com/docker/docker/blob/master/CONTRIBUTING.md), and many other
-projects use: the DCO ([Developer Certificate of Origin](http://developercertificate.org/)).
-This is a simple declaration that you wrote
-the contribution or otherwise have the right to contribute it to Matrix:
+After you make a PR a comment from @CLAassistant will appear asking you to sign
+the [CLA](https://cla-assistant.io/element-hq/synapse).
+This will link a page to allow you to confirm that you have read and agreed to
+the CLA by signing in with GitHub.
 
-```
-Developer Certificate of Origin
-Version 1.1
-
-Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
-660 York Street, Suite 102,
-San Francisco, CA 94110 USA
-
-Everyone is permitted to copy and distribute verbatim copies of this
-license document, but changing it is not allowed.
-
-Developer's Certificate of Origin 1.1
-
-By making a contribution to this project, I certify that:
-
-(a) The contribution was created in whole or in part by me and I
-    have the right to submit it under the open source license
-    indicated in the file; or
-
-(b) The contribution is based upon previous work that, to the best
-    of my knowledge, is covered under an appropriate open source
-    license and I have the right under that license to submit that
-    work with modifications, whether created in whole or in part
-    by me, under the same open source license (unless I am
-    permitted to submit under a different license), as indicated
-    in the file; or
-
-(c) The contribution was provided directly to me by some other
-    person who certified (a), (b) or (c) and I have not modified
-    it.
-
-(d) I understand and agree that this project and the contribution
-    are public and that a record of the contribution (including all
-    personal information I submit with it, including my sign-off) is
-    maintained indefinitely and may be redistributed consistent with
-    this project or the open source license(s) involved.
-```
-
-If you agree to this for your contribution, then all that's needed is to
-include the line in your commit or pull request comment:
-
-```
-Signed-off-by: Your Name <your@email.example.org>
-```
+Alternatively, you can sign off before opening a PR by going to
+<https://cla-assistant.io/element-hq/synapse>.
 
 We accept contributions under a legally identifiable name, such as
 your name on government documentation or common-law names (names
 claimed by legitimate usage or repute). Unfortunately, we cannot
 accept anonymous contributions at this time.
 
-Git allows you to add this signoff automatically when using the `-s`
-flag to `git commit`, which uses the name and email set in your
-`user.name` and `user.email` git configs.
-
-### Private Sign off
-
-If you would like to provide your legal name privately to the Matrix.org
-Foundation (instead of in a public commit or comment), you can do so
-by emailing your legal name and a link to the pull request to
-[dco@matrix.org](mailto:dco@matrix.org?subject=Private%20sign%20off).
-It helps to include "sign off" or similar in the subject line. You will then
-be instructed further.
-
-Once private sign off is complete, doing so for future contributions will not
-be required.
 
 # 10. Turn feedback into better code.
 

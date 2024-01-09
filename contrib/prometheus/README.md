@@ -34,7 +34,7 @@ Add a new job to the main prometheus.yml file:
 ```
 
 An example of a Prometheus configuration with workers can be found in
-[metrics-howto.md](https://matrix-org.github.io/synapse/latest/metrics-howto.html).
+[metrics-howto.md](https://element-hq.github.io/synapse/latest/metrics-howto.html).
 
 To use `synapse.rules` add
 

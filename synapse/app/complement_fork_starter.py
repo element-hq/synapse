@@ -1,51 +1,21 @@
-# Copyright 2022 The Matrix.org Foundation C.I.C.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
 #
-# ## What this script does
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# This script spawns multiple workers, whilst only going through the code loading
-# process once. The net effect is that start-up time for a swarm of workers is
-# reduced, particularly in CPU-constrained environments.
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
 #
-# Before the workers are spawned, the database is prepared in order to avoid the
-# workers racing.
+# [This file includes modifications made by New Vector Limited]
 #
-# ## Stability
-#
-# This script is only intended for use within the Synapse images for the
-# Complement test suite.
-# There are currently no stability guarantees whatsoever; especially not about:
-# - whether it will continue to exist in future versions;
-# - the format of its command-line arguments; or
-# - any details about its behaviour or principles of operation.
-#
-# ## Usage
-#
-# The first argument should be the path to the database configuration, used to
-# set up the database. The rest of the arguments are used as follows:
-# Each worker is specified as an argument group (each argument group is
-# separated by '--').
-# The first argument in each argument group is the Python module name of the application
-# to start. Further arguments are then passed to that module as-is.
-#
-# ## Example
-#
-#   python -m synapse.app.complement_fork_starter path_to_db_config.yaml \
-#     synapse.app.homeserver [args..] -- \
-#     synapse.app.generic_worker [args..] -- \
-#   ...
-#     synapse.app.generic_worker [args..]
 #
 import argparse
 import importlib

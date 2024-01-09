@@ -14,11 +14,11 @@ b2dba0607`:
 Note how the commit comment explains clearly what is changing and why. Also
 note the *absence* of merge commits, as well as the absence of commits called
 things like (to pick a few culprits):
-[“pep8”](https://github.com/matrix-org/synapse/commit/84691da6c), [“fix broken
-test”](https://github.com/matrix-org/synapse/commit/474810d9d),
-[“oops”](https://github.com/matrix-org/synapse/commit/c9d72e457),
-[“typo”](https://github.com/matrix-org/synapse/commit/836358823), or [“Who's
-the president?”](https://github.com/matrix-org/synapse/commit/707374d5d).
+[“pep8”](https://github.com/element-hq/synapse/commit/84691da6c), [“fix broken
+test”](https://github.com/element-hq/synapse/commit/474810d9d),
+[“oops”](https://github.com/element-hq/synapse/commit/c9d72e457),
+[“typo”](https://github.com/element-hq/synapse/commit/836358823), or [“Who's
+the president?”](https://github.com/element-hq/synapse/commit/707374d5d).
 
 There are a number of reasons why keeping a clean commit history is a good
 thing:

@@ -1,7 +1,7 @@
 ## Streams
 
 Synapse has a concept of "streams", which are roughly described in [`id_generators.py`](
-    https://github.com/matrix-org/synapse/blob/develop/synapse/storage/util/id_generators.py
+    https://github.com/element-hq/synapse/blob/develop/synapse/storage/util/id_generators.py
 ).
 Generally speaking, streams are a series of notifications that something in Synapse's database has changed that the application might need to respond to.
 For example:
@@ -11,12 +11,12 @@ For example:
 - The to-device stream reports when a device has a new [to-device message](https://spec.matrix.org/v1.7/client-server-api/#send-to-device-messaging).
 
 See [`synapse.replication.tcp.streams`](
-    https://github.com/matrix-org/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py
+    https://github.com/element-hq/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py
 ) for the full list of streams.
 
 It is very helpful to understand the streams mechanism when working on any part of Synapse that needs to respond to changes—especially if those changes are made by different workers.
 To that end, let's describe streams formally, paraphrasing from the docstring of [`AbstractStreamIdGenerator`](
-    https://github.com/matrix-org/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96
+    https://github.com/element-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96
 ).
 
 ### Definition
