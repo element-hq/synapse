@@ -1,0 +1,1 @@
+Add msc4028 experimental feature config value to /_matrix/clients/versions api. Contributed by @hanadi92.

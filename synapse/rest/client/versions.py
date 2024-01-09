@@ -134,6 +134,8 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc3391": self.config.experimental.msc3391_enabled,
                     # Allows clients to inhibit profile update propagation.
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
+                    # Allows clients to handle push for encrypted events.
+                    "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
                 },
             },
         )
