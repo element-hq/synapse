@@ -12,10 +12,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check-signoff:
-    if: "github.event_name == 'pull_request'"
-    uses: "matrix-org/backend-meta/.github/workflows/sign-off.yml@v2"
-
   # Job to detect what has changed so we don't run e.g. Rust checks on PRs that
   # don't modify Rust code.
   changes:
@@ -706,7 +702,7 @@ jobs:
           needs: ${{ toJSON(needs) }}
 
           # Various bits are skipped if there was no applicable changes.
-          # The newsfile and signoff lint may be skipped on non PR builds.
+          # The newsfile lint may be skipped on non PR builds.
           skippable: |
             trial
             trial-olddeps
@@ -714,7 +710,6 @@ jobs:
             portdb
             export-data
             complement
-            check-signoff
             lint-newsfile
             cargo-test
             cargo-bench
