@@ -364,6 +364,7 @@ class RestHelper:
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        type: str = "m.room.message",
     ) -> JsonDict:
         if body is None:
             body = "body_text_here"
@@ -372,7 +373,7 @@ class RestHelper:
 
         return self.send_event(
             room_id,
-            "m.room.message",
+            type,
             content,
             txn_id,
             tok,

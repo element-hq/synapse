@@ -2154,6 +2154,24 @@ class RoomMessageListTestCase(RoomBase):
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
 
+    def test_room_message_filter_wildcard(self) -> None:
+        # Send a first message in the room, which will be removed by the purge.
+        self.helper.send(self.room_id, "message 1", type="f.message.1")
+        self.helper.send(self.room_id, "message 1", type="f.message.2")
+        self.helper.send(self.room_id, "not returned in filter")
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/messages?access_token=x&dir=b&filter=%s"
+            % (
+                self.room_id,
+                json.dumps({"types": ["f.message.*"]}),
+            ),
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        chunk = channel.json_body["chunk"]
+        self.assertEqual(len(chunk), 2, [event["content"] for event in chunk])
+
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):
     servlets = [
