@@ -2,9 +2,9 @@
 
 ### Features
 
-- Add config options to set the avatar and the topic of the server notices room. ([\#16679](https://github.com/matrix-org/synapse/issues/16679))
-- Add a setting to be able to tweak the delay without interaction before an email is sent following a notification. ([\#16696](https://github.com/matrix-org/synapse/issues/16696))
-- Add new Sentry configuration option `environment` for improved system monitoring. Contributed by @zeeshanrafiqrana. ([\#16738](https://github.com/matrix-org/synapse/issues/16738))
+- Add [config options](https://element-hq.github.io/synapse/v1.99/usage/configuration/config_documentation.html#server_notices) to set the avatar and the topic of the server notices room, as well as the avatar of the server notices user. ([\#16679](https://github.com/matrix-org/synapse/issues/16679))
+- Add config option [`email.notif_delay_before_mail`](https://element-hq.github.io/synapse/v1.99/usage/configuration/config_documentation.html#email) to tweak the delay before an email is sent following a notification. ([\#16696](https://github.com/matrix-org/synapse/issues/16696))
+- Add new configuration option [`sentry.environment`](https://element-hq.github.io/synapse/v1.99/usage/configuration/config_documentation.html#sentry) for improved system monitoring. Contributed by @zeeshanrafiqrana. ([\#16738](https://github.com/matrix-org/synapse/issues/16738))
 - Filter out rooms from the room directory being served to other homeservers when those rooms block that homeserver by their Access Control Lists. ([\#16759](https://github.com/element-hq/synapse/issues/16759))
 
 ### Bugfixes
@@ -13,7 +13,7 @@
 - Fix email verification redirection. Contributed by Fadhlan Ridhwanallah. ([\#16761](https://github.com/element-hq/synapse/issues/16761))
 - Fixed a bug that prevented users from being queried by display name if it contains non-ASCII characters. ([\#16767](https://github.com/element-hq/synapse/issues/16767))
 - Allow reactivate user without password with Admin API in some edge cases. ([\#16770](https://github.com/element-hq/synapse/issues/16770))
-- Adds the recursion_depth parameter to the response of the /relations endpoint if MSC3981 recursion is being performed. ([\#16775](https://github.com/element-hq/synapse/issues/16775))
+- Adds the `recursion_depth` parameter to the response of the /relations endpoint if MSC3981 recursion is being performed. ([\#16775](https://github.com/element-hq/synapse/issues/16775))
 
 ### Improved Documentation
 
