@@ -286,10 +286,26 @@ jobs:
       - check-schema-delta
       - check-lockfile
       - lint-clippy
+      - lint-clippy-nightly
       - lint-rustfmt
     runs-on: ubuntu-latest
     steps:
-      - run: "true"
+      - uses: matrix-org/done-action@v2
+        with:
+          needs: ${{ toJSON(needs) }}
+
+          # Various bits are skipped if there was no applicable changes.
+          skippable: |
+            check-sampleconfig
+            check-schema-delta
+            lint
+            lint-mypy
+            lint-newsfile
+            lint-pydantic
+            lint-clippy
+            lint-clippy-nightly
+            lint-rustfmt
+
 
   calculate-test-jobs:
     if: ${{ !cancelled() && !failure() }} # Allow previous steps to be skipped, but not fail
@@ -699,6 +715,7 @@ jobs:
       - complement
       - cargo-test
       - cargo-bench
+      - linting-done
     runs-on: ubuntu-latest
     steps:
       - uses: matrix-org/done-action@v2
