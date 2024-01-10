@@ -322,6 +322,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def check_if_events_in_current_state(
         self, event_ids: StrCollection
     ) -> FrozenSet[str]:
+        """Checks and returns which of the given events is part of the current state."""
         rows = await self.db_pool.simple_select_many_batch(
             table="current_state_events",
             column="event_id",
