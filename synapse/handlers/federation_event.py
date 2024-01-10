@@ -1141,11 +1141,6 @@ class FederationEventHandler:
             partial_state_flags = await self._store.get_partial_state_events(seen)
             partial_state = any(partial_state_flags.values())
 
-            # Get the state of the events we know about
-            ours = await self._state_storage_controller.get_state_groups_ids(
-                room_id, seen, await_full_state=False
-            )
-
             # state_maps is a list of mappings from (type, state_key) to event_id
             state_maps: List[StateMap[str]] = []
 
