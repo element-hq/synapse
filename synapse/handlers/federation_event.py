@@ -1307,7 +1307,7 @@ class FederationEventHandler:
                 destination=destination, room_id=room_id, event_ids=missing_event_ids
             )
 
-        # We now need to fill out the state map, which involves loading the local state.he
+        # We now need to fill out the state map, which involves loading the local state.
         # type and state key for each event ID in the state.
         state_map = {}
 
