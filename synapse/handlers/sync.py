@@ -583,10 +583,11 @@ class SyncHandler:
                     # `recents`, so partial state is only a problem when a membership
                     # event turns up in `recents` but has not made it into the current
                     # state.
-                    current_state_ids_map = (
-                        await self.store.get_partial_current_state_ids(room_id)
+                    current_state_ids = (
+                        await self.store.check_if_events_in_current_state(
+                            {e.event_id for e in recents if e.is_state()}
+                        )
                     )
-                    current_state_ids = frozenset(current_state_ids_map.values())
 
                 recents = await filter_events_for_client(
                     self._storage_controllers,
@@ -667,10 +668,11 @@ class SyncHandler:
                     # `loaded_recents`, so partial state is only a problem when a
                     # membership event turns up in `loaded_recents` but has not made it
                     # into the current state.
-                    current_state_ids_map = (
-                        await self.store.get_partial_current_state_ids(room_id)
+                    current_state_ids = (
+                        await self.store.check_if_events_in_current_state(
+                            {e.event_id for e in loaded_recents if e.is_state()}
+                        )
                     )
-                    current_state_ids = frozenset(current_state_ids_map.values())
 
                 loaded_recents = await filter_events_for_client(
                     self._storage_controllers,
