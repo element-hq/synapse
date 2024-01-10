@@ -245,25 +245,68 @@ class DeviceInboxWorkerStore(SQLBaseStore):
                 * The last-processed stream ID. Subsequent calls of this function with the
                   same device should pass this value as 'from_stream_id'.
         """
-        (
-            user_id_device_id_to_messages,
-            last_processed_stream_id,
-        ) = await self._get_device_messages(
-            user_ids=[user_id],
-            device_id=device_id,
-            from_stream_id=from_stream_id,
-            to_stream_id=to_stream_id,
-            limit=limit,
-        )
-
-        if not user_id_device_id_to_messages:
+        if not self._device_inbox_stream_cache.has_entity_changed(
+            user_id, from_stream_id
+        ):
             # There were no messages!
             return [], to_stream_id
 
-        # Extract the messages, no need to return the user and device ID again
-        to_device_messages = user_id_device_id_to_messages.get((user_id, device_id), [])
+        def get_device_messages_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[List[JsonDict], int]:
+            sql = """
+                SELECT stream_id, message_json FROM device_inbox
+                WHERE user_id = ? AND device_id = ?
+                AND ? < stream_id AND stream_id <= ?
+                ORDER BY stream_id ASC
+                LIMIT ?
+            """
+            txn.execute(sql, (user_id, device_id, from_stream_id, to_stream_id, limit))
 
-        return to_device_messages, last_processed_stream_id
+            # Create and fill a dictionary of (user ID, device ID) -> list of messages
+            # intended for each device.
+            last_processed_stream_pos = to_stream_id
+            to_device_messages: List[JsonDict] = []
+            rowcount = 0
+            for row in txn:
+                rowcount += 1
+
+                last_processed_stream_pos = row[0]
+                message_dict = db_to_json(row[1])
+
+                # Store the device details
+                to_device_messages.append(message_dict)
+
+                # start a new span for each message, so that we can tag each separately
+                with start_active_span("get_to_device_message"):
+                    set_tag(SynapseTags.TO_DEVICE_TYPE, message_dict["type"])
+                    set_tag(SynapseTags.TO_DEVICE_SENDER, message_dict["sender"])
+                    set_tag(SynapseTags.TO_DEVICE_RECIPIENT, user_id)
+                    set_tag(SynapseTags.TO_DEVICE_RECIPIENT_DEVICE, device_id)
+                    set_tag(
+                        SynapseTags.TO_DEVICE_MSGID,
+                        message_dict["content"].get(EventContentFields.TO_DEVICE_MSGID),
+                    )
+
+            if rowcount == limit:
+                # We ended up bumping up against the message limit. There may be more messages
+                # to retrieve. Return what we have, as well as the last stream position that
+                # was processed.
+                #
+                # The caller is expected to set this as the lower (exclusive) bound
+                # for the next query of this device.
+                return to_device_messages, last_processed_stream_pos
+
+            # The limit was not reached, thus we know that recipient_device_to_messages
+            # contains all to-device messages for the given device and stream id range.
+            #
+            # We return to_stream_id, which the caller should then provide as the lower
+            # (exclusive) bound on the next query of this device.
+            return to_device_messages, to_stream_id
+
+        return await self.db_pool.runInteraction(
+            "get_messages_for_device", get_device_messages_txn
+        )
 
     async def _get_device_messages(
         self,
@@ -409,13 +452,11 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
             # Create and fill a dictionary of (user ID, device ID) -> list of messages
             # intended for each device.
-            last_processed_stream_pos = to_stream_id
             recipient_device_to_messages: Dict[Tuple[str, str], List[JsonDict]] = {}
             rowcount = 0
             for row in txn:
                 rowcount += 1
 
-                last_processed_stream_pos = row[0]
                 recipient_user_id = row[1]
                 recipient_device_id = row[2]
                 message_dict = db_to_json(row[3])
