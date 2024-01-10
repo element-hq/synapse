@@ -180,6 +180,10 @@ class RelationsHandler:
                 config=serialize_options,
             ),
         }
+
+        if recurse:
+            return_value["recursion_depth"] = 3
+
         if include_original_event:
             # Do not bundle aggregations when retrieving the original event because
             # we want the content before relations are applied to it.

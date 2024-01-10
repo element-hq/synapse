@@ -31,9 +31,10 @@ from synapse.api.room_versions import (
 )
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.event_auth import auth_types_for_event
-from synapse.events import EventBase, _EventInternalMetadata, make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.state import StateHandler
 from synapse.storage.databases.main import DataStore
+from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import EventID, JsonDict, StrCollection
 from synapse.types.state import StateFilter
 from synapse.util import Clock
@@ -93,8 +94,8 @@ class EventBuilder:
     _redacts: Optional[str] = None
     _origin_server_ts: Optional[int] = None
 
-    internal_metadata: _EventInternalMetadata = attr.Factory(
-        lambda: _EventInternalMetadata({})
+    internal_metadata: EventInternalMetadata = attr.Factory(
+        lambda: EventInternalMetadata({})
     )
 
     @property

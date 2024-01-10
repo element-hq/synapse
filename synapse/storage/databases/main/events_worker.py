@@ -1496,7 +1496,7 @@ class EventsWorkerStore(SQLBaseStore):
                     room_version_id=row[5],
                     rejected_reason=row[6],
                     redactions=[],
-                    outlier=row[7],
+                    outlier=bool(row[7]),  # This is an int in SQLite3
                 )
 
             # check for redactions

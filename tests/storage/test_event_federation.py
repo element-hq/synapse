@@ -44,12 +44,13 @@ from synapse.api.room_versions import (
     EventFormatVersions,
     RoomVersion,
 )
-from synapse.events import EventBase, _EventInternalMetadata
+from synapse.events import EventBase
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.types import Cursor
+from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict
 from synapse.util import Clock, json_encoder
 
@@ -1209,7 +1210,7 @@ class FakeEvent:
     type = "foo"
     state_key = "foo"
 
-    internal_metadata = _EventInternalMetadata({})
+    internal_metadata = EventInternalMetadata({})
 
     def auth_event_ids(self) -> List[str]:
         return self.auth_events

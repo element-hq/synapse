@@ -1155,7 +1155,7 @@ class FederationClient(FederationBase):
             # NB: We *need* to copy to ensure that we don't have multiple
             # references being passed on, as that causes... issues.
             for s in signed_state:
-                s.internal_metadata = copy.deepcopy(s.internal_metadata)
+                s.internal_metadata = s.internal_metadata.copy()
 
             # double-check that the auth chain doesn't include a different create event
             auth_chain_create_events = [

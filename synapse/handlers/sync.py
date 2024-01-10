@@ -602,7 +602,10 @@ class SyncHandler:
             if not limited or block_all_timeline:
                 prev_batch_token = upto_token
                 if recents:
-                    room_key = recents[0].internal_metadata.before
+                    assert recents[0].internal_metadata.stream_ordering
+                    room_key = RoomStreamToken(
+                        stream=recents[0].internal_metadata.stream_ordering - 1
+                    )
                     prev_batch_token = upto_token.copy_and_replace(
                         StreamKeyType.ROOM, room_key
                     )
@@ -691,7 +694,10 @@ class SyncHandler:
             if len(recents) > timeline_limit:
                 limited = True
                 recents = recents[-timeline_limit:]
-                room_key = recents[0].internal_metadata.before
+                assert recents[0].internal_metadata.stream_ordering
+                room_key = RoomStreamToken(
+                    stream=recents[0].internal_metadata.stream_ordering - 1
+                )
 
             prev_batch_token = upto_token.copy_and_replace(StreamKeyType.ROOM, room_key)
 
