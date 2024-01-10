@@ -20,6 +20,7 @@
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
     Callable,
     Collection,
     Dict,
@@ -582,6 +583,29 @@ class StateFilter:
                 return True
 
         # local users only
+        return False
+
+    def __contains__(self, key: Any) -> bool:
+        if not isinstance(key, tuple) or len(key) != 2:
+            raise TypeError(
+                f"'in StateFilter' requires (str, str) as left operand, not {type(key).__name__}"
+            )
+
+        typ, state_key = key
+
+        if not isinstance(typ, str) or not isinstance(state_key, str):
+            raise TypeError(
+                f"'in StateFilter' requires (str, str) as left operand, not ({type(typ).__name__}, {type(state_key).__name__})"
+            )
+
+        if typ in self.types:
+            state_keys = self.types[typ]
+            if state_keys is None or state_key in state_keys:
+                return True
+
+        elif self.include_others:
+            return True
+
         return False
 
 
