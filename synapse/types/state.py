@@ -587,12 +587,12 @@ class StateFilter:
 
     def __contains__(self, key: Any) -> bool:
         if not isinstance(key, tuple) or len(key) != 2:
-            return False
+            raise TypeError(f"'in StateFilter' requires (str, str) as left operand, not {type(key).__name__}")
 
         typ, state_key = key
 
         if not isinstance(typ, str) or not isinstance(state_key, str):
-            return False
+            raise TypeError(f"'in StateFilter' requires (str, str) as left operand, not ({type(typ).__name__}, {type(state_key).__name__})")
 
         if typ in self.types:
             state_keys = self.types[typ]
