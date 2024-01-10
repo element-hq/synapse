@@ -1,0 +1,1 @@
+Reject OIDC config when `client_secret` isn't specified, but the auth method requires one.
