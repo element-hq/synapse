@@ -369,7 +369,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
     def _get_unread_counts_by_room_for_user_txn(
         self, txn: LoggingTransaction, user_id: str
     ) -> Dict[str, int]:
-        # To get the badge could of all rooms we need to make three queries:
+        # To get the badge count of all rooms we need to make three queries:
         #   1. Fetch all counts from `event_push_summary`, discarding any stale
         #      rooms.
         #   2. Fetch all notifications from `event_push_actions` that haven't
@@ -393,8 +393,9 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # Step 1, fetch all counts from `event_push_summary` for the user. This
         # is slightly convoluted as we also need to pull out the stream ordering
         # of the most recent receipt of the user in the room (either a thread
-        # aware receipt or thread unaware receipt). Hence the outer GROUP BY and
-        # odd join condition against `receipts_linearized`.
+        # aware receipt or thread unaware receipt) in order to determine
+        # whether the row in `event_push_summary` is stale. Hence the outer
+        # GROUP BY and odd join condition against `receipts_linearized`.
         sql = f"""
             SELECT room_id, notif_count, stream_ordering, thread_id, last_receipt_stream_ordering,
                 MAX(receipt_stream_ordering)
