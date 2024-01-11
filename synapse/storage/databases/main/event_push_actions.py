@@ -439,6 +439,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                     room_to_count[room_id] += notif_count
                 elif stream_ordering > receipt_stream_ordering:
                     room_to_count[room_id] += notif_count
+                else:
+                    # The latest read receipt from the user is after all the rows for
+                    # this room in `event_push_summary`. We ignore them, and
+                    # calculate the count from `event_push_actions` in step 3.
+                    pass
             elif last_receipt_stream_ordering == receipt_stream_ordering:
                 room_to_count[room_id] += notif_count
             else:
