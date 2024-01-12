@@ -11,6 +11,9 @@ Note that a default logging configuration (shown below) is created automatically
 the homeserver config when following the [installation instructions](../../setup/installation.md).
 It should be named `<SERVERNAME>.log.config` by default.
 
+Hint: If you're looking for a guide on what each of the fields in the "Processed request" log lines mean,
+see [Request log format](../administration/request_log.md).
+
 ```yaml
 {{#include ../../sample_log_config.yaml}}
 ```
