@@ -86,7 +86,7 @@ body:
 
         If PostgreSQL, please also answer the following:
          - are you using a single PostgreSQL server
-        or [separate servers for `main` and `state`](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#databases)?
+        or [separate servers for `main` and `state`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#databases)?
          - have you previously ported from SQLite using the Synapse "portdb" script?
          - have you previously restored from a backup?
     validations:
@@ -97,7 +97,7 @@ body:
       label: Workers
       description: |
         Are you running a single Synapse process, or are you running
-        [2 or more workers](https://vector-im.github.io/synapse/latest/workers.html)?
+        [2 or more workers](https://element-hq.github.io/synapse/latest/workers.html)?
       options:
         - Single process
         - Multiple workers
@@ -121,9 +121,9 @@ body:
         Do you have any unusual config options turned on? If so, please provide details.
 
         - Experimental or undocumented features
-        - [Presence](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#presence)
-        - [Message retention](https://vector-im.github.io/synapse/latest/message_retention_policies.html)
-        - [Synapse modules](https://vector-im.github.io/synapse/latest/modules/index.html)
+        - [Presence](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#presence)
+        - [Message retention](https://element-hq.github.io/synapse/latest/message_retention_policies.html)
+        - [Synapse modules](https://element-hq.github.io/synapse/latest/modules/index.html)
   - type: textarea
     id: logs
     attributes:
