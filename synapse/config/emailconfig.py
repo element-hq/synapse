@@ -52,6 +52,7 @@ DEFAULT_SUBJECTS = {
     "invite_from_person_to_space": "[%(app)s] %(person)s has invited you to join the %(space)s space on %(app)s...",
     "password_reset": "[%(server_name)s] Password reset",
     "email_validation": "[%(server_name)s] Validate your email",
+    "email_already_in_use": "[%(server_name)s] Email already in use",
 }
 
 LEGACY_TEMPLATE_DIR_WARNING = """
@@ -76,6 +77,7 @@ class EmailSubjectConfig:
     invite_from_person_to_space: str
     password_reset: str
     email_validation: str
+    email_already_in_use: str
 
 
 class EmailConfig(Config):
@@ -180,6 +182,12 @@ class EmailConfig(Config):
             registration_template_text = email_config.get(
                 "registration_template_text", "registration.txt"
             )
+            already_in_use_template_html = email_config.get(
+                "already_in_use_template_html", "already_in_use.html"
+            )
+            already_in_use_template_text = email_config.get(
+                "already_in_use_template_html", "already_in_use.txt"
+            )
             add_threepid_template_html = email_config.get(
                 "add_threepid_template_html", "add_threepid.html"
             )
@@ -215,6 +223,8 @@ class EmailConfig(Config):
                 self.email_password_reset_template_text,
                 self.email_registration_template_html,
                 self.email_registration_template_text,
+                self.email_already_in_use_template_html,
+                self.email_already_in_use_template_text,
                 self.email_add_threepid_template_html,
                 self.email_add_threepid_template_text,
                 self.email_password_reset_template_confirmation_html,
@@ -230,6 +240,8 @@ class EmailConfig(Config):
                     password_reset_template_text,
                     registration_template_html,
                     registration_template_text,
+                    already_in_use_template_html,
+                    already_in_use_template_text,
                     add_threepid_template_html,
                     add_threepid_template_text,
                     "password_reset_confirmation.html",
