@@ -19,14 +19,14 @@
 #
 import yaml
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.config.room_directory import RoomDirectoryConfig
 from synapse.server import HomeServer
-from synapse.state.v2 import Clock
+from synapse.util import Clock
 
 from tests import unittest
 from tests.unittest import override_config
