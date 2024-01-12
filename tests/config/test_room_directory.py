@@ -17,13 +17,13 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import yaml
+
 from twisted.internet.testing import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
-import yaml
-
 from synapse.config.room_directory import RoomDirectoryConfig
 from synapse.server import HomeServer
 from synapse.state.v2 import Clock
@@ -33,7 +33,6 @@ from tests.unittest import override_config
 
 
 class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
@@ -196,9 +195,8 @@ class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
         token = self.login("alice", "pass")
         room_id = self.helper.create_room_as(user, is_public=True, tok=token)
 
-        is_public, _ = self.get_success(self.store.get_room(room_id))
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
 
         self.assertFalse(is_public)
-
-
-

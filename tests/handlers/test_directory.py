@@ -511,7 +511,9 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
             is_public=True,
             expect_code=200,
         )
-        is_public, _ = self.get_success(self.store.get_room(room_id))
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
 
         # room creation completes but room is not published to directory
         self.assertEqual(is_public, False)
@@ -557,7 +559,10 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
         )
 
         # the room is created with the requested alias, but the room is not published
-        is_public, _ = self.get_success(self.store.get_room(room_id))
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
+
         self.assertFalse(is_public)
 
         aliases = self.get_success(self.store.get_aliases_for_room(room_id))
