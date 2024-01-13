@@ -20,7 +20,7 @@
 
 import logging
 import random
-from typing import TYPE_CHECKING, Iterable, List, Optional
+from typing import TYPE_CHECKING, Iterable, List, Optional, cast
 
 from synapse.api.constants import EduTypes, EventTypes, Membership, PresenceState
 from synapse.api.errors import AuthError, SynapseError
@@ -29,7 +29,7 @@ from synapse.events.utils import SerializeEventConfig
 from synapse.handlers.presence import format_user_presence_state
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, UserID
+from synapse.types import JsonDict, Requester, StreamKeyType, UserID
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -93,49 +93,54 @@ class EventStreamHandler:
                 is_guest=requester.is_guest,
                 explicit_room_id=room_id,
             )
-            events = stream_result.events
+            events_by_source = stream_result.events_by_source
 
             time_now = self.clock.time_msec()
 
             # When the user joins a new room, or another user joins a currently
             # joined room, we need to send down presence for those users.
-            to_add: List[JsonDict] = []
-            for event in events:
-                if not isinstance(event, EventBase):
+            to_return: List[JsonDict] = []
+            for keyname, source_events in events_by_source.items():
+                if keyname != StreamKeyType.ROOM:
+                    e = cast(List[JsonDict], source_events)
+                    to_return.extend(e)
                     continue
-                if event.type == EventTypes.Member:
-                    if event.membership != Membership.JOIN:
-                        continue
-                    # Send down presence.
-                    if event.state_key == requester.user.to_string():
-                        # Send down presence for everyone in the room.
-                        users: Iterable[str] = await self.store.get_users_in_room(
-                            event.room_id
+
+                events = cast(List[EventBase], source_events)
+
+                serialized_events = await self._event_serializer.serialize_events(
+                    events,
+                    time_now,
+                    config=SerializeEventConfig(
+                        as_client_event=as_client_event, requester=requester
+                    ),
+                )
+                to_return.extend(serialized_events)
+
+                for event in events:
+                    if event.type == EventTypes.Member:
+                        if event.membership != Membership.JOIN:
+                            continue
+                        # Send down presence.
+                        if event.state_key == requester.user.to_string():
+                            # Send down presence for everyone in the room.
+                            users: Iterable[str] = await self.store.get_users_in_room(
+                                event.room_id
+                            )
+                        else:
+                            users = [event.state_key]
+
+                        states = await presence_handler.get_states(users)
+                        to_return.extend(
+                            {
+                                "type": EduTypes.PRESENCE,
+                                "content": format_user_presence_state(state, time_now),
+                            }
+                            for state in states
                         )
-                    else:
-                        users = [event.state_key]
-
-                    states = await presence_handler.get_states(users)
-                    to_add.extend(
-                        {
-                            "type": EduTypes.PRESENCE,
-                            "content": format_user_presence_state(state, time_now),
-                        }
-                        for state in states
-                    )
-
-            events.extend(to_add)
-
-            chunks = await self._event_serializer.serialize_events(
-                events,
-                time_now,
-                config=SerializeEventConfig(
-                    as_client_event=as_client_event, requester=requester
-                ),
-            )
 
             chunk = {
-                "chunk": chunks,
+                "chunk": to_return,
                 "start": await stream_result.start_token.to_string(self.store),
                 "end": await stream_result.end_token.to_string(self.store),
             }

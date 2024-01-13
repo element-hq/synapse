@@ -404,7 +404,7 @@ _DEFAULT_SERIALIZE_EVENT_CONFIG = SerializeEventConfig()
 
 
 def serialize_event(
-    e: Union[JsonDict, EventBase],
+    e: EventBase,
     time_now_ms: int,
     *,
     config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -419,10 +419,6 @@ def serialize_event(
     Returns:
         The serialized event dictionary.
     """
-
-    # FIXME(erikj): To handle the case of presence events and the like
-    if not isinstance(e, EventBase):
-        return e
 
     time_now_ms = int(time_now_ms)
 
@@ -531,7 +527,7 @@ class EventClientSerializer:
 
     async def serialize_event(
         self,
-        event: Union[JsonDict, EventBase],
+        event: EventBase,
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
@@ -549,10 +545,6 @@ class EventClientSerializer:
         Returns:
             The serialized event
         """
-        # To handle the case of presence events and the like
-        if not isinstance(event, EventBase):
-            return event
-
         serialized_event = serialize_event(event, time_now, config=config)
 
         new_unsigned = {}
@@ -656,7 +648,7 @@ class EventClientSerializer:
 
     async def serialize_events(
         self,
-        events: Iterable[Union[JsonDict, EventBase]],
+        events: Iterable[EventBase],
         time_now: int,
         *,
         config: SerializeEventConfig = _DEFAULT_SERIALIZE_EVENT_CONFIG,
