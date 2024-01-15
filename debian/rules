@@ -42,7 +42,7 @@ override_dh_shlibdeps:
         #
         # As of Pillow 7.1.0, these libraries are in site-packages/Pillow.libs.
         # Previously, they were in site-packages/PIL/.libs. As of Pillow 10.2.0
-        # the package name is lowercased to site-packages/Pillow.libs.
+        # the package name is lowercased to site-packages/pillow.libs.
         #
         # (we also need to exclude psycopg2, of course, since we've already
         # dealt with that.)
