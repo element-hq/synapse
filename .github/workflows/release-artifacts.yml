@@ -197,8 +197,8 @@ jobs:
     steps:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v4
-      - name: Build a tarball for the debs
-        run: tar -cvJf debs.tar.xz debs
+#      - name: Build a tarball for the debs
+#        run: tar -cvJf debs.tar.xz debs
       - name: Attach to release
         uses: softprops/action-gh-release@a929a66f232c1b11af63782948aa2210f981808a  # PR#109
         env:
