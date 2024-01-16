@@ -2154,6 +2154,15 @@ class RoomMessageListTestCase(RoomBase):
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
 
+
+class RoomMessageFilterTestCase(RoomBase):
+    """Tests /rooms/$room_id/messages REST events."""
+
+    user_id = "@sid1:red"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = self.helper.create_room_as(self.user_id)
+        
     def test_room_message_filter_wildcard(self) -> None:
         # Send a first message in the room, which will be removed by the purge.
         self.helper.send(self.room_id, "message 1", type="f.message.1")
