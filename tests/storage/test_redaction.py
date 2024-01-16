@@ -25,9 +25,10 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, _EventInternalMetadata
+from synapse.events import EventBase
 from synapse.events.builder import EventBuilder
 from synapse.server import HomeServer
+from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, RoomID, UserID
 from synapse.util import Clock
 
@@ -268,7 +269,7 @@ class RedactionTestCase(unittest.HomeserverTestCase):
                 return self._base_builder.type
 
             @property
-            def internal_metadata(self) -> _EventInternalMetadata:
+            def internal_metadata(self) -> EventInternalMetadata:
                 return self._base_builder.internal_metadata
 
         event_1, unpersisted_context_1 = self.get_success(

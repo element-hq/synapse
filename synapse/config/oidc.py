@@ -299,6 +299,19 @@ def _parse_oidc_config_dict(
                 config_path + ("client_secret",),
             )
 
+    # If no client secret is specified then the auth method must be None
+    client_auth_method = oidc_config.get("client_auth_method")
+    if client_secret is None and client_secret_jwt_key is None:
+        if client_auth_method is None:
+            client_auth_method = "none"
+        elif client_auth_method != "none":
+            raise ConfigError(
+                "No 'client_secret' is set in OIDC config, and 'client_auth_method' is not set to 'none'"
+            )
+
+    if client_auth_method is None:
+        client_auth_method = "client_secret_basic"
+
     return OidcProviderConfig(
         idp_id=idp_id,
         idp_name=oidc_config.get("idp_name", "OIDC"),
@@ -309,7 +322,7 @@ def _parse_oidc_config_dict(
         client_id=oidc_config["client_id"],
         client_secret=client_secret,
         client_secret_jwt_key=client_secret_jwt_key,
-        client_auth_method=oidc_config.get("client_auth_method", "client_secret_basic"),
+        client_auth_method=client_auth_method,
         pkce_method=oidc_config.get("pkce_method", "auto"),
         scopes=oidc_config.get("scopes", ["openid"]),
         authorization_endpoint=oidc_config.get("authorization_endpoint"),

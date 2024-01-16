@@ -26,7 +26,17 @@ import random
 import string
 from collections import OrderedDict
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    cast,
+)
 
 import attr
 from typing_extensions import TypedDict
@@ -1742,13 +1752,19 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
             events = list(room_events)
             events.extend(e for evs, _ in room_to_events.values() for e in evs)
 
-            events.sort(key=lambda e: e.internal_metadata.order)
+            # We know stream_ordering must be not None here, as its been
+            # persisted, but mypy doesn't know that
+            events.sort(key=lambda e: cast(int, e.internal_metadata.stream_ordering))
 
             if limit:
                 events[:] = events[:limit]
 
             if events:
-                end_key = events[-1].internal_metadata.after
+                last_event = events[-1]
+                assert last_event.internal_metadata.stream_ordering
+                end_key = RoomStreamToken(
+                    stream=last_event.internal_metadata.stream_ordering,
+                )
             else:
                 end_key = to_key
 

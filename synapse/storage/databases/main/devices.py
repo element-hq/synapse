@@ -1794,7 +1794,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             device_ids: The IDs of the devices to delete
         """
 
-        def _delete_devices_txn(txn: LoggingTransaction) -> None:
+        def _delete_devices_txn(txn: LoggingTransaction, device_ids: List[str]) -> None:
             self.db_pool.simple_delete_many_txn(
                 txn,
                 table="devices",
@@ -1811,7 +1811,11 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 keyvalues={"user_id": user_id},
             )
 
-        await self.db_pool.runInteraction("delete_devices", _delete_devices_txn)
+        for batch in batch_iter(device_ids, 100):
+            await self.db_pool.runInteraction(
+                "delete_devices", _delete_devices_txn, batch
+            )
+
         for device_id in device_ids:
             self.device_id_exists_cache.invalidate((user_id, device_id))
 
