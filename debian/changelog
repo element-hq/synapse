@@ -1,8 +1,9 @@
-matrix-synapse-py3 (1.99.0~rc1ubuntu1) UNRELEASED; urgency=medium
+matrix-synapse-py3 (1.99.0) stable; urgency=medium
 
   * Fix copyright file with new licensing
+  * New Synapse release 1.99.0.
 
- -- Synapse Packaging team <packages@matrix.org>  Thu, 11 Jan 2024 13:47:29 +0000
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 16 Jan 2024 11:58:34 +0000
 
 matrix-synapse-py3 (1.99.0~rc1) stable; urgency=medium
 
