@@ -115,7 +115,7 @@
                                     <!-- Versions will be added dynamically in version-picker.js -->
                                 </ul>
                             </div>
-                        </div>      
+                        </div>
                     </div>
 
                     <h1 class="menu-title">Synapse</h1>
@@ -124,10 +124,10 @@
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/modules/writing_a_module.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/modules/writing_a_module.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -168,7 +168,7 @@ the <code>synapse.module_api.ModuleApi</code> class. The configuration is a dict
 either the output of the module's <code>parse_config</code> static method (see below), or the
 configuration associated with the module in Synapse's configuration file.</p>
 <p>See the documentation for the <code>ModuleApi</code> class
-<a href="https://github.com/matrix-org/synapse/blob/master/synapse/module_api/__init__.py">here</a>.</p>
+<a href="https://github.com/element-hq/synapse/blob/master/synapse/module_api/__init__.py">here</a>.</p>
 <h2 id="when-synapse-runs-with-several-modules-configured"><a class="header" href="#when-synapse-runs-with-several-modules-configured">When Synapse runs with several modules configured</a></h2>
 <p>If Synapse is running with other modules configured, the order each module appears in
 within the <code>modules</code> section of the Synapse configuration file might restrict what it can
@@ -219,7 +219,7 @@ methods. The callback functions are passed to these methods as keyword arguments
 the callback name as the argument name and the function as its value. A
 <code>register_[...]_callbacks</code> method exists for each category.</p>
 <p>Callbacks for each category can be found on their respective page of the
-<a href="https://matrix-org.github.io/synapse">Synapse documentation website</a>.</p>
+<a href="https://element-hq.github.io/synapse">Synapse documentation website</a>.</p>
 <h2 id="caching"><a class="header" href="#caching">Caching</a></h2>
 <p><em>Added in Synapse 1.74.0.</em></p>
 <p>Modules can leverage Synapse's caching tools to manage their own cached functions. This
@@ -239,7 +239,7 @@ from synapse.module_api import cached, ModuleApi
 class MyModule:
     def __init__(self, config: Any, api: ModuleApi):
         self.api = api
-        
+
         # Register the cached function so Synapse knows how to correctly invalidate
         # entries for it.
         self.api.register_cached_function(self.get_user_from_id)
@@ -254,15 +254,15 @@ class MyModule:
 
     async def do_something_with_users(self) -&gt; None:
         &quot;&quot;&quot;Calls the cached function and then invalidates an entry in its cache.&quot;&quot;&quot;
-        
+
         user_id = &quot;@alice:example.com&quot;
-        
+
         # Get the user. Since get_department_for_user is wrapped with a cache,
         # the return value for this user_id will be cached.
         department = await self.get_department_for_user(user_id)
-        
+
         # Do something with `department`...
-        
+
         # Let's say something has changed with our user, and the entry we have for
         # them in the cache is out of date, so we want to invalidate it.
         await self.api.invalidate_cache(self.get_department_for_user, (user_id,))

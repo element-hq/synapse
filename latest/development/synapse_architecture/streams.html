@@ -115,7 +115,7 @@
                                     <!-- Versions will be added dynamically in version-picker.js -->
                                 </ul>
                             </div>
-                        </div>      
+                        </div>
                     </div>
 
                     <h1 class="menu-title">Synapse</h1>
@@ -124,10 +124,10 @@
                         <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/development/synapse_architecture/streams.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/development/synapse_architecture/streams.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -160,7 +160,7 @@
                         </div>
 
                         <h2 id="streams"><a class="header" href="#streams">Streams</a></h2>
-<p>Synapse has a concept of &quot;streams&quot;, which are roughly described in <a href="https://github.com/matrix-org/synapse/blob/develop/synapse/storage/util/id_generators.py"><code>id_generators.py</code></a>.
+<p>Synapse has a concept of &quot;streams&quot;, which are roughly described in <a href="https://github.com/element-hq/synapse/blob/develop/synapse/storage/util/id_generators.py"><code>id_generators.py</code></a>.
 Generally speaking, streams are a series of notifications that something in Synapse's database has changed that the application might need to respond to.
 For example:</p>
 <ul>
@@ -168,9 +168,9 @@ For example:</p>
 <li>The account data stream reports changes to users' <a href="https://spec.matrix.org/v1.7/client-server-api/#client-config">account data</a>.</li>
 <li>The to-device stream reports when a device has a new <a href="https://spec.matrix.org/v1.7/client-server-api/#send-to-device-messaging">to-device message</a>.</li>
 </ul>
-<p>See <a href="https://github.com/matrix-org/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py"><code>synapse.replication.tcp.streams</code></a> for the full list of streams.</p>
+<p>See <a href="https://github.com/element-hq/synapse/blob/develop/synapse/replication/tcp/streams/__init__.py"><code>synapse.replication.tcp.streams</code></a> for the full list of streams.</p>
 <p>It is very helpful to understand the streams mechanism when working on any part of Synapse that needs to respond to changes—especially if those changes are made by different workers.
-To that end, let's describe streams formally, paraphrasing from the docstring of <a href="https://github.com/matrix-org/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96"><code>AbstractStreamIdGenerator</code></a>.</p>
+To that end, let's describe streams formally, paraphrasing from the docstring of <a href="https://github.com/element-hq/synapse/blob/a719b703d9bd0dade2565ddcad0e2f3a7a9d4c37/synapse/storage/util/id_generators.py#L96"><code>AbstractStreamIdGenerator</code></a>.</p>
 <h3 id="definition"><a class="header" href="#definition">Definition</a></h3>
 <p>A stream is an append-only log <code>T1, T2, ..., Tn, ...</code> of facts<sup class="footnote-reference"><a href="#1">1</a></sup> which grows over time.
 Only &quot;writers&quot; can add facts to a stream, and there may be multiple writers.</p>

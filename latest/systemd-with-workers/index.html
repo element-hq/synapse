@@ -115,7 +115,7 @@
                                     <!-- Versions will be added dynamically in version-picker.js -->
                                 </ul>
                             </div>
-                        </div>      
+                        </div>
                     </div>
 
                     <h1 class="menu-title">Synapse</h1>
@@ -124,10 +124,10 @@
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/systemd-with-workers/README.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/systemd-with-workers/README.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -165,9 +165,9 @@ managing workers. It provides a <code>matrix-synapse</code> service for the mast
 well as a <code>matrix-synapse-worker@</code> service template for any workers you
 require. Additionally, to group the required services, it sets up a
 <code>matrix-synapse.target</code>.</p>
-<p>See the folder <a href="https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
+<p>See the folder <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
 for the systemd unit files.</p>
-<p>The folder <a href="https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/workers/">workers</a>
+<p>The folder <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/workers/">workers</a>
 contains an example configuration for the <code>generic_worker</code> worker.</p>
 <h2 id="synapse-configuration-files"><a class="header" href="#synapse-configuration-files">Synapse configuration files</a></h2>
 <p>See <a href="../workers.html">the worker documentation</a> for information on how to set up the
@@ -194,7 +194,7 @@ the provided <code>*.service</code> files accordingly.</p>
 <h2 id="set-up"><a class="header" href="#set-up">Set up</a></h2>
 <ol>
 <li>Adjust synapse configuration files as above.</li>
-<li>Copy the <code>*.service</code> and <code>*.target</code> files in <a href="https://github.com/matrix-org/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
+<li>Copy the <code>*.service</code> and <code>*.target</code> files in <a href="https://github.com/element-hq/synapse/tree/develop/docs/systemd-with-workers/system/">system</a>
 to <code>/etc/systemd/system</code>.</li>
 <li>Run <code>systemctl daemon-reload</code> to tell systemd to load the new unit files.</li>
 <li>Run <code>systemctl enable matrix-synapse.service</code>. This will configure the
@@ -229,7 +229,7 @@ systemctl restart matrix-synapse.target
 <h2 id="hardening"><a class="header" href="#hardening">Hardening</a></h2>
 <p><strong>Optional:</strong> If further hardening is desired, the file
 <code>override-hardened.conf</code> may be copied from
-<a href="https://github.com/matrix-org/synapse/tree/develop/contrib/systemd/">contrib/systemd/override-hardened.conf</a>
+<a href="https://github.com/element-hq/synapse/tree/develop/contrib/systemd/">contrib/systemd/override-hardened.conf</a>
 in this repository to the location
 <code>/etc/systemd/system/matrix-synapse.service.d/override-hardened.conf</code> (the
 directory may have to be created). It enables certain sandboxing features in

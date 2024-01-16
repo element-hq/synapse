@@ -115,7 +115,7 @@
                                     <!-- Versions will be added dynamically in version-picker.js -->
                                 </ul>
                             </div>
-                        </div>      
+                        </div>
                     </div>
 
                     <h1 class="menu-title">Synapse</h1>
@@ -124,10 +124,10 @@
                         <a href="print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse" title="Git repository" aria-label="Git repository">
+                        <a href="https://github.com/element-hq/synapse" title="Git repository" aria-label="Git repository">
                             <i id="git-repository-button" class="fa fa-github"></i>
                         </a>
-                        <a href="https://github.com/matrix-org/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit">
+                        <a href="https://github.com/element-hq/synapse/edit/develop/docs/upgrade.md" title="Suggest an edit" aria-label="Suggest an edit">
                             <i id="git-edit-button" class="fa fa-edit"></i>
                         </a>
                     </div>
@@ -266,7 +266,7 @@ v1.61.0.</p>
 <tr><td>v1.83.0 – v1.84.1</td><td>v1.77.0</td></tr>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
-<tr><td>v1.98.0 – v1.98.0</td><td>v1.96.0</td></tr>
+<tr><td>v1.98.0 – v1.99.0</td><td>v1.96.0</td></tr>
 </tbody></table>
 <h1 id="upgrading-to-v1930"><a class="header" href="#upgrading-to-v1930">Upgrading to v1.93.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
@@ -276,12 +276,12 @@ date.</p>
 <h1 id="upgrading-to-v1900"><a class="header" href="#upgrading-to-v1900">Upgrading to v1.90.0</a></h1>
 <h2 id="app-service-query-parameter-authorization-is-now-a-configuration-option"><a class="header" href="#app-service-query-parameter-authorization-is-now-a-configuration-option">App service query parameter authorization is now a configuration option</a></h2>
 <p>Synapse v1.81.0 deprecated application service authorization via query parameters as this is
-considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via 
+considered insecure - and from Synapse v1.71.0 forwards the application service token has also been sent via
 <a href="https://spec.matrix.org/v1.6/application-service-api/#authorization">the <code>Authorization</code> header</a>], making the insecure
-query parameter authorization redundant. Since removing the ability to continue to use query parameters could break 
-backwards compatibility it has now been put behind a configuration option, <code>use_appservice_legacy_authorization</code>.<br />
-This option defaults to false, but can be activated by adding </p>
-<pre><code class="language-yaml">use_appservice_legacy_authorization: true 
+query parameter authorization redundant. Since removing the ability to continue to use query parameters could break
+backwards compatibility it has now been put behind a configuration option, <code>use_appservice_legacy_authorization</code>.
+This option defaults to false, but can be activated by adding</p>
+<pre><code class="language-yaml">use_appservice_legacy_authorization: true
 </code></pre>
 <p>to your configuration.</p>
 <h1 id="upgrading-to-v1890"><a class="header" href="#upgrading-to-v1890">Upgrading to v1.89.0</a></h1>
@@ -300,9 +300,9 @@ packages or Docker images, no action is required.</p>
 <p>As mentioned previously in <a href="#upgrading-to-v1840">Upgrading to v1.84.0</a>, the following deprecated settings
 are being removed in this release of Synapse:</p>
 <ul>
-<li><a href="https://matrix-org.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_host"><code>worker_replication_host</code></a></li>
-<li><a href="https://matrix-org.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_port"><code>worker_replication_http_port</code></a></li>
-<li><a href="https://matrix-org.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_tls"><code>worker_replication_http_tls</code></a></li>
+<li><a href="https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_host"><code>worker_replication_host</code></a></li>
+<li><a href="https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_port"><code>worker_replication_http_port</code></a></li>
+<li><a href="https://element-hq.github.io/synapse/v1.86/usage/configuration/config_documentation.html#worker_replication_http_tls"><code>worker_replication_http_tls</code></a></li>
 </ul>
 <p>Please ensure that you have migrated to using <code>main</code> on your shared configuration's <code>instance_map</code>
 (or create one if necessary). This is required if you have <em><strong>any</strong></em> workers at all;
@@ -389,7 +389,7 @@ worker_listeners:
 worker_log_config: /etc/matrix-synapse/generic-worker-log.yaml
 
 </code></pre>
-<p>Notes: </p>
+<p>Notes:</p>
 <ul>
 <li><code>tls</code> is optional but mirrors the functionality of <code>worker_replication_http_tls</code></li>
 </ul>
@@ -452,8 +452,8 @@ and vice versa.</p>
 <p>Once all workers are upgraded to v1.76 (or downgraded to v1.75), account data
 and device replication will resume as normal.</p>
 <h2 id="minimum-version-of-poetry-is-now-132"><a class="header" href="#minimum-version-of-poetry-is-now-132">Minimum version of Poetry is now 1.3.2</a></h2>
-<p>The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, <a href="#upgrading-to-v1670">since 
-Synapse 1.67</a>). If you have used <code>poetry install</code> to 
+<p>The minimum supported version of Poetry is now 1.3.2 (previously 1.2.0, <a href="#upgrading-to-v1670">since
+Synapse 1.67</a>). If you have used <code>poetry install</code> to
 install Synapse from a source checkout, you should upgrade poetry: see its
 <a href="https://python-poetry.org/docs/#installation">installation instructions</a>.
 For all other installation methods, no acction is required.</p>
@@ -549,7 +549,7 @@ because current versions of Synapse emit both old and new names.</p>
 the names of Prometheus metrics.
 If you want to test your changes before legacy names are disabled by default,
 you may specify <code>enable_legacy_metrics: false</code> in your homeserver configuration.</p>
-<p>A list of affected metrics is available on the <a href="https://matrix-org.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12">Metrics How-to page</a>.</p>
+<p>A list of affected metrics is available on the <a href="https://element-hq.github.io/synapse/v1.69/metrics-howto.html?highlight=metrics%20deprecated#renaming-of-metrics--deprecation-of-old-names-in-12">Metrics How-to page</a>.</p>
 <h2 id="deprecation-of-the-generate_short_term_login_token-module-api-method"><a class="header" href="#deprecation-of-the-generate_short_term_login_token-module-api-method">Deprecation of the <code>generate_short_term_login_token</code> module API method</a></h2>
 <p>The following method of the module API has been deprecated, and is scheduled to
 be remove in v1.71.0:</p>
@@ -589,7 +589,7 @@ Synapse's database.</p>
 <h2 id="rust-requirement-when-building-from-source"><a class="header" href="#rust-requirement-when-building-from-source">Rust requirement when building from source.</a></h2>
 <p>Building from a source checkout of Synapse now requires a recent Rust compiler
 (currently Rust 1.58.1, but see also the
-<a href="https://matrix-org.github.io/synapse/latest/deprecation_policy.html">Platform Dependency Policy</a>).</p>
+<a href="https://element-hq.github.io/synapse/latest/deprecation_policy.html">Platform Dependency Policy</a>).</p>
 <p>Installations using</p>
 <ul>
 <li>Docker images <a href="https://hub.docker.com/r/matrixdotorg/synapse">from <code>matrixdotorg</code></a>,</li>
@@ -637,7 +637,7 @@ This removal was previously planned for Synapse 1.64.0, but was
 homeserver administrators more notice of the change.</p>
 <p>To continue to allow users to add email addresses to their homeserver accounts,
 and perform password resets, make sure that Synapse is configured with a working
-email server in the <a href="https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#email"><code>email</code> configuration
+email server in the <a href="https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#email"><code>email</code> configuration
 section</a>
 (including, at a minimum, a <code>notif_from</code> setting.)</p>
 <p>Specifying an <code>email</code> setting under <code>account_threepid_delegates</code> will now cause
@@ -646,7 +646,7 @@ an error at startup.</p>
 <h2 id="deprecation-of-the-ability-to-delegate-e-mail-verification-to-identity-servers"><a class="header" href="#deprecation-of-the-ability-to-delegate-e-mail-verification-to-identity-servers">Deprecation of the ability to delegate e-mail verification to identity servers</a></h2>
 <p>Synapse v1.66.0 will remove the ability to delegate the tasks of verifying email address ownership, and password reset confirmation, to an identity server.</p>
 <p>If you require your homeserver to verify e-mail addresses or to support password resets via e-mail, please configure your homeserver with SMTP access so that it can send e-mails on its own behalf.
-<a href="https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#email">Consult the configuration documentation for more information.</a></p>
+<a href="https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#email">Consult the configuration documentation for more information.</a></p>
 <p>The option that will be removed is <code>account_threepid_delegates.email</code>.</p>
 <h2 id="changes-to-the-event-replication-streams"><a class="header" href="#changes-to-the-event-replication-streams">Changes to the event replication streams</a></h2>
 <p>Synapse now includes a flag indicating if an event is an outlier when
@@ -796,7 +796,7 @@ has queries that can be used to check a database for this problem in advance.</p
 <p>The names of user devices are no longer visible to users on other homeservers by default.
 Device IDs are unaffected, as these are necessary to facilitate end-to-end encryption.</p>
 <p>To re-enable this functionality, set the
-<a href="https://matrix-org.github.io/synapse/v1.59/usage/configuration/config_documentation.html#federation"><code>allow_device_name_lookup_over_federation</code></a>
+<a href="https://element-hq.github.io/synapse/v1.59/usage/configuration/config_documentation.html#federation"><code>allow_device_name_lookup_over_federation</code></a>
 homeserver config option to <code>true</code>.</p>
 <h2 id="deprecation-of-the-synapseappappservice-and-synapseappuser_dir-worker-application-types"><a class="header" href="#deprecation-of-the-synapseappappservice-and-synapseappuser_dir-worker-application-types">Deprecation of the <code>synapse.app.appservice</code> and <code>synapse.app.user_dir</code> worker application types</a></h2>
 <p>The <code>synapse.app.appservice</code> worker application type allowed you to configure a
@@ -881,7 +881,7 @@ be disabled by default in Synapse v1.58.0.</p>
 <h2 id="change-in-behaviour-for-postgresql-databases-with-unsafe-locale"><a class="header" href="#change-in-behaviour-for-postgresql-databases-with-unsafe-locale">Change in behaviour for PostgreSQL databases with unsafe locale</a></h2>
 <p>Synapse now refuses to start when using PostgreSQL with non-<code>C</code> values for <code>COLLATE</code> and
 <code>CTYPE</code> unless the config flag <code>allow_unsafe_locale</code>, found in the database section of
-the configuration file, is set to <code>true</code>. See the <a href="https://matrix-org.github.io/synapse/latest/postgres.html#fixing-incorrect-collate-or-ctype">PostgreSQL documentation</a>
+the configuration file, is set to <code>true</code>. See the <a href="https://element-hq.github.io/synapse/latest/postgres.html#fixing-incorrect-collate-or-ctype">PostgreSQL documentation</a>
 for more information and instructions on how to fix a database with incorrect values.</p>
 <h1 id="upgrading-to-v1550"><a class="header" href="#upgrading-to-v1550">Upgrading to v1.55.0</a></h1>
 <h2 id="synctl-script-has-been-moved"><a class="header" href="#synctl-script-has-been-moved"><code>synctl</code> script has been moved</a></h2>
@@ -911,7 +911,7 @@ please upgrade Mjolnir to version 1.3.2 or later before upgrading Synapse.</p>
 <p>This release removes support for the <code>structured: true</code> logging configuration
 which was deprecated in Synapse v1.23.0. If your logging configuration contains
 <code>structured: true</code> then it should be modified based on the
-<a href="https://matrix-org.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration">structured logging documentation</a>.</p>
+<a href="https://element-hq.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration">structured logging documentation</a>.</p>
 <h1 id="upgrading-to-v1530"><a class="header" href="#upgrading-to-v1530">Upgrading to v1.53.0</a></h1>
 <h2 id="dropping-support-for-webclient-listeners-and-non-https-web_client_location"><a class="header" href="#dropping-support-for-webclient-listeners-and-non-https-web_client_location">Dropping support for <code>webclient</code> listeners and non-HTTP(S) <code>web_client_location</code></a></h2>
 <p>Per the deprecation notice in Synapse v1.51.0, listeners of type  <code>webclient</code>
@@ -954,10 +954,10 @@ becomes stable.</p>
 <h2 id="removal-of-user_may_create_room_with_invites"><a class="header" href="#removal-of-user_may_create_room_with_invites">Removal of <code>user_may_create_room_with_invites</code></a></h2>
 <p>As announced with the release of <a href="#deprecation-of-the-user_may_create_room_with_invites-module-callback">Synapse 1.47.0</a>,
 the deprecated <code>user_may_create_room_with_invites</code> module callback has been removed.</p>
-<p>Modules relying on it can instead implement <a href="https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+<p>Modules relying on it can instead implement <a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API to infer whether the invite is happening while creating a room (see <a href="https://github.com/matrix-org/synapse-domain-rule-checker/blob/e7d092dd9f2a7f844928771dbfd9fd24c2332e48/synapse_domain_rule_checker/__init__.py#L56-L89">this function</a>
-as an example). Alternately, modules can also implement <a href="https://matrix-org.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room"><code>on_create_room</code></a>.</p>
+as an example). Alternately, modules can also implement <a href="https://element-hq.github.io/synapse/latest/modules/third_party_rules_callbacks.html#on_create_room"><code>on_create_room</code></a>.</p>
 <h1 id="upgrading-to-v1520"><a class="header" href="#upgrading-to-v1520">Upgrading to v1.52.0</a></h1>
 <h2 id="twisted-security-release"><a class="header" href="#twisted-security-release">Twisted security release</a></h2>
 <p>Note that <a href="https://github.com/twisted/twisted/releases/tag/twisted-22.1.0">Twisted 22.1.0</a>
@@ -987,12 +987,12 @@ longer supported upstream.</p>
 <li><code>POST /_synapse/admin/v1/&lt;room_id&gt;/delete</code></li>
 </ul>
 <p>Any scripts still using the above APIs should be converted to use the
-<a href="https://matrix-org.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
+<a href="https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
 <h2 id="deprecation-of-the-user_may_create_room_with_invites-module-callback"><a class="header" href="#deprecation-of-the-user_may_create_room_with_invites-module-callback">Deprecation of the <code>user_may_create_room_with_invites</code> module callback</a></h2>
 <p>The <code>user_may_create_room_with_invites</code> is deprecated and will be removed in a future
 version of Synapse. Modules implementing this callback can instead implement
-<a href="https://matrix-org.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
-and use the <a href="https://github.com/matrix-org/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
+<a href="https://element-hq.github.io/synapse/latest/modules/spam_checker_callbacks.html#user_may_invite"><code>user_may_invite</code></a>
+and use the <a href="https://github.com/element-hq/synapse/blob/872f23b95fa980a61b0866c1475e84491991fa20/synapse/module_api/__init__.py#L869-L876"><code>get_room_state</code></a>
 module API method to infer whether the invite is happening in the context of creating a
 room.</p>
 <p>We plan to remove this callback in January 2022.</p>
@@ -1009,7 +1009,7 @@ no longer mirrored to storage providers. These two directories can be safely
 deleted from any configured storage providers to reclaim space.</p>
 <h1 id="upgrading-to-v1430"><a class="header" href="#upgrading-to-v1430">Upgrading to v1.43.0</a></h1>
 <h2 id="the-spaces-summary-apis-can-now-be-handled-by-workers"><a class="header" href="#the-spaces-summary-apis-can-now-be-handled-by-workers">The spaces summary APIs can now be handled by workers</a></h2>
-<p>The <a href="https://matrix-org.github.io/synapse/latest/workers.html#available-worker-applications">available worker applications documentation</a>
+<p>The <a href="https://element-hq.github.io/synapse/latest/workers.html#available-worker-applications">available worker applications documentation</a>
 has been updated to reflect that calls to the <code>/spaces</code>, <code>/hierarchy</code>, and
 <code>/summary</code> endpoints can now be routed to workers for both client API and
 federation requests.</p>
@@ -1022,11 +1022,11 @@ federation requests.</p>
 <li><code>POST /_synapse/admin/v1/shutdown_room/&lt;room_id&gt;</code></li>
 </ul>
 <p>Any scripts still using the above APIs should be converted to use the
-<a href="https://matrix-org.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
+<a href="https://element-hq.github.io/synapse/latest/admin_api/rooms.html#delete-room-api">Delete Room API</a>.</p>
 <h2 id="user-interactive-authentication-fallback-templates-can-now-display-errors"><a class="header" href="#user-interactive-authentication-fallback-templates-can-now-display-errors">User-interactive authentication fallback templates can now display errors</a></h2>
 <p>This may affect you if you make use of custom HTML templates for the
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/recaptcha.html">reCAPTCHA (<code>synapse/res/templates/recaptcha.html</code>)</a> or
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates/terms.html">terms (<code>synapse/res/templates/terms.html</code>)</a> fallback pages.</p>
 <p>The template is now provided an <code>error</code> variable if the authentication
 process failed. See the default templates linked above for an example.</p>
 <h2 id="removal-of-out-of-date-email-pushers"><a class="header" href="#removal-of-out-of-date-email-pushers">Removal of out-of-date email pushers</a></h2>
@@ -1061,11 +1061,11 @@ details.</p>
 configuration file are now deprecated. Server admins should use the new
 <code>templates.custom_template_directory</code> setting in the configuration file and use one single
 custom template directory for all aforementioned features. Template file names remain
-unchanged. See <a href="https://matrix-org.github.io/synapse/latest/templates.html">the related documentation</a>
+unchanged. See <a href="https://element-hq.github.io/synapse/latest/templates.html">the related documentation</a>
 for more information and examples.</p>
 <p>We plan to remove support for these settings in October 2021.</p>
 <h2 id="_synapseadminv1usersuseridmedia-must-be-handled-by-media-workers"><a class="header" href="#_synapseadminv1usersuseridmedia-must-be-handled-by-media-workers"><code>/_synapse/admin/v1/users/{userId}/media</code> must be handled by media workers</a></h2>
-<p>The <a href="https://matrix-org.github.io/synapse/latest/workers.html#synapseappmedia_repository">media repository worker documentation</a>
+<p>The <a href="https://element-hq.github.io/synapse/latest/workers.html#synapseappmedia_repository">media repository worker documentation</a>
 has been updated to reflect that calls to <code>/_synapse/admin/v1/users/{userId}/media</code>
 must now be handled by media repository workers. This is due to the new <code>DELETE</code> method
 of this endpoint modifying the media store.</p>
@@ -1377,7 +1377,7 @@ lock down external access to the Admin API endpoints.</p>
 <p>This release deprecates use of the <code>structured: true</code> logging
 configuration for structured logging. If your logging configuration
 contains <code>structured: true</code> then it should be modified based on the
-<a href="https://matrix-org.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration">structured logging documentation</a>.</p>
+<a href="https://element-hq.github.io/synapse/v1.56/structured_logging.html#upgrading-from-legacy-structured-logging-configuration">structured logging documentation</a>.</p>
 <p>The <code>structured</code> and <code>drains</code> logging options are now deprecated and
 should be replaced by standard logging configuration of <code>handlers</code> and
 <code>formatters</code>.</p>
@@ -1410,7 +1410,7 @@ endpoint can be handled</p>
 update your reverse proxy configuration to reflect this change.</p>
 <h2 id="new-html-templates"><a class="header" href="#new-html-templates">New HTML templates</a></h2>
 <p>A new HTML template,
-<a href="https://github.com/matrix-org/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
+<a href="https://github.com/element-hq/synapse/blob/develop/synapse/res/templates/password_reset_confirmation.html">password_reset_confirmation.html</a>,
 has been added to the <code>synapse/res/templates</code> directory. If you are
 using a custom template directory, you may want to copy the template
 over and modify it.</p>
@@ -1452,7 +1452,7 @@ updated.</p>
 <p>When setting up worker processes, we now recommend the use of a Redis
 server for replication. <strong>The old direct TCP connection method is
 deprecated and will be removed in a future release.</strong> See
-the <a href="https://matrix-org.github.io/synapse/v1.66/workers.html">worker documentation</a> for more details.</p>
+the <a href="https://element-hq.github.io/synapse/v1.66/workers.html">worker documentation</a> for more details.</p>
 <h1 id="upgrading-to-v1140"><a class="header" href="#upgrading-to-v1140">Upgrading to v1.14.0</a></h1>
 <p>This version includes a database update which is run as part of the
 upgrade, and which may take a couple of minutes in the case of a large
@@ -1490,7 +1490,7 @@ INSERT INTO background_updates (update_name, progress_json, depends_on) VALUES
 is configured to use SSO and a custom
 <code>sso_redirect_confirm_template_dir</code> configuration then these templates
 will need to be copied from
-<a href="https://github.com/matrix-org/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
+<a href="https://github.com/element-hq/synapse/tree/develop/synapse/res/templates"><code>synapse/res/templates</code></a> into that directory.</p>
 <h2 id="synapse-sso-plugins-method-deprecation"><a class="header" href="#synapse-sso-plugins-method-deprecation">Synapse SSO Plugins Method Deprecation</a></h2>
 <p>Plugins using the <code>complete_sso_login</code> method of
 <code>synapse.module_api.ModuleApi</code> should update to using the async/await
@@ -1621,7 +1621,7 @@ included.</p>
 <p>Synapse will expect these files to exist inside the configured template
 directory, and <strong>will fail to start</strong> if they are absent. To view the
 default templates, see
-<a href="https://github.com/matrix-org/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
+<a href="https://github.com/element-hq/synapse/tree/master/synapse/res/templates">synapse/res/templates</a>.</p>
 <h2 id="3pid-verification-changes"><a class="header" href="#3pid-verification-changes">3pid verification changes</a></h2>
 <p><strong>Note: As of this release, users will be unable to add phone numbers or
 email addresses to their accounts, without changes to the Synapse
