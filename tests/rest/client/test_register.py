@@ -36,7 +36,6 @@ from synapse.api.constants import (
 )
 from synapse.api.errors import Codes
 from synapse.appservice import ApplicationService
-from synapse.http.server import HttpServer
 from synapse.rest.client import account, account_validity, login, logout, register, sync
 from synapse.server import HomeServer
 from synapse.storage._base import db_to_json
@@ -44,15 +43,8 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
+from tests.server import ThreadedMemoryReactorClock
 from tests.unittest import override_config
-
-
-# Let's override the email register servlet to mock send_email, since the smtp server doesn't really exists
-def override_email_register_servlet(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.worker.worker_app is None and hs.config.email.can_verify_email:
-        email_register_servlet = register.EmailRegisterRequestTokenRestServlet(hs)
-        email_register_servlet.already_in_use_mailer.send_email = AsyncMock()  # type: ignore[method-assign]
-        email_register_servlet.register(http_server)
 
 
 class RegisterRestServletTestCase(unittest.HomeserverTestCase):
@@ -60,7 +52,6 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         register.register_servlets,
         synapse.rest.admin.register_servlets,
-        override_email_register_servlet,
     ]
     url = b"/_matrix/client/r0/register"
 
@@ -68,6 +59,13 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        hs = super().make_homeserver(reactor, clock)
+        hs.get_send_email_handler()._sendmail = AsyncMock()
+        return hs
 
     def test_POST_appservice_registration_valid(self) -> None:
         user_id = "@as_user_kermit:test"
