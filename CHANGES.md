@@ -1,10 +1,11 @@
 # Synapse 1.99.0 (2024-01-16)
 
-Synapse 1.99.0 is the first Synapse release under an AGPLv3.0 licence (with
-CLA, for proprietary dual licensing). You can read more about this here:
+Synapse 1.99.0 is the first Synapse release under an AGPLv3.0 licence (with CLA to enable Element to sell AGPL
+exceptions). You can read more about this here:
 
  - https://matrix.org/blog/2023/11/06/future-of-synapse-dendrite/
  - https://element.io/blog/element-to-adopt-agplv3/
+ - https://element.io/blog/synapse-now-lives-at-github-com-element-hq-synapse/
 
 No significant changes since 1.99.0rc1.
 
