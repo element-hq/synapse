@@ -1,1 +1,1 @@
-window.SYNAPSE_VERSION = 'v1.98';
+window.SYNAPSE_VERSION = "latest";

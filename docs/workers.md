@@ -62,8 +62,8 @@ pip install "matrix-synapse[redis]"
 
 Note that these dependencies are included when synapse is installed with `pip
 install matrix-synapse[all]`. They are also included in the debian packages from
-`matrix.org` and in the docker images at
-https://hub.docker.com/r/matrixdotorg/synapse/.
+`packages.matrix.org` and in the docker images at
+https://hub.docker.com/r/ectorim/synapse/.
 
 To make effective use of the workers, you will need to configure an HTTP
 reverse-proxy such as nginx or haproxy, which will direct incoming requests to
@@ -94,7 +94,7 @@ file suitable for use with workers:
 for the main process
 * Secondly, you need to enable
 [redis-based replication](usage/configuration/config_documentation.md#redis)
-* You will need to add an [`instance_map`](usage/configuration/config_documentation.md#instance_map) 
+* You will need to add an [`instance_map`](usage/configuration/config_documentation.md#instance_map)
 with the `main` process defined, as well as the relevant connection information from
 it's HTTP `replication` listener (defined in step 1 above).
   * Note that the `host` defined is the address the worker needs to look for the `main`
@@ -432,7 +432,7 @@ To enable this, the worker must have:
 * An [HTTP `replication` listener](usage/configuration/config_documentation.md#listeners) configured,
 * Have a [`worker_name`](usage/configuration/config_documentation.md#worker_name)
 and be listed in the [`instance_map`](usage/configuration/config_documentation.md#instance_map)
-config. 
+config.
 * Have the main process declared on the [`instance_map`](usage/configuration/config_documentation.md#instance_map) as well.
 
 Note: The same worker can handle multiple streams, but unless otherwise documented,
@@ -629,7 +629,7 @@ worker application type.
 
 You can designate generic worker to sending push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
-[sygnal](https://github.com/matrix-org/sygnal) and email.
+[sygnal](https://github.com/vector-im/sygnal) and email.
 
 This will stop the main process sending push notifications.
 

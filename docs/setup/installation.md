@@ -26,9 +26,9 @@ for most users.
 #### Docker images and Ansible playbooks
 
 There is an official synapse image available at
-<https://hub.docker.com/r/matrixdotorg/synapse> or at [`ghcr.io/matrix-org/synapse`](https://ghcr.io/matrix-org/synapse)
+<https://hub.docker.com/r/vectorim/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
 which can be used with the docker-compose file available at
-[contrib/docker](https://github.com/matrix-org/synapse/tree/develop/contrib/docker).
+[contrib/docker](https://github.com/element-hq/synapse/tree/develop/contrib/docker).
 Further information on this including configuration options is available in the README
 on hub.docker.com.
 
@@ -48,9 +48,11 @@ For more details, see
 ##### Matrix.org packages
 
 Matrix.org provides Debian/Ubuntu packages of Synapse, for the amd64
-architecture via <https://packages.matrix.org/debian/>.  
+architecture via <https://packages.matrix.org/debian/>.
 
 To install the latest release:
+
+TODO UPDATE ALL THIS
 
 ```sh
 sudo apt install -y lsb-release wget apt-transport-https
@@ -446,9 +448,9 @@ listeners:
   ```
 
 - You will also need to add the options `tls_certificate_path` and
-  `tls_private_key_path`. to your configuration file. You will need to manage provisioning of 
+  `tls_private_key_path`. to your configuration file. You will need to manage provisioning of
    these certificates yourself.
-- You can find more information about these options as well as how to configure synapse in the 
+- You can find more information about these options as well as how to configure synapse in the
   [configuration manual](../usage/configuration/config_documentation.md).
 
   If you are using your own certificate, be sure to use a `.pem` file that

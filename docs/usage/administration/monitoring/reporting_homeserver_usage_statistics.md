@@ -74,3 +74,4 @@ consider using one of the following known implementations:
 
 * [Matrix.org's Panopticon](https://github.com/matrix-org/panopticon)
 * [Famedly's Barad-dûr](https://gitlab.com/famedly/infra/services/barad-dur)
+* [Synapse Usage Exporter](https://github.com/loelkes/synapse-usage-exporter) for Prometheus

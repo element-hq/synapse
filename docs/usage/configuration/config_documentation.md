@@ -495,10 +495,10 @@ Unix socket support (_Added in Synapse 1.89.0_):
   * **Note**: The use of both `path` and `port` options for the same `listener` is not
     compatible.
   * The `x_forwarded` option defaults to true  when using Unix sockets and can be omitted.
-  * Other options that would not make sense to use with a UNIX socket, such as 
+  * Other options that would not make sense to use with a UNIX socket, such as
     `bind_addresses` and `tls` will be ignored and can be removed.
 * `mode`: The file permissions to set on the UNIX socket. Defaults to `666`
-* **Note:** Must be set as `type: http` (does not support `metrics` and `manhole`). 
+* **Note:** Must be set as `type: http` (does not support `metrics` and `manhole`).
   Also make sure that `metrics` is not included in `resources` -> `names`
 
 
@@ -549,7 +549,7 @@ listeners:
   # that unwraps TLS.
   #
   # If you plan to use a reverse proxy, please see
-  # https://matrix-org.github.io/synapse/latest/reverse_proxy.html.
+  # https://element-hq.github.io/synapse/latest/reverse_proxy.html.
   #
   - port: 8008
     tls: false
@@ -581,7 +581,7 @@ listeners:
   # conflicts, and providing enhanced security through system file permissions.
   #
   # Note that x_forwarded will default to true, when using a UNIX socket. Please see
-  # https://matrix-org.github.io/synapse/latest/reverse_proxy.html.
+  # https://element-hq.github.io/synapse/latest/reverse_proxy.html.
   #
   - path: /run/synapse/main_public.sock
     type: http
@@ -680,6 +680,11 @@ This setting has the following sub-options:
    has missed. Disabled by default.
 * `notif_for_new_users`: Set to false to disable automatic subscription to email
    notifications for new users. Enabled by default.
+* `notif_delay_before_mail`: The time to wait before emailing about a notification.
+  This gives the user a chance to view the message via push or an open client.
+  Defaults to 10 minutes.
+
+  _New in Synapse 1.99.0._
 * `client_base_url`: Custom URL for client links within the email notifications. By default
    links will be based on "https://matrix.to". (This setting used to be called `riot_base_url`;
    the old name is still supported for backwards-compatibility but is now deprecated.)
@@ -1411,7 +1416,7 @@ kill -HUP [PID_OF_SYNAPSE_PROCESS]
 If you are running multiple workers, you must individually update the worker
 config file and send this signal to each worker process.
 
-If you're using the [example systemd service](https://github.com/matrix-org/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
+If you're using the [example systemd service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
 file in Synapse's `contrib` directory, you can send a `SIGHUP` signal by using
 `systemctl reload matrix-synapse`.
 
@@ -2675,7 +2680,7 @@ Example configuration:
 refreshable_access_token_lifetime: 10m
 ```
 ---
-### `refresh_token_lifetime: 24h`
+### `refresh_token_lifetime`
 
 Time that a refresh token remains valid for (provided that it is not
 exchanged for another one first).
@@ -2774,6 +2779,10 @@ enable_metrics: true
 Use this option to enable sentry integration. Provide the DSN assigned to you by sentry
 with the `dsn` setting.
 
+ An optional `environment` field can be used to specify an environment. This allows
+ for log maintenance based on different environments, ensuring better organization
+ and analysis..
+
 NOTE: While attempts are made to ensure that the logs don't contain
 any sensitive information, this cannot be guaranteed. By enabling
 this option the sentry server may therefore receive sensitive
@@ -2783,6 +2792,7 @@ through insecure notification channels if so configured.
 Example configuration:
 ```yaml
 sentry:
+    environment: "production"
     dsn: "..."
 ```
 ---
@@ -2932,7 +2942,7 @@ access tokens via a query parameter.
 
 Example configuration:
 ```yaml
-use_appservice_legacy_authorization: true 
+use_appservice_legacy_authorization: true
 ```
 
 ---
@@ -3613,7 +3623,7 @@ This setting has the following sub-options:
 * `enabled`: Defaults to true.
    Set to false to disable password authentication.
    Set to `only_for_reauth` to allow users with existing passwords to use them
-   to log in and reauthenticate, whilst preventing new users from setting passwords.
+   to reauthenticate (not log in), whilst preventing new users from setting passwords.
 * `localdb_enabled`: Set to false to disable authentication against the local password
    database. This is ignored if `enabled` is false, and is only useful
    if you have other `password_providers`. Defaults to true.
@@ -3832,16 +3842,22 @@ Sub-options for this setting include:
 * `system_mxid_display_name`: set the display name of the "notices" user
 * `system_mxid_avatar_url`: set the avatar for the "notices" user
 * `room_name`: set the room name of the server notices room
+* `room_avatar_url`: optional string. The room avatar to use for server notice rooms. If set to the empty string `""`, notice rooms will not be given an avatar. Defaults to the empty string. _Added in Synapse 1.99.0._
+* `room_topic`: optional string. The topic to use for server notice rooms. If set to the empty string `""`, notice rooms will not be given a topic. Defaults to the empty string.  _Added in Synapse 1.99.0._
 * `auto_join`: boolean. If true, the user will be automatically joined to the room instead of being invited.
   Defaults to false. _Added in Synapse 1.98.0._
+
+Note that the name, topic and avatar of existing server notice rooms will only be updated when a new notice event is sent.
 
 Example configuration:
 ```yaml
 server_notices:
   system_mxid_localpart: notices
   system_mxid_display_name: "Server Notices"
-  system_mxid_avatar_url: "mxc://server.com/oumMVlgDnLYFaPVkExemNVVZ"
+  system_mxid_avatar_url: "mxc://example.com/oumMVlgDnLYFaPVkExemNVVZ"
   room_name: "Server Notices"
+  room_avatar_url: "mxc://example.com/oumMVlgDnLYFaPVkExemNVVZ"
+  room_topic: "Room used by your server admin to notice you of important information"
   auto_join: true
 ```
 ---
@@ -3865,7 +3881,7 @@ This setting is an optional list of 0 or more rules. By default, no list is
 provided, meaning that all alias creations are permitted.
 
 Otherwise, requests to create aliases are matched against each rule in order.
-The first rule that matches decides if the request is allowed or denied. If no 
+The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
 an empty list of rules will deny every alias creation request.
 
@@ -3877,7 +3893,7 @@ Each rule is a YAML object containing four fields, each of which is an optional 
 * `action`: either `allow` or `deny`. What to do with the request if the rule matches. Defaults to `allow`.
 
 Each of the glob patterns is optional, defaulting to `*` ("match anything").
-Note that the patterns match against fully qualified IDs, e.g. against 
+Note that the patterns match against fully qualified IDs, e.g. against
 `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead
 of `alice`, `room` and `abcedgghijk`.
 
@@ -3914,7 +3930,7 @@ alias_creation_rules:
 alias_creation_rules:
   - user_id: "@bad_user:example.com"
     action: deny
-    
+
   - action: allow
 ```
 
@@ -3992,7 +4008,7 @@ room_list_publication_rules:
 room_list_publication_rules:
   - user_id: "@bad_user:example.com"
     action: deny
-    
+
   - action: allow
 ```
 
@@ -4408,7 +4424,7 @@ must be declared, in the same way as the [`listeners` option](#listeners)
 in the shared config.
 
 Workers declared in [`stream_writers`](#stream_writers) and [`instance_map`](#instance_map)
- will need to include a `replication` listener here, in order to accept internal HTTP 
+ will need to include a `replication` listener here, in order to accept internal HTTP
 requests from other workers.
 
 Example configuration:

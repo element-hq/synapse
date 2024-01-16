@@ -1,19 +1,22 @@
-# Copyright 2014-2016 OpenMarket Ltd
-# Copyright 2017 Vector Creations Ltd
-# Copyright 2018-2019 New Vector Ltd
-# Copyright 2019 The Matrix.org Foundation C.I.C.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 
 """ This module is responsible for getting events from the DB for pagination
 and event streaming.
@@ -702,8 +705,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        self._set_before_and_after(ret, rows, topo_order=False)
-
         if order.lower() == "desc":
             ret.reverse()
 
@@ -790,8 +791,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        self._set_before_and_after(ret, rows, topo_order=False)
-
         return ret
 
     async def get_recent_events_for_room(
@@ -816,8 +815,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         events = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
-
-        self._set_before_and_after(events, rows)
 
         return events, token
 
@@ -1090,31 +1087,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # lookup a `room_id` which does not exist, `rows` will look like
         # `[(None,)]`
         return rows[0][0] if rows[0][0] is not None else 0
-
-    @staticmethod
-    def _set_before_and_after(
-        events: List[EventBase], rows: List[_EventDictReturn], topo_order: bool = True
-    ) -> None:
-        """Inserts ordering information to events' internal metadata from
-        the DB rows.
-
-        Args:
-            events
-            rows
-            topo_order: Whether the events were ordered topologically or by stream
-                ordering. If true then all rows should have a non null
-                topological_ordering.
-        """
-        for event, row in zip(events, rows):
-            stream = row.stream_ordering
-            if topo_order and row.topological_ordering:
-                topo: Optional[int] = row.topological_ordering
-            else:
-                topo = None
-            internal = event.internal_metadata
-            internal.before = RoomStreamToken(topological=topo, stream=stream - 1)
-            internal.after = RoomStreamToken(topological=topo, stream=stream)
-            internal.order = (int(topo) if topo else 0, int(stream))
 
     async def get_events_around(
         self,
@@ -1555,8 +1527,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         events = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
-
-        self._set_before_and_after(events, rows)
 
         return events, token
 

@@ -17,17 +17,17 @@ Matrix project <https://matrix.org/docs/guides/introduction>`_, and the `formal 
 Installing and configuration
 ============================
 
-The Synapse documentation describes `how to install Synapse <https://matrix-org.github.io/synapse/latest/setup/installation.html>`_. We recommend using
-`Docker images <https://matrix-org.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
-<https://matrix-org.github.io/synapse/latest/setup/installation.html#matrixorg-packages>`_.
+The Synapse documentation describes `how to install Synapse <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. We recommend using
+`Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
+<https://element-hq.github.io/synapse/latest/setup/installation.html#matrixorg-packages>`_.
 
 .. _federation:
 
 Synapse has a variety of `config options
-<https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
+<https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html>`_
 which can be used to customise its behaviour after installation.
 There are additional details on how to `configure Synapse for federation here
-<https://matrix-org.github.io/synapse/latest/federate.html>`_.
+<https://element-hq.github.io/synapse/latest/federate.html>`_.
 
 .. _reverse-proxy:
 
@@ -43,7 +43,7 @@ It is recommended to put a reverse proxy such as
 doing so is that it means that you can expose the default https port (443) to
 Matrix clients without needing to run Synapse with root privileges.
 For information on configuring one, see `the reverse proxy docs
-<https://matrix-org.github.io/synapse/latest/reverse_proxy.html>`_.
+<https://element-hq.github.io/synapse/latest/reverse_proxy.html>`_.
 
 Upgrading an existing Synapse
 -----------------------------
@@ -52,7 +52,7 @@ The instructions for upgrading Synapse are in `the upgrade notes`_.
 Please check these instructions as upgrading may require extra steps for some
 versions of Synapse.
 
-.. _the upgrade notes: https://matrix-org.github.io/synapse/develop/upgrade.html
+.. _the upgrade notes: https://element-hq.github.io/synapse/develop/upgrade.html
 
 
 Platform dependencies
@@ -60,7 +60,7 @@ Platform dependencies
 
 Synapse uses a number of platform dependencies such as Python and PostgreSQL,
 and aims to follow supported upstream versions. See the
-`deprecation policy <https://matrix-org.github.io/synapse/latest/deprecation_policy.html>`_
+`deprecation policy <https://element-hq.github.io/synapse/latest/deprecation_policy.html>`_
 for more details.
 
 
@@ -114,7 +114,7 @@ from a web client.
 Unless you are running a test instance of Synapse on your local machine, in
 general, you will need to enable TLS support before you can successfully
 connect from a client: see
-`TLS certificates <https://matrix-org.github.io/synapse/latest/setup/installation.html#tls-certificates>`_.
+`TLS certificates <https://element-hq.github.io/synapse/latest/setup/installation.html#tls-certificates>`_.
 
 An easy way to get started is to login or register via Element at
 https://app.element.io/#/login or https://app.element.io/#/register respectively.
@@ -136,11 +136,11 @@ By default, registration of new users via Matrix clients is disabled. To enable
 it:
 
 1. In the
-   `registration config section <https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html#registration>`_
+   `registration config section <https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#registration>`_
    set ``enable_registration: true`` in ``homeserver.yaml``.
 2. Then **either**:
 
-   a. set up a `CAPTCHA <https://matrix-org.github.io/synapse/latest/CAPTCHA_SETUP.html>`_, or
+   a. set up a `CAPTCHA <https://element-hq.github.io/synapse/latest/CAPTCHA_SETUP.html>`_, or
    b. set ``enable_registration_without_verification: true`` in ``homeserver.yaml``.
 
 We **strongly** recommend using a CAPTCHA, particularly if your homeserver is exposed to
@@ -162,9 +162,9 @@ desired ``localpart`` in the 'User name' box.
 Troubleshooting and support
 ===========================
 
-The `Admin FAQ <https://matrix-org.github.io/synapse/latest/usage/administration/admin_faq.html>`_
+The `Admin FAQ <https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html>`_
 includes tips on dealing with some common problems. For more details, see
-`Synapse's wider documentation <https://matrix-org.github.io/synapse/latest/>`_.
+`Synapse's wider documentation <https://element-hq.github.io/synapse/latest/>`_.
 
 For additional support installing or managing Synapse, please ask in the community
 support room |room|_ (from a matrix.org account if necessary). We do not use GitHub
@@ -211,15 +211,15 @@ Development
 
 We welcome contributions to Synapse from the community!
 The best place to get started is our
-`guide for contributors <https://matrix-org.github.io/synapse/latest/development/contributing_guide.html>`_.
-This is part of our larger `documentation <https://matrix-org.github.io/synapse/latest>`_, which includes
+`guide for contributors <https://element-hq.github.io/synapse/latest/development/contributing_guide.html>`_.
+This is part of our larger `documentation <https://element-hq.github.io/synapse/latest>`_, which includes
 
 information for Synapse developers as well as Synapse administrators.
 Developers might be particularly interested in:
 
-* `Synapse's database schema <https://matrix-org.github.io/synapse/latest/development/database_schema.html>`_,
-* `notes on Synapse's implementation details <https://matrix-org.github.io/synapse/latest/development/internal_documentation/index.html>`_, and
-* `how we use git <https://matrix-org.github.io/synapse/latest/development/git.html>`_.
+* `Synapse's database schema <https://element-hq.github.io/synapse/latest/development/database_schema.html>`_,
+* `notes on Synapse's implementation details <https://element-hq.github.io/synapse/latest/development/internal_documentation/index.html>`_, and
+* `how we use git <https://element-hq.github.io/synapse/latest/development/git.html>`_.
 
 Alongside all that, join our developer community on Matrix:
 `#synapse-dev:matrix.org <https://matrix.to/#/#synapse-dev:matrix.org>`_, featuring real humans!
@@ -235,9 +235,9 @@ Alongside all that, join our developer community on Matrix:
 
 .. |documentation| image:: https://img.shields.io/badge/documentation-%E2%9C%93-success
   :alt: (Rendered documentation on GitHub Pages)
-  :target: https://matrix-org.github.io/synapse/latest/
+  :target: https://element-hq.github.io/synapse/latest/
 
-.. |license| image:: https://img.shields.io/github/license/matrix-org/synapse
+.. |license| image:: https://img.shields.io/github/license/element-hq/synapse
   :alt: (check license in LICENSE file)
   :target: LICENSE
 

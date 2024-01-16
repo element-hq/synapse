@@ -1,19 +1,25 @@
-# Copyright 2014 - 2016 OpenMarket Ltd
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 
 import logging
-from typing import TYPE_CHECKING, Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Optional, Tuple
 
 import attr
 import msgpack
@@ -48,6 +54,9 @@ REMOTE_ROOM_LIST_POLL_INTERVAL = 60 * 1000
 # This is used to indicate we should only return rooms published to the main list.
 EMPTY_THIRD_PARTY_ID = ThirdPartyInstanceID(None, None)
 
+# Maximum number of local public rooms returned over the CS or SS API
+MAX_PUBLIC_ROOMS_IN_RESPONSE = 100
+
 
 class RoomListHandler:
     def __init__(self, hs: "HomeServer"):
@@ -68,7 +77,7 @@ class RoomListHandler:
         since_token: Optional[str] = None,
         search_filter: Optional[dict] = None,
         network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation: bool = False,
+        from_federation_origin: Optional[str] = None,
     ) -> JsonDict:
         """Generate a local public room list.
 
@@ -83,7 +92,8 @@ class RoomListHandler:
                 This can be (None, None) to indicate the main list, or a particular
                 appservice and network id to use an appservice specific one.
                 Setting to None returns all public rooms across all lists.
-            from_federation: true iff the request comes from the federation API
+            from_federation_origin: the server name of the requester, or None
+                if the request is not from federation.
         """
         if not self.enable_room_list_search:
             return {"chunk": [], "total_room_count_estimate": 0}
@@ -96,36 +106,43 @@ class RoomListHandler:
             network_tuple,
         )
 
-        if search_filter:
+        capped_limit: int = (
+            MAX_PUBLIC_ROOMS_IN_RESPONSE
+            if limit is None or limit > MAX_PUBLIC_ROOMS_IN_RESPONSE
+            else limit
+        )
+
+        if search_filter or from_federation_origin is not None:
             # We explicitly don't bother caching searches or requests for
             # appservice specific lists.
-            logger.info("Bypassing cache as search request.")
+            # We also don't bother caching requests from federated homeservers.
+            logger.debug("Bypassing cache as search or federation request.")
 
             return await self._get_public_room_list(
-                limit,
+                capped_limit,
                 since_token,
                 search_filter,
                 network_tuple=network_tuple,
-                from_federation=from_federation,
+                from_federation_origin=from_federation_origin,
             )
 
-        key = (limit, since_token, network_tuple)
+        key = (capped_limit, since_token, network_tuple)
         return await self.response_cache.wrap(
             key,
             self._get_public_room_list,
-            limit,
+            capped_limit,
             since_token,
             network_tuple=network_tuple,
-            from_federation=from_federation,
+            from_federation_origin=from_federation_origin,
         )
 
     async def _get_public_room_list(
         self,
-        limit: Optional[int] = None,
+        limit: int,
         since_token: Optional[str] = None,
         search_filter: Optional[dict] = None,
         network_tuple: Optional[ThirdPartyInstanceID] = EMPTY_THIRD_PARTY_ID,
-        from_federation: bool = False,
+        from_federation_origin: Optional[str] = None,
     ) -> JsonDict:
         """Generate a public room list.
         Args:
@@ -136,8 +153,8 @@ class RoomListHandler:
                 This can be (None, None) to indicate the main list, or a particular
                 appservice and network id to use an appservice specific one.
                 Setting to None returns all public rooms across all lists.
-            from_federation: Whether this request originated from a
-                federating server or a client. Used for room filtering.
+            from_federation_origin: the server name of the requester, or None
+                if the request is not from federation.
         """
 
         # Pagination tokens work by storing the room ID sent in the last batch,
@@ -159,8 +176,16 @@ class RoomListHandler:
             forwards = True
             has_batch_token = False
 
-        # we request one more than wanted to see if there are more pages to come
-        probing_limit = limit + 1 if limit is not None else None
+        if from_federation_origin is None:
+            # Client-Server API:
+            # we request one more than wanted to see if there are more pages to come
+            probing_limit = limit + 1
+        else:
+            # Federation API:
+            # we request a handful more in case any get filtered out by ACLs
+            # as a best easy effort attempt to return the full number of entries
+            # specified by `limit`.
+            probing_limit = limit + 10
 
         results = await self.store.get_largest_public_rooms(
             network_tuple,
@@ -168,7 +193,7 @@ class RoomListHandler:
             probing_limit,
             bounds=bounds,
             forwards=forwards,
-            ignore_non_federatable=from_federation,
+            ignore_non_federatable=from_federation_origin is not None,
         )
 
         def build_room_entry(room: LargestRoomStats) -> JsonDict:
@@ -189,59 +214,117 @@ class RoomListHandler:
             # Filter out Nones – rather omit the field altogether
             return {k: v for k, v in entry.items() if v is not None}
 
-        response: JsonDict = {}
-        num_results = len(results)
-        if limit is not None:
-            more_to_come = num_results == probing_limit
+        # Build a list of up to `limit` entries.
+        room_entries: List[JsonDict] = []
+        rooms_iterator = results if forwards else reversed(results)
 
-            # Depending on direction we trim either the front or back.
-            if forwards:
-                results = results[:limit]
+        # Track the first and last 'considered' rooms so that we can provide correct
+        # next_batch/prev_batch tokens.
+        # This is needed because the loop might finish early when
+        # `len(room_entries) >= limit` and we might be left with rooms we didn't
+        # 'consider' (iterate over) and we should save those rooms for the next
+        # batch.
+        first_considered_room: Optional[LargestRoomStats] = None
+        last_considered_room: Optional[LargestRoomStats] = None
+        cut_off_due_to_limit: bool = False
+
+        for room_result in rooms_iterator:
+            if len(room_entries) >= limit:
+                cut_off_due_to_limit = True
+                break
+
+            if first_considered_room is None:
+                first_considered_room = room_result
+            last_considered_room = room_result
+
+            if from_federation_origin is not None:
+                # If this is a federated request, apply server ACLs if the room has any set
+                acl_evaluator = (
+                    await self._storage_controllers.state.get_server_acl_for_room(
+                        room_result.room_id
+                    )
+                )
+
+                if acl_evaluator is not None:
+                    if not acl_evaluator.server_matches_acl_event(
+                        from_federation_origin
+                    ):
+                        # the requesting server is ACL blocked by the room,
+                        # don't show in directory
+                        continue
+
+            room_entries.append(build_room_entry(room_result))
+
+        if not forwards:
+            # If we are paginating backwards, we still return the chunk in
+            # biggest-first order, so reverse again.
+            room_entries.reverse()
+            # Swap the order of first/last considered rooms.
+            first_considered_room, last_considered_room = (
+                last_considered_room,
+                first_considered_room,
+            )
+
+        response: JsonDict = {
+            "chunk": room_entries,
+        }
+        num_results = len(results)
+
+        more_to_come_from_database = num_results == probing_limit
+
+        if forwards and has_batch_token:
+            # If there was a token given then we assume that there
+            # must be previous results, even if there were no results in this batch.
+            if first_considered_room is not None:
+                response["prev_batch"] = RoomListNextBatch(
+                    last_joined_members=first_considered_room.joined_members,
+                    last_room_id=first_considered_room.room_id,
+                    direction_is_forward=False,
+                ).to_token()
             else:
-                results = results[-limit:]
-        else:
-            more_to_come = False
+                # If we didn't find any results this time,
+                # we don't have an actual room ID to put in the token.
+                # But since `first_considered_room` is None, we know that we have
+                # reached the end of the results.
+                # So we can use a token of (0, empty room ID) to paginate from the end
+                # next time.
+                response["prev_batch"] = RoomListNextBatch(
+                    last_joined_members=0,
+                    last_room_id="",
+                    direction_is_forward=False,
+                ).to_token()
 
         if num_results > 0:
-            final_entry = results[-1]
-            initial_entry = results[0]
-
+            assert first_considered_room is not None
+            assert last_considered_room is not None
             if forwards:
-                if has_batch_token:
-                    # If there was a token given then we assume that there
-                    # must be previous results.
-                    response["prev_batch"] = RoomListNextBatch(
-                        last_joined_members=initial_entry.joined_members,
-                        last_room_id=initial_entry.room_id,
-                        direction_is_forward=False,
-                    ).to_token()
-
-                if more_to_come:
+                if more_to_come_from_database or cut_off_due_to_limit:
                     response["next_batch"] = RoomListNextBatch(
-                        last_joined_members=final_entry.joined_members,
-                        last_room_id=final_entry.room_id,
+                        last_joined_members=last_considered_room.joined_members,
+                        last_room_id=last_considered_room.room_id,
                         direction_is_forward=True,
                     ).to_token()
-            else:
+            else:  # backwards
                 if has_batch_token:
                     response["next_batch"] = RoomListNextBatch(
-                        last_joined_members=final_entry.joined_members,
-                        last_room_id=final_entry.room_id,
+                        last_joined_members=last_considered_room.joined_members,
+                        last_room_id=last_considered_room.room_id,
                         direction_is_forward=True,
                     ).to_token()
 
-                if more_to_come:
+                if more_to_come_from_database or cut_off_due_to_limit:
                     response["prev_batch"] = RoomListNextBatch(
-                        last_joined_members=initial_entry.joined_members,
-                        last_room_id=initial_entry.room_id,
+                        last_joined_members=first_considered_room.joined_members,
+                        last_room_id=first_considered_room.room_id,
                         direction_is_forward=False,
                     ).to_token()
 
-        response["chunk"] = [build_room_entry(r) for r in results]
-
+        # We can't efficiently count the total number of rooms that are not
+        # blocked by ACLs, but this is just an estimate so that should be
+        # good enough.
         response["total_room_count_estimate"] = await self.store.count_public_rooms(
             network_tuple,
-            ignore_non_federatable=from_federation,
+            ignore_non_federatable=from_federation_origin is not None,
             search_filter=search_filter,
         )
 

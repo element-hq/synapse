@@ -1,17 +1,23 @@
 #!/usr/bin/env python
-# Copyright 2020 The Matrix.org Foundation C.I.C.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 
 """An interactive script for doing a release. See `cli()` below.
 """
@@ -287,7 +293,7 @@ def _prepare() -> None:
     print("Opening the changelog in your browser...")
     print("Please ask #synapse-dev to give it a check.")
     click.launch(
-        f"https://github.com/matrix-org/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md"
+        f"https://github.com/element-hq/synapse/blob/{synapse_repo.active_branch.name}/CHANGES.md"
     )
 
 
@@ -355,18 +361,18 @@ def _tag(gh_token: Optional[str]) -> None:
             print("As this is an RC, remember to mark it as a pre-release!")
         print("(by the way, this step can be automated by passing --gh-token,")
         print("or one of the GH_TOKEN or GITHUB_TOKEN env vars.)")
-        click.launch(f"https://github.com/matrix-org/synapse/releases/edit/{tag_name}")
+        click.launch(f"https://github.com/element-hq/synapse/releases/edit/{tag_name}")
 
         print("Once done, you need to wait for the release assets to build.")
         if click.confirm("Launch the release assets actions page?", default=True):
             click.launch(
-                f"https://github.com/matrix-org/synapse/actions?query=branch%3A{tag_name}"
+                f"https://github.com/element-hq/synapse/actions?query=branch%3A{tag_name}"
             )
         return
 
     # Create a new draft release
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("matrix-org/synapse")
+    gh_repo = gh.get_repo("element-hq/synapse")
     release = gh_repo.create_git_release(
         tag=tag_name,
         name=tag_name,
@@ -379,7 +385,7 @@ def _tag(gh_token: Optional[str]) -> None:
     print("Launching the release page and the actions page.")
     click.launch(release.html_url)
     click.launch(
-        f"https://github.com/matrix-org/synapse/actions?query=branch%3A{tag_name}"
+        f"https://github.com/element-hq/synapse/actions?query=branch%3A{tag_name}"
     )
 
     click.echo("Wait for release assets to be built")
@@ -405,7 +411,7 @@ def _publish(gh_token: str) -> None:
 
     # Publish the draft release
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("matrix-org/synapse")
+    gh_repo = gh.get_repo("element-hq/synapse")
     for release in gh_repo.get_releases():
         if release.title == tag_name:
             break
@@ -448,7 +454,7 @@ def _upload(gh_token: Optional[str]) -> None:
 
     # Query all the assets corresponding to this release.
     gh = Github(gh_token)
-    gh_repo = gh.get_repo("matrix-org/synapse")
+    gh_repo = gh.get_repo("element-hq/synapse")
     gh_release = gh_repo.get_release(tag_name)
 
     all_assets = set(gh_release.get_assets())
@@ -537,7 +543,7 @@ def _wait_for_actions(gh_token: Optional[str]) -> None:
 
     # Authentication is optional on this endpoint,
     # but use a token if we have one to reduce the chance of being rate-limited.
-    url = f"https://api.github.com/repos/matrix-org/synapse/actions/runs?branch={tag_name}"
+    url = f"https://api.github.com/repos/element-hq/synapse/actions/runs?branch={tag_name}"
     headers = {"Accept": "application/vnd.github+json"}
     if gh_token is not None:
         headers["authorization"] = f"token {gh_token}"
@@ -652,8 +658,8 @@ def _announce() -> None:
         f"""
 Hi everyone. Synapse {current_version} has just been released.
 
-[notes](https://github.com/matrix-org/synapse/releases/tag/{tag_name}) | \
-[docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
+[notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
+[docker](https://hub.docker.com/r/vectorim/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
     )
@@ -683,7 +689,7 @@ Ask the designated people to do the blog and tweets."""
 def full(gh_token: str) -> None:
     click.echo("1. If this is a security release, read the security wiki page.")
     click.echo("2. Check for any release blockers before proceeding.")
-    click.echo("    https://github.com/matrix-org/synapse/labels/X-Release-Blocker")
+    click.echo("    https://github.com/element-hq/synapse/labels/X-Release-Blocker")
     click.echo(
         "3. Check for any other special release notes, including announcements to add to the changelog or special deployment instructions."
     )
@@ -887,7 +893,7 @@ def build_dependabot_changelog(repo: Repo, current_version: version.Version) -> 
     def replacer(match: Match[str]) -> str:
         desc = match.group(1)
         number = match.group(2)
-        return f"* {desc}. ([\\#{number}](https://github.com/matrix-org/synapse/issues/{number}))"
+        return f"* {desc}. ([\\#{number}](https://github.com/element-hq/synapse/issues/{number}))"
 
     for i, message in enumerate(messages):
         messages[i] = re.sub(r"(.*) \(#(\d+)\)$", replacer, message)

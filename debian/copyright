@@ -1,10 +1,14 @@
 Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: synapse
-Source: https://github.com/matrix-org/synapse
+Source: https://github.com/element-hq/synapse
 
 Files: *
 Copyright: 2014-2017, OpenMarket Ltd, 2017-2018 New Vector Ltd
 License: Apache-2.0
+
+Files: *
+Copyright: 2023 New Vector Ltd
+License: AGPL-3.0-or-later
 
 Files: synapse/config/saml2.py
 Copyright: 2015, Ericsson

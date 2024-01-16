@@ -115,7 +115,7 @@ A custom mapping provider must specify the following methods:
 
 Synapse has a built-in OpenID mapping provider if a custom provider isn't
 specified in the config. It is located at
-[`synapse.handlers.oidc.JinjaOidcMappingProvider`](https://github.com/matrix-org/synapse/blob/develop/synapse/handlers/oidc.py).
+[`synapse.handlers.oidc.JinjaOidcMappingProvider`](https://github.com/element-hq/synapse/blob/develop/synapse/handlers/oidc.py).
 
 ## SAML Mapping Providers
 
@@ -202,4 +202,4 @@ A custom mapping provider must specify the following methods:
 
 Synapse has a built-in SAML mapping provider if a custom provider isn't
 specified in the config. It is located at
-[`synapse.handlers.saml.DefaultSamlMappingProvider`](https://github.com/matrix-org/synapse/blob/develop/synapse/handlers/saml.py).
+[`synapse.handlers.saml.DefaultSamlMappingProvider`](https://github.com/element-hq/synapse/blob/develop/synapse/handlers/saml.py).

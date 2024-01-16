@@ -10,7 +10,7 @@ either the output of the module's `parse_config` static method (see below), or t
 configuration associated with the module in Synapse's configuration file.
 
 See the documentation for the `ModuleApi` class
-[here](https://github.com/matrix-org/synapse/blob/master/synapse/module_api/__init__.py).
+[here](https://github.com/element-hq/synapse/blob/master/synapse/module_api/__init__.py).
 
 ## When Synapse runs with several modules configured
 
@@ -82,7 +82,7 @@ the callback name as the argument name and the function as its value. A
 `register_[...]_callbacks` method exists for each category.
 
 Callbacks for each category can be found on their respective page of the
-[Synapse documentation website](https://matrix-org.github.io/synapse).
+[Synapse documentation website](https://element-hq.github.io/synapse).
 
 ## Caching
 
@@ -109,7 +109,7 @@ from synapse.module_api import cached, ModuleApi
 class MyModule:
     def __init__(self, config: Any, api: ModuleApi):
         self.api = api
-        
+
         # Register the cached function so Synapse knows how to correctly invalidate
         # entries for it.
         self.api.register_cached_function(self.get_user_from_id)
@@ -124,15 +124,15 @@ class MyModule:
 
     async def do_something_with_users(self) -> None:
         """Calls the cached function and then invalidates an entry in its cache."""
-        
+
         user_id = "@alice:example.com"
-        
+
         # Get the user. Since get_department_for_user is wrapped with a cache,
         # the return value for this user_id will be cached.
         department = await self.get_department_for_user(user_id)
-        
+
         # Do something with `department`...
-        
+
         # Let's say something has changed with our user, and the entry we have for
         # them in the cache is out of date, so we want to invalidate it.
         await self.api.invalidate_cache(self.get_department_for_user, (user_id,))

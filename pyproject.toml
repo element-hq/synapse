@@ -2,7 +2,7 @@
     package = "synapse"
     filename = "CHANGES.md"
     directory = "changelog.d"
-    issue_format = "[\\#{issue}](https://github.com/matrix-org/synapse/issues/{issue})"
+    issue_format = "[\\#{issue}](https://github.com/element-hq/synapse/issues/{issue})"
 
     [[tool.towncrier.type]]
         directory = "feature"
@@ -96,12 +96,12 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.98.0"
+version = "1.99.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
-license = "Apache-2.0"
+license = "AGPL-3.0-or-later"
 readme = "README.rst"
-repository = "https://github.com/matrix-org/synapse"
+repository = "https://github.com/element-hq/synapse"
 packages = [
     { include = "synapse" },
 ]
@@ -321,7 +321,7 @@ all = [
 # This helps prevents merge conflicts when running a batch of dependabot updates.
 isort = ">=5.10.1"
 black = ">=22.7.0"
-ruff = "0.1.6"
+ruff = "0.1.7"
 # Type checking only works with the pydantic.v1 compat module from pydantic v2
 pydantic = "^2"
 

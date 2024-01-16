@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # this script will use the api:
-#    https://matrix-org.github.io/synapse/latest/admin_api/purge_history_api.html
-# 
+#    https://element-hq.github.io/synapse/latest/admin_api/purge_history_api.html
+#
 # It will purge all messages in a list of rooms up to a cetrain event
 
 ###################################################################################################
@@ -77,9 +77,9 @@ TOKEN=$(sql "SELECT token FROM access_tokens WHERE user_id='$ADMIN' ORDER BY id 
 AUTH="Authorization: Bearer $TOKEN"
 
 ###################################################################################################
-# check, if your TOKEN works. For example this works: 
+# check, if your TOKEN works. For example this works:
 ###################################################################################################
-# $ curl --header "$AUTH" "$API_URL/rooms/$ROOM/state/m.room.power_levels" 
+# $ curl --header "$AUTH" "$API_URL/rooms/$ROOM/state/m.room.power_levels"
 
 ###################################################################################################
 # finally start pruning the room:
@@ -117,13 +117,13 @@ for ROOM in "${ROOMS_ARRAY[@]}"; do
           sleep $SLEEP
           STATUS=$(curl --header "$AUTH" -s GET "$API_URL/admin/purge_history_status/$PURGE_ID" |grep status|cut -d'"' -f4)
           : "$ROOM --> Status: $STATUS"
-          [[ "$STATUS" == "active" ]] || break 
+          [[ "$STATUS" == "active" ]] || break
           SLEEP=$((SLEEP + 1))
-        done 
+        done
       fi
       set +x
       sleep 1
-    fi  
+    fi
 done
 
 

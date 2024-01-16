@@ -1,17 +1,22 @@
-# Copyright 2014-2016 OpenMarket Ltd
-# Copyright 2021 The Matrix.org Foundation C.I.C.
 #
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
+# This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-#     http://www.apache.org/licenses/LICENSE-2.0
+# Copyright (C) 2023 New Vector, Ltd
 #
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 import argparse
 import logging
 import logging.config
@@ -55,7 +60,7 @@ DEFAULT_LOG_CONFIG = Template(
 # be ingested by ELK stacks. See [2] for details.
 #
 # [1]: https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema
-# [2]: https://matrix-org.github.io/synapse/latest/structured_logging.html
+# [2]: https://element-hq.github.io/synapse/latest/structured_logging.html
 
 version: 1
 
@@ -133,7 +138,7 @@ removed in Synapse 1.3.0. You should instead set up a separate log configuration
 STRUCTURED_ERROR = """\
 Support for the structured configuration option was removed in Synapse 1.54.0.
 You should instead use the standard logging configuration. See
-https://matrix-org.github.io/synapse/v1.54/structured_logging.html
+https://element-hq.github.io/synapse/v1.54/structured_logging.html
 """
 
 
@@ -350,6 +355,10 @@ def setup_logging(
         "Server %s version %s",
         sys.argv[0],
         SYNAPSE_VERSION,
+    )
+    logging.warning("Copyright (c) 2023 New Vector, Inc")
+    logging.warning(
+        "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
     logging.info("Server hostname: %s", config.server.server_name)
     logging.info("Instance name: %s", hs.get_instance_name())

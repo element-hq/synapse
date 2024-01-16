@@ -38,7 +38,7 @@ docker run -d --name synapse \
     --mount type=volume,src=synapse-data,dst=/data \
     -p 8008:8008 \
     -p 127.0.0.1:9000:9000 \
-    matrixdotorg/synapse:latest
+    vectorim/synapse:latest
 ```
 
 #### Native config

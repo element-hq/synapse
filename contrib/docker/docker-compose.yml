@@ -7,8 +7,8 @@ services:
 
   synapse:
     build:
-        context: ../..
-        dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: docker/Dockerfile
     image: docker.io/matrixdotorg/synapse:latest
     # Since synapse does not retry to connect to the database, restart upon
     # failure
@@ -57,7 +57,7 @@ services:
       - POSTGRES_USER=synapse
       - POSTGRES_PASSWORD=changeme
       # ensure the database gets created correctly
-      # https://matrix-org.github.io/synapse/latest/postgres.html#set-up-database
+      # https://element-hq.github.io/synapse/latest/postgres.html#set-up-database
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8 --lc-collate=C --lc-ctype=C
     volumes:
       # You may store the database tables in a local folder..
