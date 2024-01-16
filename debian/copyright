@@ -6,6 +6,10 @@ Files: *
 Copyright: 2014-2017, OpenMarket Ltd, 2017-2018 New Vector Ltd
 License: Apache-2.0
 
+Files: *
+Copyright: 2023 New Vector Ltd
+License: AGPL-3.0-or-later
+
 Files: synapse/config/saml2.py
 Copyright: 2015, Ericsson
 License: Apache-2.0
