@@ -40,9 +40,9 @@ override_dh_shlibdeps:
         # to be self-contained, but they have interdependencies and
         # dpkg-shlibdeps doesn't know how to resolve them.
         #
-        # As of Pillow 7.1.0, these libraries are in
-        # site-packages/Pillow.libs. Previously, they were in
-        # site-packages/PIL/.libs.
+        # As of Pillow 7.1.0, these libraries are in site-packages/Pillow.libs.
+        # Previously, they were in site-packages/PIL/.libs. As of Pillow 10.2.0
+        # the package name is lowercased to site-packages/pillow.libs.
         #
         # (we also need to exclude psycopg2, of course, since we've already
         # dealt with that.)
@@ -50,6 +50,7 @@ override_dh_shlibdeps:
 	dh_shlibdeps \
 	    -X site-packages/PIL/.libs \
 	    -X site-packages/Pillow.libs \
+	    -X site-packages/pillow.libs \
 	    -X site-packages/psycopg2
 
 override_dh_virtualenv:
