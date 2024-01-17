@@ -99,8 +99,8 @@ Now edit `homeserver.yaml`, things you might want to change include:
 
 - Set a `server_name`
 - Adjusting paths to be correct for your system like the `log_config` to point to the log config you just copied
-- Using a [PostgreSQL database instead of SQLite](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
-- Adding a [`registration_shared_secret`](https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://vector-im.github.io/synapse/latest/setup/installation.html#registering-a-user).
+- Using a [PostgreSQL database instead of SQLite](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#database)
+- Adding a [`registration_shared_secret`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret) so you can use [`register_new_matrix_user` command](https://element-hq.github.io/synapse/latest/setup/installation.html#registering-a-user).
 
 And then run Synapse with the following command:
 
@@ -132,7 +132,7 @@ to work on.
 
 There is a growing amount of documentation located in the
 [`docs`](https://github.com/element-hq/synapse/tree/develop/docs)
-directory, with a rendered version [available online](https://vector-im.github.io/synapse).
+directory, with a rendered version [available online](https://element-hq.github.io/synapse).
 This documentation is intended primarily for sysadmins running their
 own Synapse instance, as well as developers interacting externally with
 Synapse.
