@@ -406,17 +406,24 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         def get_e2e_device_keys_txn(
             txn: LoggingTransaction, query_clause: str, query_params: list
         ) -> None:
-            sql = (
-                "SELECT user_id, device_id, "
-                "    d.display_name, "
-                "    k.key_json"
-                " FROM devices d"
-                "    %s JOIN e2e_device_keys_json k USING (user_id, device_id)"
-                " WHERE %s AND NOT d.hidden"
-            ) % (
-                "LEFT" if include_all_devices else "INNER",
-                query_clause,
-            )
+            if include_all_devices:
+                sql = f"""
+                    SELECT user_id, device_id, d.display_name, k.key_json
+                    FROM devices d
+                    LEFT JOIN e2e_device_keys_json k USING (user_id, device_id)
+                    WHERE {query_clause} AND NOT d.hidden
+                """
+            else:
+                # We swap around `e2e_device_keys_json` and `devices`, as we
+                # want Postgres to query `e2e_device_keys_json` first as it will
+                # have fewer rows in it. This helps *a lot* with accounts with
+                # lots of non-e2e devices (such as bots).
+                sql = f"""
+                    SELECT user_id, device_id, d.display_name, k.key_json
+                    FROM e2e_device_keys_json k
+                    INNER JOIN devices d USING (user_id, device_id)
+                    WHERE {query_clause} AND NOT d.hidden
+                """
 
             txn.execute(sql, query_params)
 
