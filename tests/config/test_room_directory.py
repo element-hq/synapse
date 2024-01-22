@@ -17,15 +17,31 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
 import yaml
 
+from twisted.test.proto_helpers import MemoryReactor
+
+import synapse.rest.admin
+import synapse.rest.client.login
+import synapse.rest.client.room
 from synapse.config.room_directory import RoomDirectoryConfig
+from synapse.server import HomeServer
+from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
-class RoomDirectoryConfigTestCase(unittest.TestCase):
+class RoomDirectoryConfigTestCase(unittest.HomeserverTestCase):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        synapse.rest.client.login.register_servlets,
+        synapse.rest.client.room.register_servlets,
+    ]
+
     def test_alias_creation_acl(self) -> None:
         config = yaml.safe_load(
             """
@@ -167,3 +183,20 @@ class RoomDirectoryConfigTestCase(unittest.TestCase):
                 aliases=["#unofficial_st:example.com", "#blah:example.com"],
             )
         )
+
+    @override_config({"room_list_publication_rules": []})
+    def test_room_creation_when_publishing_denied(self) -> None:
+        """
+        Test that when room publishing is denied via the config that new rooms can
+        still be created and that the newly created room is not public.
+        """
+
+        user = self.register_user("alice", "pass")
+        token = self.login("alice", "pass")
+        room_id = self.helper.create_room_as(user, is_public=True, tok=token)
+
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
+
+        self.assertFalse(is_public)

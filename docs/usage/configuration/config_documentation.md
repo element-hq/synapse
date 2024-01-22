@@ -3959,6 +3959,9 @@ The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
 an empty list of rules will deny every alias creation request.
 
+Requests to create a public (public as in published to the room directory) room which violates
+the configured rules will result in the room being created but not published to the room directory.
+
 Each rule is a YAML object containing four fields, each of which is an optional string:
 
 * `user_id`: a glob pattern that matches against the user publishing the room.

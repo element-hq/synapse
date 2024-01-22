@@ -1,0 +1,2 @@
+Allow room creation but not publishing to continue if room publication rules are violated when creating
+a new room.
