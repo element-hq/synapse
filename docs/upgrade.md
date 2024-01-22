@@ -97,6 +97,14 @@ v1.61.0.
 
 <!-- REPLACE_WITH_SCHEMA_VERSIONS -->
 
+# Upgrading to v1.100.0
+
+## Minimum supported Rust version
+The minimum supported Rust version has been increased from v1.61.0 to v1.65.0.
+Users building from source will need to ensure their `rustc` version is up to
+date.
+
+
 # Upgrading to v1.93.0
 
 ## Minimum supported Rust version

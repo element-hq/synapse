@@ -398,14 +398,25 @@ def filter_to_clause(event_filter: Optional[Filter]) -> Tuple[str, List[str]]:
     clauses = []
     args = []
 
+    # Handle event types with potential wildcard characters
     if event_filter.types:
-        clauses.append(
-            "(%s)" % " OR ".join("event.type = ?" for _ in event_filter.types)
-        )
-        args.extend(event_filter.types)
+        type_clauses = []
+        for typ in event_filter.types:
+            if "*" in typ:
+                type_clauses.append("event.type LIKE ?")
+                typ = typ.replace("*", "%")  # Replace * with % for SQL LIKE pattern
+            else:
+                type_clauses.append("event.type = ?")
+            args.append(typ)
+        clauses.append("(%s)" % " OR ".join(type_clauses))
 
+    # Handle event types to exclude with potential wildcard characters
     for typ in event_filter.not_types:
-        clauses.append("event.type != ?")
+        if "*" in typ:
+            clauses.append("event.type NOT LIKE ?")
+            typ = typ.replace("*", "%")
+        else:
+            clauses.append("event.type != ?")
         args.append(typ)
 
     if event_filter.senders:
