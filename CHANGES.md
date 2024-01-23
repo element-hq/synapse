@@ -1,3 +1,66 @@
+# Synapse 1.100.0rc1 (2024-01-23)
+
+### Features
+
+- Advertise experimental support for [MSC4028](https://github.com/matrix-org/matrix-spec-proposals/pull/4028) through `/_matrix/clients/versions` if enabled. Contributed by @hanadi92. ([\#16787](https://github.com/element-hq/synapse/issues/16787))
+
+### Bugfixes
+
+- Handle wildcard type filters properly for room messages endpoint. Contributed by Mo Balaa. ([\#14984](https://github.com/element-hq/synapse/issues/14984))
+
+### Improved Documentation
+
+- Add a link to the "Request log format" explainer on the "Logging sample config" documentation page. ([\#16778](https://github.com/element-hq/synapse/issues/16778))
+- Fix broken links in issue templates and documentation. ([\#16810](https://github.com/element-hq/synapse/issues/16810))
+- NGINX listen http2 deprecation in documentation template for reverse proxy. ([\#16831](https://github.com/element-hq/synapse/issues/16831))
+
+### Internal Changes
+
+- Faster partial join to room with complex auth graph. ([\#7](https://github.com/element-hq/synapse/issues/7))
+- Improve DB performance of calculating badge counts for push. ([\#16756](https://github.com/element-hq/synapse/issues/16756))
+- Split up deleting devices into batches. ([\#16766](https://github.com/element-hq/synapse/issues/16766))
+- Remove CI check for sign-off as we require a CLA signature instead. ([\#16776](https://github.com/element-hq/synapse/issues/16776))
+- Ensure CI fails when linting fails to make sure auto-merge does the correct thing. ([\#16781](https://github.com/element-hq/synapse/issues/16781))
+- Faster load recents for sync by reducing amount of state pulled out. ([\#16783](https://github.com/element-hq/synapse/issues/16783))
+- Reduce amount of state pulled out when querying federation hierachy. ([\#16785](https://github.com/element-hq/synapse/issues/16785))
+- Pull less state out of the DB when we retry fetching old events during backfill. ([\#16788](https://github.com/element-hq/synapse/issues/16788))
+- Optimize query for fetching to-device messages in `/sync`. ([\#16805](https://github.com/element-hq/synapse/issues/16805))
+- Reject OIDC config when `client_secret` isn't specified, but the auth method requires one. ([\#16806](https://github.com/element-hq/synapse/issues/16806))
+- Allow room creation but not publishing to continue if room publication rules are violated when creating
+  a new room. ([\#16811](https://github.com/element-hq/synapse/issues/16811))
+- Bump minimum supported Rust version to 1.61.0. ([\#16818](https://github.com/element-hq/synapse/issues/16818))
+- Fixup copyright lines in file headers after the licensing change. ([\#16820](https://github.com/element-hq/synapse/issues/16820))
+- Add a `--generate-only` option to the internal configuration/launch script for Complement. ([\#16828](https://github.com/element-hq/synapse/issues/16828))
+- Preparatory work for tweaking performance of auth chain lookups. ([\#16833](https://github.com/element-hq/synapse/issues/16833))
+- Speed up e2e device keys queries for bot accounts. ([\#16841](https://github.com/element-hq/synapse/issues/16841))
+
+### Updates to locked dependencies
+
+* Bump actions/cache from 3 to 4. ([\#16832](https://github.com/element-hq/synapse/issues/16832))
+* Bump actions/download-artifact from 3 to 4. ([\#16795](https://github.com/element-hq/synapse/issues/16795))
+* Bump actions/upload-artifact from 3 to 4. ([\#16796](https://github.com/element-hq/synapse/issues/16796))
+* Bump anyhow from 1.0.75 to 1.0.79. ([\#16789](https://github.com/element-hq/synapse/issues/16789))
+* Bump authlib from 1.2.1 to 1.3.0. ([\#16801](https://github.com/element-hq/synapse/issues/16801))
+* Bump dawidd6/action-download-artifact from 2.28.0 to 3.0.0. ([\#16794](https://github.com/element-hq/synapse/issues/16794))
+* Bump immutabledict from 4.0.0 to 4.1.0. ([\#16812](https://github.com/element-hq/synapse/issues/16812))
+* Bump isort from 5.13.1 to 5.13.2. ([\#16835](https://github.com/element-hq/synapse/issues/16835))
+* Bump lxml from 4.9.3 to 5.1.0. ([\#16813](https://github.com/element-hq/synapse/issues/16813))
+* Bump pillow from 10.1.0 to 10.2.0. ([\#16802](https://github.com/element-hq/synapse/issues/16802))
+* Bump pydantic from 2.5.2 to 2.5.3. ([\#16836](https://github.com/element-hq/synapse/issues/16836))
+* Bump pyo3 from 0.20.0 to 0.20.2. ([\#16791](https://github.com/element-hq/synapse/issues/16791))
+* Bump regex from 1.9.6 to 1.10.3. ([\#16837](https://github.com/element-hq/synapse/issues/16837))
+* Bump ruff from 0.1.13 to 0.1.14. ([\#16838](https://github.com/element-hq/synapse/issues/16838))
+* Bump ruff from 0.1.7 to 0.1.13. ([\#16814](https://github.com/element-hq/synapse/issues/16814))
+* Bump sentry-sdk from 1.35.0 to 1.39.1. ([\#16799](https://github.com/element-hq/synapse/issues/16799))
+* Bump serde_json from 1.0.108 to 1.0.111. ([\#16792](https://github.com/element-hq/synapse/issues/16792))
+* Bump service-identity from 23.1.0 to 24.1.0. ([\#16816](https://github.com/element-hq/synapse/issues/16816))
+* Bump types-commonmark from 0.9.2.4 to 0.9.2.20240106. ([\#16797](https://github.com/element-hq/synapse/issues/16797))
+* Bump types-jsonschema from 4.20.0.0 to 4.20.0.20240105. ([\#16800](https://github.com/element-hq/synapse/issues/16800))
+* Bump types-jsonschema from 4.20.0.20240105 to 4.21.0.20240118. ([\#16834](https://github.com/element-hq/synapse/issues/16834))
+* Bump types-netaddr from 0.9.0.1 to 0.10.0.20240106. ([\#16839](https://github.com/element-hq/synapse/issues/16839))
+* Bump typing-extensions from 4.8.0 to 4.9.0. ([\#16815](https://github.com/element-hq/synapse/issues/16815))
+
+
 # Synapse 1.99.0 (2024-01-16)
 
 Synapse 1.99.0 is the first Synapse release under an AGPLv3.0 licence (with CLA to enable Element to sell AGPL

@@ -1,1 +1,0 @@
-Ensure CI fails when linting fails to make sure auto-merge does the correct thing.
