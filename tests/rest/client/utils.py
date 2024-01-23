@@ -1,6 +1,9 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
+# Copyright 2019-2021 The Matrix.org Foundation C.I.C.
+# Copyright 2017 Vector Creations Ltd
+# Copyright 2014-2016 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
@@ -364,6 +367,7 @@ class RestHelper:
         tok: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = None,
+        type: str = "m.room.message",
     ) -> JsonDict:
         if body is None:
             body = "body_text_here"
@@ -372,7 +376,7 @@ class RestHelper:
 
         return self.send_event(
             room_id,
-            "m.room.message",
+            type,
             content,
             txn_id,
             tok,

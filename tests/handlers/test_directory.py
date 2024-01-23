@@ -1,6 +1,8 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
+# Copyright 2021 Matrix.org Foundation C.I.C.
+# Copyright 2014-2016 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
@@ -496,19 +498,27 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
         self.denied_user_id = self.register_user("denied", "pass")
         self.denied_access_token = self.login("denied", "pass")
 
+        self.store = hs.get_datastores().main
+
     def test_denied_without_publication_permission(self) -> None:
         """
-        Try to create a room, register an alias for it, and publish it,
+        Try to create a room, register a valid alias for it, and publish it,
         as a user without permission to publish rooms.
-        (This is used as both a standalone test & as a helper function.)
+        The room should be created but not published.
         """
-        self.helper.create_room_as(
+        room_id = self.helper.create_room_as(
             self.denied_user_id,
             tok=self.denied_access_token,
             extra_content=self.data,
             is_public=True,
-            expect_code=403,
+            expect_code=200,
         )
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
+
+        # room creation completes but room is not published to directory
+        self.assertEqual(is_public, False)
 
     def test_allowed_when_creating_private_room(self) -> None:
         """
@@ -526,9 +536,8 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
 
     def test_allowed_with_publication_permission(self) -> None:
         """
-        Try to create a room, register an alias for it, and publish it,
+        Try to create a room, register a valid alias for it, and publish it,
         as a user WITH permission to publish rooms.
-        (This is used as both a standalone test & as a helper function.)
         """
         self.helper.create_room_as(
             self.allowed_user_id,
@@ -540,38 +549,26 @@ class TestCreatePublishedRoomACL(unittest.HomeserverTestCase):
 
     def test_denied_publication_with_invalid_alias(self) -> None:
         """
-        Try to create a room, register an alias for it, and publish it,
+        Try to create a room, register an invalid alias for it, and publish it,
         as a user WITH permission to publish rooms.
         """
-        self.helper.create_room_as(
+        room_id = self.helper.create_room_as(
             self.allowed_user_id,
             tok=self.allowed_access_token,
             extra_content={"room_alias_name": "foo"},
             is_public=True,
-            expect_code=403,
+            expect_code=200,
         )
 
-    def test_can_create_as_private_room_after_rejection(self) -> None:
-        """
-        After failing to publish a room with an alias as a user without publish permission,
-        retry as the same user, but without publishing the room.
+        # the room is created with the requested alias, but the room is not published
+        res = self.get_success(self.store.get_room(room_id))
+        assert res is not None
+        is_public, _ = res
 
-        This should pass, but used to fail because the alias was registered by the first
-        request, even though the room creation was denied.
-        """
-        self.test_denied_without_publication_permission()
-        self.test_allowed_when_creating_private_room()
+        self.assertFalse(is_public)
 
-    def test_can_create_with_permission_after_rejection(self) -> None:
-        """
-        After failing to publish a room with an alias as a user without publish permission,
-        retry as someone with permission, using the same alias.
-
-        This also used to fail because of the alias having been registered by the first
-        request, leaving it unavailable for any other user's new rooms.
-        """
-        self.test_denied_without_publication_permission()
-        self.test_allowed_with_publication_permission()
+        aliases = self.get_success(self.store.get_aliases_for_room(room_id))
+        self.assertEqual(aliases[0], "#foo:test")
 
 
 class TestRoomListSearchDisabled(unittest.HomeserverTestCase):

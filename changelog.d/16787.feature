@@ -1,1 +1,0 @@
-Advertise experimental support for [MSC4028](https://github.com/matrix-org/matrix-spec-proposals/pull/4028) through `/_matrix/clients/versions` if enabled. Contributed by @hanadi92.

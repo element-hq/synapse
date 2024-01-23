@@ -1,6 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
+# Copyright 2016-2021 The Matrix.org Foundation C.I.C.
 # Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
@@ -918,10 +919,8 @@ class RoomCreationHandler:
             if not self.config.roomdirectory.is_publishing_room_allowed(
                 user_id, room_id, room_aliases
             ):
-                # Let's just return a generic message, as there may be all sorts of
-                # reasons why we said no. TODO: Allow configurable error messages
-                # per alias creation rule?
-                raise SynapseError(403, "Not allowed to publish room")
+                # allow room creation to continue but do not publish room
+                await self.store.set_room_is_public(room_id, False)
 
         directory_handler = self.hs.get_directory_handler()
         if room_alias:

@@ -1,6 +1,9 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
+# Copyright 2019 The Matrix.org Foundation C.I.C.
+# Copyright 2017 Vector Creations Ltd
+# Copyright 2014-2016 OpenMarket Ltd
 # Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
@@ -2153,6 +2156,33 @@ class RoomMessageListTestCase(RoomBase):
 
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
+
+
+class RoomMessageFilterTestCase(RoomBase):
+    """Tests /rooms/$room_id/messages REST events."""
+
+    user_id = "@sid1:red"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = self.helper.create_room_as(self.user_id)
+
+    def test_room_message_filter_wildcard(self) -> None:
+        # Send a first message in the room, which will be removed by the purge.
+        self.helper.send(self.room_id, "message 1", type="f.message.1")
+        self.helper.send(self.room_id, "message 1", type="f.message.2")
+        self.helper.send(self.room_id, "not returned in filter")
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/messages?access_token=x&dir=b&filter=%s"
+            % (
+                self.room_id,
+                json.dumps({"types": ["f.message.*"]}),
+            ),
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        chunk = channel.json_body["chunk"]
+        self.assertEqual(len(chunk), 2, [event["content"] for event in chunk])
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):
