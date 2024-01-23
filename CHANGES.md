@@ -28,7 +28,7 @@
 - Reject OIDC config when `client_secret` isn't specified, but the auth method requires one. ([\#16806](https://github.com/element-hq/synapse/issues/16806))
 - Allow room creation but not publishing to continue if room publication rules are violated when creating
   a new room. ([\#16811](https://github.com/element-hq/synapse/issues/16811))
-- Bump minimum supported Rust version to 1.61.0. ([\#16818](https://github.com/element-hq/synapse/issues/16818))
+- Bump minimum supported Rust version to 1.65.0. ([\#16818](https://github.com/element-hq/synapse/issues/16818))
 - Fixup copyright lines in file headers after the licensing change. ([\#16820](https://github.com/element-hq/synapse/issues/16820))
 - Add a `--generate-only` option to the internal configuration/launch script for Complement. ([\#16828](https://github.com/element-hq/synapse/issues/16828))
 - Preparatory work for tweaking performance of auth chain lookups. ([\#16833](https://github.com/element-hq/synapse/issues/16833))
