@@ -1,4 +1,13 @@
+# Synapse 1.100.0rc2 (2024-01-24)
+
+### Internal Changes
+
+- Downgrade the `download-artifact` and `upload-artifact` actions to v3 due to breaking changes. ([\#16847](https://github.com/element-hq/synapse/issues/16847))
+
+
 # Synapse 1.100.0rc1 (2024-01-23)
+
+*This version was never released to PyPI or the Debian repository due to failures in the automatic part of the release process.*
 
 ### Features
 
