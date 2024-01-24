@@ -1,4 +1,24 @@
+# Synapse 1.100.0rc3 (2024-01-24)
+
+### Bugfixes
+
+- Fix database performance regression due to changing Postgres table statistics. Introduced in v1.100.0rc1. ([\#16849](https://github.com/element-hq/synapse/issues/16849))
+
+
+
+
+# Synapse 1.100.0rc2 (2024-01-24)
+
+This version is the same as 1.100.0rc1 but with fixes to the release process.
+
+### Internal Changes
+
+- Downgrade the `download-artifact` and `upload-artifact` actions to v3 due to breaking changes. ([\#16847](https://github.com/element-hq/synapse/issues/16847))
+
+
 # Synapse 1.100.0rc1 (2024-01-23)
+
+*This version was never released to PyPI or the Debian repository due to failures in the automatic part of the release process.*
 
 ### Features
 
