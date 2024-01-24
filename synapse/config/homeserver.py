@@ -31,6 +31,7 @@ from .consent import ConsentConfig
 from .database import DatabaseConfig
 from .emailconfig import EmailConfig
 from .experimental import ExperimentalConfig
+from .extensions import ExtensionsConfig
 from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
@@ -105,4 +106,5 @@ class HomeServerConfig(RootConfig):
         RedisConfig,
         ExperimentalConfig,
         BackgroundUpdateConfig,
+        ExtensionsConfig,
     ]

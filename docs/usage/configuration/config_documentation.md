@@ -4541,3 +4541,34 @@ background_updates:
     min_batch_size: 10
     default_batch_size: 50
 ```
+
+
+---
+## Extension features
+Configuration for extension features for Synapse
+
+---
+### `extension_federation_whitelist_endpoint`
+
+Enables an endpoint for fetching the federation whitelist config.
+
+The request path is `/_synapse/client/config/federation_whitelist`, and the
+response format is:
+
+```json
+{
+    "whitelist_enabled": true,  // Whether there is a federation whitelist
+    "whitelist": [  // Which hosts are allowed by the whitelist
+        "example.com"
+    ]
+}
+```
+
+If `whitelist_enabled` is `false` then the server can federate with all others.
+
+The endpoint requires authentication.
+
+Example configuration:
+```yaml
+extension_federation_whitelist_endpoint: true
+```

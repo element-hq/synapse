@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Mapping
 
 from twisted.web.resource import Resource
 
+from synapse.rest.synapse.client.federation_whitelist import FederationWhitelistResource
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource
 from synapse.rest.synapse.client.pick_idp import PickIdpResource
 from synapse.rest.synapse.client.pick_username import pick_username_resource
@@ -75,6 +76,9 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         # This is also mounted under '/_matrix' for backwards-compatibility.
         # To be removed in Synapse v1.32.0.
         resources["/_matrix/saml2"] = res
+
+    if hs.config.extensions.federation_whitelist_endpoint:
+        resources[FederationWhitelistResource.PATH] = FederationWhitelistResource(hs)
 
     return resources
 
