@@ -1,5 +1,7 @@
 # Synapse 1.100.0rc2 (2024-01-24)
 
+This version is the same as 1.100.0rc1 but with fixes to the release process.
+
 ### Internal Changes
 
 - Downgrade the `download-artifact` and `upload-artifact` actions to v3 due to breaking changes. ([\#16847](https://github.com/element-hq/synapse/issues/16847))
