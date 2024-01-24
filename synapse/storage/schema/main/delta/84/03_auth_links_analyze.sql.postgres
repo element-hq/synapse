@@ -11,10 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Force the statistics for these tables to show that the number of distinct
--- chain IDs are proportional to the total rows, as postgres has trouble
--- figuring that out by itself.
-ALTER TABLE event_auth_chain_links ALTER origin_chain_id SET (n_distinct = -0.5);
-ALTER TABLE event_auth_chain_links ALTER target_chain_id SET (n_distinct = -0.5);
-
--- We should have done an `ANALYZE event_auth_chain_links` here, but we forgot.
+-- We need to do an ANALYZE after `01_auth_links_stats.sql.postgres`, where we
+-- fiddled with the stats.
+ANALYZE event_auth_chain_links;
