@@ -12,7 +12,7 @@ This is the main reason people have a poor matrix experience on resource constra
 
 While synapse does have some performance issues with presence [#3971](https://github.com/matrix-org/synapse/issues/3971), the fundamental problem is that this is an easy feature to implement for a centralised service at nearly no overhead, but federation makes it combinatorial [#8055](https://github.com/matrix-org/synapse/issues/8055). There is also a client-side config option which disables the UI and idle tracking [enable_presence_by_hs_url] to blacklist the largest instances but I didn't notice much difference, so I recommend disabling the feature entirely at the server level as well.
 
-[enable_presence_by_hs_url]: https://github.com/vector-im/element-web/blob/v1.7.8/config.sample.json#L45
+[enable_presence_by_hs_url]: https://github.com/element-hq/element-web/blob/v1.7.8/config.sample.json#L45
 
 ### Joining
 
