@@ -9,6 +9,7 @@ on:
       - 'release-v*'
       # stable docs
       - master
+  pull_request:
 
   workflow_dispatch:
 
@@ -79,12 +80,12 @@ jobs:
           cp book/welcome_and_overview.html book/index.html
 
       # Deploy to the target directory.
-      - name: Deploy to gh pages
-        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # v3.9.3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book
-          destination_dir: ./${{ needs.pre.outputs.branch-version }}
+#      - name: Deploy to gh pages
+#        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # v3.9.3
+#        with:
+#          github_token: ${{ secrets.GITHUB_TOKEN }}
+#          publish_dir: ./book
+#          destination_dir: ./${{ needs.pre.outputs.branch-version }}
 
 ################################################################################
   pages-devdocs:
@@ -109,9 +110,9 @@ jobs:
           poetry run make html
 
       # Deploy to the target directory.
-      - name: Deploy to gh pages
-        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # v3.9.3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dev-docs/_build/html
-          destination_dir: ./dev-docs/${{ needs.pre.outputs.branch-version }}
+#      - name: Deploy to gh pages
+#        uses: peaceiris/actions-gh-pages@373f7f263a76c20808c831209c920827a82a2847 # v3.9.3
+#        with:
+#          github_token: ${{ secrets.GITHUB_TOKEN }}
+#          publish_dir: ./dev-docs/_build/html
+#          destination_dir: ./dev-docs/${{ needs.pre.outputs.branch-version }}
