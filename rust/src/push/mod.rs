@@ -361,6 +361,8 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
+    #[serde(rename = "org.matrix.msc3767.time_and_day")]
+    TimeAndDay(TimeAndDayCondition),
 }
 
 impl IntoPy<PyObject> for Condition {
@@ -436,6 +438,38 @@ pub struct RelatedEventMatchTypeCondition {
     pub rel_type: Cow<'static, str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_fallbacks: Option<bool>,
+}
+
+/// The body of [`KnownCondition::TimeAndDay`]
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeAndDayCondition {
+    /// Timezone to use for time comparison
+    pub timezone: Option<Cow<'static, str>>,
+    /// Time periods in which the rule should match
+    pub intervals: Vec<TimeAndDayIntervals>,
+}
+
+///
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeAndDayIntervals {
+    /// Tuple of hh::mm representing start and end times of the day
+    pub time_of_day: TimeInterval,
+    /// 0 = Sunday, 1 = Monday, ..., 7 = Sunday
+    pub day_of_week: Vec<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeInterval {
+    start_time: Cow<'static, str>,
+    end_time: Cow<'static, str>,
+}
+
+impl TimeInterval {
+    /// Checks whether the provided time is within the interval
+    pub fn contains(&self, time: String) -> bool {
+        // Since MSC specifies ISO 8601 which uses 24h, string comparison is valid.
+        time >= self.start_time.parse().unwrap() && time <= self.end_time.parse().unwrap()
+    }
 }
 
 /// The collection of push rules for a user.
