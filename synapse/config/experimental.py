@@ -430,3 +430,8 @@ class ExperimentalConfig(Config):
         self.msc4069_profile_inhibit_propagation = experimental.get(
             "msc4069_profile_inhibit_propagation", False
         )
+
+        # MSC3767: time based notification filtering
+        self.msc3767_time_and_day = experimental.get(
+            "org.matrix.msc3767.time_and_day", False
+        )
