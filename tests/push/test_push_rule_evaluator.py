@@ -807,10 +807,9 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
         # for testing, make whole day in do not disturb
         condition = {
             "kind": "org.matrix.msc3767.time_and_day",
-            "timezone": "",
+            "timezone": None,
             "intervals": [
                 {
-                    "time_of_day": ["00:01", "23:59"],
                     "day_of_week": [0, 1, 2, 3, 4, 5, 6],
                 },
             ],

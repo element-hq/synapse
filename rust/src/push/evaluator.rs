@@ -23,14 +23,14 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Error};
-use chrono::Datelike;
+use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use log::warn;
 use pyo3::prelude::*;
 use regex::Regex;
 
 use super::{
-    utils::{get_glob_matcher, get_localpart_from_id, GlobMatchType},
+    utils::{day_and_time_with_timezone, get_glob_matcher, get_localpart_from_id, GlobMatchType},
     Action, Condition, EventPropertyIsCondition, FilteredPushRules, KnownCondition,
     SimpleJsonValue, TimeAndDayIntervals,
 };
@@ -395,7 +395,7 @@ impl PushRuleEvaluator {
                 if !self.msc3767_time_and_day {
                     false
                 } else {
-                    self.match_time_and_day(time_and_day.timezone.clone(), &time_and_day.intervals)?
+                    self.match_time_and_day(time_and_day.timezone, &time_and_day.intervals)?
                 }
             }
         };
@@ -522,26 +522,22 @@ impl PushRuleEvaluator {
         Ok(matches)
     }
 
-    ///
+    /// Match the current server time - adjusted with user timezone or default UTC -
+    /// against the intervals using Any/OR.
     fn match_time_and_day(
         &self,
-        _timezone: Option<Cow<str>>,
+        timezone: Option<Tz>,
         intervals: &[TimeAndDayIntervals],
     ) -> Result<bool, Error> {
-        // Temp Notes from spec:
-        // The timezone to use for time comparison. This format allows for automatic DST handling.
-        // Intervals representing time periods in which the rule should match. Evaluated with an OR condition.
-        //
-        // time_of_day condition is met when the server's timezone-adjusted time is between the values of the tuple,
-        // or when no time_of_day is set on the interval. Values are inclusive.
-        // day_of_week condition is met when the server's timezone-adjusted day is included in the array.
-        // next step -> consider timezone if given
-        let now = chrono::Utc::now();
-        let today = now.weekday().num_days_from_sunday();
-        let current_time = now.time().format("%H:%M").to_string();
+        // Evaluate today and current time with timezone
+        let (today, current_time) = day_and_time_with_timezone(timezone);
+
         let matches = intervals.iter().any(|interval| {
             interval.day_of_week.contains(&today)
-                && interval.time_of_day.contains(current_time.to_string())
+                && (interval.time_of_day.is_none()
+                    || interval.time_of_day.as_ref().map_or(true, |time_interval| {
+                        time_interval.contains(current_time.to_string()) || time_interval.is_empty()
+                    }))
         });
 
         Ok(matches)
@@ -632,7 +628,7 @@ fn test_requires_room_version_supports_condition() {
 
 #[test]
 fn test_time_and_day_condition() {
-    use crate::push::{PushRule, PushRules, TimeAndDayCondition, TimeInterval};
+    use crate::push::{PushRule, PushRules, TimeAndDayCondition};
 
     let mut flattened_keys = BTreeMap::new();
     flattened_keys.insert(
@@ -669,16 +665,14 @@ fn test_time_and_day_condition() {
             TimeAndDayCondition {
                 timezone: None,
                 intervals: vec![TimeAndDayIntervals {
-                    // for testing, make all days as dnd
-                    time_of_day: TimeInterval {
-                        start_time: Cow::from("00:01"),
-                        end_time: Cow::from("23:59"),
-                    },
+                    // for testing, to avoid flakiness, make all days as dnd
+                    time_of_day: None,
                     day_of_week: vec![0, 1, 2, 3, 4, 5, 6],
                 }],
             },
         ))]),
-        actions: Cow::from(vec![Action::DontNotify]),
+        // for testing, make this notify. Since DoNotNotify is filtered out.
+        actions: Cow::from(vec![Action::Notify]),
         default: true,
         default_enabled: true,
     };
@@ -689,6 +683,6 @@ fn test_time_and_day_condition() {
         None,
     );
 
-    // dnd time, dont_notify
-    assert_eq!(result.len(), 0);
+    // dnd time, we made it Notify
+    assert_eq!(result.len(), 1);
 }
