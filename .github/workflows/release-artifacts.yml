@@ -194,7 +194,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all workflow run artifacts
-        uses: actions/download-artifact@v3 # Don't upgrade to v4, it should match upload-artifact
+        uses: actions/download-artifact@v4 # Don't upgrade to v4, it should match upload-artifact
       - name: Build a tarball for the debs
         run: tar -cvJf debs.tar.xz debs
       - name: Attach to release
