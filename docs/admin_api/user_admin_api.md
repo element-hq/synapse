@@ -226,8 +226,10 @@ The following parameters should be set in the URL:
   Defaults to `true` to include guest users. This parameter is not supported when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 - `admins` - Optional flag to filter admins. If `true`, only admins are queried. If `false`, admins are excluded from
   the query. When the flag is absent (the default), **both** admins and non-admins are included in the search results.
-- `deactivated` - string representing a bool - Is optional and if `true` will **include** deactivated users.
-  Defaults to `false` to exclude deactivated users.
+- `deactivated` - Optional flag to filter deactivated users. If `true`, only deactivated users are queried. 
+  If `false`, deactivated users are excluded from the query. When the flag is absent (the default), 
+  **both** active and deactivated users are included in the 
+  search results.
 - `limit` - string representing a positive integer - Is optional but is used for pagination,
   denoting the maximum number of items to return in this call. Defaults to `100`.
 - `from` - string representing a positive integer - Is optional but used for pagination,

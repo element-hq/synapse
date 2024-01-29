@@ -1,0 +1,1 @@
+Query parameter `deactivated` of [List Accounts](https://matrix-org.github.io/synapse/v1.99/admin_api/user_admin_api.html#list-accounts) [admin API](https://matrix-org.github.io/synapse/v1.99/usage/administration/admin_api/index.html) refactored, to filter deactivated users in user queries.
