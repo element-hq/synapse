@@ -1,0 +1,1 @@
+Fixed an issue where device list updates were not sent eagerly to remote servers on room join.
