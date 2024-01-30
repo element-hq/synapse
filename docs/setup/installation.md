@@ -334,8 +334,8 @@ If you're struggling to get icu discovered, and see:
 ```
 despite it being installed and having your `PATH` updated, you can omit this dependency by
 not specifying `--extras all` to `poetry`. If using postgres, you can install Synapse via
-`poetry install  --extras postgres`. ICU is not a hard dependency on getting a working
-installation.
+`poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry`.
+ICU is not a hard dependency on getting a working installation.
 
 On ARM-based Macs you may also need to install libjpeg and libpq:
 ```sh
