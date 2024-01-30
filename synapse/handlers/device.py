@@ -22,6 +22,7 @@
 import logging
 from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Set, Tuple
 
+import synapse.metrics
 from synapse.api import errors
 from synapse.api.constants import EduTypes, EventTypes, Membership
 from synapse.api.errors import (
@@ -33,7 +34,6 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.logging.opentracing import log_kv, set_tag, trace
-import synapse.metrics
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -56,7 +56,7 @@ from synapse.util import stringutils
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.cancellation import cancellable
-from synapse.util.metrics import measure_func, Measure
+from synapse.util.metrics import Measure, measure_func
 from synapse.util.retryutils import (
     NotRetryingDestination,
     filter_destinations_by_retry_limiter,
