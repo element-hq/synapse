@@ -917,12 +917,12 @@ reverse proxy is using.</p>
 <p><strong>NOTE</strong>: You only need one of these.</p>
 <h3 id="nginx"><a class="header" href="#nginx">nginx</a></h3>
 <pre><code class="language-nginx">server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
 
     # For the federation port
-    listen 8448 ssl http2 default_server;
-    listen [::]:8448 ssl http2 default_server;
+    listen 8448 ssl default_server;
+    listen [::]:8448 ssl default_server;
 
     server_name matrix.example.com;
 
@@ -1814,10 +1814,15 @@ v1.61.0.</p>
 <tr><td>v1.83.0 – v1.84.1</td><td>v1.77.0</td></tr>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
-<tr><td>v1.98.0 – v1.99.0</td><td>v1.96.0</td></tr>
+<tr><td>v1.98.0 – v1.100.0</td><td>v1.96.0</td></tr>
 </tbody></table>
-<h1 id="upgrading-to-v1930"><a class="header" href="#upgrading-to-v1930">Upgrading to v1.93.0</a></h1>
+<h1 id="upgrading-to-v11000"><a class="header" href="#upgrading-to-v11000">Upgrading to v1.100.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
+<p>The minimum supported Rust version has been increased from v1.61.0 to v1.65.0.
+Users building from source will need to ensure their <code>rustc</code> version is up to
+date.</p>
+<h1 id="upgrading-to-v1930"><a class="header" href="#upgrading-to-v1930">Upgrading to v1.93.0</a></h1>
+<h2 id="minimum-supported-rust-version-1"><a class="header" href="#minimum-supported-rust-version-1">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.60.0 to v1.61.0.
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
@@ -1857,7 +1862,7 @@ are being removed in this release of Synapse:</p>
 administrators of single-process (monolith) installations don't need to do anything.</p>
 <p>For an illustrative example, please see <a href="upgrade.html#upgrading-to-v1840">Upgrading to v1.84.0</a> below.</p>
 <h1 id="upgrading-to-v1860"><a class="header" href="#upgrading-to-v1860">Upgrading to v1.86.0</a></h1>
-<h2 id="minimum-supported-rust-version-1"><a class="header" href="#minimum-supported-rust-version-1">Minimum supported Rust version</a></h2>
+<h2 id="minimum-supported-rust-version-2"><a class="header" href="#minimum-supported-rust-version-2">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.58.1 to v1.60.0.
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
@@ -7139,6 +7144,8 @@ published to the room list.</p>
 The first rule that matches decides if the request is allowed or denied. If no
 rule matches, the request is denied. In particular, this means that configuring
 an empty list of rules will deny every alias creation request.</p>
+<p>Requests to create a public (public as in published to the room directory) room which violates
+the configured rules will result in the room being created but not published to the room directory.</p>
 <p>Each rule is a YAML object containing four fields, each of which is an optional string:</p>
 <ul>
 <li><code>user_id</code>: a glob pattern that matches against the user publishing the room.</li>
@@ -7675,6 +7682,8 @@ should be the path to this file.</p>
 <p>Note that a default logging configuration (shown below) is created automatically alongside
 the homeserver config when following the <a href="usage/configuration/../../setup/installation.html">installation instructions</a>.
 It should be named <code>&lt;SERVERNAME&gt;.log.config</code> by default.</p>
+<p>Hint: If you're looking for a guide on what each of the fields in the &quot;Processed request&quot; log lines mean,
+see <a href="usage/configuration/../administration/request_log.html">Request log format</a>.</p>
 <pre><code class="language-yaml"># Log configuration for Synapse.
 #
 # This is a YAML file containing a standard Python logging configuration
@@ -16489,8 +16498,8 @@ cp docs/sample_log_config.yaml log_config.yaml
 <ul>
 <li>Set a <code>server_name</code></li>
 <li>Adjusting paths to be correct for your system like the <code>log_config</code> to point to the log config you just copied</li>
-<li>Using a <a href="https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#database">PostgreSQL database instead of SQLite</a></li>
-<li>Adding a <a href="https://vector-im.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret"><code>registration_shared_secret</code></a> so you can use <a href="https://vector-im.github.io/synapse/latest/setup/installation.html#registering-a-user"><code>register_new_matrix_user</code> command</a>.</li>
+<li>Using a <a href="https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#database">PostgreSQL database instead of SQLite</a></li>
+<li>Adding a <a href="https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#registration_shared_secret"><code>registration_shared_secret</code></a> so you can use <a href="https://element-hq.github.io/synapse/latest/setup/installation.html#registering-a-user"><code>register_new_matrix_user</code> command</a>.</li>
 </ul>
 <p>And then run Synapse with the following command:</p>
 <pre><code class="language-sh">poetry run python -m synapse.app.homeserver -c homeserver.yaml
@@ -16508,7 +16517,7 @@ to work on.</p>
 <h1 id="7-turn-coffee-into-code-and-documentation"><a class="header" href="#7-turn-coffee-into-code-and-documentation">7. Turn coffee into code and documentation!</a></h1>
 <p>There is a growing amount of documentation located in the
 <a href="https://github.com/element-hq/synapse/tree/develop/docs"><code>docs</code></a>
-directory, with a rendered version <a href="https://vector-im.github.io/synapse">available online</a>.
+directory, with a rendered version <a href="https://element-hq.github.io/synapse">available online</a>.
 This documentation is intended primarily for sysadmins running their
 own Synapse instance, as well as developers interacting externally with
 Synapse.
