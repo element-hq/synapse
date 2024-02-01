@@ -54,7 +54,7 @@ function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
 
-            fetch("https://api.github.com/repos/matrix-org/synapse/git/trees/gh-pages", {
+            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages", {
                 cache: "force-cache",
             }).then(res => 
                 res.json()
