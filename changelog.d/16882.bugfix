@@ -1,0 +1,1 @@
+Fixed returning all rooms in the admin API when asking for federated rooms by destination.
