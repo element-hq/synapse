@@ -600,6 +600,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
                     start=start,
                     limit=limit,
                     retcols=("room_id", "stream_ordering"),
+                    keyvalues={"destination": destination},
                     order_direction=order,
                 ),
             )
