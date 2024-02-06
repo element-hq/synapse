@@ -256,12 +256,11 @@ def calc_description_and_urls(open_graph_response: JsonDict, html_body: str) -> 
     parser = etree.HTMLParser(recover=True, encoding="utf-8")
 
     # Attempt to parse the body. If this fails, log and return no metadata.
-    # TODO Develop of lxml-stubs has this correct.
-    tree = etree.fromstring(html_body, parser)  # type: ignore[arg-type]
+    tree = etree.fromstring(html_body, parser)
 
     # The data was successfully parsed, but no tree was found.
     if tree is None:
-        return  # type: ignore[unreachable]
+        return
 
     # Attempt to find interesting URLs (images, videos, embeds).
     if "og:image" not in open_graph_response:
