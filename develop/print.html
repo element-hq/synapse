@@ -451,6 +451,15 @@ sudo dnf groupinstall &quot;Development Tools&quot;
 <p>Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) for them.</p>
 <p>You may need to install icu, and make the icu binaries and libraries accessible.
 Please follow <a href="https://pypi.org/project/PyICU/">the official instructions of PyICU</a> to do so.</p>
+<p>If you're struggling to get icu discovered, and see:</p>
+<pre><code>  RuntimeError:
+  Please install pkg-config on your system or set the ICU_VERSION environment
+  variable to the version of ICU you have installed.
+</code></pre>
+<p>despite it being installed and having your <code>PATH</code> updated, you can omit this dependency by
+not specifying <code>--extras all</code> to <code>poetry</code>. If using postgres, you can install Synapse via
+<code>poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry</code>.
+ICU is not a hard dependency on getting a working installation.</p>
 <p>On ARM-based Macs you may also need to install libjpeg and libpq:</p>
 <pre><code class="language-sh"> brew install jpeg libpq
 </code></pre>
