@@ -1445,8 +1445,8 @@ basic installation and got it working.</p>
 <p>NB: If your TLS certificate was provided by Let's Encrypt, TLS/DTLS will
 not work with any Matrix client that uses Chromium's WebRTC library. This
 currently includes Element Android &amp; iOS; for more details, see their
-<a href="https://github.com/vector-im/element-android/issues/1533">respective</a>
-<a href="https://github.com/vector-im/element-ios/issues/2712">issues</a> as well as the underlying
+<a href="https://github.com/element-hq/element-android/issues/1533">respective</a>
+<a href="https://github.com/element-hq/element-ios/issues/2712">issues</a> as well as the underlying
 <a href="https://bugs.chromium.org/p/webrtc/issues/detail?id=11710">WebRTC issue</a>.
 Consider using a ZeroSSL certificate for your TURN server as a working alternative.</p>
 </li>
@@ -1600,8 +1600,8 @@ basic installation and got it working.</p>
 <p>NB: If your TLS certificate was provided by Let's Encrypt, TLS/DTLS will
 not work with any Matrix client that uses Chromium's WebRTC library. This
 currently includes Element Android &amp; iOS; for more details, see their
-<a href="https://github.com/vector-im/element-android/issues/1533">respective</a>
-<a href="https://github.com/vector-im/element-ios/issues/2712">issues</a> as well as the underlying
+<a href="https://github.com/element-hq/element-android/issues/1533">respective</a>
+<a href="https://github.com/element-hq/element-ios/issues/2712">issues</a> as well as the underlying
 <a href="https://bugs.chromium.org/p/webrtc/issues/detail?id=11710">WebRTC issue</a>.
 Consider using a ZeroSSL certificate for your TURN server as a working alternative.</p>
 </li>
@@ -11785,7 +11785,7 @@ worker application type.</p>
 <h4 id="push-notifications"><a class="header" href="#push-notifications">Push Notifications</a></h4>
 <p>You can designate generic worker to sending push notifications to
 a <a href="https://spec.matrix.org/v1.5/push-gateway-api/">push gateway</a> such as
-<a href="https://github.com/vector-im/sygnal">sygnal</a> and email.</p>
+<a href="https://github.com/matrix-org/sygnal">sygnal</a> and email.</p>
 <p>This will stop the main process sending push notifications.</p>
 <p>The workers responsible for sending push notifications can be defined using the
 <a href="usage/configuration/config_documentation.html#pusher_instances"><code>pusher_instances</code></a>
@@ -16649,7 +16649,7 @@ configuration:</p>
 <li>To run with Postgres, supply the <code>-e POSTGRES=1 -e MULTI_POSTGRES=1</code> environment flags.</li>
 <li>To run with Synapse in worker mode, supply the <code>-e WORKERS=1 -e REDIS=1</code> environment flags (in addition to the Postgres flags).</li>
 </ul>
-<p>For more details about other configurations, see the <a href="https://github.com/vector-im/sytest/blob/develop/docker/README.md">Docker-specific documentation in the SyTest repo</a>.</p>
+<p>For more details about other configurations, see the <a href="https://github.com/matrix-org/sytest/blob/develop/docker/README.md">Docker-specific documentation in the SyTest repo</a>.</p>
 <h2 id="run-the-integration-tests-complement"><a class="header" href="#run-the-integration-tests-complement">Run the integration tests (<a href="https://github.com/matrix-org/complement">Complement</a>).</a></h2>
 <p><a href="https://github.com/matrix-org/complement">Complement</a> is a suite of black box tests that can be run on any homeserver implementation. It can also be thought of as end-to-end (e2e) tests.</p>
 <p>It's often nice to develop on Synapse and write Complement tests at the same time.
@@ -19610,7 +19610,7 @@ and is consistent with the <code>.deb</code> packages released by Matrix.org.</p
 <h3 id="presence-1"><a class="header" href="#presence-1">Presence</a></h3>
 <p>This is the main reason people have a poor matrix experience on resource constrained homeservers. Element web will frequently be saying the server is offline while the python process will be pegged at 100% cpu. This feature is used to tell when other users are active (have a client app in the foreground) and therefore more likely to respond, but requires a lot of network activity to maintain even when nobody is talking in a room.</p>
 <p><img src="https://user-images.githubusercontent.com/71895/94848963-a47a3580-041c-11eb-8b6e-acb772b4259e.png" alt="Screenshot_2020-10-01_19-29-46" /></p>
-<p>While synapse does have some performance issues with presence <a href="https://github.com/matrix-org/synapse/issues/3971">#3971</a>, the fundamental problem is that this is an easy feature to implement for a centralised service at nearly no overhead, but federation makes it combinatorial <a href="https://github.com/matrix-org/synapse/issues/8055">#8055</a>. There is also a client-side config option which disables the UI and idle tracking <a href="https://github.com/vector-im/element-web/blob/v1.7.8/config.sample.json#L45">enable_presence_by_hs_url</a> to blacklist the largest instances but I didn't notice much difference, so I recommend disabling the feature entirely at the server level as well.</p>
+<p>While synapse does have some performance issues with presence <a href="https://github.com/matrix-org/synapse/issues/3971">#3971</a>, the fundamental problem is that this is an easy feature to implement for a centralised service at nearly no overhead, but federation makes it combinatorial <a href="https://github.com/matrix-org/synapse/issues/8055">#8055</a>. There is also a client-side config option which disables the UI and idle tracking <a href="https://github.com/element-hq/element-web/blob/v1.7.8/config.sample.json#L45">enable_presence_by_hs_url</a> to blacklist the largest instances but I didn't notice much difference, so I recommend disabling the feature entirely at the server level as well.</p>
 <h3 id="joining"><a class="header" href="#joining">Joining</a></h3>
 <p>Joining a &quot;large&quot;, federated room will initially fail with the below message in Element web, but waiting a while (10-60mins) and trying again will succeed without any issue. What counts as &quot;large&quot; is not message history, user count, connections to homeservers or even a simple count of the state events, it is instead how long the state resolution algorithm takes. However, each of those numbers are reasonable proxies, so we can use them as estimates since user count is one of the few things you see before joining.</p>
 <p><img src="https://user-images.githubusercontent.com/71895/94945781-18771500-04d3-11eb-8419-83c2da73a341.png" alt="Screenshot_2020-10-02_17-15-06" /></p>
