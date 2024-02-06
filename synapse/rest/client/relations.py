@@ -71,7 +71,7 @@ class RelationPaginationServlet(RestServlet):
             self._store, request, default_limit=5, default_dir=Direction.BACKWARDS
         )
         if self._support_recurse:
-            recurse = parse_boolean(
+            recurse = parse_boolean(request, "recurse", default=False) or parse_boolean(
                 request, "org.matrix.msc3981.recurse", default=False
             )
         else:
