@@ -844,9 +844,7 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
 
         results = {}
 
-        async def get_keys(key_to_fetch_item: _FetchKeyRequest) -> None:
-            server_name = key_to_fetch_item.server_name
-
+        async def get_keys(server_name: str) -> None:
             try:
                 keys = await self.get_server_verify_keys_v2_direct(server_name)
                 results[server_name] = keys
