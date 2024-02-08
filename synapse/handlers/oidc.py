@@ -442,6 +442,8 @@ class OidcProvider:
         # optional brand identifier for this auth provider
         self.idp_brand = provider.idp_brand
 
+        self.extra_grant_values = provider.extra_grant_values
+
         self._sso_handler = hs.get_sso_handler()
         self._device_handler = hs.get_device_handler()
 
@@ -971,8 +973,8 @@ class OidcProvider:
 
         metadata = await self.load_metadata()
 
+        extra_grant_values = dict(self.extra_grant_values)
         # Automatically enable PKCE if it is supported.
-        extra_grant_values = {}
         if metadata.get("code_challenge_methods_supported"):
             code_verifier = generate_token(48)
 
