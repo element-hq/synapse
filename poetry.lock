@@ -1966,20 +1966,19 @@ typing-extensions = ">=4.6.0,<4.7.0 || >4.7.0"
 
 [[package]]
 name = "pygithub"
-version = "2.1.1"
+version = "2.2.0"
 description = "Use the full Github API v3"
 optional = false
 python-versions = ">=3.7"
 files = [
-    {file = "PyGithub-2.1.1-py3-none-any.whl", hash = "sha256:4b528d5d6f35e991ea5fd3f942f58748f24938805cb7fcf24486546637917337"},
-    {file = "PyGithub-2.1.1.tar.gz", hash = "sha256:ecf12c2809c44147bce63b047b3d2e9dac8a41b63e90fcb263c703f64936b97c"},
+    {file = "PyGithub-2.2.0-py3-none-any.whl", hash = "sha256:41042ea53e4c372219db708c38d2ca1fd4fadab75475bac27d89d339596cfad1"},
+    {file = "PyGithub-2.2.0.tar.gz", hash = "sha256:e39be7c4dc39418bdd6e3ecab5931c636170b8b21b4d26f9ecf7e6102a3b51c3"},
 ]
 
 [package.dependencies]
 Deprecated = "*"
 pyjwt = {version = ">=2.4.0", extras = ["crypto"]}
 pynacl = ">=1.4.0"
-python-dateutil = "*"
 requests = ">=2.14.0"
 typing-extensions = ">=4.0.0"
 urllib3 = ">=1.26.0"
@@ -2126,7 +2125,7 @@ s2repoze = ["paste", "repoze.who", "zope.interface"]
 name = "python-dateutil"
 version = "2.8.2"
 description = "Extensions to the standard Python datetime module"
-optional = false
+optional = true
 python-versions = "!=3.0.*,!=3.1.*,!=3.2.*,>=2.7"
 files = [
     {file = "python-dateutil-2.8.2.tar.gz", hash = "sha256:0123cacc1627ae19ddf3c27a5de5bd67ee4586fbdd6440d9748f8abb483d3e86"},
