@@ -1757,8 +1757,14 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for event in sorted_auth_events:
+        for i, event in enumerate(sorted_auth_events):
             await prep(event)
+
+            # The above function is typically not async, and so won't yield to
+            # the reactor. For large rooms lets yield to the reactor
+            # occasionally to ensure we don't block other work.
+            if (i + 1) % 1000 == 0:
+                await self._clock.sleep(0)
 
         await self.persist_events_and_notify(
             room_id,
