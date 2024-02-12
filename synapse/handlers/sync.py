@@ -597,7 +597,6 @@ class SyncHandler:
                     recents,
                     always_include_ids=current_state_ids,
                 )
-
                 log_kv({"recents_after_visibility_filtering": len(recents)})
             else:
                 recents = []
