@@ -41,6 +41,7 @@ from synapse.api.constants import (
     AccountDataTypes,
     EventContentFields,
     EventTypes,
+    JoinRules,
     Membership,
 )
 from synapse.api.filtering import FilterCollection
@@ -596,6 +597,7 @@ class SyncHandler:
                     recents,
                     always_include_ids=current_state_ids,
                 )
+
                 log_kv({"recents_after_visibility_filtering": len(recents)})
             else:
                 recents = []
@@ -675,12 +677,21 @@ class SyncHandler:
                         )
                     )
 
-                loaded_recents = await filter_events_for_client(
+                filtered_recents = await filter_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     loaded_recents,
                     always_include_ids=current_state_ids,
                 )
+
+                loaded_recents = []
+                for event in filtered_recents:
+                    if event.type == EventTypes.CallInvite:
+                        room_info = await self.store.get_room_with_stats(event.room_id)
+                        assert room_info is not None
+                        if room_info.join_rules == JoinRules.PUBLIC:
+                            continue
+                    loaded_recents.append(event)
 
                 log_kv({"loaded_recents_after_client_filtering": len(loaded_recents)})
 
