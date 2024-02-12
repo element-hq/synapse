@@ -93,6 +93,7 @@ class RoomPermissionsTestCase(RoomBase):
     rmcreator_id = "@notme:red"
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store_controllers = hs.get_storage_controllers()
         self.helper.auth_user_id = self.rmcreator_id
         # create some rooms under the name rmcreator_id
         self.uncreated_rmid = "!aa:test"
@@ -481,6 +482,23 @@ class RoomPermissionsTestCase(RoomBase):
             membership=Membership.LEAVE,
             expect_code=HTTPStatus.OK,
         )
+
+    def test_default_call_invite_power_level(self) -> None:
+        pl_event = self.get_success(
+            self.store_controllers.state.get_current_state_event(
+                self.created_public_rmid, EventTypes.PowerLevels, ""
+            )
+        )
+        assert pl_event is not None
+        self.assertEqual(50, pl_event.content.get("m.call.invite"))
+
+        private_pl_event = self.get_success(
+            self.store_controllers.state.get_current_state_event(
+                self.created_rmid, EventTypes.PowerLevels, ""
+            )
+        )
+        assert private_pl_event is not None
+        self.assertEqual(None, private_pl_event.content.get("m.call.invite"))
 
 
 class RoomStateTestCase(RoomBase):
