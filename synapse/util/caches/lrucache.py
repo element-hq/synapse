@@ -918,6 +918,9 @@ class AsyncLruCache(Generic[KT, VT]):
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._lru_cache.invalidate(key)
 
+    def invalidate_on_index_local(self, index_key: KT) -> None:
+        self._lru_cache.invalidate_on_index(index_key)
+
     def invalidate_local(self, key: KT) -> None:
         """Remove an entry from the local cache
 
