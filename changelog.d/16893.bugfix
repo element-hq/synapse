@@ -1,1 +1,0 @@
-Fix performance regression when fetching auth chains from the DB. Introduced in v1.100.0.
