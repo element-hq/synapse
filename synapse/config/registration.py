@@ -237,6 +237,14 @@ class RegistrationConfig(Config):
 
         self.inhibit_user_in_use_error = config.get("inhibit_user_in_use_error", False)
 
+        # List of user IDs not to send out device list updates for when they
+        # register new devices. This is useful to handle bot accounts.
+        #
+        # Note: This will still send out device list updates if the device is
+        # later updated, e.g. end to end keys are added.
+        dont_notify_new_devices_for = config.get("dont_notify_new_devices_for", [])
+        self.dont_notify_new_devices_for = frozenset(dont_notify_new_devices_for)
+
     def generate_config_section(
         self, generate_secrets: bool = False, **kwargs: Any
     ) -> str:

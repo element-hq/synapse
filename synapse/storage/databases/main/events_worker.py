@@ -268,6 +268,8 @@ class EventsWorkerStore(SQLBaseStore):
         ] = AsyncLruCache(
             cache_name="*getEvent*",
             max_size=hs.config.caches.event_cache_size,
+            # `extra_index_cb` Returns a tuple as that is the key type
+            extra_index_cb=lambda _, v: (v.event.room_id,),
         )
 
         # Map from event ID to a deferred that will result in a map from event
@@ -782,9 +784,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         if missing_events_ids:
 
-            async def get_missing_events_from_cache_or_db() -> Dict[
-                str, EventCacheEntry
-            ]:
+            async def get_missing_events_from_cache_or_db() -> (
+                Dict[str, EventCacheEntry]
+            ):
                 """Fetches the events in `missing_event_ids` from the database.
 
                 Also creates entries in `self._current_event_fetches` to allow
@@ -910,12 +912,12 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.pop(event_id, None)
         self._current_event_fetches.pop(event_id, None)
 
-    def _invalidate_local_get_event_cache_all(self) -> None:
-        """Clears the in-memory get event caches.
+    def _invalidate_local_get_event_cache_room_id(self, room_id: str) -> None:
+        """Clears the in-memory get event caches for a room.
 
         Used when we purge room history.
         """
-        self._get_event_cache.clear()
+        self._get_event_cache.invalidate_on_extra_index_local((room_id,))
         self._event_ref.clear()
         self._current_event_fetches.clear()
 

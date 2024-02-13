@@ -1,3 +1,12 @@
+# Synapse 1.101.0 (2024-02-13)
+
+### Bugfixes
+
+- Fix performance regression when fetching auth chains from the DB. Introduced in v1.100.0. ([\#16893](https://github.com/element-hq/synapse/issues/16893))
+
+
+
+
 # Synapse 1.101.0rc1 (2024-02-06)
 
 ### Improved Documentation
