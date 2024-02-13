@@ -425,7 +425,7 @@ class LruCache(Generic[KT, VT]):
                 on the second type of key.
 
                 For example, for the event cache this would be a callback that
-                maps an event to ita room ID, allowing invalidation of all
+                maps an event to its room ID, allowing invalidation of all
                 events in a given room.
 
                 Note: Though the two types of key have the same type, they are
