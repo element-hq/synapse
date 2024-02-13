@@ -660,7 +660,7 @@ def _announce() -> None:
 Hi everyone. Synapse {current_version} has just been released.
 
 [notes](https://github.com/element-hq/synapse/releases/tag/{tag_name}) | \
-[docker](https://hub.docker.com/r/vectorim/synapse/tags?name={tag_name}) | \
+[docker](https://hub.docker.com/r/matrixdotorg/synapse/tags?name={tag_name}) | \
 [debs](https://packages.matrix.org/debian/) | \
 [pypi](https://pypi.org/project/matrix-synapse/{current_version}/)"""
     )
