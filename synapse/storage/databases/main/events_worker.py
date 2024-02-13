@@ -917,7 +917,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         Used when we purge room history.
         """
-        self._get_event_cache.invalidate_on_index_local((room_id,))
+        self._get_event_cache.invalidate_on_extra_index_local((room_id,))
         self._event_ref.clear()
         self._current_event_fetches.clear()
 

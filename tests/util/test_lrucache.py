@@ -391,11 +391,11 @@ class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):
         cache["key1"] = 1
         cache["key2"] = 2
 
-        cache.invalidate_on_index("key1")
+        cache.invalidate_on_extra_index("key1")
         self.assertEqual(cache.get("key1"), 1)
         self.assertEqual(cache.get("key2"), 2)
 
-        cache.invalidate_on_index("1")
+        cache.invalidate_on_extra_index("1")
         self.assertEqual(cache.get("key1"), None)
         self.assertEqual(cache.get("key2"), 2)
 
@@ -405,12 +405,12 @@ class ExtraIndexLruCacheTestCase(unittest.HomeserverTestCase):
         cache["key2"] = 1
         cache["key3"] = 2
 
-        cache.invalidate_on_index("key1")
+        cache.invalidate_on_extra_index("key1")
         self.assertEqual(cache.get("key1"), 1)
         self.assertEqual(cache.get("key2"), 1)
         self.assertEqual(cache.get("key3"), 2)
 
-        cache.invalidate_on_index("1")
+        cache.invalidate_on_extra_index("1")
         self.assertEqual(cache.get("key1"), None)
         self.assertEqual(cache.get("key2"), None)
         self.assertEqual(cache.get("key3"), 2)

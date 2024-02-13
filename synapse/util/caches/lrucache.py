@@ -789,11 +789,13 @@ class LruCache(Generic[KT, VT]):
             return key in cache
 
         @synchronized
-        def cache_invalidate_on_index(index_key: KT) -> None:
+        def cache_invalidate_on_extra_index(index_key: KT) -> None:
             """Invalidates all entries that match the given extra index key.
 
-            This only makes sense to call when `extra_index_cb` was specified.
+            This can only be called when `extra_index_cb` was specified.
             """
+
+            assert extra_index_cb is not None
 
             keys = extra_index.pop(index_key, None)
             if not keys:
@@ -824,7 +826,7 @@ class LruCache(Generic[KT, VT]):
         self.len = synchronized(cache_len)
         self.contains = cache_contains
         self.clear = cache_clear
-        self.invalidate_on_index = cache_invalidate_on_index
+        self.invalidate_on_extra_index = cache_invalidate_on_extra_index
 
     def __getitem__(self, key: KT) -> VT:
         result = self.get(key, _Sentinel.sentinel)
@@ -918,8 +920,8 @@ class AsyncLruCache(Generic[KT, VT]):
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._lru_cache.invalidate(key)
 
-    def invalidate_on_index_local(self, index_key: KT) -> None:
-        self._lru_cache.invalidate_on_index(index_key)
+    def invalidate_on_extra_index_local(self, index_key: KT) -> None:
+        self._lru_cache.invalidate_on_extra_index(index_key)
 
     def invalidate_local(self, key: KT) -> None:
         """Remove an entry from the local cache
