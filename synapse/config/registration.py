@@ -237,7 +237,7 @@ class RegistrationConfig(Config):
 
         self.inhibit_user_in_use_error = config.get("inhibit_user_in_use_error", False)
 
-        # List of users not to send out device list updates for when they
+        # List of user IDs not to send out device list updates for when they
         # register new devices. This is useful to handle bot accounts.
         #
         # Note: This will still send out device list updates if the device is
