@@ -22,7 +22,7 @@ jobs:
       integration: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.integration }}
       linting: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting }}
     steps:
-    - uses: dorny/paths-filter@v2
+    - uses: dorny/paths-filter@v3
       id: filter
       # We only check on PRs
       if: startsWith(github.ref, 'refs/pull/')

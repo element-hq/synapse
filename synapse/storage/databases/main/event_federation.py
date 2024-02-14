@@ -310,7 +310,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # Add all linked chains reachable from initial set of chains.
         chains_to_fetch = set(event_chains.keys())
         while chains_to_fetch:
-            batch2 = tuple(itertools.islice(chains_to_fetch, 100))
+            batch2 = tuple(itertools.islice(chains_to_fetch, 1000))
             chains_to_fetch.difference_update(batch2)
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "origin_chain_id", batch2
@@ -593,7 +593,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # the loop)
         chains_to_fetch = set(seen_chains)
         while chains_to_fetch:
-            batch2 = tuple(itertools.islice(chains_to_fetch, 100))
+            batch2 = tuple(itertools.islice(chains_to_fetch, 1000))
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "origin_chain_id", batch2
             )

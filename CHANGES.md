@@ -1,3 +1,44 @@
+# Synapse 1.101.0 (2024-02-13)
+
+### Bugfixes
+
+- Fix performance regression when fetching auth chains from the DB. Introduced in v1.100.0. ([\#16893](https://github.com/element-hq/synapse/issues/16893))
+
+
+
+
+# Synapse 1.101.0rc1 (2024-02-06)
+
+### Improved Documentation
+
+- Fix broken links in the documentation. ([\#16853](https://github.com/element-hq/synapse/issues/16853))
+- Update MacOS installation instructions to mention that libicu is optional. ([\#16854](https://github.com/element-hq/synapse/issues/16854))
+- The version picker now correctly lists versions after `v1.98.0`. ([\#16880](https://github.com/element-hq/synapse/issues/16880))
+
+### Internal Changes
+
+- Add support for stabilised [MSC3981](https://github.com/matrix-org/matrix-spec-proposals/pull/3981) that adds a `recurse` parameter on the `/relations` API. ([\#16842](https://github.com/element-hq/synapse/issues/16842))
+
+
+
+### Updates to locked dependencies
+
+* Bump dorny/paths-filter from 2 to 3. ([\#16869](https://github.com/element-hq/synapse/issues/16869))
+* Bump gitpython from 3.1.40 to 3.1.41. ([\#16850](https://github.com/element-hq/synapse/issues/16850))
+* Bump hiredis from 2.2.3 to 2.3.2. ([\#16862](https://github.com/element-hq/synapse/issues/16862))
+* Bump jsonschema from 4.20.0 to 4.21.1. ([\#16887](https://github.com/element-hq/synapse/issues/16887))
+* Bump lxml-stubs from 0.4.0 to 0.5.1. ([\#16885](https://github.com/element-hq/synapse/issues/16885))
+* Bump mypy-zope from 1.0.1 to 1.0.3. ([\#16865](https://github.com/element-hq/synapse/issues/16865))
+* Bump phonenumbers from 8.13.26 to 8.13.29. ([\#16868](https://github.com/element-hq/synapse/issues/16868))
+* Bump pydantic from 2.5.3 to 2.6.0. ([\#16888](https://github.com/element-hq/synapse/issues/16888))
+* Bump sentry-sdk from 1.39.1 to 1.40.0. ([\#16889](https://github.com/element-hq/synapse/issues/16889))
+* Bump serde from 1.0.195 to 1.0.196. ([\#16867](https://github.com/element-hq/synapse/issues/16867))
+* Bump serde_json from 1.0.111 to 1.0.113. ([\#16866](https://github.com/element-hq/synapse/issues/16866))
+* Bump sigstore/cosign-installer from 3.3.0 to 3.4.0. ([\#16890](https://github.com/element-hq/synapse/issues/16890))
+* Bump types-pillow from 10.1.0.2 to 10.2.0.20240125. ([\#16864](https://github.com/element-hq/synapse/issues/16864))
+* Bump types-requests from 2.31.0.10 to 2.31.0.20240125. ([\#16886](https://github.com/element-hq/synapse/issues/16886))
+* Bump types-setuptools from 69.0.0.0 to 69.0.0.20240125. ([\#16863](https://github.com/element-hq/synapse/issues/16863))
+
 # Synapse 1.100.0 (2024-01-30)
 
 No significant changes since 1.100.0rc3.

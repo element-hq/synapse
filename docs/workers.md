@@ -629,7 +629,7 @@ worker application type.
 
 You can designate generic worker to sending push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
-[sygnal](https://github.com/vector-im/sygnal) and email.
+[sygnal](https://github.com/matrix-org/sygnal) and email.
 
 This will stop the main process sending push notifications.
 
