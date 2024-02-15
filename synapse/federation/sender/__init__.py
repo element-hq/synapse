@@ -192,10 +192,9 @@ sent_pdus_destination_dist_total = Counter(
 )
 
 # Time (in s) to wait before trying to wake up destinations that have
-# catch-up outstanding. This will also be the delay applied at startup
-# before trying the same.
+# catch-up outstanding.
 # Please note that rate limiting still applies, so while the loop is
-# executed every X seconds the destinations may not be wake up because
+# executed every X seconds the destinations may not be woken up because
 # they are being rate limited following previous attempt failures.
 WAKEUP_RETRY_PERIOD_SEC = 60
 
@@ -428,6 +427,9 @@ class FederationSender(AbstractFederationSender):
             / hs.config.ratelimiting.federation_rr_transactions_per_room_per_second
         )
 
+        self._external_cache = hs.get_external_cache()
+        self._destination_wakeup_queue = _DestinationWakeupQueue(self, self.clock)
+
         # Regularly wake up destinations that have outstanding PDUs to be caught up
         self.clock.looping_call(
             run_as_background_process,
@@ -435,10 +437,11 @@ class FederationSender(AbstractFederationSender):
             "wake_destinations_needing_catchup",
             self._wake_destinations_needing_catchup,
         )
-
-        self._external_cache = hs.get_external_cache()
-
-        self._destination_wakeup_queue = _DestinationWakeupQueue(self, self.clock)
+        # Also kick off a run of the waker process at startup.
+        run_as_background_process(
+            "wake_destinations_needing_catchup",
+            self._wake_destinations_needing_catchup,
+        )
 
     def _get_per_destination_queue(self, destination: str) -> PerDestinationQueue:
         """Get or create a PerDestinationQueue for the given destination
