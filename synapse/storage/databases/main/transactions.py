@@ -448,18 +448,35 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
     def _get_catch_up_outstanding_destinations_txn(
         txn: LoggingTransaction, now_time_ms: int, after_destination: Optional[str]
     ) -> List[str]:
+        # We're looking for destinations for which there is at least one room where we
+        # have an event that we have not yet sent to them, indicated by a row in
+        # `destination_rooms` with a `stream_ordering` older than the
+        # `last_successful_stream_ordering` (if any) in `destinations`.
+        #
+        # Of course, that may produce destinations where we are already busy sending
+        # the relevant PDU, but in that case, waking up the sender will just be a
+        # no-op.
+        #
+        # From that list, we need to *exclude* destinations which are subject to a
+        # backoff (ie, where `destinations.retry_last_ts + destinations.retry_interval`
+        # is in the future). There is also an edge-case where, if the server was
+        # previously shut down in the middle of the first send attempt to a given
+        # destination, there may be no row in `destinations` at all; we need to include
+        # such rows in the output, which means we need to left-join rather than
+        # inner-join against `destinations`.
+
         q = """
-            SELECT DISTINCT destination FROM destinations
-            INNER JOIN destination_rooms USING (destination)
-                WHERE
-                    stream_ordering > last_successful_stream_ordering
-                    AND destination > ?
-                    AND (
-                        retry_last_ts IS NULL OR
-                        retry_last_ts + retry_interval < ?
-                    )
-                    ORDER BY destination
-                    LIMIT 25
+            SELECT DISTINCT destination FROM destination_rooms
+            LEFT JOIN destinations USING (destination)
+            WHERE
+                stream_ordering > COALESCE(last_successful_stream_ordering, 0)
+                AND destination > ?
+                AND (
+                    retry_last_ts IS NULL OR
+                    retry_last_ts + retry_interval < ?
+                )
+            ORDER BY destination
+            LIMIT 25
         """
         txn.execute(
             q,
