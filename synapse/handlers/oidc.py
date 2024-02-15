@@ -818,14 +818,30 @@ class OidcProvider:
         logger.debug("Using the OAuth2 access_token to request userinfo")
         metadata = await self.load_metadata()
 
-        resp = await self._http_client.get_json(
+        resp = await self._http_client.get_raw(
             metadata["userinfo_endpoint"],
             headers={"Authorization": ["Bearer {}".format(token["access_token"])]},
         )
 
-        logger.debug("Retrieved user info from userinfo endpoint: %r", resp)
+        try:
+            decoded_resp = json_decoder.decode(resp.decode("utf-8"))
+        except json.JSONDecodeError:
+            # JSON parsing failed, the userinfo may be JWT so let's try to decode
+            alg_values = metadata.get(
+                "id_token_signing_alg_values_supported", ["RS256"]
+            )
+            jwt = JsonWebToken(alg_values)
+            jwk_set = await self.load_jwks()
+            try:
+                decoded_resp = jwt.decode(resp, key=jwk_set)
+            except ValueError:
+                logger.info("Reloading JWKS after decode error")
+                jwk_set = await self.load_jwks(force=True)  # try reloading the jwks
+                decoded_resp = jwt.decode(resp, key=jwk_set)
 
-        return UserInfo(resp)
+        logger.debug("Retrieved user info from userinfo endpoint: %r", decoded_resp)
+
+        return UserInfo(decoded_resp)
 
     async def _verify_jwt(
         self,
