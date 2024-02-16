@@ -352,6 +352,86 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [s2_event],
         )
 
+    def test_state_includes_changes_on_forks_when_events_excluded(self) -> None:
+        """A variation on the previous test, but where one event is filtered
+
+        The DAG is the same as the previous test, but E4 is excluded by the filter.
+
+             E1
+           ↗    ↖
+          |      S2
+          |      ↑
+        --|------|----
+          |      |
+          E3     |
+           ↖    /
+            (E4)
+
+        """
+
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync as Alice to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester, generate_sync_config(alice)
+            )
+        )
+        last_room_creation_event_id = (
+            initial_sync_result.joined[0].timeline.events[-1].event_id
+        )
+
+        # Send a state event, and a regular event, both using the same prev ID
+        with self._patch_get_latest_events([last_room_creation_event_id]):
+            s2_event = self.helper.send_state(room_id, "s2", {}, tok=alice_tok)[
+                "event_id"
+            ]
+            e3_event = self.helper.send(room_id, "e3", tok=alice_tok)["event_id"]
+
+        # Send a final event, joining the two branches of the dag
+        self.helper.send(room_id, "e4", type="not_a_normal_message", tok=alice_tok)[
+            "event_id"
+        ]
+
+        # do an incremental sync, with a filter that will only return E3, excluding S2
+        # and E4.
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(
+                        self.hs,
+                        {
+                            "room": {
+                                "timeline": {
+                                    "limit": 1,
+                                    "not_types": ["not_a_normal_message"],
+                                }
+                            }
+                        },
+                    ),
+                ),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The state event should appear in the 'state' section of the response.
+        room_sync = incremental_sync.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertTrue(room_sync.timeline.limited)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e3_event],
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [s2_event],
+        )
+
     @parameterized.expand(
         [
             (False, False),

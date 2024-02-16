@@ -1177,15 +1177,14 @@ class SyncHandler:
             await_full_state = True
             lazy_load_members = False
 
-        if batch:
-            state_at_timeline_end = (
-                await self._state_storage_controller.get_state_ids_for_event(
-                    batch.events[-1].event_id,
-                    state_filter=state_filter,
-                    await_full_state=await_full_state,
-                )
-            )
+        state_at_timeline_end = await self.get_state_at(
+            room_id,
+            stream_position=end_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
 
+        if batch:
             state_at_timeline_start = (
                 await self._state_storage_controller.get_state_ids_for_event(
                     batch.events[0].event_id,
@@ -1194,13 +1193,6 @@ class SyncHandler:
                 )
             )
         else:
-            state_at_timeline_end = await self.get_state_at(
-                room_id,
-                stream_position=end_token,
-                state_filter=state_filter,
-                await_full_state=await_full_state,
-            )
-
             state_at_timeline_start = state_at_timeline_end
 
         state_ids = _calculate_state(
@@ -1295,23 +1287,12 @@ class SyncHandler:
                 await_full_state=await_full_state,
             )
 
-            if batch:
-                state_at_timeline_end = (
-                    await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[-1].event_id,
-                        state_filter=state_filter,
-                        await_full_state=await_full_state,
-                    )
-                )
-            else:
-                # We can get here if the user has ignored the senders of all
-                # the recent events.
-                state_at_timeline_end = await self.get_state_at(
-                    room_id,
-                    stream_position=end_token,
-                    state_filter=state_filter,
-                    await_full_state=await_full_state,
-                )
+            state_at_timeline_end = await self.get_state_at(
+                room_id,
+                stream_position=end_token,
+                state_filter=state_filter,
+                await_full_state=await_full_state,
+            )
 
             state_ids = _calculate_state(
                 timeline_contains=timeline_state,
@@ -2837,15 +2818,6 @@ def _calculate_state(
     # timeline. We have no way to represent that in the /sync response, and we don't
     # even try; it is ether omitted or plonked into `state` as if it were at the start
     # of the timeline, depending on what else is in the timeline.)
-    #
-    # ----------
-    #
-    # Aside 2: it's worth noting that `timeline_end`, as provided to us, is actually
-    # the state *before* the final event in the timeline. In other words: if the final
-    # event in the timeline is a state event, it won't be included in `timeline_end`.
-    # However, that doesn't matter here, because the only difference can be in that
-    # one piece of state, and by definition that event is in the timeline, so we
-    # don't need to include it in the `state` section.
 
     state_ids = (
         (timeline_end_ids | timeline_start_ids)
