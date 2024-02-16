@@ -2771,6 +2771,70 @@ def _calculate_state(
             e for t, e in timeline_start.items() if t[0] == EventTypes.Member
         )
 
+    # Naively, we would just return the difference between the state at the start
+    # of the timeline (`timeline_start_ids`) and that at the end of the previous sync
+    # (`previous_timeline_end_ids`). However, that fails in the presence of forks in
+    # the DAG.
+    #
+    # For example, consider a DAG such as the following:
+    #
+    #       E1
+    #     ↗    ↖
+    #    |      S2
+    #    |      ↑
+    #  --|------|----
+    #    |      |
+    #    E3     |
+    #     ↖    /
+    #       E4
+    #
+    # ... and a filter that means we only return 2 events, represented by the dashed
+    # horizontal line. Assuming S2 was *not* included in the previous sync, we need to
+    # include it in the `state` section.
+    #
+    # Note that the state at the start of the timeline (E3) does not include S2. So,
+    # to make sure it gets included in the calculation here, we actually look at
+    # the state at the *end* of the timeline, and subtract any events that are present
+    # in the timeline.
+    #
+    # ----------
+    #
+    # Aside 1: You may then wonder if we need to include `timeline_start` in the
+    # calculation. Consider a linear DAG:
+    #
+    #      E1
+    #      ↑
+    #      S2
+    #      ↑
+    #  ----|------
+    #      |
+    #      E3
+    #      ↑
+    #      S4
+    #      ↑
+    #      E5
+    #
+    # ... where S2 and S4 change the same piece of state; and where we have a filter
+    # that returns 3 events (E3, S4, E5). We still need to tell the client about S2,
+    # because it might affect the display of E3. However, the state at the end of the
+    # timeline only tells us about S4; if we don't inspect `timeline_start` we won't
+    # find out about S2.
+    #
+    # (There are yet more complicated cases in which a state event is excluded from the
+    # timeline, but whose effect actually lands in the DAG in the *middle* of the
+    # timeline. We have no way to represent that in the /sync response, and we don't
+    # even try; it is ether omitted or plonked into `state` as if it were at the start
+    # of the timeline, depending on what else is in the timeline.)
+    #
+    # ----------
+    #
+    # Aside 2: it's worth noting that `timeline_end`, as provided to us, is actually
+    # the state *before* the final event in the timeline. In other words: if the final
+    # event in the timeline is a state event, it won't be included in `timeline_end`.
+    # However, that doesn't matter here, because the only difference can be in that
+    # one piece of state, and by definition that event is in the timeline, so we
+    # don't need to include it in the `state` section.
+
     state_ids = (
         (timeline_end_ids | timeline_start_ids)
         - previous_timeline_end_ids

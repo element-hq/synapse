@@ -17,14 +17,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Optional
+from typing import ContextManager, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules
 from synapse.api.errors import Codes, ResourceLimitError
-from synapse.api.filtering import Filtering
+from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sync import SyncConfig, SyncResult
 from synapse.rest import admin
@@ -255,13 +255,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Eve tries to join the room. We monkey patch the internal logic which selects
         # the prev_events used when creating the join event, such that the ban does not
         # precede the join.
-        mocked_get_prev_events = patch.object(
-            self.hs.get_datastores().main,
-            "get_prev_events_for_room",
-            new_callable=AsyncMock,
-            return_value=[last_room_creation_event_id],
-        )
-        with mocked_get_prev_events:
+        with self._patch_get_latest_events([last_room_creation_event_id]):
             self.helper.join(room_id, eve, tok=eve_token)
 
         # Eve makes a second, incremental sync.
@@ -285,19 +279,115 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         )
         self.assertEqual(eve_initial_sync_after_join.joined, [])
 
+    def test_state_includes_changes_on_forks(self) -> None:
+        """State changes that happen on a fork of the DAG must be included in `state`
+
+        Given the following DAG:
+
+             E1
+           ↗    ↖
+          |      S2
+          |      ↑
+        --|------|----
+          |      |
+          E3     |
+           ↖    /
+             E4
+
+        ... and a filter that means we only return 2 events, represented by the dashed
+        horizontal line: `S2` must be included in the `state` section.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync as Alice to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester, generate_sync_config(alice)
+            )
+        )
+        last_room_creation_event_id = (
+            initial_sync_result.joined[0].timeline.events[-1].event_id
+        )
+
+        # Send a state event, and a regular event, both using the same prev ID
+        with self._patch_get_latest_events([last_room_creation_event_id]):
+            s2_event = self.helper.send_state(room_id, "s2", {}, tok=alice_tok)[
+                "event_id"
+            ]
+            e3_event = self.helper.send(room_id, "e3", tok=alice_tok)["event_id"]
+
+        # Send a final event, joining the two branches of the dag
+        e4_event = self.helper.send(room_id, "e4", tok=alice_tok)["event_id"]
+
+        # do an incremental sync, with a filter that will ensure we only get two of
+        # the three new events.
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(
+                        self.hs, {"room": {"timeline": {"limit": 2}}}
+                    ),
+                ),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The state event should appear in the 'state' section of the response.
+        room_sync = incremental_sync.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertTrue(room_sync.timeline.limited)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e3_event, e4_event],
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [s2_event],
+        )
+
+    def _patch_get_latest_events(self, latest_events: List[str]) -> ContextManager:
+        """Monkey-patch `get_prev_events_for_room`
+
+        Returns a context manager which will replace the implementation of
+        `get_prev_events_for_room` with one which returns `latest_events`.
+        """
+        return patch.object(
+            self.hs.get_datastores().main,
+            "get_prev_events_for_room",
+            new_callable=AsyncMock,
+            return_value=latest_events,
+        )
+
 
 _request_key = 0
 
 
 def generate_sync_config(
-    user_id: str, device_id: Optional[str] = "device_id"
+    user_id: str,
+    device_id: Optional[str] = "device_id",
+    filter_collection: Optional[FilterCollection] = None,
 ) -> SyncConfig:
-    """Generate a sync config (with a unique request key)."""
+    """Generate a sync config (with a unique request key).
+
+    Args:
+        user_id: user who is syncing.
+        device_id: device that is syncing. Defaults to "device_id".
+        filter_collection: filter to apply. Defaults to the default filter (ie,
+           return everything, with a default limit)
+    """
+    if filter_collection is None:
+        filter_collection = Filtering(Mock()).DEFAULT_FILTER_COLLECTION
+
     global _request_key
     _request_key += 1
     return SyncConfig(
         user=UserID.from_string(user_id),
-        filter_collection=Filtering(Mock()).DEFAULT_FILTER_COLLECTION,
+        filter_collection=filter_collection,
         is_guest=False,
         request_key=("request_key", _request_key),
         device_id=device_id,
