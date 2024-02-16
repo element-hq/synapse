@@ -2334,6 +2334,7 @@ class SyncHandler:
                         full_state=False,
                         since_token=since_token,
                         upto_token=leave_token,
+                        end_token=leave_token,
                         out_of_band=leave_event.internal_metadata.is_out_of_band_membership(),
                     )
                 )
@@ -2371,6 +2372,7 @@ class SyncHandler:
                     full_state=False,
                     since_token=None if newly_joined else since_token,
                     upto_token=prev_batch_token,
+                    end_token=now_token,
                 )
             else:
                 entry = RoomSyncResultBuilder(
@@ -2381,6 +2383,7 @@ class SyncHandler:
                     full_state=False,
                     since_token=since_token,
                     upto_token=since_token,
+                    end_token=now_token,
                 )
 
             room_entries.append(entry)
@@ -2439,6 +2442,7 @@ class SyncHandler:
                         full_state=True,
                         since_token=since_token,
                         upto_token=now_token,
+                        end_token=now_token,
                     )
                 )
             elif event.membership == Membership.INVITE:
@@ -2468,6 +2472,7 @@ class SyncHandler:
                         full_state=True,
                         since_token=since_token,
                         upto_token=leave_token,
+                        end_token=leave_token,
                     )
                 )
 
@@ -2930,13 +2935,30 @@ class RoomSyncResultBuilder:
 
     Attributes:
         room_id
+
         rtype: One of `"joined"` or `"archived"`
+
         events: List of events to include in the room (more events may be added
             when generating result).
+
         newly_joined: If the user has newly joined the room
+
         full_state: Whether the full state should be sent in result
+
         since_token: Earliest point to return events from, or None
-        upto_token: Latest point to return events from.
+
+        upto_token: Latest point to return events from. If `events` is populated,
+           this is set to the token at the start of `events`
+
+        end_token: The last point in the timeline that the client should see events
+           from. Normally this will be the same as the global `now_token`, but in
+           the case of rooms where the user has left the room, this will be the point
+           just after their leave event.
+
+           This is used in the calculation of the state which is returned in `state`:
+           any state changes *up to* `end_token` (and not beyond!) which are not
+           reflected in the timeline need to be returned in `state`.
+
         out_of_band: whether the events in the room are "out of band" events
             and the server isn't in the room.
     """
@@ -2948,5 +2970,5 @@ class RoomSyncResultBuilder:
     full_state: bool
     since_token: Optional[StreamToken]
     upto_token: StreamToken
-
+    end_token: StreamToken
     out_of_band: bool = False
