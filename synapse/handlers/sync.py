@@ -943,7 +943,7 @@ class SyncHandler:
         batch: TimelineBatch,
         sync_config: SyncConfig,
         since_token: Optional[StreamToken],
-        now_token: StreamToken,
+        end_token: StreamToken,
         full_state: bool,
     ) -> MutableStateMap[EventBase]:
         """Works out the difference in state between the end of the previous sync and
@@ -954,7 +954,9 @@ class SyncHandler:
             batch: The timeline batch for the room that will be sent to the user.
             sync_config:
             since_token: Token of the end of the previous batch. May be `None`.
-            now_token: Token of the end of the current batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
             full_state: Whether to force returning the full state.
                 `lazy_load_members` still applies when `full_state` is `True`.
 
@@ -1034,7 +1036,7 @@ class SyncHandler:
                     room_id,
                     sync_config.user,
                     batch,
-                    now_token,
+                    end_token,
                     members_to_fetch,
                     timeline_state,
                 )
@@ -1048,7 +1050,7 @@ class SyncHandler:
                     room_id,
                     batch,
                     since_token,
-                    now_token,
+                    end_token,
                     members_to_fetch,
                     timeline_state,
                 )
@@ -1120,7 +1122,7 @@ class SyncHandler:
         room_id: str,
         syncing_user: UserID,
         batch: TimelineBatch,
-        now_token: StreamToken,
+        end_token: StreamToken,
         members_to_fetch: Optional[Set[str]],
         timeline_state: StateMap[str],
     ) -> StateMap[str]:
@@ -1133,7 +1135,9 @@ class SyncHandler:
             room_id: The room we are calculating for.
             syncing_user: The user that is calling `/sync`.
             batch: The timeline batch for the room that will be sent to the user.
-            now_token: Token of the end of the current batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
             members_to_fetch: If lazy-loading is enabled, the memberships needed for
                 events in the timeline.
             timeline_state: The contribution to the room state from state events in
@@ -1192,7 +1196,7 @@ class SyncHandler:
         else:
             state_at_timeline_end = await self.get_state_at(
                 room_id,
-                stream_position=now_token,
+                stream_position=end_token,
                 state_filter=state_filter,
                 await_full_state=await_full_state,
             )
@@ -1213,7 +1217,7 @@ class SyncHandler:
         room_id: str,
         batch: TimelineBatch,
         since_token: StreamToken,
-        now_token: StreamToken,
+        end_token: StreamToken,
         members_to_fetch: Optional[Set[str]],
         timeline_state: StateMap[str],
     ) -> StateMap[str]:
@@ -1229,7 +1233,9 @@ class SyncHandler:
             room_id: The room we are calculating for.
             batch: The timeline batch for the room that will be sent to the user.
             since_token: Token of the end of the previous batch.
-            now_token: Token of the end of the current batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
             members_to_fetch: If lazy-loading is enabled, the memberships needed for
                 events in the timeline. Otherwise, `None`.
             timeline_state: The contribution to the room state from state events in
@@ -1263,7 +1269,7 @@ class SyncHandler:
                 # the recent events.
                 state_at_timeline_start = await self.get_state_at(
                     room_id,
-                    stream_position=now_token,
+                    stream_position=end_token,
                     state_filter=state_filter,
                     await_full_state=await_full_state,
                 )
@@ -1302,7 +1308,7 @@ class SyncHandler:
                 # the recent events.
                 state_at_timeline_end = await self.get_state_at(
                     room_id,
-                    stream_position=now_token,
+                    stream_position=end_token,
                     state_filter=state_filter,
                     await_full_state=await_full_state,
                 )
@@ -2543,6 +2549,7 @@ class SyncHandler:
                 {
                     "since_token": since_token,
                     "upto_token": upto_token,
+                    "end_token": room_builder.end_token,
                 }
             )
 
@@ -2616,7 +2623,7 @@ class SyncHandler:
                     batch,
                     sync_config,
                     since_token,
-                    now_token,
+                    room_builder.end_token,
                     full_state=full_state,
                 )
             else:
