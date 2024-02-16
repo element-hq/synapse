@@ -480,11 +480,13 @@ class ReceiptsWorkerStore(SQLBaseStore):
             # This means we will drop some receipts, but MSC4102 is designed to drop semantically
             # meaningless receipts, so this is okay. Previously, we would drop meaningful data!
             receipt_data = db_to_json(data)
-            if user_id in receipt_type_dict: # existing receipt
+            if user_id in receipt_type_dict:  # existing receipt
                 # is the existing receipt threaded and we are currently processing an unthreaded one?
                 if "thread_id" in receipt_type_dict[user_id] and not thread_id:
-                    receipt_type_dict[user_id] = receipt_data # replace with unthreaded one
-            else: # receipt does not exist, just set it
+                    receipt_type_dict[
+                        user_id
+                    ] = receipt_data  # replace with unthreaded one
+            else:  # receipt does not exist, just set it
                 receipt_type_dict[user_id] = receipt_data
                 if thread_id:
                     receipt_type_dict[user_id]["thread_id"] = thread_id
