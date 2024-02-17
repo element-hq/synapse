@@ -20,6 +20,8 @@
 from typing import ContextManager, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
 
+from parameterized import parameterized
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules
@@ -30,7 +32,7 @@ from synapse.handlers.sync import SyncConfig, SyncResult
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
-from synapse.types import UserID, create_requester
+from synapse.types import JsonDict, UserID, create_requester
 from synapse.util import Clock
 
 import tests.unittest
@@ -349,6 +351,96 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.state.values()],
             [s2_event],
         )
+
+    @parameterized.expand(
+        [
+            (False, False),
+            (True, False),
+            (False, True),
+            (True, True),
+        ]
+    )
+    def test_archived_rooms_do_not_include_state_after_leave(
+        self, initial_sync: bool, empty_timeline: bool
+    ) -> None:
+        """If the user leaves the room, state changes that happen after they leave are not returned.
+
+        We try with both a zero and a normal timeline limit,
+        and we try both an initial sync and an incremental sync for both.
+        """
+        if empty_timeline and not initial_sync:
+            # FIXME synapse doesn't return the room at all in this situation!
+            self.skipTest("Synapse does not correctly handle this case")
+
+        # Alice creates the room, and bob joins.
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+
+        bob = self.register_user("bob", "password")
+        bob_tok = self.login(bob, "password")
+        bob_requester = create_requester(bob)
+
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+        self.helper.join(room_id, bob, tok=bob_tok)
+
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                bob_requester, generate_sync_config(bob)
+            )
+        )
+
+        # Alice sends a message and a state
+        before_message_event = self.helper.send(room_id, "before", tok=alice_tok)[
+            "event_id"
+        ]
+        before_state_event = self.helper.send_state(
+            room_id, "test_state", {"body": "before"}, tok=alice_tok
+        )["event_id"]
+
+        # Bob leaves
+        leave_event = self.helper.leave(room_id, bob, tok=bob_tok)["event_id"]
+
+        # Alice sends some more stuff
+        self.helper.send(room_id, "after", tok=alice_tok)["event_id"]
+        self.helper.send_state(room_id, "test_state", {"body": "after"}, tok=alice_tok)[
+            "event_id"
+        ]
+
+        # And now, Bob resyncs.
+        filter_dict: JsonDict = {"room": {"include_leave": True}}
+        if empty_timeline:
+            filter_dict["room"]["timeline"] = {"limit": 0}
+        sync_room_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                bob_requester,
+                generate_sync_config(
+                    bob, filter_collection=FilterCollection(self.hs, filter_dict)
+                ),
+                since_token=None if initial_sync else initial_sync_result.next_batch,
+            )
+        ).archived[0]
+
+        if empty_timeline:
+            # The timeline should be empty
+            self.assertEqual(sync_room_result.timeline.events, [])
+
+            # And the state should include the leave event...
+            self.assertEqual(
+                sync_room_result.state[("m.room.member", bob)].event_id, leave_event
+            )
+            # ... and the state change before he left.
+            self.assertEqual(
+                sync_room_result.state[("test_state", "")].event_id, before_state_event
+            )
+        else:
+            # The last three events in the timeline should be those leading up to the
+            # leave
+            self.assertEqual(
+                [e.event_id for e in sync_room_result.timeline.events[-3:]],
+                [before_message_event, before_state_event, leave_event],
+            )
+            # ... And the state should be empty
+            self.assertEqual(sync_room_result.state, {})
 
     def _patch_get_latest_events(self, latest_events: List[str]) -> ContextManager:
         """Monkey-patch `get_prev_events_for_room`
