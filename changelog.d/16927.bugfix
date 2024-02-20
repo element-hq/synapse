@@ -1,0 +1,1 @@
+Always prefer unthreaded receipt when >1 exist ([MSC4102](https://github.com/matrix-org/matrix-spec-proposals/pull/4102)).
