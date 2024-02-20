@@ -409,8 +409,11 @@ class SigningKeyUploadServlet(RestServlet):
             # But first-time setup is fine
 
         elif self.hs.config.experimental.msc3967_enabled:
-            # If we already have a master key then cross signing is set up and we require UIA to reset
-            if is_cross_signing_setup:
+            keys_are_different = await self.e2e_keys_handler.has_different_keys(user_id, body)
+            # If we already have a master key then cross signing is set up and we require UIA to change
+            # the keys. We need to account for keys_are_different to make this endpoint idempotent:
+            # in other words we allow no UIA if the request is going to no-op.
+            if is_cross_signing_setup and keys_are_different:
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
                     request,
