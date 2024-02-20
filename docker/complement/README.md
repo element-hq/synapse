@@ -30,3 +30,14 @@ Consult `scripts-dev/complement.sh` in the repository root for a real example.
 
 [complement]: https://github.com/matrix-org/complement
 [complementEnv]: https://github.com/matrix-org/complement/pull/382
+
+## How to modify homeserver.yaml for Complement tests
+
+It's common for MSCs to be gated behind a feature flag like this:
+```yaml
+experimental_features:
+  faster_joins: true
+```
+To modify this for the Complement image, modify `./conf/workers-shared-extra.yaml.j2`. Despite the name,
+this will affect non-worker mode as well. Remember to _rebuild_ the image (so don't use `-e` if using
+`complement.sh`).
