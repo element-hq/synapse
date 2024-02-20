@@ -38,6 +38,6 @@ It's common for MSCs to be gated behind a feature flag like this:
 experimental_features:
   faster_joins: true
 ```
-To modify this for the Complement image, modify `./confg/workers-shared-extra.yaml.j2`. Despite the name,
+To modify this for the Complement image, modify `./conf/workers-shared-extra.yaml.j2`. Despite the name,
 this will affect non-worker mode as well. Remember to _rebuild_ the image (so don't use `-e` if using
 `complement.sh`).
