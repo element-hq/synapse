@@ -526,9 +526,10 @@ class LimitExceededError(SynapseError):
         retry_after_ms: Optional[int] = None,
         errcode: str = Codes.LIMIT_EXCEEDED,
     ):
+        # Use HTTP header Retry-After to enable library-assisted retry handling.
         headers = (
             {"Retry-After": str(math.ceil(retry_after_ms / 1000))}
-            if self.include_retry_after_header and retry_after_ms is not None
+            if retry_after_ms is not None
             else None
         )
         super().__init__(code, "Too Many Requests", errcode, headers=headers)
