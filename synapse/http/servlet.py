@@ -445,14 +445,15 @@ def parse_json(
         default: value to use if the parameter is absent,
             defaults to None.
         required: whether to raise a 400 SynapseError if the
-        parameter is absent, defaults to False.
+           parameter is absent, defaults to False.
         encoding: The encoding to decode the string content with.
 
     Returns:
-        A JSON value.
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
 
     Raises:
-        SynapseError if the parameter is absent or if the
+        SynapseError if the parameter is absent and required, or if the
             parameter is present and not a JSON object.
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
@@ -476,16 +477,16 @@ def parse_json_from_args(
     Parse a JSON parameter from the request query string.
 
     Args:
-        args: A mapping of request args as bytes to a list of bytes (e.g. request.args).
+        args: a mapping of request args as bytes to a list of bytes (e.g. request.args).
         name: the name of the query parameter.
         default: value to use if the parameter is absent,
             defaults to None.
         required: whether to raise a 400 SynapseError if the
             parameter is absent, defaults to False.
-        encoding: The encoding to decode the string content with.
+        encoding: the encoding to decode the string content with.
 
-    Returns:
-        A JSON Object or the default.
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
 
     Raises:
         SynapseError if the parameter is absent and required, or if the
