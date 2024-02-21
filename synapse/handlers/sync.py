@@ -1324,7 +1324,7 @@ class SyncHandler:
                     # But we're lazy-loading, so the client might need some more
                     # member events to understand the events in this timeline.
                     # So we fish out all the member events corresponding to the
-                    # timeline here, and then dedupe any redundant ones below.
+                    # timeline here. The caller will then dedupe any redundant ones.
 
                     state_ids = await self._state_storage_controller.get_state_ids_for_event(
                         batch.events[0].event_id,
