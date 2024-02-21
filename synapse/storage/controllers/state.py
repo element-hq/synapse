@@ -273,8 +273,10 @@ class StateStorageController:
         await_full_state: bool = True,
     ) -> Dict[str, StateMap[str]]:
         """
-        Get the state dicts corresponding to a list of events, containing the event_ids
-        of the state events (as opposed to the events themselves)
+        Get the room states after each of a list of events.
+
+        For each event in `event_ids`, the result contains a map from state tuple
+        to the event_ids of the state event (as opposed to the events themselves).
 
         Args:
             event_ids: events whose state should be returned
@@ -347,7 +349,7 @@ class StateStorageController:
         await_full_state: bool = True,
     ) -> StateMap[str]:
         """
-        Get the state dict corresponding to a particular event
+        Get the state dict corresponding to the state after a particular event
 
         Args:
             event_id: event whose state should be returned
