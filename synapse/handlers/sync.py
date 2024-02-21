@@ -1195,6 +1195,8 @@ class SyncHandler:
         )
 
         if batch:
+            # Strictly speaking, this returns the state *after* the first event in the
+            # timeline, but that is good enough here.
             state_at_timeline_start = (
                 await self._state_storage_controller.get_state_ids_for_event(
                     batch.events[0].event_id,
@@ -1257,25 +1259,25 @@ class SyncHandler:
             await_full_state = True
             lazy_load_members = False
 
-        if batch.limited:
-            if batch:
-                state_at_timeline_start = (
-                    await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[0].event_id,
-                        state_filter=state_filter,
-                        await_full_state=await_full_state,
-                    )
-                )
-            else:
-                # We can get here if the user has ignored the senders of all
-                # the recent events.
-                state_at_timeline_start = await self.get_state_at(
-                    room_id,
-                    stream_position=end_token,
+        if batch:
+            state_at_timeline_start = (
+                await self._state_storage_controller.get_state_ids_for_event(
+                    batch.events[0].event_id,
                     state_filter=state_filter,
                     await_full_state=await_full_state,
                 )
+            )
+        else:
+            # We can get here if the user has ignored the senders of all
+            # the recent events.
+            state_at_timeline_start = await self.get_state_at(
+                room_id,
+                stream_position=end_token,
+                state_filter=state_filter,
+                await_full_state=await_full_state,
+            )
 
+        if batch.limited:
             # for now, we disable LL for gappy syncs - see
             # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
             # N.B. this slows down incr syncs as we are now processing way
@@ -1290,47 +1292,28 @@ class SyncHandler:
             # about them).
             state_filter = StateFilter.all()
 
-            state_at_previous_sync = await self.get_state_at(
-                room_id,
-                stream_position=since_token,
-                state_filter=state_filter,
-                await_full_state=await_full_state,
-            )
+        state_at_previous_sync = await self.get_state_at(
+            room_id,
+            stream_position=since_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
 
-            state_at_timeline_end = await self.get_state_at(
-                room_id,
-                stream_position=end_token,
-                state_filter=state_filter,
-                await_full_state=await_full_state,
-            )
+        state_at_timeline_end = await self.get_state_at(
+            room_id,
+            stream_position=end_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
 
-            state_ids = _calculate_state(
-                timeline_contains=timeline_state,
-                timeline_start=state_at_timeline_start,
-                timeline_end=state_at_timeline_end,
-                previous_timeline_end=state_at_previous_sync,
-                lazy_load_members=lazy_load_members,
-            )
-        else:
-            state_ids = {}
-            if lazy_load_members:
-                if members_to_fetch and batch.events:
-                    # We're returning an incremental sync, with no
-                    # "gap" since the previous sync, so normally there would be
-                    # no state to return.
-                    # But we're lazy-loading, so the client might need some more
-                    # member events to understand the events in this timeline.
-                    # So we fish out all the member events corresponding to the
-                    # timeline here. The caller will then dedupe any redundant ones.
+        state_ids = _calculate_state(
+            timeline_contains=timeline_state,
+            timeline_start=state_at_timeline_start,
+            timeline_end=state_at_timeline_end,
+            previous_timeline_end=state_at_previous_sync,
+            lazy_load_members=lazy_load_members,
+        )
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[0].event_id,
-                        # we only want members!
-                        state_filter=StateFilter.from_types(
-                            (EventTypes.Member, member) for member in members_to_fetch
-                        ),
-                        await_full_state=False,
-                    )
         return state_ids
 
     async def _find_missing_partial_state_memberships(
