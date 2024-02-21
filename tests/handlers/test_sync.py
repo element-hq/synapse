@@ -432,6 +432,111 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [s2_event],
         )
 
+    def test_state_includes_changes_on_ungappy_syncs(self) -> None:
+        """Test `state` where the sync is not gappy.
+
+        We start with a DAG like this:
+
+             E1
+           ↗    ↖
+          |      S2
+          |
+        --|---
+          |
+          E3
+
+        ... and initialsync with `limit=1`, represented by the horizontal dashed line.
+        At this point, we do not expect S2 to appear in the response at all (since
+        it is excluded from the timeline by the `limit`, and the state is based on the
+        state after the most recent event before the sync token (E3), which doesn't
+        include S2.
+
+        Now more events arrive, and we do an incremental sync:
+
+             E1
+           ↗    ↖
+          |      S2
+          |      ↑
+          E3     |
+          ↑      |
+        --|------|----
+          |      |
+          E4     |
+           ↖    /
+             E5
+
+        This is the last chance for us to tell the client about S2, so it *must* be
+        included in the response.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester, generate_sync_config(alice)
+            )
+        )
+        last_room_creation_event_id = (
+            initial_sync_result.joined[0].timeline.events[-1].event_id
+        )
+
+        # Send a state event, and a regular event, both using the same prev ID
+        with self._patch_get_latest_events([last_room_creation_event_id]):
+            s2_event = self.helper.send_state(room_id, "s2", {}, tok=alice_tok)[
+                "event_id"
+            ]
+            e3_event = self.helper.send(room_id, "e3", tok=alice_tok)["event_id"]
+
+        # Another initial sync, with limit=1
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(
+                        self.hs, {"room": {"timeline": {"limit": 1}}}
+                    ),
+                ),
+            )
+        )
+        room_sync = initial_sync_result.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e3_event],
+        )
+        self.assertNotIn(s2_event, [e.event_id for e in room_sync.state.values()])
+
+        # More events, E4 and E5
+        with self._patch_get_latest_events([e3_event]):
+            e4_event = self.helper.send(room_id, "e4", tok=alice_tok)["event_id"]
+        e5_event = self.helper.send(room_id, "e5", tok=alice_tok)["event_id"]
+
+        # Now incremental sync
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+
+        # The state event should appear in the 'state' section of the response.
+        room_sync = incremental_sync.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertFalse(room_sync.timeline.limited)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e4_event, e5_event],
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [s2_event],
+        )
+
     @parameterized.expand(
         [
             (False, False),
