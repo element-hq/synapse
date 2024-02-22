@@ -101,23 +101,21 @@ v1.61.0.
 
 You need to read all of the upgrade notes for each version between your current
 version and the latest so that you can update your dependencies, environment,
-config files, etc. if anything has changed. But you do not need to perform an
+config files, etc. if necessary. But you do not need to perform an
 upgrade to each individual version that was missed.
 
-We do not have a list of which versions must be installed. But, we recommend
+We do not have a list of which versions must be installed. Instead, we recommend
 that you upgrade through each incompatible database schema version, which would
 give you the ability to roll back the maximum number of versions should anything
 go wrong. See [Rolling back to older versions](#rolling-back-to-older-versions)
-above. Say you are upgrading from 1.48.0, you could update to v1.51.0 (and still
-be able to roll back to v1.48.0, or all the way back to v1.39.0), then v1.57.1
-(and still roll back to v1.49.0), etc.
+above.
 
 Additionally, new versions of Synapse will occasionally run database migrations
 and background updates to update the database. Synapse will not start until
-database migrations are complete, you should wait until background updates from
+database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
-[this Admin API](usage/administration/admin_api/background_updates.html#status).
+[the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 # Upgrading to v1.100.0
 
