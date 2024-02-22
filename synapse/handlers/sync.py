@@ -87,6 +87,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Logging for https://github.com/matrix-org/matrix-spec/issues/1209 and
+# https://github.com/element-hq/synapse/issues/16940
+client_state_desync_logger = logging.getLogger("synapse.client_state_desync_debug")
+
 # Counts the number of times we returned a non-empty sync. `type` is one of
 # "initial_sync", "full_state_sync" or "incremental_sync", `lazy_loaded` is
 # "true" or "false" depending on if the request asked for lazy loaded members or
@@ -260,6 +264,17 @@ class SyncResult:
             or self.to_device
             or self.device_lists
         )
+
+
+@attr.s(slots=True, auto_attribs=True)
+class ClientCalculatedMembershipStateErrorEntry:
+    """Difference between the membership states calculated by the client and the server
+
+    Returned by `SyncHandler._calculate_state_error`.
+    """
+
+    actual: Optional[str]
+    calculated: Optional[str]
 
 
 class SyncHandler:
@@ -1204,6 +1219,12 @@ class SyncHandler:
             previous_timeline_end={},
             lazy_load_members=lazy_load_members,
         )
+
+        if client_state_desync_logger.isEnabledFor(logging.WARNING):
+            await self._log_client_state_desync(
+                room_id, None, state_ids, timeline_state, lazy_load_members
+            )
+
         return state_ids
 
     async def _compute_state_delta_for_incremental_sync(
@@ -1303,6 +1324,15 @@ class SyncHandler:
             previous_timeline_end=state_at_previous_sync,
             lazy_load_members=lazy_load_members,
         )
+
+        if client_state_desync_logger.isEnabledFor(logging.WARNING):
+            await self._log_client_state_desync(
+                room_id,
+                since_token,
+                state_ids,
+                timeline_state,
+                lazy_load_members,
+            )
 
         return state_ids
 
@@ -1419,6 +1449,136 @@ class SyncHandler:
             )
 
         return additional_state_ids
+
+    async def _log_client_state_desync(
+        self,
+        room_id: str,
+        since_token: Optional[StreamToken],
+        sync_response_state_state: StateMap[str],
+        sync_response_timeline_state: StateMap[str],
+        lazy_load_members: bool,
+    ) -> None:
+        # Tracking to see how often the client's state gets out of sync with the
+        # actual current state of the room.
+        #
+        # There are few different potential failure modes here:
+        #
+        #  * State resolution can cause changes in the state of the room that don't
+        #    directly correspond to events with the corresponding (type, state_key).
+        #    https://github.com/matrix-org/matrix-spec/issues/1209 discusses this in
+        #    more detail.
+        #
+        #  * Even where there is an event that causes a given state change, Synapse
+        #    may not serve it to the client, since it works on state at specific points
+        #    in the DAG, rather than "current state".
+        #    See https://github.com/element-hq/synapse/issues/16940.
+        #
+        #  * Lazy-loading adds more complexity, as it means that events that would
+        #    normally be served via the `state` part of an incremental sync are filtered
+        #    out.
+        #
+        # To try to get a handle on this, let's put ourselves in the shoes of a client,
+        # and compare the state they will calculate against the actual current state.
+
+        if since_token is None:
+            if lazy_load_members:
+                # For initial syncs with lazy-loading enabled, there's not too much
+                # concern here. We know the client will do a `/members` query before
+                # doing any encryption, so what sync returns isn't too important.
+                #
+                # (Of course, then `/members` might also return an incomplete list, but
+                # that's a separate problem.)
+                return
+
+            # For regular initial syncs, compare the returned response with the actual
+            # current state.
+            client_calculated_state = {}
+            client_calculated_state.update(sync_response_state_state)
+            client_calculated_state.update(sync_response_timeline_state)
+
+            current_state = await self._state_storage_controller.get_current_state_ids(
+                room_id, await_full_state=False
+            )
+            state_error = await self._calculate_state_error(
+                current_state, client_calculated_state
+            )
+            if state_error:
+                client_state_desync_logger.warning(
+                    "client state discrepancy in initialsync in room %s: %s",
+                    room_id,
+                    state_error,
+                )
+        else:
+            # For an incremental (gappy or otherwise) sync, let's assume the client has
+            # a complete membership list as of the last sync (or rather, at
+            # `since_token`, which is the closes approximation we have to it
+            # right now), and see what they would calculate as the current state given
+            # this sync update.
+
+            client_calculated_state = dict(
+                await self.get_state_at(
+                    room_id,
+                    stream_position=since_token,
+                    await_full_state=False,
+                )
+            )
+            client_calculated_state.update(sync_response_state_state)
+            client_calculated_state.update(sync_response_timeline_state)
+
+            current_state = await self._state_storage_controller.get_current_state_ids(
+                room_id, await_full_state=False
+            )
+
+            state_error = await self._calculate_state_error(
+                current_state, client_calculated_state
+            )
+            if state_error:
+                client_state_desync_logger.warning(
+                    "client state discrepancy in incremental sync in room %s: %s",
+                    room_id,
+                    state_error,
+                )
+
+    async def _calculate_state_error(
+        self,
+        actual_state: StateMap[str],
+        client_calculated_state: StateMap[str],
+    ) -> Mapping[str, ClientCalculatedMembershipStateErrorEntry]:
+        error_map: Dict[str, ClientCalculatedMembershipStateErrorEntry] = {}
+
+        async def event_id_to_membership(event_id: Optional[str]) -> Optional[str]:
+            if event_id is None:
+                return None
+            event = await self.store.get_event(event_id)
+            return event.membership
+
+        # Check for entries in the calculated state which differ from the actual state.
+        for (
+            event_type,
+            state_key,
+        ), calculated_event_id in client_calculated_state.items():
+            if event_type != EventTypes.Member:
+                continue
+
+            actual_event_id = actual_state.get((event_type, state_key))
+            if calculated_event_id != actual_event_id:
+                error_map[state_key] = ClientCalculatedMembershipStateErrorEntry(
+                    actual=await event_id_to_membership(actual_event_id),
+                    calculated=await event_id_to_membership(calculated_event_id),
+                )
+
+        # Check for entries which are missing altogether.
+        for (event_type, state_key), actual_event_id in actual_state.items():
+            if event_type != EventTypes.Member:
+                continue
+
+            if (event_type, state_key) not in client_calculated_state:
+                error_map[state_key] = ClientCalculatedMembershipStateErrorEntry(
+                    actual=await event_id_to_membership(actual_event_id),
+                    calculated=None,
+                )
+
+        return error_map
 
     async def unread_notifs_for_room_id(
         self, room_id: str, sync_config: SyncConfig
