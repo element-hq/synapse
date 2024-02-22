@@ -122,8 +122,8 @@ done
 
 How do I upgrade from a very old version of Synapse to the latest?
 ---
-See [this](../../upgrade.html#upgrading-from-a-very-old-version) section in the upgrade
-docs.
+See [this](../../upgrade.html#upgrading-from-a-very-old-version) section in the
+upgrade docs.
 
 Manually resetting passwords
 ---
