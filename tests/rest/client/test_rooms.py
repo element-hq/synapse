@@ -2162,19 +2162,19 @@ class RoomMessageListTestCase(RoomBase):
         # Does not test the validity of the filter, only the json validation.
 
         # Check Get with valid json filter parameter, expect 200.
-        _valid_filter_str = '{"types": ["m.room.message"]}'
+        valid_filter_str = '{"types": ["m.room.message"]}'
         channel = self.make_request(
             "GET",
-            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={_valid_filter_str}",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={valid_filter_str}",
         )
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Check Get with invalid json filter parameter, expect 400 INVALID_PARAM.
-        _invalid_filter_str = "}}}{}"
+        invalid_filter_str = "}}}{}"
         channel = self.make_request(
             "GET",
-            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={_invalid_filter_str}",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={invalid_filter_str}",
         )
 
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
@@ -3226,19 +3226,19 @@ class ContextTestCase(unittest.HomeserverTestCase):
         event_id = self.helper.send(self.room_id, "message 7", tok=self.tok)["event_id"]
 
         # Check Get with valid json filter parameter, expect 200.
-        _valid_filter_str = '{"types": ["m.room.message"]}'
+        valid_filter_str = '{"types": ["m.room.message"]}'
         channel = self.make_request(
             "GET",
-            f"/rooms/{self.room_id}/context/{event_id}?filter={_valid_filter_str}",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={valid_filter_str}",
             access_token=self.tok,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
         # Check Get with invalid json filter parameter, expect 400 INVALID_PARAM.
-        _invalid_filter_str = "}}}{}"
+        invalid_filter_str = "}}}{}"
         channel = self.make_request(
             "GET",
-            f"/rooms/{self.room_id}/context/{event_id}?filter={_invalid_filter_str}",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={invalid_filter_str}",
             access_token=self.tok,
         )
 
