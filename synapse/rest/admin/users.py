@@ -118,7 +118,7 @@ class UsersRestServletV2(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        deactivated = self.__parse_parameter_deactivated(request)
+        deactivated = self._parse_parameter_deactivated(request)
 
         locked = parse_boolean(request, "locked", default=False)
         admins = parse_boolean(request, "admins")
@@ -183,14 +183,14 @@ class UsersRestServletV2(RestServlet):
 
         return HTTPStatus.OK, ret
 
-    def __parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         return None if parse_boolean(request, "deactivated") else False
 
 
 class UsersRestServletV3(UsersRestServletV2):
     PATTERNS = admin_patterns("/users$", "v3")
 
-    def __parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
         return parse_boolean(request, "deactivated")
 
 

@@ -503,7 +503,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + "?deactivated=true",
+            f"{self.url}?deactivated=true",
             {},
             access_token=self.admin_user_tok,
         )
@@ -1180,7 +1180,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # They should appear in the list users API, marked as not erased.
         channel = self.make_request(
             "GET",
-            self.url,
+            f"{self.url}?deactivated=true",
             access_token=self.admin_user_tok,
         )
         users = {user["name"]: user for user in channel.json_body["users"]}
@@ -1244,7 +1244,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
             dir: The direction of ordering to give the server
         """
 
-        url = self.url + "?"
+        url = f"{self.url}?deactivated=true&"
         if order_by is not None:
             url += "order_by=%s&" % (order_by,)
         if dir is not None and dir in ("b", "f"):

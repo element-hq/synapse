@@ -163,7 +163,8 @@ Body parameters:
   not be changed. If `null` is given, the user type will be cleared.
   Other allowed options are: `bot` and `support`.
 
-## List Accounts (V2)
+## List Accounts
+### List Accounts (V2)
 
 This API returns all local user accounts.
 By default, the response is ordered by ascending user ID.
@@ -287,7 +288,7 @@ The following fields are returned in the JSON response body:
 
 *Added in Synapse 1.93:* the `locked` query parameter and response field.
 
-## List Accounts (V3)
+### List Accounts (V3)
 
 This API returns all local user accounts (see v2). In contrast to v2, the query parameter `deactivated` is handled differently.
 
