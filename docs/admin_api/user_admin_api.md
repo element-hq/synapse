@@ -287,7 +287,6 @@ The following fields are returned in the JSON response body:
 
 *Added in Synapse 1.93:* the `locked` query parameter and response field.
 
-
 ## List Accounts (V3)
 
 This API returns all local user accounts (see v2). In contrast to v2, the query parameter `deactivated` is handled differently.
