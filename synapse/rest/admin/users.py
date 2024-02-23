@@ -23,7 +23,7 @@ import hmac
 import logging
 import secrets
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
@@ -183,14 +183,18 @@ class UsersRestServletV2(RestServlet):
 
         return HTTPStatus.OK, ret
 
-    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+    def _parse_parameter_deactivated(
+        self, request: SynapseRequest
+    ) -> Union[bool, None]:
         return None if parse_boolean(request, "deactivated") else False
 
 
 class UsersRestServletV3(UsersRestServletV2):
     PATTERNS = admin_patterns("/users$", "v3")
 
-    def _parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+    def _parse_parameter_deactivated(
+        self, request: SynapseRequest
+    ) -> Union[bool, None]:
         return parse_boolean(request, "deactivated")
 
 
