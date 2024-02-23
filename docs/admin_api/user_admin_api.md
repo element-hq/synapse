@@ -163,7 +163,7 @@ Body parameters:
   not be changed. If `null` is given, the user type will be cleared.
   Other allowed options are: `bot` and `support`.
 
-## List Accounts
+## List Accounts (V2)
 
 This API returns all local user accounts.
 By default, the response is ordered by ascending user ID.
@@ -226,10 +226,8 @@ The following parameters should be set in the URL:
   Defaults to `true` to include guest users. This parameter is not supported when MSC3861 is enabled. [See #15582](https://github.com/matrix-org/synapse/pull/15582)
 - `admins` - Optional flag to filter admins. If `true`, only admins are queried. If `false`, admins are excluded from
   the query. When the flag is absent (the default), **both** admins and non-admins are included in the search results.
-- `deactivated` - Optional flag to filter deactivated users. If `true`, only deactivated users are queried. 
-  If `false`, deactivated users are excluded from the query. When the flag is absent (the default), 
-  **both** active and deactivated users are included in the 
-  search results.
+- `deactivated` - string representing a bool - Is optional and if `true` will **include** deactivated users.
+  Defaults to `false` to exclude deactivated users.
 - `limit` - string representing a positive integer - Is optional but is used for pagination,
   denoting the maximum number of items to return in this call. Defaults to `100`.
 - `from` - string representing a positive integer - Is optional but used for pagination,
@@ -288,6 +286,21 @@ The following fields are returned in the JSON response body:
 - `total` - integer - Total number of media.
 
 *Added in Synapse 1.93:* the `locked` query parameter and response field.
+
+
+## List Accounts (V3)
+
+This API returns all local user accounts (see v2). In contrast to v2, the query parameter `deactivated` is handled differently.
+
+```
+GET /_synapse/admin/v3/users
+```
+
+**Parameters**
+- `deactivated` - Optional flag to filter deactivated users. If `true`, only deactivated users are queried.
+  If `false`, deactivated users are excluded from the query. When the flag is absent (the default),
+  **both** active and deactivated users are included in the
+  search results.
 
 ## Query current sessions for a user
 

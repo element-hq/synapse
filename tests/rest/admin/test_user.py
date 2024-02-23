@@ -503,7 +503,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url,
+            self.url + "?deactivated=true",
             {},
             access_token=self.admin_user_tok,
         )
@@ -987,6 +987,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         Tests whether the various values of the query parameter `deactivated` lead to the
         expected result set.
         """
+        users_url_v3 = self.url.replace("v2", "v3")
 
         # Register an additional non admin user
         user_id = self.register_user("user", "pass", admin=False)
@@ -1002,7 +1003,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # Query all users
         channel = self.make_request(
             "GET",
-            f"{self.url}",
+            users_url_v3,
             access_token=self.admin_user_tok,
         )
 
@@ -1012,7 +1013,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # Query deactivated users
         channel = self.make_request(
             "GET",
-            f"{self.url}?deactivated=true",
+            f"{users_url_v3}?deactivated=true",
             access_token=self.admin_user_tok,
         )
 
@@ -1023,7 +1024,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # Query deactivated users
         channel = self.make_request(
             "GET",
-            f"{self.url}?deactivated=false",
+            f"{users_url_v3}?deactivated=false",
             access_token=self.admin_user_tok,
         )
 

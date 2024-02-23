@@ -72,7 +72,7 @@ class UsersRestServletV2(RestServlet):
     The parameter `user_id` can be used to filter by user id.
     The parameter `name` can be used to filter by user id or display name.
     The parameter `guests` can be used to exclude guest users.
-    The parameter `deactivated` can be used to filter deactivated users.
+    The parameter `deactivated` can be used to include deactivated users.
     The parameter `order_by` can be used to order the result.
     The parameter `not_user_type` can be used to exclude certain user types.
     The parameter `locked` can be used to include locked users.
@@ -118,7 +118,8 @@ class UsersRestServletV2(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        deactivated = parse_boolean(request, "deactivated")
+        deactivated = self.__parse_parameter_deactivated(request)
+
         locked = parse_boolean(request, "locked", default=False)
         admins = parse_boolean(request, "admins")
 
@@ -181,6 +182,16 @@ class UsersRestServletV2(RestServlet):
             ret["next_token"] = str(start + len(users))
 
         return HTTPStatus.OK, ret
+
+    def __parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+        return None if parse_boolean(request, "deactivated") else False
+
+
+class UsersRestServletV3(UsersRestServletV2):
+    PATTERNS = admin_patterns("/users$", "v3")
+
+    def __parse_parameter_deactivated(self, request: SynapseRequest) -> bool | None:
+        return parse_boolean(request, "deactivated")
 
 
 class UserRestServletV2(RestServlet):
