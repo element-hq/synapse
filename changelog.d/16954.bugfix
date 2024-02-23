@@ -1,0 +1,1 @@
+Fix a bug introduced in v1.100.0 where notifications from rooms you've left would continue to be counted.
