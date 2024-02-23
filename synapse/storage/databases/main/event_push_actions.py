@@ -404,7 +404,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 SELECT e.room_id, notif_count, e.stream_ordering, e.thread_id, last_receipt_stream_ordering,
                     ev.stream_ordering AS receipt_stream_ordering
                 FROM event_push_summary AS e
-                INNER JOIN local_current_membership USING (user_id, room_id)
+                INNER JOIN local_current_membership AS lcm ON (
+                    e.user_id = lcm.user_id
+                    AND e.room_id = lcm.room_id
+                    AND lcm.membership = 'join'
+                )
                 LEFT JOIN receipts_linearized AS r ON (
                     e.user_id = r.user_id
                     AND e.room_id = r.room_id
@@ -472,7 +476,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 SELECT e.room_id, e.stream_ordering, e.thread_id,
                     ev.stream_ordering AS receipt_stream_ordering
                 FROM event_push_actions AS e
-                INNER JOIN local_current_membership USING (user_id, room_id)
+                INNER JOIN local_current_membership AS lcm ON (
+                    e.user_id = lcm.user_id
+                    AND e.room_id = lcm.room_id
+                    AND lcm.membership = 'join'
+                )
                 LEFT JOIN receipts_linearized AS r ON (
                     e.user_id = r.user_id
                     AND e.room_id = r.room_id
@@ -514,7 +522,11 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                     SELECT e.room_id, e.stream_ordering, e.thread_id,
                         ev.stream_ordering AS receipt_stream_ordering
                     FROM event_push_actions AS e
-                    INNER JOIN local_current_membership USING (user_id, room_id)
+                    INNER JOIN local_current_membership AS lcm ON (
+                        e.user_id = lcm.user_id
+                        AND e.room_id = lcm.room_id
+                        AND lcm.membership = 'join'
+                    )
                     LEFT JOIN receipts_linearized AS r ON (
                         e.user_id = r.user_id
                         AND e.room_id = r.room_id
