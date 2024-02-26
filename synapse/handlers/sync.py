@@ -1549,7 +1549,9 @@ class SyncHandler:
         async def event_id_to_membership(event_id: Optional[str]) -> Optional[str]:
             if event_id is None:
                 return None
-            event = await self.store.get_event(event_id)
+            event = await self.store.get_event(event_id, allow_none=True)
+            if event is None:
+                return "MISSING_EVENT"
             return event.membership
 
         # Check for entries in the calculated state which differ from the actual state.
