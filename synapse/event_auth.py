@@ -177,35 +177,13 @@ async def check_state_independent_auth_rules(
         return
 
     # 2. Reject if event has auth_events that: ...
+    auth_events = await store.get_events(
+        event.auth_event_ids(),
+        redact_behaviour=EventRedactBehaviour.as_is,
+        allow_rejected=True,
+    )
     if batched_auth_events:
-        # Copy the batched auth events to avoid mutating them.
-        auth_events = {}
-        for key, value in batched_auth_events.items():
-            auth_events[key] = make_event_from_dict(
-                event_dict={
-                    "type": value.get("type"),
-                    "state_key": value.get_state_key(),
-                    "room_id": value.get("room_id")
-                },
-                room_version=value.room_version,
-                rejected_reason=value.rejected_reason
-            )
-        
-        needed_auth_event_ids = set(event.auth_event_ids()) - batched_auth_events.keys()
-        if needed_auth_event_ids:
-            auth_events.update(
-                await store.get_events(
-                    needed_auth_event_ids,
-                    redact_behaviour=EventRedactBehaviour.as_is,
-                    allow_rejected=True,
-                )
-            )
-    else:
-        auth_events = await store.get_events(
-            event.auth_event_ids(),
-            redact_behaviour=EventRedactBehaviour.as_is,
-            allow_rejected=True,
-        )
+        auth_events.update(batched_auth_events)
 
     room_id = event.room_id
     auth_dict: MutableStateMap[str] = {}
