@@ -21,6 +21,7 @@
 #
 
 import collections.abc
+import copy
 import logging
 import typing
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
@@ -181,7 +182,7 @@ async def check_state_independent_auth_rules(
         auth_events = {}
         for key, value in batched_auth_events.items():
             auth_events[key] = make_event_from_dict(
-                event_dict=value.get_dict(),
+                event_dict=copy.deepcopy(value.get_dict()),
                 room_version=value.room_version,
                 rejected_reason=value.rejected_reason
             )
