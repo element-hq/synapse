@@ -1,0 +1,1 @@
+Fix a potential deadlock when checking state independent auth rules by creating a deepcopy of authentication events. Contributed by @ggogel.
