@@ -182,7 +182,11 @@ async def check_state_independent_auth_rules(
         auth_events = {}
         for key, value in batched_auth_events.items():
             auth_events[key] = make_event_from_dict(
-                event_dict=copy.deepcopy(value.get_dict()),
+                event_dict={
+                    "type": value.get("type"),
+                    "state_key": value.get_state_key(),
+                    "room_id": value.get("room_id")
+                },
                 room_version=value.room_version,
                 rejected_reason=value.rejected_reason
             )
