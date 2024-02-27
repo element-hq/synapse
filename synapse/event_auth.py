@@ -21,7 +21,6 @@
 #
 
 import collections.abc
-import copy
 import logging
 import typing
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
