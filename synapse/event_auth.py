@@ -21,6 +21,7 @@
 #
 
 import collections.abc
+import copy
 import logging
 import typing
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
@@ -177,7 +178,7 @@ async def check_state_independent_auth_rules(
     # 2. Reject if event has auth_events that: ...
     if batched_auth_events:
         # Copy the batched auth events to avoid mutating them.
-        auth_events = dict(batched_auth_events)
+        auth_events = copy.deepcopy(batched_auth_events)
         needed_auth_event_ids = set(event.auth_event_ids()) - batched_auth_events.keys()
         if needed_auth_event_ids:
             auth_events.update(
