@@ -30,7 +30,6 @@ from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 from typing_extensions import Protocol
 from unpaddedbase64 import decode_base64
-from synapse.events import make_event_from_dict
 
 from synapse.api.constants import (
     MAX_PDU_SIZE,
