@@ -21,7 +21,6 @@
 #
 
 import collections.abc
-import copy
 import logging
 import typing
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
@@ -31,6 +30,7 @@ from signedjson.key import decode_verify_key_bytes
 from signedjson.sign import SignatureVerifyException, verify_signed_json
 from typing_extensions import Protocol
 from unpaddedbase64 import decode_base64
+from synapse.events import make_event_from_dict
 
 from synapse.api.constants import (
     MAX_PDU_SIZE,
@@ -178,7 +178,14 @@ async def check_state_independent_auth_rules(
     # 2. Reject if event has auth_events that: ...
     if batched_auth_events:
         # Copy the batched auth events to avoid mutating them.
-        auth_events = copy.deepcopy(batched_auth_events)
+        auth_events = {}
+        for key, value in batched_auth_events.items():
+            auth_events[key] = make_event_from_dict(
+                event_dict=value.get_dict(),
+                room_version=value.room_version,
+                rejected_reason=value.rejected_reason
+            )
+        
         needed_auth_event_ids = set(event.auth_event_ids()) - batched_auth_events.keys()
         if needed_auth_event_ids:
             auth_events.update(
