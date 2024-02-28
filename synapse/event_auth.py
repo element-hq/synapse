@@ -179,13 +179,12 @@ async def check_state_independent_auth_rules(
         auth_events = batched_auth_events
         needed_auth_event_ids = set(event.auth_event_ids()) - set(batched_auth_events)
         if needed_auth_event_ids:
-            auth_events.update(
-                await store.get_events(
-                    needed_auth_event_ids,
-                    redact_behaviour=EventRedactBehaviour.as_is,
-                    allow_rejected=True,
-                )
+            needed_auth_events = await store.get_events(
+                needed_auth_event_ids,
+                redact_behaviour=EventRedactBehaviour.as_is,
+                allow_rejected=True
             )
+            auth_events.update(needed_auth_events)
     else:
         auth_events = await store.get_events(
             event.auth_event_ids(),
