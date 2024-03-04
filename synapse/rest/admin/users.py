@@ -186,6 +186,10 @@ class UsersRestServletV2(RestServlet):
     def _parse_parameter_deactivated(
         self, request: SynapseRequest
     ) -> Optional[bool]:
+        """
+        Return None (no filtering) if `deactivated` is `true`, otherwise return `False`
+        (exclude deactivated users from the results).
+        """
         return None if parse_boolean(request, "deactivated") else False
 
 
