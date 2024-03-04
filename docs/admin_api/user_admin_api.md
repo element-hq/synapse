@@ -299,8 +299,7 @@ GET /_synapse/admin/v3/users
 **Parameters**
 - `deactivated` - Optional flag to filter deactivated users. If `true`, only deactivated users are returned.
   If `false`, deactivated users are excluded from the query. When the flag is absent (the default),
-  **both** active and deactivated users are included in the
-  search results.
+  users are not filtered by deactivation status.
 
 ## Query current sessions for a user
 
