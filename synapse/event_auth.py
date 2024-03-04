@@ -23,7 +23,7 @@
 import collections.abc
 import logging
 import typing
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
+from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Set, Tuple, Union
 
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
@@ -175,6 +175,7 @@ async def check_state_independent_auth_rules(
         return
 
     # 2. Reject if event has auth_events that: ...
+    auth_events: MutableMapping[str, "EventBase"]
     if batched_auth_events:
         auth_events = batched_auth_events
         needed_auth_event_ids = [
