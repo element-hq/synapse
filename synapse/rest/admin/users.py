@@ -185,7 +185,7 @@ class UsersRestServletV2(RestServlet):
 
     def _parse_parameter_deactivated(
         self, request: SynapseRequest
-    ) -> Union[bool, None]:
+    ) -> Optional[bool]:
         return None if parse_boolean(request, "deactivated") else False
 
 
