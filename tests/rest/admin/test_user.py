@@ -1021,7 +1021,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, channel.json_body["total"])
         self.assertEqual("@user:test", channel.json_body["users"][0]["name"])
 
-        # Query deactivated users
+        # Query non-deactivated users
         channel = self.make_request(
             "GET",
             f"{users_url_v3}?deactivated=false",
