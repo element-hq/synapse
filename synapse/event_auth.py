@@ -23,7 +23,18 @@
 import collections.abc
 import logging
 import typing
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 from canonicaljson import encode_canonical_json
 from signedjson.key import decode_verify_key_bytes
