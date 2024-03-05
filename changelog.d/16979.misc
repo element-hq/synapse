@@ -1,0 +1,1 @@
+Revert https://github.com/element-hq/synapse/pull/16756, which caused incorrect notification counts on mobile clients.
