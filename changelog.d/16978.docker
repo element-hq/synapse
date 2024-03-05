@@ -1,1 +1,1 @@
-Updated start.py to generate config using the correct user ID (fixes #16824, #15202)
+Updated start.py to generate config using the correct user ID when running as root (fixes #16824, #15202).
