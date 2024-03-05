@@ -1,1 +1,1 @@
-Do not create a shallow copy of batched_auth_events to prevent a potential deadlock. Contributed by @ggogel.
+Prevent locking up when checking auth rules that are independent of room state for batched auth events. Contributed by @ggogel.
