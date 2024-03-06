@@ -517,8 +517,6 @@ class InvalidCaptchaError(SynapseError):
 class LimitExceededError(SynapseError):
     """A client has sent too many requests and is being throttled."""
 
-    include_retry_after_header = False
-
     def __init__(
         self,
         limiter_name: str,
