@@ -1,3 +1,41 @@
+# Synapse 1.102.0 (2024-03-05)
+
+### Bugfixes
+
+- Revert https://github.com/element-hq/synapse/pull/16756, which caused incorrect notification counts on mobile clients since v1.100.0. ([\#16979](https://github.com/element-hq/synapse/issues/16979))
+
+
+# Synapse 1.102.0rc1 (2024-02-20)
+
+### Features
+
+- A metric was added for emails sent by Synapse, broken down by type: `synapse_emails_sent_total`. Contributed by Remi Rampin. ([\#16881](https://github.com/element-hq/synapse/issues/16881))
+
+### Bugfixes
+
+- Do not send multiple concurrent requests for keys for the same server. ([\#16894](https://github.com/element-hq/synapse/issues/16894))
+- Fix performance issue when joining very large rooms that can cause the server to lock up. Introduced in v1.100.0. ([\#16903](https://github.com/element-hq/synapse/issues/16903))
+- Always prefer unthreaded receipt when >1 exist ([MSC4102](https://github.com/matrix-org/matrix-spec-proposals/pull/4102)). ([\#16927](https://github.com/element-hq/synapse/issues/16927))
+
+### Improved Documentation
+
+- Fix a small typo in the Rooms section of the Admin API documentation. Contributed by @RainerZufall187. ([\#16857](https://github.com/element-hq/synapse/issues/16857))
+
+### Internal Changes
+
+- Don't invalidate the entire event cache when we purge history. ([\#16905](https://github.com/element-hq/synapse/issues/16905))
+- Add experimental config option to not send device list updates for specific users. ([\#16909](https://github.com/element-hq/synapse/issues/16909))
+- Fix incorrect docker hub link in release script. ([\#16910](https://github.com/element-hq/synapse/issues/16910))
+
+
+
+### Updates to locked dependencies
+
+* Bump attrs from 23.1.0 to 23.2.0. ([\#16899](https://github.com/element-hq/synapse/issues/16899))
+* Bump bcrypt from 4.0.1 to 4.1.2. ([\#16900](https://github.com/element-hq/synapse/issues/16900))
+* Bump pygithub from 2.1.1 to 2.2.0. ([\#16902](https://github.com/element-hq/synapse/issues/16902))
+* Bump sentry-sdk from 1.40.0 to 1.40.3. ([\#16898](https://github.com/element-hq/synapse/issues/16898))
+
 # Synapse 1.101.0 (2024-02-13)
 
 ### Bugfixes

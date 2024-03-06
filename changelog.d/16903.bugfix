@@ -1,1 +1,0 @@
-Fix performance issue when joining very large rooms that can cause the server to lock up. Introduced in v1.100.0.
