@@ -562,10 +562,15 @@ class StateStorageController:
     @trace
     @tag_args
     async def get_current_state(
-        self, room_id: str, state_filter: Optional[StateFilter] = None
+        self,
+        room_id: str,
+        state_filter: Optional[StateFilter] = None,
+        await_full_state: bool = True,
     ) -> StateMap[EventBase]:
         """Same as `get_current_state_ids` but also fetches the events"""
-        state_map_ids = await self.get_current_state_ids(room_id, state_filter)
+        state_map_ids = await self.get_current_state_ids(
+            room_id, state_filter, await_full_state
+        )
 
         event_map = await self.stores.main.get_events(list(state_map_ids.values()))
 
