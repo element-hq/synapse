@@ -188,7 +188,7 @@ async def check_state_independent_auth_rules(
     # 2. Reject if event has auth_events that: ...
     auth_events: MutableMapping[str, "EventBase"]
     if batched_auth_events:
-        auth_events = dict(batched_auth_events)
+        auth_events = batched_auth_events
         needed_auth_event_ids = [
             event_id
             for event_id in event.auth_event_ids()
