@@ -1,0 +1,1 @@
+Allow containers building on top of Synapse's Complement container is use the included PostgreSQL cluster.
