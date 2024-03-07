@@ -32,8 +32,13 @@ case "$SYNAPSE_COMPLEMENT_DATABASE" in
     ;;
 
   sqlite|"")
-    # Configure supervisord not to start Postgres, as we don't need it
-    export START_POSTGRES=false
+    # Check that START_POSTGRES hasn't already been set
+    # (i.e. by another container image inheriting our own).
+    # If not, then set it here.
+    if [ -z "$START_POSTGRES" ]; then
+      # Configure supervisord not to start Postgres.
+      export START_POSTGRES=false
+    fi
     ;;
 
   *)
