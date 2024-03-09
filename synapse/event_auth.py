@@ -189,23 +189,20 @@ async def check_state_independent_auth_rules(
     # 2. Reject if event has auth_events that: ...
     auth_events: MutableMapping[str, "EventBase"] = {}
     if batched_auth_events:
+        auth_events = cast(MutableMapping[str, "EventBase"], batched_auth_events)
         needed_auth_event_ids = [
             event_id
             for event_id in event.auth_event_ids()
             if event_id not in batched_auth_events
         ]
-
-        needed_auth_events: MutableMapping[str, "EventBase"] = {}
-
         if needed_auth_event_ids:
-            needed_auth_events = await store.get_events(
-                needed_auth_event_ids,
-                redact_behaviour=EventRedactBehaviour.as_is,
-                allow_rejected=True,
+            auth_events.update(
+                await store.get_events(
+                    needed_auth_event_ids,
+                    redact_behaviour=EventRedactBehaviour.as_is,
+                    allow_rejected=True,
+                )
             )
-        
-        auth_events = cast(MutableMapping[str, "EventBase"], batched_auth_events)
-        auth_events.update(needed_auth_events)
     else:
         auth_events = await store.get_events(
             event.auth_event_ids(),
