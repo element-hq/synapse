@@ -1997,16 +1997,18 @@ class EventsWorkerStore(SQLBaseStore):
         return rows, to_token, True
 
     @cached(max_entries=5000)
-    async def get_event_ordering(self, event_id: str) -> Tuple[int, int]:
+    async def get_event_ordering(self, event_id: str, room_id: str) -> Tuple[int, int]:
         res = await self.db_pool.simple_select_one(
             table="events",
             retcols=["topological_ordering", "stream_ordering"],
-            keyvalues={"event_id": event_id},
+            keyvalues={"event_id": event_id, "room_id": room_id},
             allow_none=True,
         )
 
         if not res:
-            raise SynapseError(404, "Could not find event %s" % (event_id,))
+            raise SynapseError(
+                404, "Could not find event %s in room %s" % (event_id, room_id)
+            )
 
         return int(res[0]), int(res[1])
 
