@@ -190,6 +190,10 @@ async def check_state_independent_auth_rules(
     # 2. Reject if event has auth_events that: ...
     auth_events: ChainMap[str, EventBase] = ChainMap()
     if batched_auth_events:
+        # batched_auth_events can become very large. To avoid repeatedly copying it, which
+        # would significantly impact performance, we use a ChainMap.
+        # batched_auth_events must be cast to MutableMapping because .new_child() requires
+        # this type. This casting is safe as the mapping is never mutated.
         auth_events = auth_events.new_child(cast(MutableMapping[str, "EventBase"], batched_auth_events))
         needed_auth_event_ids = [
             event_id
