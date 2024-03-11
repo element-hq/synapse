@@ -1428,6 +1428,17 @@ class FederationHandlerRegistry:
         if not self.config.server.track_presence and edu_type == EduTypes.PRESENCE:
             return
 
+        if (
+            not self.config.server.federation_presence_tracking
+            and edu_type == EduTypes.PRESENCE
+        ):
+            filtered_edus = []
+            for e in content["push"]:
+                # Process only profile presence updates to reduce resource impact
+                if "status_msg" in e or "displayname" in e or "avatar_url" in e:
+                    filtered_edus.append(e)
+            content["push"] = filtered_edus
+
         # Check if we have a handler on this instance
         handler = self.edu_handlers.get(edu_type)
         if handler:
