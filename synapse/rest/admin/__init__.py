@@ -109,6 +109,7 @@ from synapse.rest.admin.users import (
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
     UsersRestServletV2,
+    UsersRestServletV3,
     UserTokenRestServlet,
     WhoisRestServlet,
 )
@@ -289,6 +290,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)
     UsersRestServletV2(hs).register(http_server)
+    UsersRestServletV3(hs).register(http_server)
     UserMediaStatisticsRestServlet(hs).register(http_server)
     LargestRoomsStatistics(hs).register(http_server)
     EventReportDetailRestServlet(hs).register(http_server)
