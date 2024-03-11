@@ -201,6 +201,7 @@ class BasePresenceHandler(abc.ABC):
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
+        self._sync_presence_tracking = hs.config.server.sync_presence_tracking
 
         self._federation = None
         if hs.should_send_federation():
@@ -451,6 +452,8 @@ class BasePresenceHandler(abc.ABC):
         state = {
             "presence": current_presence_state.state,
             "status_message": current_presence_state.status_msg,
+            "displayname": current_presence_state.displayname,
+            "avatar_url": current_presence_state.avatar_url,
         }
 
         # Copy the presence state to the tip of the presence stream.
@@ -579,7 +582,11 @@ class WorkerPresenceHandler(BasePresenceHandler):
         Called by the sync and events servlets to record that a user has connected to
         this worker and is waiting for some events.
         """
-        if not affect_presence or not self._track_presence:
+        if (
+            not affect_presence
+            or not self._track_presence
+            or not self._sync_presence_tracking
+        ):
             return _NullContextManager()
 
         # Note that this causes last_active_ts to be incremented which is not
@@ -648,6 +655,8 @@ class WorkerPresenceHandler(BasePresenceHandler):
                 row.last_user_sync_ts,
                 row.status_msg,
                 row.currently_active,
+                row.displayname,
+                row.avatar_url,
             )
             for row in rows
         ]
@@ -1140,7 +1149,11 @@ class PresenceHandler(BasePresenceHandler):
                 client that is being used by a user.
             presence_state: The presence state indicated in the sync request
         """
-        if not affect_presence or not self._track_presence:
+        if (
+            not affect_presence
+            or not self._track_presence
+            or not self._sync_presence_tracking
+        ):
             return _NullContextManager()
 
         curr_sync = self._user_device_to_num_current_syncs.get((user_id, device_id), 0)
@@ -1340,6 +1353,8 @@ class PresenceHandler(BasePresenceHandler):
 
             new_fields["status_msg"] = push.get("status_msg", None)
             new_fields["currently_active"] = push.get("currently_active", False)
+            new_fields["displayname"] = push.get("displayname", None)
+            new_fields["avatar_url"] = push.get("avatar_url", None)
 
             prev_state = await self.current_state_for_user(user_id)
             updates.append(prev_state.copy_and_replace(**new_fields))
@@ -1369,6 +1384,8 @@ class PresenceHandler(BasePresenceHandler):
                 the `state` dict.
         """
         status_msg = state.get("status_msg", None)
+        displayname = state.get("displayname", None)
+        avatar_url = state.get("avatar_url", None)
         presence = state["presence"]
 
         if presence not in self.VALID_PRESENCE:
@@ -1414,6 +1431,8 @@ class PresenceHandler(BasePresenceHandler):
         else:
             # Syncs do not override the status message.
             new_fields["status_msg"] = status_msg
+            new_fields["displayname"] = displayname
+            new_fields["avatar_url"] = avatar_url
 
         await self._update_states(
             [prev_state.copy_and_replace(**new_fields)], force_notify=force_notify
@@ -1634,6 +1653,8 @@ class PresenceHandler(BasePresenceHandler):
                 if state.state != PresenceState.OFFLINE
                 or now - state.last_active_ts < 7 * 24 * 60 * 60 * 1000
                 or state.status_msg is not None
+                or state.displayname is not None
+                or state.avatar_url is not None
             ]
 
             await self._federation_queue.send_presence_to_destinations(
@@ -1666,6 +1687,14 @@ def should_notify(
 
     if old_state.status_msg != new_state.status_msg:
         notify_reason_counter.labels(user_location, "status_msg_change").inc()
+        return True
+
+    if old_state.displayname != new_state.displayname:
+        notify_reason_counter.labels(user_location, "displayname_change").inc()
+        return True
+
+    if old_state.avatar_url != new_state.avatar_url:
+        notify_reason_counter.labels(user_location, "avatar_url_change").inc()
         return True
 
     if old_state.state != new_state.state:
@@ -1725,6 +1754,8 @@ def format_user_presence_state(
             * status_msg: Optional. Included if `status_msg` is set on `state`. The user's
                 status.
             * currently_active: Optional. Included only if `state.state` is "online".
+            * displayname: Optional. The current display name for this user, if any.
+            * avatar_url: Optional. The current avatar URL for this user, if any.
 
         Example:
 
@@ -1733,7 +1764,9 @@ def format_user_presence_state(
             "user_id": "@alice:example.com",
             "last_active_ago": 16783813918,
             "status_msg": "Hello world!",
-            "currently_active": True
+            "currently_active": True,
+            "displayname": "Alice",
+            "avatar_url": "mxc://localhost/wefuiwegh8742w"
         }
     """
     content: JsonDict = {"presence": state.state}
@@ -1745,6 +1778,10 @@ def format_user_presence_state(
         content["status_msg"] = state.status_msg
     if state.state == PresenceState.ONLINE:
         content["currently_active"] = state.currently_active
+    if state.displayname:
+        content["displayname"] = state.displayname
+    if state.avatar_url:
+        content["avatar_url"] = state.avatar_url
 
     return content
 
