@@ -25,6 +25,7 @@ import logging
 import typing
 from typing import (
     Any,
+    ChainMap,
     Dict,
     Iterable,
     List,
@@ -35,7 +36,6 @@ from typing import (
     Tuple,
     Union,
     cast,
-    ChainMap,
 )
 
 from canonicaljson import encode_canonical_json
