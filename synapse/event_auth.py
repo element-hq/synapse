@@ -194,7 +194,9 @@ async def check_state_independent_auth_rules(
         # would significantly impact performance, we use a ChainMap.
         # batched_auth_events must be cast to MutableMapping because .new_child() requires
         # this type. This casting is safe as the mapping is never mutated.
-        auth_events = auth_events.new_child(cast(MutableMapping[str, "EventBase"], batched_auth_events))
+        auth_events = auth_events.new_child(
+            cast(MutableMapping[str, "EventBase"], batched_auth_events)
+        )
         needed_auth_event_ids = [
             event_id
             for event_id in event.auth_event_ids()
