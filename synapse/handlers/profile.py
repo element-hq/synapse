@@ -200,6 +200,19 @@ class ProfileHandler:
         if propagate:
             await self._update_join_states(requester, target_user)
 
+        if self.hs.config.server.track_presence:
+            presence_handler = self.hs.get_presence_handler()
+            current_presence_state = await presence_handler.get_state(target_user)
+
+            state = {
+                "presence": current_presence_state.state,
+                "status_message": current_presence_state.status_msg,
+                "displayname": new_displayname,
+                "avatar_url": current_presence_state.avatar_url,
+            }
+
+            await presence_handler.set_state(target_user, requester.device_id, state)
+
     async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
         if self.hs.is_mine(target_user):
             try:
@@ -292,6 +305,19 @@ class ProfileHandler:
 
         if propagate:
             await self._update_join_states(requester, target_user)
+
+        if self.hs.config.server.track_presence:
+            presence_handler = self.hs.get_presence_handler()
+            current_presence_state = await presence_handler.get_state(target_user)
+
+            state = {
+                "presence": current_presence_state.state,
+                "status_message": current_presence_state.status_msg,
+                "displayname": current_presence_state.displayname,
+                "avatar_url": new_avatar_url,
+            }
+
+            await presence_handler.set_state(target_user, requester.device_id, state)
 
     @cached()
     async def check_avatar_size_and_mime_type(self, mxc: str) -> bool:
