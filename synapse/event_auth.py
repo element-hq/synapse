@@ -35,6 +35,7 @@ from typing import (
     Tuple,
     Union,
     cast,
+    ChainMap,
 )
 
 from canonicaljson import encode_canonical_json
@@ -187,16 +188,16 @@ async def check_state_independent_auth_rules(
         return
 
     # 2. Reject if event has auth_events that: ...
-    auth_events: MutableMapping[str, "EventBase"] = {}
+    auth_events: ChainMap[str, EventBase] = ChainMap()
     if batched_auth_events:
-        auth_events = cast(MutableMapping[str, "EventBase"], batched_auth_events)
+        auth_events = auth_events.new_child(cast(MutableMapping[str, "EventBase"], batched_auth_events))
         needed_auth_event_ids = [
             event_id
             for event_id in event.auth_event_ids()
             if event_id not in batched_auth_events
         ]
         if needed_auth_event_ids:
-            auth_events.update(
+            auth_events = auth_events.new_child(
                 await store.get_events(
                     needed_auth_event_ids,
                     redact_behaviour=EventRedactBehaviour.as_is,
@@ -204,10 +205,12 @@ async def check_state_independent_auth_rules(
                 )
             )
     else:
-        auth_events = await store.get_events(
-            event.auth_event_ids(),
-            redact_behaviour=EventRedactBehaviour.as_is,
-            allow_rejected=True,
+        auth_events = auth_events.new_child(
+            await store.get_events(
+                event.auth_event_ids(),
+                redact_behaviour=EventRedactBehaviour.as_is,
+                allow_rejected=True,
+            )
         )
 
     room_id = event.room_id
