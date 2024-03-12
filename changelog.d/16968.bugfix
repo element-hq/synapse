@@ -1,0 +1,1 @@
+Prevent locking up when checking auth rules that are independent of room state for batched auth events. Contributed by @ggogel.
