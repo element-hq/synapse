@@ -1,0 +1,1 @@
+Add a new [List Accounts v3](https://element-hq.github.io/synapse/v1.103/admin_api/user_admin_api.html#list-accounts-v3) Admin API with improved deactivated user filtering capabilities.

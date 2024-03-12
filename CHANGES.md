@@ -1,3 +1,10 @@
+# Synapse 1.102.0 (2024-03-05)
+
+### Bugfixes
+
+- Revert https://github.com/element-hq/synapse/pull/16756, which caused incorrect notification counts on mobile clients since v1.100.0. ([\#16979](https://github.com/element-hq/synapse/issues/16979))
+
+
 # Synapse 1.102.0rc1 (2024-02-20)
 
 ### Features

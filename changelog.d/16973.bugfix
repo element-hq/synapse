@@ -1,0 +1,1 @@
+Fix joining remote rooms when a module uses the `on_new_event` callback. This callback may now pass partial state events instead of the full state for remote rooms.
