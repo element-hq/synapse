@@ -8,6 +8,7 @@
 ### Bugfixes
 
 - Fix joining remote rooms when a module uses the `on_new_event` callback. This callback may now pass partial state events instead of the full state for remote rooms. Introduced in v1.76.0. ([\#16973](https://github.com/element-hq/synapse/issues/16973))
+- Fix performance issue when joining very large rooms that can cause the server to lock up. Introduced in v1.100.0. Contributed by @ggogel. ([\#16968](https://github.com/element-hq/synapse/issues/16968))
 
 ### Improved Documentation
 
