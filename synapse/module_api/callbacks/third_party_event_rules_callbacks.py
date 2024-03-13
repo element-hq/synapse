@@ -366,7 +366,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         if len(self._check_threepid_can_be_invited_callbacks) == 0:
             return True
 
-        state_events = await self._get_state_map_for_room(room_id)
+        state_events = await self._storage_controllers.state.get_current_state(room_id)
 
         for callback in self._check_threepid_can_be_invited_callbacks:
             try:
@@ -399,7 +399,7 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         if len(self._check_visibility_can_be_modified_callbacks) == 0:
             return True
 
-        state_events = await self._get_state_map_for_room(room_id)
+        state_events = await self._storage_controllers.state.get_current_state(room_id)
 
         for callback in self._check_visibility_can_be_modified_callbacks:
             try:
@@ -427,7 +427,13 @@ class ThirdPartyEventRulesModuleApiCallbacks:
             return
 
         event = await self.store.get_event(event_id)
-        state_events = await self._get_state_map_for_room(event.room_id)
+
+        # We *don't* want to wait for the full state here, because waiting for full
+        # state will persist event, which in turn will call this method.
+        # This would end up in a deadlock.
+        state_events = await self._storage_controllers.state.get_current_state(
+            event.room_id, await_full_state=False
+        )
 
         for callback in self._on_new_event_callbacks:
             try:
@@ -489,17 +495,6 @@ class ThirdPartyEventRulesModuleApiCallbacks:
                     "Failed to run module API callback %s: %s", callback, e
                 )
         return True
-
-    async def _get_state_map_for_room(self, room_id: str) -> StateMap[EventBase]:
-        """Given a room ID, return the state events of that room.
-
-        Args:
-            room_id: The ID of the room.
-
-        Returns:
-            A dict mapping (event type, state key) to state event.
-        """
-        return await self._storage_controllers.state.get_current_state(room_id)
 
     async def on_profile_update(
         self, user_id: str, new_profile: ProfileInfo, by_admin: bool, deactivation: bool

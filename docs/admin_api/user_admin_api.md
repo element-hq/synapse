@@ -164,6 +164,7 @@ Body parameters:
   Other allowed options are: `bot` and `support`.
 
 ## List Accounts
+### List Accounts (V2)
 
 This API returns all local user accounts.
 By default, the response is ordered by ascending user ID.
@@ -286,6 +287,19 @@ The following fields are returned in the JSON response body:
 - `total` - integer - Total number of media.
 
 *Added in Synapse 1.93:* the `locked` query parameter and response field.
+
+### List Accounts (V3)
+
+This API returns all local user accounts (see v2). In contrast to v2, the query parameter `deactivated` is handled differently.
+
+```
+GET /_synapse/admin/v3/users
+```
+
+**Parameters**
+- `deactivated` - Optional flag to filter deactivated users. If `true`, only deactivated users are returned.
+  If `false`, deactivated users are excluded from the query. When the flag is absent (the default),
+  users are not filtered by deactivation status.
 
 ## Query current sessions for a user
 
