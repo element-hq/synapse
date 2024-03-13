@@ -1292,9 +1292,9 @@ class PersistEventsStore:
         Returns:
             filtered list
         """
-        new_events_and_contexts: OrderedDict[
-            str, Tuple[EventBase, EventContext]
-        ] = OrderedDict()
+        new_events_and_contexts: OrderedDict[str, Tuple[EventBase, EventContext]] = (
+            OrderedDict()
+        )
         for event, context in events_and_contexts:
             prev_event_context = new_events_and_contexts.get(event.event_id)
             if prev_event_context:

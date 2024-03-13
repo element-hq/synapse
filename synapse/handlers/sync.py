@@ -1333,9 +1333,9 @@ class SyncHandler:
                     and auth_event.state_key == member
                 ):
                     missing_members.discard(member)
-                    additional_state_ids[
-                        (EventTypes.Member, member)
-                    ] = auth_event.event_id
+                    additional_state_ids[(EventTypes.Member, member)] = (
+                        auth_event.event_id
+                    )
                     break
 
         if missing_members:

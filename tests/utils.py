@@ -121,13 +121,11 @@ def setupdb() -> None:
 
 
 @overload
-def default_config(name: str, parse: Literal[False] = ...) -> Dict[str, object]:
-    ...
+def default_config(name: str, parse: Literal[False] = ...) -> Dict[str, object]: ...
 
 
 @overload
-def default_config(name: str, parse: Literal[True]) -> HomeServerConfig:
-    ...
+def default_config(name: str, parse: Literal[True]) -> HomeServerConfig: ...
 
 
 def default_config(

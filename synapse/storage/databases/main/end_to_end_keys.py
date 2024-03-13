@@ -256,8 +256,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         self,
         query_list: Collection[Tuple[str, Optional[str]]],
         include_all_devices: Literal[False] = False,
-    ) -> Dict[str, Dict[str, DeviceKeyLookupResult]]:
-        ...
+    ) -> Dict[str, Dict[str, DeviceKeyLookupResult]]: ...
 
     @overload
     async def get_e2e_device_keys_and_signatures(
@@ -265,8 +264,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         query_list: Collection[Tuple[str, Optional[str]]],
         include_all_devices: bool = False,
         include_deleted_devices: Literal[False] = False,
-    ) -> Dict[str, Dict[str, DeviceKeyLookupResult]]:
-        ...
+    ) -> Dict[str, Dict[str, DeviceKeyLookupResult]]: ...
 
     @overload
     async def get_e2e_device_keys_and_signatures(
@@ -274,8 +272,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         query_list: Collection[Tuple[str, Optional[str]]],
         include_all_devices: Literal[True],
         include_deleted_devices: Literal[True],
-    ) -> Dict[str, Dict[str, Optional[DeviceKeyLookupResult]]]:
-        ...
+    ) -> Dict[str, Dict[str, Optional[DeviceKeyLookupResult]]]: ...
 
     @trace
     @cancellable

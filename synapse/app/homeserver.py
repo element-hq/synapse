@@ -188,9 +188,9 @@ class SynapseHomeServer(HomeServer):
                     PasswordResetSubmitTokenResource,
                 )
 
-                resources[
-                    "/_synapse/client/password_reset/email/submit_token"
-                ] = PasswordResetSubmitTokenResource(self)
+                resources["/_synapse/client/password_reset/email/submit_token"] = (
+                    PasswordResetSubmitTokenResource(self)
+                )
 
         if name == "consent":
             from synapse.rest.consent.consent_resource import ConsentResource

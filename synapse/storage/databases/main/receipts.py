@@ -394,9 +394,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
         content: JsonDict = {}
         for receipt_type, user_id, event_id, data in rows:
-            content.setdefault(event_id, {}).setdefault(receipt_type, {})[
-                user_id
-            ] = db_to_json(data)
+            content.setdefault(event_id, {}).setdefault(receipt_type, {})[user_id] = (
+                db_to_json(data)
+            )
 
         return [{"type": EduTypes.RECEIPT, "room_id": room_id, "content": content}]
 
@@ -483,9 +483,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
             if user_id in receipt_type_dict:  # existing receipt
                 # is the existing receipt threaded and we are currently processing an unthreaded one?
                 if "thread_id" in receipt_type_dict[user_id] and not thread_id:
-                    receipt_type_dict[
-                        user_id
-                    ] = receipt_data  # replace with unthreaded one
+                    receipt_type_dict[user_id] = (
+                        receipt_data  # replace with unthreaded one
+                    )
             else:  # receipt does not exist, just set it
                 receipt_type_dict[user_id] = receipt_data
                 if thread_id:

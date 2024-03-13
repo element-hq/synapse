@@ -503,7 +503,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            self.url + "?deactivated=true",
+            f"{self.url}?deactivated=true",
             {},
             access_token=self.admin_user_tok,
         )
@@ -982,6 +982,56 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, channel.json_body["total"])
         self.assertFalse(channel.json_body["users"][0]["admin"])
 
+    def test_filter_deactivated_users(self) -> None:
+        """
+        Tests whether the various values of the query parameter `deactivated` lead to the
+        expected result set.
+        """
+        users_url_v3 = self.url.replace("v2", "v3")
+
+        # Register an additional non admin user
+        user_id = self.register_user("user", "pass", admin=False)
+
+        # Deactivate that user, requesting erasure.
+        deactivate_account_handler = self.hs.get_deactivate_account_handler()
+        self.get_success(
+            deactivate_account_handler.deactivate_account(
+                user_id, erase_data=True, requester=create_requester(user_id)
+            )
+        )
+
+        # Query all users
+        channel = self.make_request(
+            "GET",
+            users_url_v3,
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(2, channel.json_body["total"])
+
+        # Query deactivated users
+        channel = self.make_request(
+            "GET",
+            f"{users_url_v3}?deactivated=true",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(1, channel.json_body["total"])
+        self.assertEqual("@user:test", channel.json_body["users"][0]["name"])
+
+        # Query non-deactivated users
+        channel = self.make_request(
+            "GET",
+            f"{users_url_v3}?deactivated=false",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(1, channel.json_body["total"])
+        self.assertEqual("@admin:test", channel.json_body["users"][0]["name"])
+
     @override_config(
         {
             "experimental_features": {
@@ -1130,7 +1180,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         # They should appear in the list users API, marked as not erased.
         channel = self.make_request(
             "GET",
-            self.url + "?deactivated=true",
+            f"{self.url}?deactivated=true",
             access_token=self.admin_user_tok,
         )
         users = {user["name"]: user for user in channel.json_body["users"]}
@@ -1194,7 +1244,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
             dir: The direction of ordering to give the server
         """
 
-        url = self.url + "?deactivated=true&"
+        url = f"{self.url}?deactivated=true&"
         if order_by is not None:
             url += "order_by=%s&" % (order_by,)
         if dir is not None and dir in ("b", "f"):
