@@ -284,15 +284,7 @@ async def yieldable_gather_results(
     try:
         return await make_deferred_yieldable(
             defer.gatherResults(
-                # type-ignore: mypy reports two errors:
-                # error: Argument 1 to "run_in_background" has incompatible type
-                #     "Callable[[T, **P], Awaitable[R]]"; expected
-                #     "Callable[[T, **P], Awaitable[R]]"  [arg-type]
-                # error: Argument 2 to "run_in_background" has incompatible type
-                #     "T"; expected "[T, **P.args]"  [arg-type]
-                # The former looks like a mypy bug, and the latter looks like a
-                # false positive.
-                [run_in_background(func, item, *args, **kwargs) for item in iter],  # type: ignore[arg-type]
+                [run_in_background(func, item, *args, **kwargs) for item in iter],
                 consumeErrors=True,
             )
         )
@@ -338,7 +330,7 @@ async def yieldable_gather_results_delaying_cancellation(
         return await make_deferred_yieldable(
             delay_cancellation(
                 defer.gatherResults(
-                    [run_in_background(func, item, *args, **kwargs) for item in iter],  # type: ignore[arg-type]
+                    [run_in_background(func, item, *args, **kwargs) for item in iter],
                     consumeErrors=True,
                 )
             )
