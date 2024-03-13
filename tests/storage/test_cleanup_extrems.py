@@ -337,15 +337,15 @@ class CleanupExtremDummyEventsTestCase(HomeserverTestCase):
         """Simple test to ensure that _expire_rooms_to_exclude_from_dummy_event_insertion()
         expires old entries correctly.
         """
-        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion[
-            "1"
-        ] = 100000
-        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion[
-            "2"
-        ] = 200000
-        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion[
-            "3"
-        ] = 300000
+        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion["1"] = (
+            100000
+        )
+        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion["2"] = (
+            200000
+        )
+        self.event_creator_handler._rooms_to_exclude_from_dummy_event_insertion["3"] = (
+            300000
+        )
 
         self.event_creator_handler._expire_rooms_to_exclude_from_dummy_event_insertion()
         # All entries within time frame

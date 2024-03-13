@@ -171,9 +171,9 @@ class RegistrationConfig(Config):
             refreshable_access_token_lifetime = self.parse_duration(
                 refreshable_access_token_lifetime
             )
-        self.refreshable_access_token_lifetime: Optional[
-            int
-        ] = refreshable_access_token_lifetime
+        self.refreshable_access_token_lifetime: Optional[int] = (
+            refreshable_access_token_lifetime
+        )
 
         if (
             self.session_lifetime is not None

@@ -237,10 +237,12 @@ class PurgeHistoryStatusRestServlet(RestServlet):
             raise NotFoundError("purge id '%s' not found" % purge_id)
 
         result: JsonDict = {
-            "status": purge_task.status
-            if purge_task.status == TaskStatus.COMPLETE
-            or purge_task.status == TaskStatus.FAILED
-            else "active",
+            "status": (
+                purge_task.status
+                if purge_task.status == TaskStatus.COMPLETE
+                or purge_task.status == TaskStatus.FAILED
+                else "active"
+            ),
         }
         if purge_task.error:
             result["error"] = purge_task.error

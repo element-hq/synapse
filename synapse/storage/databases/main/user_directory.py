@@ -745,9 +745,11 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                         p.user_id,
                         get_localpart_from_id(p.user_id),
                         get_domain_from_id(p.user_id),
-                        _filter_text_for_index(p.display_name)
-                        if p.display_name
-                        else None,
+                        (
+                            _filter_text_for_index(p.display_name)
+                            if p.display_name
+                            else None
+                        ),
                     )
                     for p in profiles
                 ],

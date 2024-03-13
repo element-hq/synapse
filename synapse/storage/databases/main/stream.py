@@ -988,8 +988,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         txn: LoggingTransaction,
         event_id: str,
         allow_none: Literal[False] = False,
-    ) -> int:
-        ...
+    ) -> int: ...
 
     @overload
     def get_stream_id_for_event_txn(
@@ -997,8 +996,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         txn: LoggingTransaction,
         event_id: str,
         allow_none: bool = False,
-    ) -> Optional[int]:
-        ...
+    ) -> Optional[int]: ...
 
     def get_stream_id_for_event_txn(
         self,
@@ -1476,12 +1474,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             _EventDictReturn(event_id, topological_ordering, stream_ordering)
             for event_id, instance_name, topological_ordering, stream_ordering in txn
             if _filter_results(
-                lower_token=to_token
-                if direction == Direction.BACKWARDS
-                else from_token,
-                upper_token=from_token
-                if direction == Direction.BACKWARDS
-                else to_token,
+                lower_token=(
+                    to_token if direction == Direction.BACKWARDS else from_token
+                ),
+                upper_token=(
+                    from_token if direction == Direction.BACKWARDS else to_token
+                ),
                 instance_name=instance_name,
                 topological_ordering=topological_ordering,
                 stream_ordering=stream_ordering,
