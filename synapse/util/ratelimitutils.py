@@ -177,9 +177,9 @@ class FederationRateLimiter:
                 clock=clock, config=config, metrics_name=metrics_name
             )
 
-        self.ratelimiters: DefaultDict[
-            str, "_PerHostRatelimiter"
-        ] = collections.defaultdict(new_limiter)
+        self.ratelimiters: DefaultDict[str, "_PerHostRatelimiter"] = (
+            collections.defaultdict(new_limiter)
+        )
 
         with _rate_limiter_instances_lock:
             _rate_limiter_instances.add(self)

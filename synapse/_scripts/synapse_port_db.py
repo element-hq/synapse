@@ -1040,10 +1040,10 @@ class Porter:
         return done, remaining + done
 
     async def _setup_state_group_id_seq(self) -> None:
-        curr_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
-            table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
+        curr_id: Optional[int] = (
+            await self.sqlite_store.db_pool.simple_select_one_onecol(
+                table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
+            )
         )
 
         if not curr_id:
@@ -1132,13 +1132,13 @@ class Porter:
         )
 
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
-            table="event_auth_chains",
-            keyvalues={},
-            retcol="MAX(chain_id)",
-            allow_none=True,
+        curr_chain_id: Optional[int] = (
+            await self.sqlite_store.db_pool.simple_select_one_onecol(
+                table="event_auth_chains",
+                keyvalues={},
+                retcol="MAX(chain_id)",
+                allow_none=True,
+            )
         )
 
         def r(txn: LoggingTransaction) -> None:

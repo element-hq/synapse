@@ -88,8 +88,7 @@ class _EventSourceStore(Protocol):
         redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
-    ) -> Dict[str, "EventBase"]:
-        ...
+    ) -> Dict[str, "EventBase"]: ...
 
 
 def validate_event_for_room_version(event: "EventBase") -> None:

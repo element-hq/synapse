@@ -357,24 +357,21 @@ T4 = TypeVar("T4")
 @overload
 def gather_results(
     deferredList: Tuple[()], consumeErrors: bool = ...
-) -> "defer.Deferred[Tuple[()]]":
-    ...
+) -> "defer.Deferred[Tuple[()]]": ...
 
 
 @overload
 def gather_results(
     deferredList: Tuple["defer.Deferred[T1]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1]]":
-    ...
+) -> "defer.Deferred[Tuple[T1]]": ...
 
 
 @overload
 def gather_results(
     deferredList: Tuple["defer.Deferred[T1]", "defer.Deferred[T2]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2]]": ...
 
 
 @overload
@@ -383,8 +380,7 @@ def gather_results(
         "defer.Deferred[T1]", "defer.Deferred[T2]", "defer.Deferred[T3]"
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2, T3]]": ...
 
 
 @overload
@@ -396,8 +392,7 @@ def gather_results(
         "defer.Deferred[T4]",
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3, T4]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2, T3, T4]]": ...
 
 
 def gather_results(  # type: ignore[misc]
@@ -782,18 +777,15 @@ def stop_cancellation(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
 
 
 @overload
-def delay_cancellation(awaitable: "defer.Deferred[T]") -> "defer.Deferred[T]":
-    ...
+def delay_cancellation(awaitable: "defer.Deferred[T]") -> "defer.Deferred[T]": ...
 
 
 @overload
-def delay_cancellation(awaitable: Coroutine[Any, Any, T]) -> "defer.Deferred[T]":
-    ...
+def delay_cancellation(awaitable: Coroutine[Any, Any, T]) -> "defer.Deferred[T]": ...
 
 
 @overload
-def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
-    ...
+def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]: ...
 
 
 def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
