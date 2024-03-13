@@ -56,7 +56,6 @@ class EventInternalMetadata:
 
         (Added in synapse 0.99.0, so may be unreliable for events received before that)
         """
-        ...
 
     def get_send_on_behalf_of(self) -> Optional[str]:
         """Whether this server should send the event on behalf of another server.
@@ -65,7 +64,6 @@ class EventInternalMetadata:
 
         returns a str with the name of the server this event is sent on behalf of.
         """
-        ...
 
     def need_to_check_redaction(self) -> bool:
         """Whether the redaction event needs to be rechecked when fetching
@@ -77,7 +75,6 @@ class EventInternalMetadata:
         If the sender of the redaction event is allowed to redact any event
         due to auth rules, then this will always return false.
         """
-        ...
 
     def is_soft_failed(self) -> bool:
         """Whether the event has been soft failed.
@@ -88,7 +85,6 @@ class EventInternalMetadata:
             2. They should not be added to the forward extremities (and
                therefore not to current state).
         """
-        ...
 
     def should_proactively_send(self) -> bool:
         """Whether the event, if ours, should be sent to other clients and
@@ -97,7 +93,6 @@ class EventInternalMetadata:
         This is used for sending dummy events internally. Servers and clients
         can still explicitly fetch the event.
         """
-        ...
 
     def is_redacted(self) -> bool:
         """Whether the event has been redacted.
@@ -105,8 +100,6 @@ class EventInternalMetadata:
         This is used for efficiently checking whether an event has been
         marked as redacted without needing to make another database call.
         """
-        ...
 
     def is_notifiable(self) -> bool:
         """Whether this event can trigger a push notification"""
-        ...
