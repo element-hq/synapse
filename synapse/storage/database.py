@@ -913,9 +913,9 @@ class DatabasePool:
 
             try:
                 with opentracing.start_active_span(f"db.{desc}"):
-                    result = await self.runWithConnection(
+                    result: R = await self.runWithConnection(
                         # mypy seems to have an issue with this, maybe a bug?
-                        self.new_transaction,  # type: ignore[arg-type]
+                        self.new_transaction,
                         desc,
                         after_callbacks,
                         async_after_callbacks,
@@ -934,7 +934,7 @@ class DatabasePool:
                     await async_callback(*async_args, **async_kwargs)
                 for after_callback, after_args, after_kwargs in after_callbacks:
                     after_callback(*after_args, **after_kwargs)
-                return cast(R, result)
+                return result
             except Exception:
                 for exception_callback, after_args, after_kwargs in exception_callbacks:
                     exception_callback(*after_args, **after_kwargs)

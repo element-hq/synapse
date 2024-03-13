@@ -142,7 +142,7 @@ class ExpiringCache(Generic[KT, VT]):
             return default
 
         if self.iterable:
-            self.metrics.inc_evictions(EvictionReason.invalidation, len(value.value))  # type: ignore[arg-type]
+            self.metrics.inc_evictions(EvictionReason.invalidation, len(value.value))
         else:
             self.metrics.inc_evictions(EvictionReason.invalidation)
 
