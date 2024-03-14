@@ -320,9 +320,9 @@ class ProfileHandler:
             server_name = host
 
         if self._is_mine_server_name(server_name):
-            media_info: Optional[
-                Union[LocalMedia, RemoteMedia]
-            ] = await self.store.get_local_media(media_id)
+            media_info: Optional[Union[LocalMedia, RemoteMedia]] = (
+                await self.store.get_local_media(media_id)
+            )
         else:
             media_info = await self.store.get_cached_remote_media(server_name, media_id)
 
