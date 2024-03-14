@@ -2837,7 +2837,7 @@ class SyncResultBuilder:
         if self.since_token:
             for joined_sync in self.joined:
                 it = itertools.chain(
-                    joined_sync.timeline.events, joined_sync.state.values()
+                    joined_sync.state.values(), joined_sync.timeline.events
                 )
                 for event in it:
                     if event.type == EventTypes.Member:
@@ -2849,13 +2849,20 @@ class SyncResultBuilder:
                             newly_joined_or_invited_or_knocked_users.add(
                                 event.state_key
                             )
+                            # If the user left and rejoined in the same batch, they
+                            # count as a newly-joined user, *not* a newly-left user.
+                            newly_left_users.discard(event.state_key)
                         else:
                             prev_content = event.unsigned.get("prev_content", {})
                             prev_membership = prev_content.get("membership", None)
                             if prev_membership == Membership.JOIN:
                                 newly_left_users.add(event.state_key)
+                            # If the user joined and left in the same batch, they
+                            # count as a newly-left user, not a newly-joined user.
+                            newly_joined_or_invited_or_knocked_users.discard(
+                                event.state_key
+                            )
 
-        newly_left_users -= newly_joined_or_invited_or_knocked_users
         return newly_joined_or_invited_or_knocked_users, newly_left_users
 
 
