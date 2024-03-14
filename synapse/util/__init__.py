@@ -117,11 +117,17 @@ class Clock:
         return int(self.time() * 1000)
 
     def looping_call(
-        self, f: Callable[P, object], msec: float, *args: P.args, **kwargs: P.kwargs
+        self,
+        f: Callable[P, object],
+        msec: float,
+        *args: P.args,
+        now: bool = False,
+        **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
 
-        Waits `msec` initially before calling `f` for the first time.
+        Unless `now` is `True`, waits `msec` initially before calling `f` for the first
+        time.
 
         If the function given to `looping_call` returns an awaitable/deferred, the next
         call isn't scheduled until after the returned awaitable has finished. We get
@@ -134,12 +140,14 @@ class Clock:
         Args:
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
-            *args: Postional arguments to pass to function.
+            *args: Positional arguments to pass to function.
+            now: (Must be specified as a named arg.) If `True`, the first call to the
+                function is scheduled immediately.
             **kwargs: Key arguments to pass to function.
         """
         call = task.LoopingCall(f, *args, **kwargs)
         call.clock = self._reactor
-        d = call.start(msec / 1000.0, now=False)
+        d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         return call
 

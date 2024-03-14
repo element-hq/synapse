@@ -436,11 +436,7 @@ class FederationSender(AbstractFederationSender):
             WAKEUP_RETRY_PERIOD_SEC * 1000.0,
             "wake_destinations_needing_catchup",
             self._wake_destinations_needing_catchup,
-        )
-        # Also kick off a run of the waker process at startup.
-        run_as_background_process(
-            "wake_destinations_needing_catchup",
-            self._wake_destinations_needing_catchup,
+            now=True,
         )
 
     def _get_per_destination_queue(self, destination: str) -> PerDestinationQueue:
