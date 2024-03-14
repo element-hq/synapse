@@ -1,0 +1,2 @@
+Refactor state delta calculation in `/sync` handler.
+
