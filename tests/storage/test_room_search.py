@@ -71,17 +71,16 @@ class EventSearchInsertionTest(HomeserverTestCase):
             store.search_msgs([room_id], "hi bob", ["content.body"])
         )
         self.assertEqual(result.get("count"), 1)
-        if isinstance(store.database_engine, PostgresEngine):
-            self.assertIn("hi", result.get("highlights"))
-            self.assertIn("bob", result.get("highlights"))
+        self.assertIn("hi", result.get("highlights"))
+        self.assertIn("bob", result.get("highlights"))
 
         # Check that search works for an unrelated message
         result = self.get_success(
             store.search_msgs([room_id], "another", ["content.body"])
         )
         self.assertEqual(result.get("count"), 1)
-        if isinstance(store.database_engine, PostgresEngine):
-            self.assertIn("another", result.get("highlights"))
+
+        self.assertIn("another", result.get("highlights"))
 
         # Check that search works for a search term that overlaps with the message
         # containing a null byte and an unrelated message.
@@ -90,8 +89,8 @@ class EventSearchInsertionTest(HomeserverTestCase):
         result = self.get_success(
             store.search_msgs([room_id], "hi alice", ["content.body"])
         )
-        if isinstance(store.database_engine, PostgresEngine):
-            self.assertIn("alice", result.get("highlights"))
+
+        self.assertIn("alice", result.get("highlights"))
 
     def test_non_string(self) -> None:
         """Test that non-string `value`s are not inserted into `event_search`.
