@@ -1,0 +1,1 @@
+Fix bug which did not reject pending knocks at rooms on deactivating account. Contributed by @hanadi92.
