@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import itertools
 import logging
 from typing import TYPE_CHECKING, Optional
 
@@ -205,7 +206,7 @@ class DeactivateAccountHandler:
         pending_invites = await self.store.get_invited_rooms_for_local_user(user_id)
         pending_knocks = await self.store.get_knocked_at_rooms_for_local_user(user_id)
 
-        for room in pending_invites + pending_knocks:
+        for room in itertools.chain(pending_invites, pending_knocks):
             try:
                 await self._room_member_handler.update_membership(
                     create_requester(user, authenticated_entity=self._server_name),
