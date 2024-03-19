@@ -332,6 +332,7 @@ Other allowed options are: <code>bot</code> and <code>support</code>.</p>
 </li>
 </ul>
 <h2 id="list-accounts"><a class="header" href="#list-accounts">List Accounts</a></h2>
+<h3 id="list-accounts-v2"><a class="header" href="#list-accounts-v2">List Accounts (V2)</a></h3>
 <p>This API returns all local user accounts.
 By default, the response is ordered by ascending user ID.</p>
 <pre><code>GET /_synapse/admin/v2/users?from=0&amp;limit=10&amp;guests=false
@@ -471,6 +472,16 @@ This allows user type specific behaviour. There are also types <code>support</co
 </li>
 </ul>
 <p><em>Added in Synapse 1.93:</em> the <code>locked</code> query parameter and response field.</p>
+<h3 id="list-accounts-v3"><a class="header" href="#list-accounts-v3">List Accounts (V3)</a></h3>
+<p>This API returns all local user accounts (see v2). In contrast to v2, the query parameter <code>deactivated</code> is handled differently.</p>
+<pre><code>GET /_synapse/admin/v3/users
+</code></pre>
+<p><strong>Parameters</strong></p>
+<ul>
+<li><code>deactivated</code> - Optional flag to filter deactivated users. If <code>true</code>, only deactivated users are returned.
+If <code>false</code>, deactivated users are excluded from the query. When the flag is absent (the default),
+users are not filtered by deactivation status.</li>
+</ul>
 <h2 id="query-current-sessions-for-a-user"><a class="header" href="#query-current-sessions-for-a-user">Query current sessions for a user</a></h2>
 <p>This API returns information about the active sessions for a specific user.</p>
 <p>The endpoints are:</p>

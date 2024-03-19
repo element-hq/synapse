@@ -1036,6 +1036,24 @@ backend matrix
 <pre><code>backend matrix
   server matrix unix@/run/synapse/main_public.sock
 </code></pre>
+<p>Example configuration when using a single port for both client and federation traffic.</p>
+<pre><code>frontend https
+  bind *:443,[::]:443 ssl crt /etc/ssl/haproxy/ strict-sni alpn h2,http/1.1
+  http-request set-header X-Forwarded-Proto https if { ssl_fc }
+  http-request set-header X-Forwarded-Proto http  if !{ ssl_fc }
+  http-request set-header X-Forwarded-For %[src]
+
+  acl matrix-host hdr(host) -i matrix.example.com matrix.example.com:443
+  acl matrix-sni  ssl_fc_sni   matrix.example.com
+  acl matrix-path path_beg     /_matrix
+  acl matrix-path path_beg     /_synapse/client
+
+  use_backend matrix if matrix-host matrix-path
+  use_backend matrix if matrix-sni
+
+backend matrix
+  server matrix 127.0.0.1:8008
+</code></pre>
 <p><a href="delegate.html">Delegation</a> example:</p>
 <pre><code>frontend https
   acl matrix-well-known-client-path path /.well-known/matrix/client
@@ -1823,8 +1841,24 @@ v1.61.0.</p>
 <tr><td>v1.83.0 – v1.84.1</td><td>v1.77.0</td></tr>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
-<tr><td>v1.98.0 – v1.102.0</td><td>v1.96.0</td></tr>
+<tr><td>v1.98.0 – v1.103.0</td><td>v1.96.0</td></tr>
 </tbody></table>
+<h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
+<p>You need to read all of the upgrade notes for each version between your current
+version and the latest so that you can update your dependencies, environment,
+config files, etc. if necessary. But you do not need to perform an
+upgrade to each individual version that was missed.</p>
+<p>We do not have a list of which versions must be installed. Instead, we recommend
+that you upgrade through each incompatible database schema version, which would
+give you the ability to roll back the maximum number of versions should anything
+go wrong. See <a href="upgrade.html#rolling-back-to-older-versions">Rolling back to older versions</a>
+above.</p>
+<p>Additionally, new versions of Synapse will occasionally run database migrations
+and background updates to update the database. Synapse will not start until
+database migrations are complete. You should wait until background updates from
+each upgrade are complete before moving on to the next upgrade, to avoid
+stacking them up. You can monitor the currently running background updates with
+<a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
 <h1 id="upgrading-to-v11000"><a class="header" href="#upgrading-to-v11000">Upgrading to v1.100.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.61.0 to v1.65.0.
@@ -10559,6 +10593,9 @@ any of the subsequent implementations of this callback.</p>
 <p>Called after sending an event into a room. The module is passed the event, as well
 as the state of the room <em>after</em> the event. This means that if the event is a state event,
 it will be included in this state.</p>
+<p>The state map may not be complete if Synapse hasn't yet loaded the full state
+of the room. This can happen for events in rooms that were just joined from
+a remote server.</p>
 <p>Note that this callback is called when the event has already been processed and stored
 into the room, which means this callback cannot be used to deny persisting the event. To
 deny an incoming event, see <a href="modules/spam_checker_callbacks.html#check_event_for_spam"><code>check_event_for_spam</code></a> instead.</p>
@@ -14303,6 +14340,7 @@ Other allowed options are: <code>bot</code> and <code>support</code>.</p>
 </li>
 </ul>
 <h2 id="list-accounts"><a class="header" href="#list-accounts">List Accounts</a></h2>
+<h3 id="list-accounts-v2"><a class="header" href="#list-accounts-v2">List Accounts (V2)</a></h3>
 <p>This API returns all local user accounts.
 By default, the response is ordered by ascending user ID.</p>
 <pre><code>GET /_synapse/admin/v2/users?from=0&amp;limit=10&amp;guests=false
@@ -14442,6 +14480,16 @@ This allows user type specific behaviour. There are also types <code>support</co
 </li>
 </ul>
 <p><em>Added in Synapse 1.93:</em> the <code>locked</code> query parameter and response field.</p>
+<h3 id="list-accounts-v3"><a class="header" href="#list-accounts-v3">List Accounts (V3)</a></h3>
+<p>This API returns all local user accounts (see v2). In contrast to v2, the query parameter <code>deactivated</code> is handled differently.</p>
+<pre><code>GET /_synapse/admin/v3/users
+</code></pre>
+<p><strong>Parameters</strong></p>
+<ul>
+<li><code>deactivated</code> - Optional flag to filter deactivated users. If <code>true</code>, only deactivated users are returned.
+If <code>false</code>, deactivated users are excluded from the query. When the flag is absent (the default),
+users are not filtered by deactivation status.</li>
+</ul>
 <h2 id="query-current-sessions-for-a-user"><a class="header" href="#query-current-sessions-for-a-user">Query current sessions for a user</a></h2>
 <p>This API returns information about the active sessions for a specific user.</p>
 <p>The endpoints are:</p>
@@ -16326,6 +16374,9 @@ for file in $source_directory/*; do
     fi
 done
 </code></pre>
+<h2 id="how-do-i-upgrade-from-a-very-old-version-of-synapse-to-the-latest"><a class="header" href="#how-do-i-upgrade-from-a-very-old-version-of-synapse-to-the-latest">How do I upgrade from a very old version of Synapse to the latest?</a></h2>
+<p>See <a href="usage/administration/../../upgrade.html#upgrading-from-a-very-old-version">this</a> section in the
+upgrade docs.</p>
 <h2 id="manually-resetting-passwords"><a class="header" href="#manually-resetting-passwords">Manually resetting passwords</a></h2>
 <p>Users can reset their password through their client. Alternatively, a server admin
 can reset a user's password using the <a href="usage/administration/../../admin_api/user_admin_api.html#reset-password">admin API</a>.</p>

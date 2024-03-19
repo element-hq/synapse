@@ -266,8 +266,24 @@ v1.61.0.</p>
 <tr><td>v1.83.0 – v1.84.1</td><td>v1.77.0</td></tr>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
-<tr><td>v1.98.0 – v1.102.0</td><td>v1.96.0</td></tr>
+<tr><td>v1.98.0 – v1.103.0</td><td>v1.96.0</td></tr>
 </tbody></table>
+<h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
+<p>You need to read all of the upgrade notes for each version between your current
+version and the latest so that you can update your dependencies, environment,
+config files, etc. if necessary. But you do not need to perform an
+upgrade to each individual version that was missed.</p>
+<p>We do not have a list of which versions must be installed. Instead, we recommend
+that you upgrade through each incompatible database schema version, which would
+give you the ability to roll back the maximum number of versions should anything
+go wrong. See <a href="#rolling-back-to-older-versions">Rolling back to older versions</a>
+above.</p>
+<p>Additionally, new versions of Synapse will occasionally run database migrations
+and background updates to update the database. Synapse will not start until
+database migrations are complete. You should wait until background updates from
+each upgrade are complete before moving on to the next upgrade, to avoid
+stacking them up. You can monitor the currently running background updates with
+<a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
 <h1 id="upgrading-to-v11000"><a class="header" href="#upgrading-to-v11000">Upgrading to v1.100.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.61.0 to v1.65.0.
