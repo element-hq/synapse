@@ -470,7 +470,7 @@ class SearchStore(SearchBackgroundUpdateStore):
         count_args = args
         count_clauses = clauses
 
-        sqlite_highlights = []
+        sqlite_highlights: List[str] = []
 
         if isinstance(self.database_engine, PostgresEngine):
             search_query = search_term
@@ -533,7 +533,7 @@ class SearchStore(SearchBackgroundUpdateStore):
 
         event_map = {ev.event_id: ev for ev in events}
 
-        highlights = None
+        highlights: Collection[str] = []
         if isinstance(self.database_engine, PostgresEngine):
             highlights = await self._find_highlights_in_postgres(search_query, events)
         else:
@@ -601,7 +601,7 @@ class SearchStore(SearchBackgroundUpdateStore):
         count_args = list(args)
         count_clauses = list(clauses)
 
-        sqlite_highlights = []
+        sqlite_highlights: List[str] = []
 
         if pagination_token:
             try:
@@ -700,7 +700,7 @@ class SearchStore(SearchBackgroundUpdateStore):
 
         event_map = {ev.event_id: ev for ev in events}
 
-        highlights = None
+        highlights: Collection[str] = []
         if isinstance(self.database_engine, PostgresEngine):
             highlights = await self._find_highlights_in_postgres(search_query, events)
         else:
@@ -941,4 +941,3 @@ def _parse_query_for_sqlite(search_term: str) -> Tuple[str, List[str]]:
     that can be used as highlights.
     """
     return _tokens_to_sqlite_match_query(_tokenize_query(search_term))
-
