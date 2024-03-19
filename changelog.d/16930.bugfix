@@ -1,0 +1,1 @@
+Fix a long-standing bug which could cause state to be omitted from `/sync` responses when certain events are filtered out of the timeline.

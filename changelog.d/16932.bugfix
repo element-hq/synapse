@@ -1,0 +1,1 @@
+Fix a long-standing bug which could cause incorrect state to be returned from `/sync` for rooms where the user has left.
