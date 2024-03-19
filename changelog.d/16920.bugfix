@@ -1,1 +1,1 @@
-Adds `limit` parameter negative value validation check to prevent 500 internal server error on publicRooms request.
+Adds validation to ensure that the `limit` parameter on `/publicRooms` is non-negative.
