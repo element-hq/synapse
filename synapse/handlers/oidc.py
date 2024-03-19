@@ -65,6 +65,7 @@ from synapse.http.server import finish_request
 from synapse.http.servlet import parse_string
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
+from synapse.module_api import ModuleApi
 from synapse.types import JsonDict, UserID, map_username_to_mxid_localpart
 from synapse.util import Clock, json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
@@ -421,9 +422,19 @@ class OidcProvider:
         # from the IdP's jwks_uri, if required.
         self._jwks = RetryOnExceptionCachedCall(self._load_jwks)
 
-        self._user_mapping_provider = provider.user_mapping_provider_class(
-            provider.user_mapping_provider_config
+        user_mapping_provider_init_method = (
+            provider.user_mapping_provider_class.__init__
         )
+        if len(inspect.signature(user_mapping_provider_init_method).parameters) == 3:
+            self._user_mapping_provider = provider.user_mapping_provider_class(
+                provider.user_mapping_provider_config,
+                ModuleApi(hs, hs.get_auth_handler()),
+            )
+        else:
+            self._user_mapping_provider = provider.user_mapping_provider_class(
+                provider.user_mapping_provider_config,
+            )
+
         self._skip_verification = provider.skip_verification
         self._allow_existing_users = provider.allow_existing_users
 
@@ -1583,7 +1594,7 @@ class JinjaOidcMappingProvider(OidcMappingProvider[JinjaOidcMappingConfig]):
     This is the default mapping provider.
     """
 
-    def __init__(self, config: JinjaOidcMappingConfig):
+    def __init__(self, config: JinjaOidcMappingConfig, module_api: ModuleApi):
         self._config = config
 
     @staticmethod

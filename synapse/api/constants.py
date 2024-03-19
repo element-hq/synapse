@@ -129,6 +129,8 @@ class EventTypes:
 
     Reaction: Final = "m.reaction"
 
+    CallInvite: Final = "m.call.invite"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
