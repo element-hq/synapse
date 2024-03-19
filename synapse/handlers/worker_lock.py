@@ -182,12 +182,15 @@ class WorkerLocksHandler:
         if not locks:
             return
 
-        def _wake_deferred(deferred: defer.Deferred) -> None:
-            if not deferred.called:
-                deferred.callback(None)
+        def _wake_all_locks(
+            locks: Collection[Union[WaitingLock, WaitingMultiLock]]
+        ) -> None:
+            for lock in locks:
+                deferred = lock.deferred
+                if not deferred.called:
+                    deferred.callback(None)
 
-        for lock in locks:
-            self._clock.call_later(0, _wake_deferred, lock.deferred)
+        self._clock.call_later(0, _wake_all_locks, locks)
 
     @wrap_as_background_process("_cleanup_locks")
     async def _cleanup_locks(self) -> None:

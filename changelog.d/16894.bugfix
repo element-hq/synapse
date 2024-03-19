@@ -1,1 +1,0 @@
-Do not send multiple concurrent requests for keys for the same server.

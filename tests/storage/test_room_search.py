@@ -328,9 +328,11 @@ class MessageSearchTest(HomeserverTestCase):
             self.assertEqual(
                 result["count"],
                 1 if expect_to_contain else 0,
-                f"expected '{query}' to match '{self.PHRASE}'"
-                if expect_to_contain
-                else f"'{query}' unexpectedly matched '{self.PHRASE}'",
+                (
+                    f"expected '{query}' to match '{self.PHRASE}'"
+                    if expect_to_contain
+                    else f"'{query}' unexpectedly matched '{self.PHRASE}'"
+                ),
             )
             self.assertEqual(
                 len(result["results"]),
@@ -346,9 +348,11 @@ class MessageSearchTest(HomeserverTestCase):
             self.assertEqual(
                 result["count"],
                 1 if expect_to_contain else 0,
-                f"expected '{query}' to match '{self.PHRASE}'"
-                if expect_to_contain
-                else f"'{query}' unexpectedly matched '{self.PHRASE}'",
+                (
+                    f"expected '{query}' to match '{self.PHRASE}'"
+                    if expect_to_contain
+                    else f"'{query}' unexpectedly matched '{self.PHRASE}'"
+                ),
             )
             self.assertEqual(
                 len(result["results"]),

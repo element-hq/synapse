@@ -1367,9 +1367,9 @@ class FederationEventHandler:
             )
 
         if remote_event.is_state() and remote_event.rejected_reason is None:
-            state_map[
-                (remote_event.type, remote_event.state_key)
-            ] = remote_event.event_id
+            state_map[(remote_event.type, remote_event.state_key)] = (
+                remote_event.event_id
+            )
 
         return state_map
 
@@ -1757,17 +1757,25 @@ class FederationEventHandler:
 
             events_and_contexts_to_persist.append((event, context))
 
-        for event in sorted_auth_events:
+        for i, event in enumerate(sorted_auth_events):
             await prep(event)
 
-        await self.persist_events_and_notify(
-            room_id,
-            events_and_contexts_to_persist,
-            # Mark these events backfilled as they're historic events that will
-            # eventually be backfilled. For example, missing events we fetch
-            # during backfill should be marked as backfilled as well.
-            backfilled=True,
-        )
+            # The above function is typically not async, and so won't yield to
+            # the reactor. For large rooms let's yield to the reactor
+            # occasionally to ensure we don't block other work.
+            if (i + 1) % 1000 == 0:
+                await self._clock.sleep(0)
+
+        # Also persist the new event in batches for similar reasons as above.
+        for batch in batch_iter(events_and_contexts_to_persist, 1000):
+            await self.persist_events_and_notify(
+                room_id,
+                batch,
+                # Mark these events as backfilled as they're historic events that will
+                # eventually be backfilled. For example, missing events we fetch
+                # during backfill should be marked as backfilled as well.
+                backfilled=True,
+            )
 
     @trace
     async def _check_event_auth(

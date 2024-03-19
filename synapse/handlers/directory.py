@@ -265,9 +265,9 @@ class DirectoryHandler:
     async def get_association(self, room_alias: RoomAlias) -> JsonDict:
         room_id = None
         if self.hs.is_mine(room_alias):
-            result: Optional[
-                RoomAliasMapping
-            ] = await self.get_association_from_room_alias(room_alias)
+            result: Optional[RoomAliasMapping] = (
+                await self.get_association_from_room_alias(room_alias)
+            )
 
             if result:
                 room_id = result.room_id

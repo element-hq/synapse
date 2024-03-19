@@ -111,8 +111,7 @@ class _PoolConnection(Connection):
     A Connection from twisted.enterprise.adbapi.Connection.
     """
 
-    def reconnect(self) -> None:
-        ...
+    def reconnect(self) -> None: ...
 
 
 def make_pool(
@@ -914,9 +913,9 @@ class DatabasePool:
 
             try:
                 with opentracing.start_active_span(f"db.{desc}"):
-                    result = await self.runWithConnection(
+                    result: R = await self.runWithConnection(
                         # mypy seems to have an issue with this, maybe a bug?
-                        self.new_transaction,  # type: ignore[arg-type]
+                        self.new_transaction,
                         desc,
                         after_callbacks,
                         async_after_callbacks,
@@ -935,7 +934,7 @@ class DatabasePool:
                     await async_callback(*async_args, **async_kwargs)
                 for after_callback, after_args, after_kwargs in after_callbacks:
                     after_callback(*after_args, **after_kwargs)
-                return cast(R, result)
+                return result
             except Exception:
                 for exception_callback, after_args, after_kwargs in exception_callbacks:
                     exception_callback(*after_args, **after_kwargs)
@@ -1603,8 +1602,7 @@ class DatabasePool:
         retcols: Collection[str],
         allow_none: Literal[False] = False,
         desc: str = "simple_select_one",
-    ) -> Tuple[Any, ...]:
-        ...
+    ) -> Tuple[Any, ...]: ...
 
     @overload
     async def simple_select_one(
@@ -1614,8 +1612,7 @@ class DatabasePool:
         retcols: Collection[str],
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one",
-    ) -> Optional[Tuple[Any, ...]]:
-        ...
+    ) -> Optional[Tuple[Any, ...]]: ...
 
     async def simple_select_one(
         self,
@@ -1654,8 +1651,7 @@ class DatabasePool:
         retcol: str,
         allow_none: Literal[False] = False,
         desc: str = "simple_select_one_onecol",
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     @overload
     async def simple_select_one_onecol(
@@ -1665,8 +1661,7 @@ class DatabasePool:
         retcol: str,
         allow_none: Literal[True] = True,
         desc: str = "simple_select_one_onecol",
-    ) -> Optional[Any]:
-        ...
+    ) -> Optional[Any]: ...
 
     async def simple_select_one_onecol(
         self,
@@ -1706,8 +1701,7 @@ class DatabasePool:
         keyvalues: Dict[str, Any],
         retcol: str,
         allow_none: Literal[False] = False,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     @overload
     @classmethod
@@ -1718,8 +1712,7 @@ class DatabasePool:
         keyvalues: Dict[str, Any],
         retcol: str,
         allow_none: Literal[True] = True,
-    ) -> Optional[Any]:
-        ...
+    ) -> Optional[Any]: ...
 
     @classmethod
     def simple_select_one_onecol_txn(
@@ -2501,8 +2494,7 @@ def make_tuple_in_list_sql_clause(
     database_engine: BaseDatabaseEngine,
     columns: Tuple[str, str],
     iterable: Collection[Tuple[Any, Any]],
-) -> Tuple[str, list]:
-    ...
+) -> Tuple[str, list]: ...
 
 
 def make_tuple_in_list_sql_clause(

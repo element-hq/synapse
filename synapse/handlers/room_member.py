@@ -1236,11 +1236,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate
         # the event.
-        content[
-            EventContentFields.AUTHORISING_USER
-        ] = await self.event_auth_handler.get_user_which_could_invite(
-            room_id,
-            state_before_join,
+        content[EventContentFields.AUTHORISING_USER] = (
+            await self.event_auth_handler.get_user_which_could_invite(
+                room_id,
+                state_before_join,
+            )
         )
 
         return False, []
