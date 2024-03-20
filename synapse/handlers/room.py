@@ -151,7 +151,7 @@ class RoomCreationHandler:
                 "history_visibility": HistoryVisibility.SHARED,
                 "original_invitees_have_ops": False,
                 "guest_can_join": False,
-                "power_level_content_override": {},
+                "power_level_content_override": {EventTypes.CallInvite: 50},
             },
         }
 

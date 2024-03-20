@@ -128,7 +128,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             token="foobar",
             url="a_url",
             sender=self.test_user,
-            ip_range_whitelist=IPSet(["192.168/16"]),
+            ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)
@@ -147,7 +147,7 @@ class AuthTestCase(unittest.HomeserverTestCase):
             token="foobar",
             url="a_url",
             sender=self.test_user,
-            ip_range_whitelist=IPSet(["192.168/16"]),
+            ip_range_whitelist=IPSet(["192.168.0.0/16"]),
         )
         self.store.get_app_service_by_token = Mock(return_value=app_service)
         self.store.get_user_by_access_token = AsyncMock(return_value=None)

@@ -34,6 +34,7 @@ from synapse.api.constants import (
     EventTypes,
     GuestAccess,
     HistoryVisibility,
+    JoinRules,
     Membership,
     RelationTypes,
     UserTypes,
@@ -1325,6 +1326,18 @@ class EventCreationHandler:
 
         self.validator.validate_new(event, self.config)
         await self._validate_event_relation(event)
+
+        if event.type == EventTypes.CallInvite:
+            room_id = event.room_id
+            room_info = await self.store.get_room_with_stats(room_id)
+            assert room_info is not None
+
+            if room_info.join_rules == JoinRules.PUBLIC:
+                raise SynapseError(
+                    403,
+                    "Call invites are not allowed in public rooms.",
+                    Codes.FORBIDDEN,
+                )
         logger.debug("Created event %s", event.event_id)
 
         return event, context
