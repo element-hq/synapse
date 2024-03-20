@@ -142,7 +142,7 @@ class ExpiringCache(Generic[KT, VT]):
             return default
 
         if self.iterable:
-            self.metrics.inc_evictions(EvictionReason.invalidation, len(value.value))  # type: ignore[arg-type]
+            self.metrics.inc_evictions(EvictionReason.invalidation, len(value.value))
         else:
             self.metrics.inc_evictions(EvictionReason.invalidation)
 
@@ -152,12 +152,10 @@ class ExpiringCache(Generic[KT, VT]):
         return key in self._cache
 
     @overload
-    def get(self, key: KT, default: Literal[None] = None) -> Optional[VT]:
-        ...
+    def get(self, key: KT, default: Literal[None] = None) -> Optional[VT]: ...
 
     @overload
-    def get(self, key: KT, default: T) -> Union[VT, T]:
-        ...
+    def get(self, key: KT, default: T) -> Union[VT, T]: ...
 
     def get(self, key: KT, default: Optional[T] = None) -> Union[VT, Optional[T]]:
         try:

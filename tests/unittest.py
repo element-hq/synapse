@@ -109,8 +109,7 @@ class _TypedFailure(Generic[_ExcType], Protocol):
     """Extension to twisted.Failure, where the 'value' has a certain type."""
 
     @property
-    def value(self) -> _ExcType:
-        ...
+    def value(self) -> _ExcType: ...
 
 
 def around(target: TV) -> Callable[[Callable[Concatenate[S, P], R]], None]:

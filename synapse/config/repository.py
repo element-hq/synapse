@@ -199,9 +199,9 @@ class ContentRepositoryConfig(Config):
                 provider_config["module"] == "file_system"
                 or provider_config["module"] == "synapse.rest.media.v1.storage_provider"
             ):
-                provider_config[
-                    "module"
-                ] = "synapse.media.storage_provider.FileStorageProviderBackend"
+                provider_config["module"] = (
+                    "synapse.media.storage_provider.FileStorageProviderBackend"
+                )
 
             provider_class, parsed_config = load_module(
                 provider_config, ("media_storage_providers", "<item %i>" % i)

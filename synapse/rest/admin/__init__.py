@@ -109,6 +109,7 @@ from synapse.rest.admin.users import (
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
     UsersRestServletV2,
+    UsersRestServletV3,
     UserTokenRestServlet,
     WhoisRestServlet,
 )
@@ -236,10 +237,12 @@ class PurgeHistoryStatusRestServlet(RestServlet):
             raise NotFoundError("purge id '%s' not found" % purge_id)
 
         result: JsonDict = {
-            "status": purge_task.status
-            if purge_task.status == TaskStatus.COMPLETE
-            or purge_task.status == TaskStatus.FAILED
-            else "active",
+            "status": (
+                purge_task.status
+                if purge_task.status == TaskStatus.COMPLETE
+                or purge_task.status == TaskStatus.FAILED
+                else "active"
+            ),
         }
         if purge_task.error:
             result["error"] = purge_task.error
@@ -289,6 +292,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         UserTokenRestServlet(hs).register(http_server)
     UserRestServletV2(hs).register(http_server)
     UsersRestServletV2(hs).register(http_server)
+    UsersRestServletV3(hs).register(http_server)
     UserMediaStatisticsRestServlet(hs).register(http_server)
     LargestRoomsStatistics(hs).register(http_server)
     EventReportDetailRestServlet(hs).register(http_server)

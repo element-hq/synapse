@@ -23,7 +23,7 @@ import hmac
 import logging
 import secrets
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
@@ -118,7 +118,8 @@ class UsersRestServletV2(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-        deactivated = parse_boolean(request, "deactivated", default=False)
+        deactivated = self._parse_parameter_deactivated(request)
+
         locked = parse_boolean(request, "locked", default=False)
         admins = parse_boolean(request, "admins")
 
@@ -181,6 +182,22 @@ class UsersRestServletV2(RestServlet):
             ret["next_token"] = str(start + len(users))
 
         return HTTPStatus.OK, ret
+
+    def _parse_parameter_deactivated(self, request: SynapseRequest) -> Optional[bool]:
+        """
+        Return None (no filtering) if `deactivated` is `true`, otherwise return `False`
+        (exclude deactivated users from the results).
+        """
+        return None if parse_boolean(request, "deactivated") else False
+
+
+class UsersRestServletV3(UsersRestServletV2):
+    PATTERNS = admin_patterns("/users$", "v3")
+
+    def _parse_parameter_deactivated(
+        self, request: SynapseRequest
+    ) -> Union[bool, None]:
+        return parse_boolean(request, "deactivated")
 
 
 class UserRestServletV2(RestServlet):
@@ -1167,12 +1184,14 @@ class RateLimitRestServlet(RestServlet):
             # convert `null` to `0` for consistency
             # both values do the same in retelimit handler
             ret = {
-                "messages_per_second": 0
-                if ratelimit.messages_per_second is None
-                else ratelimit.messages_per_second,
-                "burst_count": 0
-                if ratelimit.burst_count is None
-                else ratelimit.burst_count,
+                "messages_per_second": (
+                    0
+                    if ratelimit.messages_per_second is None
+                    else ratelimit.messages_per_second
+                ),
+                "burst_count": (
+                    0 if ratelimit.burst_count is None else ratelimit.burst_count
+                ),
             }
         else:
             ret = {}

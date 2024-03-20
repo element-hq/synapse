@@ -493,9 +493,9 @@ class WorkerPresenceHandler(BasePresenceHandler):
 
         # The number of ongoing syncs on this process, by (user ID, device ID).
         # Empty if _presence_enabled is false.
-        self._user_device_to_num_current_syncs: Dict[
-            Tuple[str, Optional[str]], int
-        ] = {}
+        self._user_device_to_num_current_syncs: Dict[Tuple[str, Optional[str]], int] = (
+            {}
+        )
 
         self.notifier = hs.get_notifier()
         self.instance_id = hs.get_instance_id()
@@ -818,9 +818,9 @@ class PresenceHandler(BasePresenceHandler):
 
         # Keeps track of the number of *ongoing* syncs on this process. While
         # this is non zero a user will never go offline.
-        self._user_device_to_num_current_syncs: Dict[
-            Tuple[str, Optional[str]], int
-        ] = {}
+        self._user_device_to_num_current_syncs: Dict[Tuple[str, Optional[str]], int] = (
+            {}
+        )
 
         # Keeps track of the number of *ongoing* syncs on other processes.
         #

@@ -151,7 +151,7 @@ class RoomCreationHandler:
                 "history_visibility": HistoryVisibility.SHARED,
                 "original_invitees_have_ops": False,
                 "guest_can_join": False,
-                "power_level_content_override": {},
+                "power_level_content_override": {EventTypes.CallInvite: 50},
             },
         }
 
@@ -538,10 +538,10 @@ class RoomCreationHandler:
         # deep-copy the power-levels event before we start modifying it
         # note that if frozen_dicts are enabled, `power_levels` will be a frozen
         # dict so we can't just copy.deepcopy it.
-        initial_state[
-            (EventTypes.PowerLevels, "")
-        ] = power_levels = copy_and_fixup_power_levels_contents(
-            initial_state[(EventTypes.PowerLevels, "")]
+        initial_state[(EventTypes.PowerLevels, "")] = power_levels = (
+            copy_and_fixup_power_levels_contents(
+                initial_state[(EventTypes.PowerLevels, "")]
+            )
         )
 
         # Resolve the minimum power level required to send any state event
@@ -1362,9 +1362,11 @@ class RoomCreationHandler:
         visibility = room_config.get("visibility", "private")
         preset_name = room_config.get(
             "preset",
-            RoomCreationPreset.PRIVATE_CHAT
-            if visibility == "private"
-            else RoomCreationPreset.PUBLIC_CHAT,
+            (
+                RoomCreationPreset.PRIVATE_CHAT
+                if visibility == "private"
+                else RoomCreationPreset.PUBLIC_CHAT
+            ),
         )
         try:
             preset_config = self._presets_dict[preset_name]

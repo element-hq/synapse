@@ -118,10 +118,10 @@ class AccountHandler:
             }
 
             if self._use_account_validity_in_account_status:
-                status[
-                    "org.matrix.expired"
-                ] = await self._account_validity_handler.is_user_expired(
-                    user_id.to_string()
+                status["org.matrix.expired"] = (
+                    await self._account_validity_handler.is_user_expired(
+                        user_id.to_string()
+                    )
                 )
 
         return status

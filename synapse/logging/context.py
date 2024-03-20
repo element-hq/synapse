@@ -744,8 +744,7 @@ def preserve_fn(
 
 
 @overload
-def preserve_fn(f: Callable[P, R]) -> Callable[P, "defer.Deferred[R]"]:
-    ...
+def preserve_fn(f: Callable[P, R]) -> Callable[P, "defer.Deferred[R]"]: ...
 
 
 def preserve_fn(
@@ -774,15 +773,10 @@ def run_in_background(
 @overload
 def run_in_background(
     f: Callable[P, R], *args: P.args, **kwargs: P.kwargs
-) -> "defer.Deferred[R]":
-    ...
+) -> "defer.Deferred[R]": ...
 
 
-def run_in_background(  # type: ignore[misc]
-    # The `type: ignore[misc]` above suppresses
-    # "Overloaded function implementation does not accept all possible arguments of signature 1"
-    # "Overloaded function implementation does not accept all possible arguments of signature 2"
-    # which seems like a bug in mypy.
+def run_in_background(
     f: Union[
         Callable[P, R],
         Callable[P, Awaitable[R]],
