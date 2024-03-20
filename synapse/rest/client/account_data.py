@@ -112,9 +112,9 @@ class AccountDataServlet(RestServlet):
             self._hs.config.experimental.msc4010_push_rules_account_data
             and account_data_type == AccountDataTypes.PUSH_RULES
         ):
-            account_data: Optional[
-                JsonMapping
-            ] = await self._push_rules_handler.push_rules_for_user(requester.user)
+            account_data: Optional[JsonMapping] = (
+                await self._push_rules_handler.push_rules_for_user(requester.user)
+            )
         else:
             account_data = await self.store.get_global_account_data_by_type_for_user(
                 user_id, account_data_type

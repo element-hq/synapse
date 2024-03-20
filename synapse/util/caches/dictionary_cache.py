@@ -229,7 +229,7 @@ class DictionaryCache(Generic[KT, DKT, DV]):
         for dict_key in missing:
             # We explicitly add each dict key to the cache, so that cache hit
             # rates and LRU times for each key can be tracked separately.
-            value = entry.get(dict_key, _Sentinel.sentinel)  # type: ignore[arg-type]
+            value = entry.get(dict_key, _Sentinel.sentinel)
             self.cache[(key, dict_key)] = _PerKeyValue(value)
 
             if value is not _Sentinel.sentinel:

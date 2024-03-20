@@ -169,9 +169,9 @@ class FederationServer(FederationBase):
 
         # We cache responses to state queries, as they take a while and often
         # come in waves.
-        self._state_resp_cache: ResponseCache[
-            Tuple[str, Optional[str]]
-        ] = ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+        self._state_resp_cache: ResponseCache[Tuple[str, Optional[str]]] = (
+            ResponseCache(hs.get_clock(), "state_resp", timeout_ms=30000)
+        )
         self._state_ids_resp_cache: ResponseCache[Tuple[str, str]] = ResponseCache(
             hs.get_clock(), "state_ids_resp", timeout_ms=30000
         )
