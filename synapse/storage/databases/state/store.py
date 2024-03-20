@@ -120,11 +120,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             # TODO: this hasn't been tuned yet
             50000,
         )
-        self._state_group_members_cache: DictionaryCache[
-            int, StateKey, str
-        ] = DictionaryCache(
-            "*stateGroupMembersCache*",
-            500000,
+        self._state_group_members_cache: DictionaryCache[int, StateKey, str] = (
+            DictionaryCache(
+                "*stateGroupMembersCache*",
+                500000,
+            )
         )
 
         def get_max_state_group_txn(txn: Cursor) -> int:

@@ -50,8 +50,7 @@ class _SelfSlice(Sized, Protocol):
     returned.
     """
 
-    def __getitem__(self: S, i: slice) -> S:
-        ...
+    def __getitem__(self: S, i: slice) -> S: ...
 
 
 def batch_iter(iterable: Iterable[T], size: int) -> Iterator[Tuple[T, ...]]:

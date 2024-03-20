@@ -48,8 +48,7 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
 
     @property
     @abc.abstractmethod
-    def single_threaded(self) -> bool:
-        ...
+    def single_threaded(self) -> bool: ...
 
     @property
     @abc.abstractmethod
@@ -68,8 +67,7 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
     @abc.abstractmethod
     def check_database(
         self, db_conn: ConnectionType, allow_outdated_version: bool = False
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abc.abstractmethod
     def check_new_database(self, txn: CursorType) -> None:
@@ -79,27 +77,22 @@ class BaseDatabaseEngine(Generic[ConnectionType, CursorType], metaclass=abc.ABCM
         ...
 
     @abc.abstractmethod
-    def convert_param_style(self, sql: str) -> str:
-        ...
+    def convert_param_style(self, sql: str) -> str: ...
 
     # This method would ideally take a plain ConnectionType, but it seems that
     # the Sqlite engine expects to use LoggingDatabaseConnection.cursor
     # instead of sqlite3.Connection.cursor: only the former takes a txn_name.
     @abc.abstractmethod
-    def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
-        ...
+    def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None: ...
 
     @abc.abstractmethod
-    def is_deadlock(self, error: Exception) -> bool:
-        ...
+    def is_deadlock(self, error: Exception) -> bool: ...
 
     @abc.abstractmethod
-    def is_connection_closed(self, conn: ConnectionType) -> bool:
-        ...
+    def is_connection_closed(self, conn: ConnectionType) -> bool: ...
 
     @abc.abstractmethod
-    def lock_table(self, txn: Cursor, table: str) -> None:
-        ...
+    def lock_table(self, txn: Cursor, table: str) -> None: ...
 
     @property
     @abc.abstractmethod

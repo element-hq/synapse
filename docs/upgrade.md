@@ -88,14 +88,34 @@ process, for example:
     dpkg -i matrix-synapse-py3_1.3.0+stretch1_amd64.deb
     ```
 
-Generally Synapse database schemas are compatible across multiple versions, once
-a version of Synapse is deployed you may not be able to rollback automatically.
+Generally Synapse database schemas are compatible across multiple versions, but once
+a version of Synapse is deployed you may not be able to roll back automatically.
 The following table gives the version ranges and the earliest version they can
 be rolled back to. E.g. Synapse versions v1.58.0 through v1.61.1 can be rolled
-back safely to v1.57.0, but starting with v1.62.0 it is only safe to rollback to
+back safely to v1.57.0, but starting with v1.62.0 it is only safe to roll back to
 v1.61.0.
 
 <!-- REPLACE_WITH_SCHEMA_VERSIONS -->
+
+## Upgrading from a very old version
+
+You need to read all of the upgrade notes for each version between your current
+version and the latest so that you can update your dependencies, environment,
+config files, etc. if necessary. But you do not need to perform an
+upgrade to each individual version that was missed.
+
+We do not have a list of which versions must be installed. Instead, we recommend
+that you upgrade through each incompatible database schema version, which would
+give you the ability to roll back the maximum number of versions should anything
+go wrong. See [Rolling back to older versions](#rolling-back-to-older-versions)
+above.
+
+Additionally, new versions of Synapse will occasionally run database migrations
+and background updates to update the database. Synapse will not start until
+database migrations are complete. You should wait until background updates from
+each upgrade are complete before moving on to the next upgrade, to avoid
+stacking them up. You can monitor the currently running background updates with
+[the Admin API](usage/administration/admin_api/background_updates.html#status).
 
 # Upgrading to v1.100.0
 

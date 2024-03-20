@@ -394,9 +394,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
         content: JsonDict = {}
         for receipt_type, user_id, event_id, data in rows:
-            content.setdefault(event_id, {}).setdefault(receipt_type, {})[
-                user_id
-            ] = db_to_json(data)
+            content.setdefault(event_id, {}).setdefault(receipt_type, {})[user_id] = (
+                db_to_json(data)
+            )
 
         return [{"type": EduTypes.RECEIPT, "room_id": room_id, "content": content}]
 
@@ -472,9 +472,24 @@ class ReceiptsWorkerStore(SQLBaseStore):
             event_entry = room_event["content"].setdefault(event_id, {})
             receipt_type_dict = event_entry.setdefault(receipt_type, {})
 
-            receipt_type_dict[user_id] = db_to_json(data)
-            if thread_id:
-                receipt_type_dict[user_id]["thread_id"] = thread_id
+            # MSC4102: always replace threaded receipts with unthreaded ones if there is a clash.
+            # Specifically:
+            # - if there is no existing receipt, great, set the data.
+            # - if there is an existing receipt, is it threaded (thread_id present)?
+            #    YES: replace if this receipt has no thread id. NO: do not replace.
+            # This means we will drop some receipts, but MSC4102 is designed to drop semantically
+            # meaningless receipts, so this is okay. Previously, we would drop meaningful data!
+            receipt_data = db_to_json(data)
+            if user_id in receipt_type_dict:  # existing receipt
+                # is the existing receipt threaded and we are currently processing an unthreaded one?
+                if "thread_id" in receipt_type_dict[user_id] and not thread_id:
+                    receipt_type_dict[user_id] = (
+                        receipt_data  # replace with unthreaded one
+                    )
+            else:  # receipt does not exist, just set it
+                receipt_type_dict[user_id] = receipt_data
+                if thread_id:
+                    receipt_type_dict[user_id]["thread_id"] = thread_id
 
         results = {
             room_id: [results[room_id]] if room_id in results else []

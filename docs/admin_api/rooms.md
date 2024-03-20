@@ -913,7 +913,7 @@ With all that being said, if you still want to try and recover the room:
    them handle rejoining themselves.
 
 4. If `new_room_user_id` was given, a 'Content Violation' will have been
-   created. Consider whether you want to delete that roomm.
+   created. Consider whether you want to delete that room.
 
 # Make Room Admin API
 
