@@ -21,7 +21,6 @@
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
-from urllib import parse as urlparse
 
 import attr
 
@@ -52,7 +51,6 @@ from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder
 
 if TYPE_CHECKING:
     from synapse.api.auth import Auth
@@ -909,7 +907,7 @@ class RoomMessagesRestServlet(RestServlet):
         )
         # Twisted will have processed the args by now.
         assert request.args is not None
-        
+
         filter_json = parse_json(request, "filter", encoding="utf-8")
         event_filter = Filter(self._hs, filter_json) if filter_json else None
 
