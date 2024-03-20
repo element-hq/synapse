@@ -75,8 +75,7 @@ def parse_integer(
     default: Optional[int] = None,
     required: bool = False,
     negative: bool = False,
-) -> int:
-    ...
+) -> int: ...
 
 
 def parse_integer(
@@ -131,8 +130,7 @@ def parse_integer_from_args(
     default: Optional[int] = None,
     required: bool = False,
     negative: bool = False,
-) -> Optional[int]:
-    ...
+) -> Optional[int]: ...
 
 
 def parse_integer_from_args(

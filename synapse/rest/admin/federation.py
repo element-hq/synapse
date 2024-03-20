@@ -23,7 +23,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.constants import Direction
-from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.api.errors import NotFoundError, SynapseError
 from synapse.federation.transport.server import Authenticator
 from synapse.http.servlet import RestServlet, parse_enum, parse_integer, parse_string
 from synapse.http.site import SynapseRequest

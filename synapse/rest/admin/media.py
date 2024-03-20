@@ -323,7 +323,6 @@ class DeleteMediaByDateSize(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
-
         # This check is useless, we keep it for the legacy endpoint only.
         if server_name is not None and self.server_name != server_name:
             raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only delete local media")
@@ -424,7 +423,6 @@ class UserMediaRestServlet(RestServlet):
 
         start = parse_integer(request, "from", default=0, negative=False)
         limit = parse_integer(request, "limit", default=100, negative=False)
-
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.

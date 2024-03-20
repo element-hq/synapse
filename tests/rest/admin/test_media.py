@@ -277,7 +277,8 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.MISSING_PARAM, channel.json_body["errcode"])
         self.assertEqual(
-            "Missing required integer query parameter before_ts", channel.json_body["error"]
+            "Missing required integer query parameter before_ts",
+            channel.json_body["error"],
         )
 
     def test_invalid_parameter(self) -> None:
