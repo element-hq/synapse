@@ -3349,7 +3349,7 @@ Options for each entry include:
    not included in `scopes`. Set to `userinfo_endpoint` to always use the
    userinfo endpoint.
 
-* `extra_grant_values`: String to string dictionary of values that will be passed as
+* `extra_authorize_parameters`: String to string dictionary that will be passed as
    extra parameters to the authorization grant URL.
 
 * `allow_existing_users`: set to true to allow a user logging in via OIDC to
@@ -3476,7 +3476,7 @@ oidc_providers:
     token_endpoint: "https://accounts.example.com/oauth2/token"
     userinfo_endpoint: "https://accounts.example.com/userinfo"
     jwks_uri: "https://accounts.example.com/.well-known/jwks.json"
-    extra_grant_values:
+    extra_authorize_parameters:
       acr_values: 2fa
     skip_verification: true
     enable_registration: true

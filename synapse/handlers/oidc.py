@@ -442,7 +442,7 @@ class OidcProvider:
         # optional brand identifier for this auth provider
         self.idp_brand = provider.idp_brand
 
-        self.extra_grant_values = provider.extra_grant_values
+        self.extra_authorize_parameters = provider.extra_authorize_parameters
 
         self._sso_handler = hs.get_sso_handler()
         self._device_handler = hs.get_device_handler()
@@ -973,14 +973,14 @@ class OidcProvider:
 
         metadata = await self.load_metadata()
 
-        extra_grant_values = dict(self.extra_grant_values)
+        extra_authorize_parameters = dict(self.extra_authorize_parameters)
         # Automatically enable PKCE if it is supported.
         if metadata.get("code_challenge_methods_supported"):
             code_verifier = generate_token(48)
 
             # Note that we verified the server supports S256 earlier (in
             # OidcProvider._validate_metadata).
-            extra_grant_values = {
+            extra_authorize_parameters = {
                 "code_challenge_method": "S256",
                 "code_challenge": create_s256_code_challenge(code_verifier),
             }
@@ -1022,7 +1022,7 @@ class OidcProvider:
             scope=self._scopes,
             state=state,
             nonce=nonce,
-            **extra_grant_values,
+            **extra_authorize_parameters,
         )
 
     async def handle_oidc_callback(
