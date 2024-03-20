@@ -121,13 +121,11 @@ class Clock:
         f: Callable[P, object],
         msec: float,
         *args: P.args,
-        now: bool = False,
         **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
 
-        Unless `now` is `True`, waits `msec` initially before calling `f` for the first
-        time.
+        Waits `msec` initially before calling `f` for the first time.
 
         If the function given to `looping_call` returns an awaitable/deferred, the next
         call isn't scheduled until after the returned awaitable has finished. We get
@@ -141,10 +139,42 @@ class Clock:
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
             *args: Positional arguments to pass to function.
-            now: (Must be specified as a named arg.) If `True`, the first call to the
-                function is scheduled immediately.
             **kwargs: Key arguments to pass to function.
         """
+        return self._looping_call_common(f, msec, False, *args, **kwargs)
+
+    def looping_call_now(
+        self,
+        f: Callable[P, object],
+        msec: float,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LoopingCall:
+        """Call a function immediately, and then repeatedly thereafter.
+
+        As with `looping_call`: subsequent calls are not scheduled until after the
+        the Awaitable returned by a previous call has finished.
+
+        Also as with `looping_call`: the function is called with no logcontext and
+        you probably want to wrap it in `run_as_background_process`.
+
+        Args:
+            f: The function to call repeatedly.
+            msec: How long to wait between calls in milliseconds.
+            *args: Positional arguments to pass to function.
+            **kwargs: Key arguments to pass to function.
+        """
+        return self._looping_call_common(f, msec, True, *args, **kwargs)
+
+    def _looping_call_common(
+        self,
+        f: Callable[P, object],
+        msec: float,
+        now: bool,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LoopingCall:
+        """Common functionality for `looping_call` and `looping_call_now`"""
         call = task.LoopingCall(f, *args, **kwargs)
         call.clock = self._reactor
         d = call.start(msec / 1000.0, now=now)
