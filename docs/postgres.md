@@ -182,7 +182,7 @@ synapse_port_db --sqlite-database homeserver.db.snapshot \
     --postgres-config homeserver-postgres.yaml
 ```
 
-The flag `--curses` displays a coloured curses progress UI.
+The flag `--curses` displays a coloured curses progress UI. (NOTE: if your terminal is too small the script will error out)
 
 If the script took a long time to complete, or time has otherwise passed
 since the original snapshot was taken, repeat the previous steps with a
