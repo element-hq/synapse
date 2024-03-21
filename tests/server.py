@@ -70,7 +70,6 @@ from twisted.internet.interfaces import (
     IProtocol,
     IPullProducer,
     IPushProducer,
-    IReactorCore,
     IReactorPluggableNameResolver,
     IReactorTime,
     IResolverSimple,
@@ -673,7 +672,7 @@ def validate_connector(connector: tcp.Connector, expected_ip: str) -> None:
 
 
 def make_fake_db_pool(
-    reactor: IReactorCore,
+    reactor: ISynapseReactor,
     db_config: DatabaseConnectionConfig,
     engine: BaseDatabaseEngine,
 ) -> adbapi.ConnectionPool:
