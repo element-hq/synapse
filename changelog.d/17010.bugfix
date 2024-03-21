@@ -1,1 +1,1 @@
-Fix bug which did not reject pending knocks at rooms on deactivating account. Contributed by @hanadi92.
+Fix bug which did not retract a user's pending knocks at rooms when their account was deactivated. Contributed by @hanadi92.
