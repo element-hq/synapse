@@ -1575,14 +1575,17 @@ testing-docutils = ["pygments", "pytest (>=7,<8)", "pytest-param-files (>=0.3.4,
 
 [[package]]
 name = "netaddr"
-version = "0.9.0"
+version = "1.2.1"
 description = "A network address manipulation library for Python"
 optional = false
-python-versions = "*"
+python-versions = ">=3.7"
 files = [
-    {file = "netaddr-0.9.0-py3-none-any.whl", hash = "sha256:5148b1055679d2a1ec070c521b7db82137887fabd6d7e37f5199b44f775c3bb1"},
-    {file = "netaddr-0.9.0.tar.gz", hash = "sha256:7b46fa9b1a2d71fd5de9e4a3784ef339700a53a08c8040f08baf5f1194da0128"},
+    {file = "netaddr-1.2.1-py3-none-any.whl", hash = "sha256:bd9e9534b0d46af328cf64f0e5a23a5a43fca292df221c85580b27394793496e"},
+    {file = "netaddr-1.2.1.tar.gz", hash = "sha256:6eb8fedf0412c6d294d06885c110de945cf4d22d2b510d0404f4e06950857987"},
 ]
+
+[package.extras]
+nicer-shell = ["ipython"]
 
 [[package]]
 name = "opentracing"
