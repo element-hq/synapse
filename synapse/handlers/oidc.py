@@ -453,7 +453,7 @@ class OidcProvider:
         # optional brand identifier for this auth provider
         self.idp_brand = provider.idp_brand
 
-        self.extra_authorize_parameters = provider.extra_authorize_parameters
+        self.additional_authorization_parameters = provider.additional_authorization_parameters
 
         self._sso_handler = hs.get_sso_handler()
         self._device_handler = hs.get_device_handler()
@@ -984,17 +984,17 @@ class OidcProvider:
 
         metadata = await self.load_metadata()
 
-        extra_authorize_parameters = dict(self.extra_authorize_parameters)
+        additional_authorization_parameters = dict(self.additional_authorization_parameters)
         # Automatically enable PKCE if it is supported.
         if metadata.get("code_challenge_methods_supported"):
             code_verifier = generate_token(48)
 
             # Note that we verified the server supports S256 earlier (in
             # OidcProvider._validate_metadata).
-            extra_authorize_parameters = {
+            additional_authorization_parameters.update({
                 "code_challenge_method": "S256",
                 "code_challenge": create_s256_code_challenge(code_verifier),
-            }
+            })
 
         cookie = self._macaroon_generaton.generate_oidc_session_token(
             state=state,
@@ -1033,7 +1033,7 @@ class OidcProvider:
             scope=self._scopes,
             state=state,
             nonce=nonce,
-            **extra_authorize_parameters,
+            **additional_authorization_parameters,
         )
 
     async def handle_oidc_callback(
