@@ -1,0 +1,1 @@
+Fix a bug which meant that, under certain circumstances, we might never retry sending events or to-device messages over federation after a failure.
