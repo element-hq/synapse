@@ -3349,6 +3349,9 @@ Options for each entry include:
    not included in `scopes`. Set to `userinfo_endpoint` to always use the
    userinfo endpoint.
 
+* `additional_authorization_parameters`: String to string dictionary that will be passed as
+   additional parameters to the authorization grant URL.
+
 * `allow_existing_users`: set to true to allow a user logging in via OIDC to
    match a pre-existing account instead of failing. This could be used if
    switching from password logins to OIDC. Defaults to false.
@@ -3473,6 +3476,8 @@ oidc_providers:
     token_endpoint: "https://accounts.example.com/oauth2/token"
     userinfo_endpoint: "https://accounts.example.com/userinfo"
     jwks_uri: "https://accounts.example.com/.well-known/jwks.json"
+    additional_authorization_parameters:
+      acr_values: 2fa
     skip_verification: true
     enable_registration: true
     user_mapping_provider:
