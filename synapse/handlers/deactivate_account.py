@@ -18,9 +18,11 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import itertools
 import logging
 from typing import TYPE_CHECKING, Optional
 
+from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
 from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -168,9 +170,9 @@ class DeactivateAccountHandler:
         # parts users from rooms (if it isn't already running)
         self._start_user_parting()
 
-        # Reject all pending invites for the user, so that the user doesn't show up in the
-        # "invited" section of rooms' members list.
-        await self._reject_pending_invites_for_user(user_id)
+        # Reject all pending invites and knocks for the user, so that the
+        # user doesn't show up in the "invited" section of rooms' members list.
+        await self._reject_pending_invites_and_knocks_for_user(user_id)
 
         # Remove all information on the user from the account_validity table.
         if self._account_validity_enabled:
@@ -194,34 +196,37 @@ class DeactivateAccountHandler:
 
         return identity_server_supports_unbinding
 
-    async def _reject_pending_invites_for_user(self, user_id: str) -> None:
-        """Reject pending invites addressed to a given user ID.
+    async def _reject_pending_invites_and_knocks_for_user(self, user_id: str) -> None:
+        """Reject pending invites and knocks addressed to a given user ID.
 
         Args:
-            user_id: The user ID to reject pending invites for.
+            user_id: The user ID to reject pending invites and knocks for.
         """
         user = UserID.from_string(user_id)
         pending_invites = await self.store.get_invited_rooms_for_local_user(user_id)
+        pending_knocks = await self.store.get_knocked_at_rooms_for_local_user(user_id)
 
-        for room in pending_invites:
+        for room in itertools.chain(pending_invites, pending_knocks):
             try:
                 await self._room_member_handler.update_membership(
                     create_requester(user, authenticated_entity=self._server_name),
                     user,
                     room.room_id,
-                    "leave",
+                    Membership.LEAVE,
                     ratelimit=False,
                     require_consent=False,
                 )
                 logger.info(
-                    "Rejected invite for deactivated user %r in room %r",
+                    "Rejected %r for deactivated user %r in room %r",
+                    room.membership,
                     user_id,
                     room.room_id,
                 )
             except Exception:
                 logger.exception(
-                    "Failed to reject invite for user %r in room %r:"
+                    "Failed to reject %r for user %r in room %r:"
                     " ignoring and continuing",
+                    room.membership,
                     user_id,
                     room.room_id,
                 )

@@ -21,12 +21,13 @@
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.push.rulekinds import PRIORITY_CLASS_MAP
 from synapse.rest import admin
-from synapse.rest.client import account, login
+from synapse.rest.client import account, login, room
 from synapse.server import HomeServer
 from synapse.synapse_rust.push import PushRule
+from synapse.types import UserID, create_requester
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -37,6 +38,7 @@ class DeactivateAccountTestCase(HomeserverTestCase):
         login.register_servlets,
         admin.register_servlets,
         account.register_servlets,
+        room.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -44,6 +46,7 @@ class DeactivateAccountTestCase(HomeserverTestCase):
 
         self.user = self.register_user("user", "pass")
         self.token = self.login("user", "pass")
+        self.handler = self.hs.get_room_member_handler()
 
     def _deactivate_my_account(self) -> None:
         """
@@ -341,3 +344,83 @@ class DeactivateAccountTestCase(HomeserverTestCase):
 
         self.assertEqual(req.code, 401, req)
         self.assertEqual(req.json_body["flows"], [{"stages": ["m.login.password"]}])
+
+    def test_deactivate_account_rejects_invites(self) -> None:
+        """
+        Tests that deactivating an account rejects its invite memberships
+        """
+        # Create another user and room just for the invitation
+        another_user = self.register_user("another_user", "pass")
+        token = self.login("another_user", "pass")
+        room_id = self.helper.create_room_as(another_user, is_public=False, tok=token)
+
+        # Invite user to the created room
+        invite_event, _ = self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(another_user),
+                target=UserID.from_string(self.user),
+                room_id=room_id,
+                action=Membership.INVITE,
+            )
+        )
+
+        # Check that the invite exists
+        invite = self.get_success(
+            self._store.get_invited_rooms_for_local_user(self.user)
+        )
+        self.assertEqual(invite[0].event_id, invite_event)
+
+        # Deactivate the user
+        self._deactivate_my_account()
+
+        # Check that the deactivated user has no invites in the room
+        after_deactivate_invite = self.get_success(
+            self._store.get_invited_rooms_for_local_user(self.user)
+        )
+        self.assertEqual(len(after_deactivate_invite), 0)
+
+    def test_deactivate_account_rejects_knocks(self) -> None:
+        """
+        Tests that deactivating an account rejects its knock memberships
+        """
+        # Create another user and room just for the invitation
+        another_user = self.register_user("another_user", "pass")
+        token = self.login("another_user", "pass")
+        room_id = self.helper.create_room_as(
+            another_user,
+            is_public=False,
+            tok=token,
+        )
+
+        # Allow room to be knocked at
+        self.helper.send_state(
+            room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=token,
+        )
+
+        # Knock user at the created room
+        knock_event, _ = self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.user),
+                target=UserID.from_string(self.user),
+                room_id=room_id,
+                action=Membership.KNOCK,
+            )
+        )
+
+        # Check that the knock exists
+        knocks = self.get_success(
+            self._store.get_knocked_at_rooms_for_local_user(self.user)
+        )
+        self.assertEqual(knocks[0].event_id, knock_event)
+
+        # Deactivate the user
+        self._deactivate_my_account()
+
+        # Check that the deactivated user has no knocks
+        after_deactivate_knocks = self.get_success(
+            self._store.get_knocked_at_rooms_for_local_user(self.user)
+        )
+        self.assertEqual(len(after_deactivate_knocks), 0)
