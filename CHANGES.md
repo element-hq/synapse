@@ -3,7 +3,7 @@
 ### Features
 
 - Add an OIDC config to specify extra parameters for the authorization grant URL. IT can be useful to pass an ACR value for example. ([\#16971](https://github.com/element-hq/synapse/issues/16971))
-- OIDC: try to JWT decode userinfo response if JSON parsing failed. ([\#16972](https://github.com/element-hq/synapse/issues/16972))
+- Add support for OIDC provider returning JWT. ([\#16972](https://github.com/element-hq/synapse/issues/16972), [\#17031](https://github.com/element-hq/synapse/issues/17031))
 
 ### Bugfixes
 
