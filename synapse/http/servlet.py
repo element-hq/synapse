@@ -19,7 +19,8 @@
 #
 #
 
-""" This module contains base REST classes for constructing REST servlets. """
+"""This module contains base REST classes for constructing REST servlets."""
+
 import enum
 import logging
 from http import HTTPStatus
@@ -65,7 +66,31 @@ def parse_integer(request: Request, name: str, default: int) -> int: ...
 
 
 @overload
-def parse_integer(request: Request, name: str, *, required: Literal[True]) -> int: ...
+def parse_integer(
+    request: Request, name: str, *, default: int, negative: bool
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, default: int, negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, required: Literal[True], negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, default: Literal[None], negative: bool = False
+) -> None: ...
+
+
+@overload
+def parse_integer(request: Request, name: str, *, negative: bool) -> Optional[int]: ...
 
 
 @overload
@@ -75,7 +100,7 @@ def parse_integer(
     default: Optional[int] = None,
     required: bool = False,
     negative: bool = False,
-) -> int: ...
+) -> Optional[int]: ...
 
 
 def parse_integer(
