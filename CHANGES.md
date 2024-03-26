@@ -1,3 +1,39 @@
+# Synapse 1.103.0 (2024-03-19)
+
+No significant changes since 1.103.0rc1.
+
+
+
+
+# Synapse 1.103.0rc1 (2024-03-12)
+
+### Features
+
+- Add a new [List Accounts v3](https://element-hq.github.io/synapse/v1.103/admin_api/user_admin_api.html#list-accounts-v3) Admin API with improved deactivated user filtering capabilities. ([\#16874](https://github.com/element-hq/synapse/issues/16874))
+- Include `Retry-After` header by default per [MSC4041](https://github.com/matrix-org/matrix-spec-proposals/pull/4041). Contributed by @clokep. ([\#16947](https://github.com/element-hq/synapse/issues/16947))
+
+### Bugfixes
+
+- Fix joining remote rooms when a module uses the `on_new_event` callback. This callback may now pass partial state events instead of the full state for remote rooms. Introduced in v1.76.0. ([\#16973](https://github.com/element-hq/synapse/issues/16973))
+- Fix performance issue when joining very large rooms that can cause the server to lock up. Introduced in v1.100.0. Contributed by @ggogel. ([\#16968](https://github.com/element-hq/synapse/issues/16968))
+
+### Improved Documentation
+
+- Add HAProxy example for single port operation to reverse proxy documentation. Contributed by Georg Pfuetzenreuter (@tacerus). ([\#16768](https://github.com/element-hq/synapse/issues/16768))
+- Improve the documentation around running Complement tests with new configuration parameters. ([\#16946](https://github.com/element-hq/synapse/issues/16946))
+- Add docs on upgrading from a very old version. ([\#16951](https://github.com/element-hq/synapse/issues/16951))
+
+
+### Updates to locked dependencies
+
+* Bump JasonEtco/create-an-issue from 2.9.1 to 2.9.2. ([\#16934](https://github.com/element-hq/synapse/issues/16934))
+* Bump anyhow from 1.0.79 to 1.0.80. ([\#16935](https://github.com/element-hq/synapse/issues/16935))
+* Bump dawidd6/action-download-artifact from 3.0.0 to 3.1.1. ([\#16933](https://github.com/element-hq/synapse/issues/16933))
+* Bump furo from 2023.9.10 to 2024.1.29. ([\#16939](https://github.com/element-hq/synapse/issues/16939))
+* Bump pyopenssl from 23.3.0 to 24.0.0. ([\#16937](https://github.com/element-hq/synapse/issues/16937))
+* Bump types-netaddr from 0.10.0.20240106 to 1.2.0.20240219. ([\#16938](https://github.com/element-hq/synapse/issues/16938))
+
+
 # Synapse 1.102.0 (2024-03-05)
 
 ### Bugfixes

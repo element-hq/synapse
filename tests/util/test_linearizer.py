@@ -34,8 +34,7 @@ from tests import unittest
 
 
 class UnblockFunction(Protocol):
-    def __call__(self, pump_reactor: bool = True) -> None:
-        ...
+    def __call__(self, pump_reactor: bool = True) -> None: ...
 
 
 class LinearizerTestCase(unittest.TestCase):

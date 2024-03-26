@@ -129,9 +129,9 @@ async def filter_events_for_client(
         retention_policies: Dict[str, RetentionPolicy] = {}
 
         for room_id in room_ids:
-            retention_policies[
-                room_id
-            ] = await storage.main.get_retention_policy_for_room(room_id)
+            retention_policies[room_id] = (
+                await storage.main.get_retention_policy_for_room(room_id)
+            )
 
     def allowed(event: EventBase) -> Optional[EventBase]:
         return _check_client_allowed_to_see_event(

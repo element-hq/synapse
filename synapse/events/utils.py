@@ -612,9 +612,9 @@ class EventClientSerializer:
         serialized_aggregations = {}
 
         if event_aggregations.references:
-            serialized_aggregations[
-                RelationTypes.REFERENCE
-            ] = event_aggregations.references
+            serialized_aggregations[RelationTypes.REFERENCE] = (
+                event_aggregations.references
+            )
 
         if event_aggregations.replace:
             # Include information about it in the relations dict.

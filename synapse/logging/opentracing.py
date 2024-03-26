@@ -388,15 +388,13 @@ def only_if_tracing(func: Callable[P, R]) -> Callable[P, Optional[R]]:
 @overload
 def ensure_active_span(
     message: str,
-) -> Callable[[Callable[P, R]], Callable[P, Optional[R]]]:
-    ...
+) -> Callable[[Callable[P, R]], Callable[P, Optional[R]]]: ...
 
 
 @overload
 def ensure_active_span(
     message: str, ret: T
-) -> Callable[[Callable[P, R]], Callable[P, Union[T, R]]]:
-    ...
+) -> Callable[[Callable[P, R]], Callable[P, Union[T, R]]]: ...
 
 
 def ensure_active_span(

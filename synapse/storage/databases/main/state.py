@@ -768,12 +768,10 @@ class StateMapWrapper(Dict[StateKey, str]):
         return super().__getitem__(key)
 
     @overload
-    def get(self, key: Tuple[str, str]) -> Optional[str]:
-        ...
+    def get(self, key: Tuple[str, str]) -> Optional[str]: ...
 
     @overload
-    def get(self, key: Tuple[str, str], default: Union[str, _T]) -> Union[str, _T]:
-        ...
+    def get(self, key: Tuple[str, str], default: Union[str, _T]) -> Union[str, _T]: ...
 
     def get(
         self, key: StateKey, default: Union[str, _T, None] = None

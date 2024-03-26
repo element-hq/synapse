@@ -377,12 +377,14 @@ class Mailer:
             #
             # Note that many email clients will not render the unsubscribe link
             # unless DKIM, etc. is properly setup.
-            additional_headers={
-                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-                "List-Unsubscribe": f"<{unsubscribe_link}>",
-            }
-            if unsubscribe_link
-            else None,
+            additional_headers=(
+                {
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                    "List-Unsubscribe": f"<{unsubscribe_link}>",
+                }
+                if unsubscribe_link
+                else None
+            ),
         )
 
     async def _get_room_vars(

@@ -93,16 +93,14 @@ class DictProperty(Generic[T]):
         self,
         instance: Literal[None],
         owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> "DictProperty":
-        ...
+    ) -> "DictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
         owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> T:
-        ...
+    ) -> T: ...
 
     def __get__(
         self,
@@ -161,16 +159,14 @@ class DefaultDictProperty(DictProperty, Generic[T]):
         self,
         instance: Literal[None],
         owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> "DefaultDictProperty":
-        ...
+    ) -> "DefaultDictProperty": ...
 
     @overload
     def __get__(
         self,
         instance: _DictPropertyInstance,
         owner: Optional[Type[_DictPropertyInstance]] = None,
-    ) -> T:
-        ...
+    ) -> T: ...
 
     def __get__(
         self,
