@@ -14,7 +14,7 @@
 
 ### Updates to the Docker image
 
-- Updated start.py to generate config using the correct user ID when running as root (fixes #16824, #15202). ([\#16978](https://github.com/element-hq/synapse/issues/16978))
+- Updated `start.py` to generate config using the correct user ID when running as root (fixes [\#16824](https://github.com/element-hq/synapse/issues/16824), [\#15202](https://github.com/element-hq/synapse/issues/15202)). ([\#16978](https://github.com/element-hq/synapse/issues/16978))
 
 ### Improved Documentation
 
@@ -26,8 +26,8 @@
 ### Internal Changes
 
 - Improve lock performance when a lot of locks are all waiting for a single lock to be released. ([\#16840](https://github.com/element-hq/synapse/issues/16840))
-- Update power level default for public rooms (#16907). ([\#16907](https://github.com/element-hq/synapse/issues/16907))
-- Improve event validation (#16908). ([\#16908](https://github.com/element-hq/synapse/issues/16908))
+- Update power level default for public rooms. ([\#16907](https://github.com/element-hq/synapse/issues/16907))
+- Improve event validation. ([\#16908](https://github.com/element-hq/synapse/issues/16908))
 - Multi-worker-docker-container: disable log buffering. ([\#16919](https://github.com/element-hq/synapse/issues/16919))
 - Refactor state delta calculation in `/sync` handler. ([\#16929](https://github.com/element-hq/synapse/issues/16929))
 - Clarify docs for some room state functions. ([\#16950](https://github.com/element-hq/synapse/issues/16950))
