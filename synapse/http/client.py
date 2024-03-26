@@ -390,6 +390,13 @@ class BaseHttpClient:
                         cooperator=self._cooperator,
                     )
 
+                # Always make sure we add a user agent to the request
+                if headers is None:
+                    headers = Headers()
+
+                if not headers.hasHeader("User-Agent"):
+                    headers.addRawHeader("User-Agent", self.user_agent)
+
                 request_deferred: defer.Deferred = treq.request(
                     method,
                     uri,
