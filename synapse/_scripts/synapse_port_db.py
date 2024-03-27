@@ -60,7 +60,7 @@ from synapse.logging.context import (
 )
 from synapse.notifier import ReplicationNotifier
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
-from synapse.storage.databases.main import FilteringWorkerStore, PushRuleStore
+from synapse.storage.databases.main import FilteringWorkerStore
 from synapse.storage.databases.main.account_data import AccountDataWorkerStore
 from synapse.storage.databases.main.client_ips import ClientIpBackgroundUpdateStore
 from synapse.storage.databases.main.deviceinbox import DeviceInboxBackgroundUpdateStore
@@ -77,10 +77,8 @@ from synapse.storage.databases.main.media_repository import (
 )
 from synapse.storage.databases.main.presence import PresenceBackgroundUpdateStore
 from synapse.storage.databases.main.profile import ProfileWorkerStore
-from synapse.storage.databases.main.pusher import (
-    PusherBackgroundUpdatesStore,
-    PusherWorkerStore,
-)
+from synapse.storage.databases.main.push_rule import PusherWorkerStore
+from synapse.storage.databases.main.pusher import PusherBackgroundUpdatesStore
 from synapse.storage.databases.main.receipts import ReceiptsBackgroundUpdateStore
 from synapse.storage.databases.main.registration import (
     RegistrationBackgroundUpdateStore,
@@ -245,7 +243,6 @@ class Store(
     AccountDataWorkerStore,
     FilteringWorkerStore,
     ProfileWorkerStore,
-    PushRuleStore,
     PusherWorkerStore,
     PusherBackgroundUpdatesStore,
     PresenceBackgroundUpdateStore,

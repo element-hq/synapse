@@ -63,7 +63,7 @@ from .openid import OpenIdStore
 from .presence import PresenceStore
 from .profile import ProfileStore
 from .purge_events import PurgeEventsStore
-from .push_rule import PushRuleStore
+from .push_rule import PushRulesWorkerStore
 from .pusher import PusherStore
 from .receipts import ReceiptsStore
 from .registration import RegistrationStore
@@ -130,7 +130,6 @@ class DataStore(
     RejectionsStore,
     FilteringWorkerStore,
     PusherStore,
-    PushRuleStore,
     ApplicationServiceTransactionStore,
     EventPushActionsStore,
     ServerMetricsStore,
@@ -140,6 +139,7 @@ class DataStore(
     SearchStore,
     TagsStore,
     AccountDataStore,
+    PushRulesWorkerStore,
     StreamWorkerStore,
     OpenIdStore,
     ClientIpWorkerStore,
