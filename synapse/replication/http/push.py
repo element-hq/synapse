@@ -20,13 +20,14 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Tuple, Union
 
 from twisted.web.server import Request
 
 from synapse.http.server import HttpServer
 from synapse.replication.http._base import ReplicationEndpoint
 from synapse.types import JsonDict
+from synapse.types.push import RuleSpec
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -77,5 +78,59 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
         return 200, {}
 
 
+class PushSetRuleAttrRestServlet(ReplicationEndpoint):
+    """Updates an attr of a push rule
+
+    Request format:
+
+        POST /_synapse/replication/push_set_rule_attr/:user_id/:scope/:template/:rule_id/:attr
+
+        {
+            "vale": <new_val>,
+        }
+
+    """
+
+    NAME = "push_set_rule_attr"
+    PATH_ARGS = ("user_id", "scope", "template", "rule_id", "attr")
+    CACHE = False
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+
+        self._push_rules_handler = hs.get_push_rules_handler()
+
+    @staticmethod
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: str,
+        scope: str,
+        template: str,
+        rule_id: str,
+        attr: str,
+        val: Union[bool, JsonDict],
+    ) -> JsonDict:
+        payload = {"val": val}
+
+        return payload
+
+    async def _handle_request(  # type: ignore[override]
+        self,
+        request: Request,
+        content: JsonDict,
+        user_id: str,
+        scope: str,
+        template: str,
+        rule_id: str,
+        attr: str,
+    ) -> Tuple[int, JsonDict]:
+
+        spec = RuleSpec(scope=scope, template=template, rule_id=rule_id, attr=attr)
+
+        await self._push_rules_handler.set_rule_attr(user_id, spec, val=content["val"])
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReplicationRemovePusherRestServlet(hs).register(http_server)
+    PushSetRuleAttrRestServlet(hs).register(http_server)

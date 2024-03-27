@@ -66,7 +66,7 @@ from synapse.handlers.auth import (
     AuthHandler,
 )
 from synapse.handlers.device import DeviceHandler
-from synapse.handlers.push_rules import RuleSpec, check_actions
+from synapse.handlers.push_rules import check_actions
 from synapse.http.client import SimpleHttpClient
 from synapse.http.server import (
     DirectServeHtmlResource,
@@ -141,6 +141,7 @@ from synapse.types import (
     UserProfile,
     create_requester,
 )
+from synapse.types.push import RuleSpec
 from synapse.types.state import StateFilter
 from synapse.util import Clock
 from synapse.util.async_helpers import maybe_awaitable

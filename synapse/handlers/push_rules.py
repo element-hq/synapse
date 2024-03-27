@@ -18,29 +18,21 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
-
-import attr
+from typing import TYPE_CHECKING, Any, Dict, List, Union
 
 from synapse.api.errors import SynapseError, UnrecognizedRequestError
 from synapse.push.clientformat import format_push_rules_for_user
+from synapse.replication.http.push import PushSetRuleAttrRestServlet
 from synapse.storage.push_rule import RuleNotFoundException
 from synapse.synapse_rust.push import get_base_rule_ids
 from synapse.types import JsonDict, StreamKeyType, UserID
+from synapse.types.push import RuleSpec
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
 BASE_RULE_IDS = get_base_rule_ids()
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class RuleSpec:
-    scope: str
-    template: str
-    rule_id: str
-    attr: Optional[str]
 
 
 class PushRulesHandler:
@@ -50,7 +42,26 @@ class PushRulesHandler:
         self._notifier = hs.get_notifier()
         self._main_store = hs.get_datastores().main
 
+        self._push_attr_repl_client = None
+        if hs.config.worker.worker_app is not None:
+            self._push_attr_repl_client = PushSetRuleAttrRestServlet.make_client(hs)
+
     async def set_rule_attr(
+        self, user_id: str, spec: RuleSpec, val: Union[bool, JsonDict]
+    ) -> None:
+        if self._push_attr_repl_client:
+            await self._push_attr_repl_client(
+                user_id=user_id,
+                scope=spec.scope,
+                template=spec.template,
+                rule_id=spec.rule_id,
+                attr=spec.attr,
+                val=val,
+            )
+        else:
+            await self._set_rule_attr(user_id, spec, val)
+
+    async def _set_rule_attr(
         self, user_id: str, spec: RuleSpec, val: Union[bool, JsonDict]
     ) -> None:
         """Set an attribute (enabled or actions) on an existing push rule.

@@ -27,7 +27,7 @@ from synapse.api.errors import (
     SynapseError,
     UnrecognizedRequestError,
 )
-from synapse.handlers.push_rules import InvalidRuleException, RuleSpec, check_actions
+from synapse.handlers.push_rules import InvalidRuleException, check_actions
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -39,6 +39,7 @@ from synapse.push.rulekinds import PRIORITY_CLASS_MAP
 from synapse.rest.client._base import client_patterns
 from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundException
 from synapse.types import JsonDict
+from synapse.types.push import RuleSpec
 from synapse.util.async_helpers import Linearizer
 
 if TYPE_CHECKING:
