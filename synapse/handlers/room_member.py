@@ -183,6 +183,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         )
 
         self._is_push_writer = hs.get_instance_name() in hs.config.worker.writers.push
+        self._push_writer = hs.config.worker.writers.push[0]
         self._copy_push_client = ReplicationCopyPusherRestServlet.make_client(hs)
 
     def _on_user_joined_room(self, event_id: str, room_id: str) -> None:
@@ -1311,6 +1312,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     )
                 else:
                     await self._copy_push_client(
+                        instance_name=self._push_writer,
                         user_id=user_id,
                         old_room_id=old_room_id,
                         new_room_id=new_room_id,
