@@ -450,6 +450,8 @@ class FilteringTestCase(unittest.HomeserverTestCase):
                 last_user_sync_ts=0,
                 status_msg=None,
                 currently_active=False,
+                displayname=None,
+                avatar_url=None,
             ),
         ]
 
@@ -478,6 +480,8 @@ class FilteringTestCase(unittest.HomeserverTestCase):
                 last_user_sync_ts=0,
                 status_msg=None,
                 currently_active=False,
+                displayname=None,
+                avatar_url=None,
             ),
         ]
 

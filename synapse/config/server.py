@@ -384,6 +384,16 @@ class ServerConfig(Config):
         # Whether to internally track presence, requires that presence is enabled,
         self.track_presence = self.presence_enabled and presence_enabled != "untracked"
 
+        # Disabling server-side presence tracking
+        self.sync_presence_tracking = presence_config.get(
+            "sync_presence_tracking", True
+        )
+
+        # Disabling federation presence tracking
+        self.federation_presence_tracking = presence_config.get(
+            "federation_presence_tracking", True
+        )
+
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
         self.presence_router_module_class = None
