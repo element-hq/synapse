@@ -136,7 +136,9 @@ class PushRulesWorkerStore(
     ):
         super().__init__(database, db_conn, hs)
 
-        self._is_push_writer = hs.get_instance_name() in hs.config.worker.writers.push
+        self._is_push_writer = (
+            hs.get_instance_name() in hs.config.worker.writers.push_rules
+        )
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker
         # class below that is used on the main process.

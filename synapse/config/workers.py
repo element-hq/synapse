@@ -156,7 +156,7 @@ class WriterLocations:
             can only be a single instance.
         presence: The instances that write to the presence stream. Currently
             can only be a single instance.
-        push: The instances that write to the push stream. Currently
+        push_rules: The instances that write to the push stream. Currently
             can only be a single instance.
     """
 
@@ -184,7 +184,7 @@ class WriterLocations:
         default=["master"],
         converter=_instance_to_list_converter,
     )
-    push: List[str] = attr.ib(
+    push_rules: List[str] = attr.ib(
         default=["master"],
         converter=_instance_to_list_converter,
     )
@@ -347,7 +347,7 @@ class WorkerConfig(Config):
             "account_data",
             "receipts",
             "presence",
-            "push",
+            "push_rules",
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
@@ -385,7 +385,7 @@ class WorkerConfig(Config):
                 "Must only specify one instance to handle `presence` messages."
             )
 
-        if len(self.writers.push) != 1:
+        if len(self.writers.push_rules) != 1:
             raise ConfigError(
                 "Must only specify one instance to handle `push` messages."
             )
