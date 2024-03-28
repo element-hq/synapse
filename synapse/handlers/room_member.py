@@ -182,7 +182,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             hs.config.server.forgotten_room_retention_period
         )
 
-        self._is_push_writer = hs.get_instance_name() in hs.config.worker.writers.push_rules
+        self._is_push_writer = (
+            hs.get_instance_name() in hs.config.worker.writers.push_rules
+        )
         self._push_writer = hs.config.worker.writers.push_rules[0]
         self._copy_push_client = ReplicationCopyPusherRestServlet.make_client(hs)
 
