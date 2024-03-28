@@ -1,0 +1,1 @@
+Adds validation to ensure that the `limit` parameter on `/publicRooms` is non-negative.

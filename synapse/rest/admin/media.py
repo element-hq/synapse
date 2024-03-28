@@ -311,27 +311,15 @@ class DeleteMediaByDateSize(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        before_ts = parse_integer(request, "before_ts", required=True)
-        size_gt = parse_integer(request, "size_gt", default=0)
+        before_ts = parse_integer(request, "before_ts", required=True, negative=False)
+        size_gt = parse_integer(request, "size_gt", default=0, negative=False)
         keep_profiles = parse_boolean(request, "keep_profiles", default=True)
 
-        if before_ts < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter before_ts must be a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-        elif before_ts < 30000000000:  # Dec 1970 in milliseconds, Aug 2920 in seconds
+        if before_ts < 30000000000:  # Dec 1970 in milliseconds, Aug 2920 in seconds
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Query parameter before_ts you provided is from the year 1970. "
                 + "Double check that you are providing a timestamp in milliseconds.",
-                errcode=Codes.INVALID_PARAM,
-            )
-        if size_gt < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter size_gt must be a string representing a positive integer.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -389,22 +377,8 @@ class UserMediaRestServlet(RestServlet):
         if user is None:
             raise NotFoundError("Unknown user")
 
-        start = parse_integer(request, "from", default=0)
-        limit = parse_integer(request, "limit", default=100)
-
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
+        start = parse_integer(request, "from", default=0, negative=False)
+        limit = parse_integer(request, "limit", default=100, negative=False)
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.
@@ -447,22 +421,8 @@ class UserMediaRestServlet(RestServlet):
         if user is None:
             raise NotFoundError("Unknown user")
 
-        start = parse_integer(request, "from", default=0)
-        limit = parse_integer(request, "limit", default=100)
-
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
+        start = parse_integer(request, "from", default=0, negative=False)
+        limit = parse_integer(request, "limit", default=100, negative=False)
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.

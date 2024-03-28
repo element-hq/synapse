@@ -90,22 +90,8 @@ class UsersRestServletV2(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        start = parse_integer(request, "from", default=0)
-        limit = parse_integer(request, "limit", default=100)
-
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
+        start = parse_integer(request, "from", default=0, negative=False)
+        limit = parse_integer(request, "limit", default=100, negative=False)
 
         user_id = parse_string(request, "user_id")
         name = parse_string(request, "name", encoding="utf-8")
