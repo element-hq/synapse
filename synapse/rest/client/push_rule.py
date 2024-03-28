@@ -59,7 +59,9 @@ class PushRuleRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
-        self._is_push_worker = hs.get_instance_name() in hs.config.worker.writers.push
+        self._is_push_worker = (
+            hs.get_instance_name() in hs.config.worker.writers.push_rules
+        )
         self._push_rules_handler = hs.get_push_rules_handler()
         self._push_rule_linearizer = Linearizer(name="push_rules")
 

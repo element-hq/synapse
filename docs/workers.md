@@ -532,7 +532,7 @@ the stream writer for the `presence` stream:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
 
-##### The `push` stream
+##### The `push_rules` stream
 
 The following endpoints should be routed directly to the worker configured as
 the stream writer for the `push` stream:

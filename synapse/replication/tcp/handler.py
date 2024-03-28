@@ -180,7 +180,7 @@ class ReplicationCommandHandler:
                 continue
 
             if isinstance(stream, PushRulesStream):
-                if hs.get_instance_name() in hs.config.worker.writers.push:
+                if hs.get_instance_name() in hs.config.worker.writers.push_rules:
                     self._streams_to_replicate.append(stream)
 
                 continue
