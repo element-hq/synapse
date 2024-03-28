@@ -150,7 +150,8 @@ class SynapseRequest(Request):
                 self.get_method(),
                 self.get_redacted_uri(),
             )
-            self.transport.abortConnection()
+            if self.channel:
+                self.channel.forceAbortClient()
             return
         super().handleContentChunk(data)
 

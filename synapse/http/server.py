@@ -153,9 +153,9 @@ def return_json_error(
     # Only respond with an error response if we haven't already started writing,
     # otherwise lets just kill the connection
     if request.startedWriting:
-        if request.transport:
+        if request.channel:
             try:
-                request.transport.abortConnection()
+                request.channel.forceAbortClient()
             except Exception:
                 # abortConnection throws if the connection is already closed
                 pass
