@@ -1,3 +1,64 @@
+# Synapse 1.104.0rc1 (2024-03-26)
+
+### Features
+
+- Add an OIDC config to specify extra parameters for the authorization grant URL. IT can be useful to pass an ACR value for example. ([\#16971](https://github.com/element-hq/synapse/issues/16971))
+- Add support for OIDC provider returning JWT. ([\#16972](https://github.com/element-hq/synapse/issues/16972), [\#17031](https://github.com/element-hq/synapse/issues/17031))
+
+### Bugfixes
+
+- Fix a bug which meant that, under certain circumstances, we might never retry sending events or to-device messages over federation after a failure. ([\#16925](https://github.com/element-hq/synapse/issues/16925))
+- Fix various long-standing bugs which could cause incorrect state to be returned from `/sync` in certain situations. ([\#16949](https://github.com/element-hq/synapse/issues/16949))
+- Fix case in which `m.fully_read` marker would not get updated. Contributed by @SpiritCroc. ([\#16990](https://github.com/element-hq/synapse/issues/16990))
+- Fix bug which did not retract a user's pending knocks at rooms when their account was deactivated. Contributed by @hanadi92. ([\#17010](https://github.com/element-hq/synapse/issues/17010))
+
+### Updates to the Docker image
+
+- Updated `start.py` to generate config using the correct user ID when running as root (fixes [\#16824](https://github.com/element-hq/synapse/issues/16824), [\#15202](https://github.com/element-hq/synapse/issues/15202)). ([\#16978](https://github.com/element-hq/synapse/issues/16978))
+
+### Improved Documentation
+
+- Add a query to force a refresh of a remote user's device list to the "Useful SQL for Admins" documentation page. ([\#16892](https://github.com/element-hq/synapse/issues/16892))
+- Minor grammatical corrections to the upgrade documentation. ([\#16965](https://github.com/element-hq/synapse/issues/16965))
+- Fix the sort order for the documentation version picker, so that newer releases appear above older ones. ([\#16966](https://github.com/element-hq/synapse/issues/16966))
+- Remove recommendation for a specific poetry version from contributing guide. ([\#17002](https://github.com/element-hq/synapse/issues/17002))
+
+### Internal Changes
+
+- Improve lock performance when a lot of locks are all waiting for a single lock to be released. ([\#16840](https://github.com/element-hq/synapse/issues/16840))
+- Update power level default for public rooms. ([\#16907](https://github.com/element-hq/synapse/issues/16907))
+- Improve event validation. ([\#16908](https://github.com/element-hq/synapse/issues/16908))
+- Multi-worker-docker-container: disable log buffering. ([\#16919](https://github.com/element-hq/synapse/issues/16919))
+- Refactor state delta calculation in `/sync` handler. ([\#16929](https://github.com/element-hq/synapse/issues/16929))
+- Clarify docs for some room state functions. ([\#16950](https://github.com/element-hq/synapse/issues/16950))
+- Specify IP subnets in canonical form. ([\#16953](https://github.com/element-hq/synapse/issues/16953))
+- As done for SAML mapping provider, let's pass the module API to the OIDC one so the mapper can do more logic in its code. ([\#16974](https://github.com/element-hq/synapse/issues/16974))
+- Allow containers building on top of Synapse's Complement container is use the included PostgreSQL cluster. ([\#16985](https://github.com/element-hq/synapse/issues/16985))
+- Raise poetry-core version cap to 1.9.0. ([\#16986](https://github.com/element-hq/synapse/issues/16986))
+- Patch the db conn pool sooner in tests. ([\#17017](https://github.com/element-hq/synapse/issues/17017))
+
+
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.80 to 1.0.81. ([\#17009](https://github.com/element-hq/synapse/issues/17009))
+* Bump black from 23.10.1 to 24.2.0. ([\#16936](https://github.com/element-hq/synapse/issues/16936))
+* Bump cryptography from 41.0.7 to 42.0.5. ([\#16958](https://github.com/element-hq/synapse/issues/16958))
+* Bump dawidd6/action-download-artifact from 3.1.1 to 3.1.2. ([\#16960](https://github.com/element-hq/synapse/issues/16960))
+* Bump dawidd6/action-download-artifact from 3.1.2 to 3.1.4. ([\#17008](https://github.com/element-hq/synapse/issues/17008))
+* Bump jinja2 from 3.1.2 to 3.1.3. ([\#17005](https://github.com/element-hq/synapse/issues/17005))
+* Bump log from 0.4.20 to 0.4.21. ([\#16977](https://github.com/element-hq/synapse/issues/16977))
+* Bump mypy from 1.5.1 to 1.8.0. ([\#16901](https://github.com/element-hq/synapse/issues/16901))
+* Bump netaddr from 0.9.0 to 1.2.1. ([\#17006](https://github.com/element-hq/synapse/issues/17006))
+* Bump pydantic from 2.6.0 to 2.6.4. ([\#17004](https://github.com/element-hq/synapse/issues/17004))
+* Bump pyo3 from 0.20.2 to 0.20.3. ([\#16962](https://github.com/element-hq/synapse/issues/16962))
+* Bump ruff from 0.1.14 to 0.3.2. ([\#16994](https://github.com/element-hq/synapse/issues/16994))
+* Bump serde from 1.0.196 to 1.0.197. ([\#16963](https://github.com/element-hq/synapse/issues/16963))
+* Bump serde_json from 1.0.113 to 1.0.114. ([\#16961](https://github.com/element-hq/synapse/issues/16961))
+* Bump types-jsonschema from 4.21.0.20240118 to 4.21.0.20240311. ([\#17007](https://github.com/element-hq/synapse/issues/17007))
+* Bump types-psycopg2 from 2.9.21.16 to 2.9.21.20240311. ([\#16995](https://github.com/element-hq/synapse/issues/16995))
+* Bump types-pyopenssl from 23.3.0.0 to 24.0.0.20240311. ([\#17003](https://github.com/element-hq/synapse/issues/17003))
+
 # Synapse 1.103.0 (2024-03-19)
 
 No significant changes since 1.103.0rc1.
