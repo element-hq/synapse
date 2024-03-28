@@ -86,11 +86,17 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
         self.config = hs.config
 
         if self.hs.config.email.can_verify_email:
-            self.mailer = Mailer(
+            self.registration_mailer = Mailer(
                 hs=self.hs,
                 app_name=self.config.email.email_app_name,
                 template_html=self.config.email.email_registration_template_html,
                 template_text=self.config.email.email_registration_template_text,
+            )
+            self.already_in_use_mailer = Mailer(
+                hs=self.hs,
+                app_name=self.config.email.email_app_name,
+                template_html=self.config.email.email_already_in_use_template_html,
+                template_text=self.config.email.email_already_in_use_template_text,
             )
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -139,8 +145,10 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             if self.hs.config.server.request_token_inhibit_3pid_errors:
                 # Make the client think the operation succeeded. See the rationale in the
                 # comments for request_token_inhibit_3pid_errors.
+                # Still send an email to warn the user that an account already exists.
                 # Also wait for some random amount of time between 100ms and 1s to make it
                 # look like we did something.
+                await self.already_in_use_mailer.send_already_in_use_mail(email)
                 await self.hs.get_clock().sleep(random.randint(1, 10) / 10)
                 return 200, {"sid": random_string(16)}
 
@@ -151,7 +159,7 @@ class EmailRegisterRequestTokenRestServlet(RestServlet):
             email,
             client_secret,
             send_attempt,
-            self.mailer.send_registration_mail,
+            self.registration_mailer.send_registration_mail,
             next_link,
         )
 

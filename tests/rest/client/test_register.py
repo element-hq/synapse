@@ -22,6 +22,7 @@
 import datetime
 import os
 from typing import Any, Dict, List, Tuple
+from unittest.mock import AsyncMock
 
 import pkg_resources
 
@@ -42,6 +43,7 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
+from tests.server import ThreadedMemoryReactorClock
 from tests.unittest import override_config
 
 
@@ -57,6 +59,13 @@ class RegisterRestServletTestCase(unittest.HomeserverTestCase):
         config = super().default_config()
         config["allow_guest_access"] = True
         return config
+
+    def make_homeserver(
+        self, reactor: ThreadedMemoryReactorClock, clock: Clock
+    ) -> HomeServer:
+        hs = super().make_homeserver(reactor, clock)
+        hs.get_send_email_handler()._sendmail = AsyncMock()
+        return hs
 
     def test_POST_appservice_registration_valid(self) -> None:
         user_id = "@as_user_kermit:test"
