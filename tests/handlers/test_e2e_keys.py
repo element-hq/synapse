@@ -1101,6 +1101,56 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             },
         )
 
+    def test_has_different_keys(self) -> None:
+        """check that has_different_keys returns True when the keys provided are different to what
+        is in the database."""
+        local_user = "@boris:" + self.hs.hostname
+        keys1 = {
+            "master_key": {
+                # private key: 2lonYOM6xYKdEsO+6KrC766xBcHnYnim1x/4LFGF8B0
+                "user_id": local_user,
+                "usage": ["master"],
+                "keys": {
+                    "ed25519:nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk": "nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unI9kDYcHwk"
+                },
+            }
+        }
+        self.get_success(self.handler.upload_signing_keys_for_user(local_user, keys1))
+        is_different = self.get_success(
+            self.handler.has_different_keys(
+                local_user,
+                {
+                    "master_key": keys1["master_key"],
+                },
+            )
+        )
+        self.assertEqual(is_different, False)
+        # change the usage => different keys
+        keys1["master_key"]["usage"] = ["develop"]
+        is_different = self.get_success(
+            self.handler.has_different_keys(
+                local_user,
+                {
+                    "master_key": keys1["master_key"],
+                },
+            )
+        )
+        self.assertEqual(is_different, True)
+        keys1["master_key"]["usage"] = ["master"]  # reset
+        # change the key => different keys
+        keys1["master_key"]["keys"] = {
+            "ed25519:nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unIc0rncs": "nqOvzeuGWT/sRx3h7+MHoInYj3Uk2LD/unIc0rncs"
+        }
+        is_different = self.get_success(
+            self.handler.has_different_keys(
+                local_user,
+                {
+                    "master_key": keys1["master_key"],
+                },
+            )
+        )
+        self.assertEqual(is_different, True)
+
     def test_query_devices_remote_sync(self) -> None:
         """Tests that querying keys for a remote user that we share a room with,
         but haven't yet fetched the keys for, returns the cross signing keys
