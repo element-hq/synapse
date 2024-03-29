@@ -465,32 +465,41 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         tables: List[Tuple[str, str, str]],
     ) -> None:
         cur = db_conn.cursor(txn_name="_load_current_ids")
+        max_stream_id = 1
 
-        # Load the current positions of all writers for the stream.
-        if self._writers:
-            # We delete any stale entries in the positions table. This is
-            # important if we add back a writer after a long time; we want to
-            # consider that a "new" writer, rather than using the old stale
-            # entry here.
+        # Load the current positions of all writers for the stream from its provided
+        # table. Differentiate between(potentially) multiple workers for a stream by the
+        # instance_name. For a multiple event writer example:
+        # event_persister1 could be at 6
+        # but event_persister2 could be at 3
+        # For the case of no explicit writers, this will still pull the data for
+        # populating max_stream_id.
+        rows: List[Tuple[str, int]] = []
+        for table, instance_column, id_column in tables:
             sql = """
-                DELETE FROM stream_positions
-                WHERE
-                    stream_name = ?
-                    AND instance_name != ALL(?)
-            """
-            cur.execute(sql, (self._stream_name, self._writers))
-
-            sql = """
-                SELECT instance_name, stream_id FROM stream_positions
-                WHERE stream_name = ?
-            """
-            cur.execute(sql, (self._stream_name,))
-
-            self._current_positions = {
-                instance: stream_id * self._return_factor
-                for instance, stream_id in cur
-                if instance in self._writers
+                SELECT %(instance)s, %(agg)s(%(id)s) FROM %(table)s
+                GROUP BY %(instance)s
+            """ % {
+                "id": id_column,
+                "table": table,
+                "instance": instance_column,
+                "agg": "MAX" if self._positive else "MIN",
             }
+            cur.execute(sql)
+
+            # Cast safety: this corresponds to the types returned by the query above.
+            rows.extend(cast(Iterable[Tuple[str, int]], cur))
+
+        # This is filtered by writer...
+        self._current_positions = {
+            instance: stream_id * self._return_factor
+            for instance, stream_id in rows
+            if instance in self._writers
+        }
+
+        # ...where this is not
+        for _, stream_id in rows:
+            max_stream_id = max(max_stream_id, stream_id)
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
@@ -532,7 +541,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
             self._persisted_upto_position = min_stream_id
 
-            rows: List[Tuple[str, int]] = []
+            rows = []
             for table, instance_column, id_column in tables:
                 sql = """
                     SELECT %(instance)s, %(id)s FROM %(table)s
