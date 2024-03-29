@@ -48,7 +48,6 @@ from typing import (
 import attr
 from sortedcontainers import SortedList, SortedSet
 
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -343,8 +342,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     Args:
         db_conn
         db
-        stream_name: A name for the stream, for use in the `stream_positions`
-            table. (Does not need to be the same as the replication stream name)
         instance_name: The name of this instance.
         tables: List of tables associated with the stream. Tuple of table
             name, column name that stores the writer's instance name, and
@@ -363,7 +360,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         db_conn: LoggingDatabaseConnection,
         db: DatabasePool,
         notifier: "ReplicationNotifier",
-        stream_name: str,
         instance_name: str,
         tables: List[Tuple[str, str, str]],
         sequence_name: str,
@@ -372,7 +368,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     ) -> None:
         self._db = db
         self._notifier = notifier
-        self._stream_name = stream_name
         self._instance_name = instance_name
         self._positive = positive
         self._writers = writers
@@ -440,7 +435,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 db_conn,
                 table=table,
                 id_column=id_column,
-                stream_name=stream_name,
                 positive=positive,
             )
 
@@ -661,21 +655,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         txn.call_on_exception(self._mark_ids_as_finished, [next_id])
         txn.call_after(self._notifier.notify_replication)
 
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        if self._writers:
-            txn.call_after(
-                run_as_background_process,
-                "MultiWriterIdGenerator._update_table",
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
-            )
-
         return self._return_factor * next_id
 
     def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> List[int]:
@@ -696,21 +675,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         txn.call_after(self._mark_ids_as_finished, next_ids)
         txn.call_on_exception(self._mark_ids_as_finished, next_ids)
         txn.call_after(self._notifier.notify_replication)
-
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        if self._writers:
-            txn.call_after(
-                run_as_background_process,
-                "MultiWriterIdGenerator._update_table",
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
-            )
 
         return [self._return_factor * next_id for next_id in next_ids]
 
@@ -905,27 +869,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # do.
                 break
 
-    def _update_stream_positions_table_txn(self, txn: Cursor) -> None:
-        """Update the `stream_positions` table with newly persisted position."""
-
-        if not self._writers:
-            return
-
-        # We upsert the value, ensuring on conflict that we always increase the
-        # value (or decrease if stream goes backwards).
-        sql = """
-            INSERT INTO stream_positions (stream_name, instance_name, stream_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (stream_name, instance_name)
-            DO UPDATE SET
-                stream_id = %(agg)s(stream_positions.stream_id, EXCLUDED.stream_id)
-        """ % {
-            "agg": "GREATEST" if self._positive else "LEAST",
-        }
-
-        pos = (self.get_current_token_for_writer(self._instance_name),)
-        txn.execute(sql, (self._stream_name, self._instance_name, pos))
-
 
 @attr.s(frozen=True, auto_attribs=True)
 class _AsyncCtxManagerWrapper(Generic[T]):
@@ -985,23 +928,5 @@ class _MultiWriterCtxManager:
 
         if exc_type is not None:
             return False
-
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        #
-        # We do this in autocommit mode as a) the upsert works correctly outside
-        # transactions and b) reduces the amount of time the rows are locked
-        # for. If we don't do this then we'll often hit serialization errors due
-        # to the fact we default to REPEATABLE READ isolation levels.
-        if self.id_gen._writers:
-            await self.id_gen._db.runInteraction(
-                "MultiWriterIdGenerator._update_table",
-                self.id_gen._update_stream_positions_table_txn,
-                db_autocommit=True,
-            )
 
         return False

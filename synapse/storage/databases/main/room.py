@@ -162,7 +162,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 db_conn=db_conn,
                 db=database,
                 notifier=hs.get_replication_notifier(),
-                stream_name="un_partial_stated_room_stream",
                 instance_name=self._instance_name,
                 tables=[
                     ("un_partial_stated_room_stream", "instance_name", "stream_id")

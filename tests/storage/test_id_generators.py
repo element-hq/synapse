@@ -205,7 +205,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[("foobar", "instance_name", "stream_id")],
                 sequence_name="foobar_seq",
@@ -752,7 +751,6 @@ class BackwardsMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[("foobar", "instance_name", "stream_id")],
                 sequence_name="foobar_seq",
@@ -889,7 +887,6 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[
                     ("foobar1", "instance_name", "stream_id"),
