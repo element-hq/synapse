@@ -414,9 +414,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # We start at 1 here as a) the first generated stream ID will be 2, and
         # b) other parts of the code assume that stream IDs are strictly greater
         # than 0.
-        self._persisted_upto_position = (
-            min(self._current_positions.values()) if self._current_positions else 1
-        )
+        self._persisted_upto_position = 1
         self._known_persisted_positions: List[int] = []
 
         # The maximum stream ID that we have seen been allocated across any writer.
