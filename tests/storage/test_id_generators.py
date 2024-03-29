@@ -224,13 +224,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     "INSERT INTO foobar VALUES (nextval('foobar_seq'), ?)",
                     (instance_name,),
                 )
-                txn.execute(
-                    """
-                    INSERT INTO stream_positions VALUES ('test_stream', ?,  lastval())
-                    ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = lastval()
-                    """,
-                    (instance_name,),
-                )
 
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
 
@@ -248,13 +241,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 ),
             )
             txn.execute("SELECT setval('foobar_seq', ?)", (stream_id,))
-            txn.execute(
-                """
-                INSERT INTO stream_positions VALUES ('test_stream', ?, ?)
-                ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = ?
-                """,
-                (instance_name, stream_id, stream_id),
-            )
 
         self.get_success(self.db_pool.runInteraction("_insert_row_with_id", _insert))
 
@@ -771,13 +757,6 @@ class BackwardsMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     instance_name,
                 ),
             )
-            txn.execute(
-                """
-                INSERT INTO stream_positions VALUES ('test_stream', ?, ?)
-                ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = ?
-                """,
-                (instance_name, -stream_id, -stream_id),
-            )
 
         self.get_success(self.db_pool.runInteraction("_insert_row", _insert))
 
@@ -903,7 +882,6 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
         table: str,
         instance_name: str,
         number: int,
-        update_stream_table: bool = True,
     ) -> None:
         """Insert N rows as the given instance, inserting with stream IDs pulled
         from the postgres sequence.
@@ -915,14 +893,6 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     "INSERT INTO %s VALUES (nextval('foobar_seq'), ?)" % (table,),
                     (instance_name,),
                 )
-                if update_stream_table:
-                    txn.execute(
-                        """
-                        INSERT INTO stream_positions VALUES ('test_stream', ?,  lastval())
-                        ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = lastval()
-                        """,
-                        (instance_name,),
-                    )
 
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
 
@@ -932,7 +902,7 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
         """
         self._insert_rows("foobar1", "first", 3)
         self._insert_rows("foobar2", "second", 3)
-        self._insert_rows("foobar2", "second", 1, update_stream_table=False)
+        self._insert_rows("foobar2", "second", 1)
 
         first_id_gen = self._create_id_generator("first", writers=["first", "second"])
         second_id_gen = self._create_id_generator("second", writers=["first", "second"])
