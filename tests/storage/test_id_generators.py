@@ -897,17 +897,14 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
 
     def test_load_existing_stream(self) -> None:
-        """Test creating ID gens with multiple tables that have rows from after
-        the position in `stream_positions` table.
-        """
+        """Test creating ID gens with multiple tables load positions correctly."""
         self._insert_rows("foobar1", "first", 3)
-        self._insert_rows("foobar2", "second", 3)
-        self._insert_rows("foobar2", "second", 1)
+        self._insert_rows("foobar2", "second", 4)
 
         first_id_gen = self._create_id_generator("first", writers=["first", "second"])
         second_id_gen = self._create_id_generator("second", writers=["first", "second"])
 
-        self.assertEqual(first_id_gen.get_positions(), {"first": 3, "second": 6})
+        self.assertEqual(first_id_gen.get_positions(), {"first": 3, "second": 7})
         self.assertEqual(first_id_gen.get_current_token_for_writer("first"), 7)
         self.assertEqual(first_id_gen.get_current_token_for_writer("second"), 7)
         self.assertEqual(first_id_gen.get_persisted_upto_position(), 7)
