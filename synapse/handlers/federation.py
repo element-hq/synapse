@@ -453,7 +453,7 @@ class FederationHandler:
 
             # Maximum number of contacted remote homeservers that can deny our
             # backfill request with 4xx codes before we give up.
-            max_denied_count = 5
+            max_denied_count = min(len(domains), 50)
 
             for dom in domains:
                 # We don't want to ask our own server for information we don't have
