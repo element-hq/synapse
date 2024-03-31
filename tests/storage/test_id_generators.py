@@ -589,6 +589,10 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
         self.assertEqual(id_gen.get_current_token_for_writer("first"), 3)
         self.assertEqual(id_gen.get_current_token_for_writer("second"), 5)
 
+        # Going to test gap closing at the bottom of the test, save this guy for later,
+        # otherwise we can not write to "first"
+        id_gen_1 = self._create_id_generator("first", writers=["first", "third"])
+
         # New config removes one of the configs. Note that if the writer is
         # removed from config we assume that it has been shut down and has
         # finished persisting, hence why the persisted upto position is 5.
@@ -613,16 +617,46 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
         async def _get_next_async() -> None:
             async with id_gen_3.get_next() as stream_id:
                 self.assertEqual(stream_id, 6)
+                # Actually write a row, or the position won't advance
+                self._insert_row_with_id("third", stream_id)
 
         self.get_success(_get_next_async())
         self.assertEqual(id_gen_3.get_persisted_upto_position(), 6)
 
         # If we add back the old "first" then we shouldn't see the persisted up
         # to position revert back to 3.
+        # TODO: I postulate that it actually should be a 3 and not a 6, as "first"
+        #  hasn't actually written anything since it's initial 3 reflecting it's minimum
+        #  persisted value.
+        #  I assert that the first instance created in this test is proof, since it's
+        #  instance name is neither of the writers named and is therefore a 'reader' and
+        #  not a 'writer', just as this 5th instance is.
         id_gen_5 = self._create_id_generator("five", writers=["first", "third"])
-        self.assertEqual(id_gen_5.get_persisted_upto_position(), 6)
-        self.assertEqual(id_gen_5.get_current_token_for_writer("first"), 6)
+        self.assertEqual(id_gen_5.get_persisted_upto_position(), 3)
+        self.assertEqual(id_gen_5.get_current_token_for_writer("first"), 3)
         self.assertEqual(id_gen_5.get_current_token_for_writer("third"), 6)
+
+        # Gap closing
+        # Check that writing of what should be the next token(7) written to "first"
+        # actually skips over the gap correctly.
+        async def _get_next_async_gap_closer() -> None:
+            # Recall we saved "first" writer above
+            async with id_gen_1.get_next() as stream_id:
+                self.assertEqual(stream_id, 7)
+                # Actually write a row, or the position won't advance
+                self._insert_row_with_id("first", stream_id)
+
+        self.get_success(_get_next_async_gap_closer())
+
+        # Since this is not a full Synapse Homeserver Test case, there is no
+        # replication. We have to create yet another id generator to load the new values
+        id_gen_6 = self._create_id_generator("six", writers=["first", "third"])
+
+        # Updating "first" does advance the position
+        self.assertEqual(id_gen_6.get_persisted_upto_position(), 7)
+        # Updates both tokens correctly
+        self.assertEqual(id_gen_6.get_current_token_for_writer("first"), 7)
+        self.assertEqual(id_gen_6.get_current_token_for_writer("third"), 7)
 
     def test_sequence_consistency(self) -> None:
         """Test that we error out if the table and sequence diverges."""
