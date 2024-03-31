@@ -443,6 +443,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             self._current_positions.values(), default=1
         )
 
+        # TODO: this needs updating or verifying
         # For the case where `stream_positions` is not up-to-date,
         # `_persisted_upto_position` may be higher.
         self._max_seen_allocated_stream_id = max(
