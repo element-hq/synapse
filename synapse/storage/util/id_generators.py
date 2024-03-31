@@ -532,12 +532,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # than it from the DB so that we can prefill
             # `_known_persisted_positions` and get a more accurate
             # `_persisted_upto_position`.
-            #
-            # We also check if any of the later rows are from this instance, in
-            # which case we use that for this instance's current position. This
-            # is to handle the case where we didn't finish persisting to the
-            # stream positions table before restart (or the stream position
-            # table otherwise got out of date).
 
             self._persisted_upto_position = min_stream_id
 
@@ -557,28 +551,13 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # Cast safety: this corresponds to the types returned by the query above.
                 rows.extend(cast(Iterable[Tuple[str, int]], cur))
 
-            # Sort by stream_id (ascending, lowest -> highest) so that we handle
-            # rows in order for each instance because we don't want to overwrite
-            # the current_position of an instance to a lower stream ID than
-            # we're actually at.
-            def sort_by_stream_id_key_func(row: Tuple[str, int]) -> int:
-                (instance, stream_id) = row
-                # If `stream_id` is ever `None`, we will see a `TypeError: '<'
-                # not supported between instances of 'NoneType' and 'X'` error.
-                return stream_id
-
-            rows.sort(key=sort_by_stream_id_key_func)
-
             with self._lock:
                 for (
-                    instance,
+                    _,
                     stream_id,
                 ) in rows:
                     stream_id = self._return_factor * stream_id
                     self._add_persisted_position(stream_id)
-
-                    if instance == self._instance_name:
-                        self._current_positions[instance] = stream_id
 
         if self._writers:
             # If we have explicit writers then make sure that each instance has
