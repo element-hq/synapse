@@ -503,28 +503,28 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
+
+        # Note some oddities around writer instances that disappear then reappear.
+        # For example with an events stream writer:
+        #  1. Using the main process to persist events
+        #  2. Declaring a separate events worker for some time
+        #  3. Resetting back to the main process
+        # It should resolve itself the first time (3) writes a row, thereby advancing
+        # its position.
+
         min_stream_id = min(self._current_positions.values(), default=None)
 
         if min_stream_id is None:
-            # We add a GREATEST here to ensure that the result is always
-            # positive. (This can be a problem for e.g. backfill streams where
-            # the server has never backfilled).
-            max_stream_id = 1
-            for table, _, id_column in tables:
-                sql = """
-                    SELECT GREATEST(COALESCE(%(agg)s(%(id)s), 1), 1)
-                    FROM %(table)s
-                """ % {
-                    "id": id_column,
-                    "table": table,
-                    "agg": "MAX" if self._positive else "-MIN",
-                }
-                cur.execute(sql)
-                result = cur.fetchone()
-                assert result is not None
-                (stream_id,) = result
-
-                max_stream_id = max(max_stream_id, stream_id)
+            # A min_stream_id being None means:
+            # 1. This table has never been written to
+            # 2. Whatever stream writer wrote to it is no longer available
+            # 3. It doesn't matter if the writer position is tracked(see cache
+            #    invalidation stream for example)
+            # Use the max_stream_id as all of those stream ids will be guaranteed
+            # to be persisted or will default to 1.
+            # TODO: is this next comment still valid?
+            # (This can be a problem for e.g. backfill streams where the server has
+            # never backfilled).
 
             self._persisted_upto_position = max_stream_id
         else:
