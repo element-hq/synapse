@@ -407,7 +407,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # will be gapless; gaps can form when e.g. a transaction was rolled
         # back. This means that sometimes we won't be able to skip forward the
         # position even though everything has been persisted. However, since
-        # gaps should be relatively rare it's still worth doing the book keeping
+        # gaps should be relatively rare it's still worth doing the bookkeeping
         # that allows us to skip forwards when there are gapless runs of
         # positions.
         #
@@ -443,7 +443,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             self._current_positions.values(), default=1
         )
 
-        # For the case where `stream_positions` is not up to date,
+        # For the case where `stream_positions` is not up-to-date,
         # `_persisted_upto_position` may be higher.
         self._max_seen_allocated_stream_id = max(
             self._max_seen_allocated_stream_id, self._persisted_upto_position
@@ -455,7 +455,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         if not writers:
             # If there have been no explicit writers given then any instance can
-            # write to the stream. In which case, let's pre-seed our own
+            # write to the stream. In which case, lets pre-seed our own
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
 
@@ -548,7 +548,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 }
                 cur.execute(sql, (min_stream_id * self._return_factor,))
 
-                # Cast safety: this corresponds to the types returned by the query above.
+                # Cast safety: this corresponds to the types returned by the query above
                 rows.extend(cast(Iterable[Tuple[str, int]], cur))
 
             with self._lock:
