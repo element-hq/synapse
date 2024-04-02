@@ -1,3 +1,10 @@
+# Synapse 1.104.0 (2024-04-02)
+
+### Bugfixes
+
+- Fix regression when using OIDC provider. Introduced in v1.104.0rc1. ([\#17031](https://github.com/element-hq/synapse/issues/17031))
+
+
 # Synapse 1.104.0rc1 (2024-03-26)
 
 ### Features
