@@ -252,7 +252,7 @@ that your email address is probably <code>user@example.com</code> rather than
 for most users.</p>
 <h4 id="docker-images-and-ansible-playbooks"><a class="header" href="#docker-images-and-ansible-playbooks">Docker images and Ansible playbooks</a></h4>
 <p>There is an official synapse image available at
-<a href="https://hub.docker.com/r/vectorim/synapse">https://hub.docker.com/r/vectorim/synapse</a> or at <a href="https://ghcr.io/element-hq/synapse"><code>ghcr.io/element-hq/synapse</code></a>
+<a href="https://hub.docker.com/r/matrixdotorg/synapse">https://hub.docker.com/r/matrixdotorg/synapse</a> or at <a href="https://ghcr.io/element-hq/synapse"><code>ghcr.io/element-hq/synapse</code></a>
 which can be used with the docker-compose file available at
 <a href="https://github.com/element-hq/synapse/tree/develop/contrib/docker">contrib/docker</a>.
 Further information on this including configuration options is available in the README
@@ -820,7 +820,7 @@ simply run:</p>
 <pre><code class="language-sh">synapse_port_db --sqlite-database homeserver.db.snapshot \
     --postgres-config homeserver-postgres.yaml
 </code></pre>
-<p>The flag <code>--curses</code> displays a coloured curses progress UI.</p>
+<p>The flag <code>--curses</code> displays a coloured curses progress UI. (NOTE: if your terminal is too small the script will error out)</p>
 <p>If the script took a long time to complete, or time has otherwise passed
 since the original snapshot was taken, repeat the previous steps with a
 newer snapshot.</p>
@@ -1819,11 +1819,11 @@ dpkg -i matrix-synapse-py3_1.3.0+stretch1_amd64.deb
 </code></pre>
 </li>
 </ul>
-<p>Generally Synapse database schemas are compatible across multiple versions, once
-a version of Synapse is deployed you may not be able to rollback automatically.
+<p>Generally Synapse database schemas are compatible across multiple versions, but once
+a version of Synapse is deployed you may not be able to roll back automatically.
 The following table gives the version ranges and the earliest version they can
 be rolled back to. E.g. Synapse versions v1.58.0 through v1.61.1 can be rolled
-back safely to v1.57.0, but starting with v1.62.0 it is only safe to rollback to
+back safely to v1.57.0, but starting with v1.62.0 it is only safe to roll back to
 v1.61.0.</p>
 <table><thead><tr><th>Versions</th><th>Compatible version</th></tr></thead><tbody>
 <tr><td>v1.0.0 – v1.2.1</td><td>v1.0.0</td></tr>
@@ -1841,7 +1841,7 @@ v1.61.0.</p>
 <tr><td>v1.83.0 – v1.84.1</td><td>v1.77.0</td></tr>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
-<tr><td>v1.98.0 – v1.103.0</td><td>v1.96.0</td></tr>
+<tr><td>v1.98.0 – v1.104.0</td><td>v1.96.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -6596,6 +6596,10 @@ not included in <code>scopes</code>. Set to <code>userinfo_endpoint</code> to al
 userinfo endpoint.</p>
 </li>
 <li>
+<p><code>additional_authorization_parameters</code>: String to string dictionary that will be passed as
+additional parameters to the authorization grant URL.</p>
+</li>
+<li>
 <p><code>allow_existing_users</code>: set to true to allow a user logging in via OIDC to
 match a pre-existing account instead of failing. This could be used if
 switching from password logins to OIDC. Defaults to false.</p>
@@ -6727,6 +6731,8 @@ claim MUST contain &quot;admin&quot;.</p>
     token_endpoint: &quot;https://accounts.example.com/oauth2/token&quot;
     userinfo_endpoint: &quot;https://accounts.example.com/userinfo&quot;
     jwks_uri: &quot;https://accounts.example.com/.well-known/jwks.json&quot;
+    additional_authorization_parameters:
+      acr_values: 2fa
     skip_verification: true
     enable_registration: true
     user_mapping_provider:
@@ -8853,13 +8859,15 @@ comment these options out and use those specified by the module instead.</p>
 <h3 id="building-a-custom-openid-mapping-provider"><a class="header" href="#building-a-custom-openid-mapping-provider">Building a Custom OpenID Mapping Provider</a></h3>
 <p>A custom mapping provider must specify the following methods:</p>
 <ul>
-<li><code>def __init__(self, parsed_config)</code>
+<li><code>def __init__(self, parsed_config, module_api)</code>
 <ul>
 <li>Arguments:
 <ul>
 <li><code>parsed_config</code> - A configuration object that is the return value of the
 <code>parse_config</code> method. You should set any configuration options needed by
 the module here.</li>
+<li><code>module_api</code> - a <code>synapse.module_api.ModuleApi</code> object which provides the
+stable API available for extension modules.</li>
 </ul>
 </li>
 </ul>
@@ -16222,6 +16230,12 @@ WHERE room_stats_state.room_id = event_json.room_id&quot; | psql -d synapse -h l
   FROM devices
   WHERE last_seen &lt; DATE_PART('epoch', NOW() - INTERVAL '3 month') * 1000;
 </code></pre>
+<h2 id="clear-the-cache-of-a-remote-users-device-list"><a class="header" href="#clear-the-cache-of-a-remote-users-device-list">Clear the cache of a remote user's device list</a></h2>
+<p>Forces the resync of a remote user's device list - if you have somehow cached a bad state, and the remote server is
+will not send out a device list update.</p>
+<pre><code class="language-sql">INSERT INTO device_lists_remote_resync
+VALUES ('USER_ID', (EXTRACT(epoch FROM NOW()) * 1000)::BIGINT);
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><p><em>This <a href="https://jacksonchen666.com/posts/2022-12-03/14-33-00/">blog post by Jackson Chen</a> (Dec 2022) explains how to use many of the tools listed on this page. There is also an <a href="https://levans.fr/shrink-synapse-database.html">earlier blog by Victor Berger</a> (June 2020), though this may be outdated in places.</em></p>
 <h1 id="list-of-useful-tools-and-scripts-for-maintenance-synapse-database"><a class="header" href="#list-of-useful-tools-and-scripts-for-maintenance-synapse-database">List of useful tools and scripts for maintenance Synapse database:</a></h1>
 <h2 id="purge-remote-media-api-1"><a class="header" href="#purge-remote-media-api-1"><a href="usage/administration/../../admin_api/media_admin_api.html#purge-remote-media-api">Purge Remote Media API</a></a></h2>
@@ -16538,7 +16552,7 @@ source, you should install <code>poetry</code>.
 Of their installation methods, we recommend
 <a href="https://python-poetry.org/docs/#installing-with-pipx">installing <code>poetry</code> using <code>pipx</code></a>,</p>
 <pre><code class="language-shell">pip install --user pipx
-pipx install poetry==1.5.1  # Problems with Poetry 1.6, see https://github.com/matrix-org/synapse/issues/16147
+pipx install poetry
 </code></pre>
 <p>but see poetry's <a href="https://python-poetry.org/docs/#installation">installation instructions</a>
 for other installation methods.</p>

@@ -199,13 +199,15 @@ comment these options out and use those specified by the module instead.</p>
 <h3 id="building-a-custom-openid-mapping-provider"><a class="header" href="#building-a-custom-openid-mapping-provider">Building a Custom OpenID Mapping Provider</a></h3>
 <p>A custom mapping provider must specify the following methods:</p>
 <ul>
-<li><code>def __init__(self, parsed_config)</code>
+<li><code>def __init__(self, parsed_config, module_api)</code>
 <ul>
 <li>Arguments:
 <ul>
 <li><code>parsed_config</code> - A configuration object that is the return value of the
 <code>parse_config</code> method. You should set any configuration options needed by
 the module here.</li>
+<li><code>module_api</code> - a <code>synapse.module_api.ModuleApi</code> object which provides the
+stable API available for extension modules.</li>
 </ul>
 </li>
 </ul>
