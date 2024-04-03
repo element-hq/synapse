@@ -59,12 +59,14 @@ class PushRuleRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.notifier = hs.get_notifier()
-        self._is_worker = hs.config.worker.worker_app is not None
+        self._is_push_worker = (
+            hs.get_instance_name() in hs.config.worker.writers.push_rules
+        )
         self._push_rules_handler = hs.get_push_rules_handler()
         self._push_rule_linearizer = Linearizer(name="push_rules")
 
     async def on_PUT(self, request: SynapseRequest, path: str) -> Tuple[int, JsonDict]:
-        if self._is_worker:
+        if not self._is_push_worker:
             raise Exception("Cannot handle PUT /push_rules on worker")
 
         requester = await self.auth.get_user_by_req(request)
@@ -137,7 +139,7 @@ class PushRuleRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, path: str
     ) -> Tuple[int, JsonDict]:
-        if self._is_worker:
+        if not self._is_push_worker:
             raise Exception("Cannot handle DELETE /push_rules on worker")
 
         requester = await self.auth.get_user_by_req(request)

@@ -117,7 +117,11 @@ class Clock:
         return int(self.time() * 1000)
 
     def looping_call(
-        self, f: Callable[P, object], msec: float, *args: P.args, **kwargs: P.kwargs
+        self,
+        f: Callable[P, object],
+        msec: float,
+        *args: P.args,
+        **kwargs: P.kwargs,
     ) -> LoopingCall:
         """Call a function repeatedly.
 
@@ -134,12 +138,46 @@ class Clock:
         Args:
             f: The function to call repeatedly.
             msec: How long to wait between calls in milliseconds.
-            *args: Postional arguments to pass to function.
+            *args: Positional arguments to pass to function.
             **kwargs: Key arguments to pass to function.
         """
+        return self._looping_call_common(f, msec, False, *args, **kwargs)
+
+    def looping_call_now(
+        self,
+        f: Callable[P, object],
+        msec: float,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LoopingCall:
+        """Call a function immediately, and then repeatedly thereafter.
+
+        As with `looping_call`: subsequent calls are not scheduled until after the
+        the Awaitable returned by a previous call has finished.
+
+        Also as with `looping_call`: the function is called with no logcontext and
+        you probably want to wrap it in `run_as_background_process`.
+
+        Args:
+            f: The function to call repeatedly.
+            msec: How long to wait between calls in milliseconds.
+            *args: Positional arguments to pass to function.
+            **kwargs: Key arguments to pass to function.
+        """
+        return self._looping_call_common(f, msec, True, *args, **kwargs)
+
+    def _looping_call_common(
+        self,
+        f: Callable[P, object],
+        msec: float,
+        now: bool,
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> LoopingCall:
+        """Common functionality for `looping_call` and `looping_call_now`"""
         call = task.LoopingCall(f, *args, **kwargs)
         call.clock = self._reactor
-        d = call.start(msec / 1000.0, now=False)
+        d = call.start(msec / 1000.0, now=now)
         d.addErrback(log_failure, "Looping call died", consumeErrors=False)
         return call
 
