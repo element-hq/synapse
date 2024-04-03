@@ -1,1 +1,0 @@
-As done for SAML mapping provider, let's pass the module API to the OIDC one so the mapper can do more logic in its code.

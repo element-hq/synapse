@@ -156,6 +156,8 @@ class WriterLocations:
             can only be a single instance.
         presence: The instances that write to the presence stream. Currently
             can only be a single instance.
+        push_rules: The instances that write to the push stream. Currently
+            can only be a single instance.
     """
 
     events: List[str] = attr.ib(
@@ -179,6 +181,10 @@ class WriterLocations:
         converter=_instance_to_list_converter,
     )
     presence: List[str] = attr.ib(
+        default=["master"],
+        converter=_instance_to_list_converter,
+    )
+    push_rules: List[str] = attr.ib(
         default=["master"],
         converter=_instance_to_list_converter,
     )
@@ -341,6 +347,7 @@ class WorkerConfig(Config):
             "account_data",
             "receipts",
             "presence",
+            "push_rules",
         ):
             instances = _instance_to_list_converter(getattr(self.writers, stream))
             for instance in instances:
@@ -376,6 +383,11 @@ class WorkerConfig(Config):
         if len(self.writers.presence) != 1:
             raise ConfigError(
                 "Must only specify one instance to handle `presence` messages."
+            )
+
+        if len(self.writers.push_rules) != 1:
+            raise ConfigError(
+                "Must only specify one instance to handle `push` messages."
             )
 
         self.events_shard_config = RoutableShardedWorkerHandlingConfig(
