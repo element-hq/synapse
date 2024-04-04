@@ -1156,6 +1156,7 @@ class UserInfo:
         user_type:  User type (None for normal user, 'support' and 'bot' other options).
         approved: If the user has been "approved" to register on the server.
         locked: Whether the user's account has been locked
+        suspended: Whether the user's account is currently suspended
     """
 
     user_id: UserID
@@ -1171,6 +1172,7 @@ class UserInfo:
     is_shadow_banned: bool
     approved: bool
     locked: bool
+    suspended: bool
 
 
 class UserProfile(TypedDict):
