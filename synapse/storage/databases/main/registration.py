@@ -2266,6 +2266,13 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
     ):
         super().__init__(database, db_conn, hs)
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="access_tokens_refresh_token_id_idx",
+            index_name="access_tokens_refresh_token_id_idx",
+            table="access_tokens",
+            columns=("refresh_token_id",),
+        )
+
         self._ignore_unknown_session_error = (
             hs.config.server.request_token_inhibit_3pid_errors
         )
