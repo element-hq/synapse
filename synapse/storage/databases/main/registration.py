@@ -2251,7 +2251,7 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
             txn=txn,
             table="users",
             keyvalues={"name": user_id},
-            updatevalues={"suspended": 1 if suspended else 0},
+            updatevalues={"suspended": suspended},
         )
         self._invalidate_cache_and_stream(
             txn, self.get_user_suspended_status, (user_id,)
