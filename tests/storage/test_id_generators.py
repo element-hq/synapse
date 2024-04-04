@@ -623,14 +623,8 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
         self.get_success(_get_next_async())
         self.assertEqual(id_gen_3.get_persisted_upto_position(), 6)
 
-        # If we add back the old "first" then we shouldn't see the persisted up
-        # to position revert back to 3.
-        # TODO: I postulate that it actually should be a 3 and not a 6, as "first"
-        #  hasn't actually written anything since it's initial 3 reflecting it's minimum
-        #  persisted value.
-        #  I assert that the first instance created in this test is proof, since it's
-        #  instance name is neither of the writers named and is therefore a 'reader' and
-        #  not a 'writer', just as this 5th instance is.
+        # If we add back the old "first" then we should see the persisted up
+        # to position revert back to 3, as this writer hasn't written anything since.
         id_gen_5 = self._create_id_generator("five", writers=["first", "third"])
         self.assertEqual(id_gen_5.get_persisted_upto_position(), 3)
         self.assertEqual(id_gen_5.get_current_token_for_writer("first"), 3)
