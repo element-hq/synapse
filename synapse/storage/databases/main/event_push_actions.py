@@ -866,7 +866,9 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         room_ids: StrCollection,
         thread_ids: StrCollection,
     ) -> Dict[str, _RoomReceipt]:
-        """Get receipts for a user and the given room IDs and thread IDs.
+        """
+        Get (private) read receipts for a user in each of the given room IDs
+        and thread IDs.
 
         Note: The corresponding room ID for each thread must appear in
         `room_ids` arg.
