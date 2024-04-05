@@ -23,6 +23,9 @@ name = "synapse.synapse_rust"
 
 [dependencies]
 anyhow = "1.0.63"
+bytes = "1.6.0"
+headers = "0.4.0"
+http = "1.1.0"
 lazy_static = "1.4.0"
 log = "0.4.17"
 pyo3 = { version = "0.20.0", features = [
