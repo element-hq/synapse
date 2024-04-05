@@ -51,21 +51,6 @@ and run the following SQL:
 See docs/postgres.md for more information.
 """
 
-_INCONSISTENT_STREAM_ERROR = """
-Postgres sequence '%(seq)s' is inconsistent with associated stream position
-of '%(stream_name)s' in the 'stream_positions' table.
-
-This is likely a programming error and should be reported at
-https://github.com/matrix-org/synapse.
-
-A temporary workaround to fix this error is to shut down Synapse (including
-any and all workers) and run the following SQL:
-
-    DELETE FROM stream_positions WHERE stream_name = '%(stream_name)s';
-
-This will need to be done every time the server is restarted.
-"""
-
 
 class SequenceGenerator(metaclass=abc.ABCMeta):
     """A class which generates a unique sequence of integers"""
@@ -86,7 +71,6 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
         db_conn: "LoggingDatabaseConnection",
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
         positive: bool = True,
     ) -> None:
         """Should be called during start up to test that the current value of
@@ -95,11 +79,6 @@ class SequenceGenerator(metaclass=abc.ABCMeta):
         This is to handle various cases where the sequence value can get out of
         sync with the table, e.g. if Synapse gets rolled back to a previous
         version and the rolled forwards again.
-
-        If a stream name is given then this will check that any value in the
-        `stream_positions` table is less than or equal to the current sequence
-        value. If it isn't then it's likely that streams have been crossed
-        somewhere (e.g. two ID generators have the same stream name).
         """
         ...
 
@@ -127,7 +106,6 @@ class PostgresSequenceGenerator(SequenceGenerator):
         db_conn: "LoggingDatabaseConnection",
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
         positive: bool = True,
     ) -> None:
         """See SequenceGenerator.check_consistency for docstring."""
@@ -158,17 +136,6 @@ class PostgresSequenceGenerator(SequenceGenerator):
         assert fetch_res is not None
         last_value, is_called = fetch_res
 
-        # If we have an associated stream check the stream_positions table.
-        max_in_stream_positions = None
-        if stream_name:
-            txn.execute(
-                "SELECT MAX(stream_id) FROM stream_positions WHERE stream_name = ?",
-                (stream_name,),
-            )
-            row = txn.fetchone()
-            if row:
-                max_in_stream_positions = row[0]
-
         txn.close()
 
         # If `is_called` is False then `last_value` is actually the value that
@@ -187,14 +154,6 @@ class PostgresSequenceGenerator(SequenceGenerator):
             raise IncorrectDatabaseSetup(
                 _INCONSISTENT_SEQUENCE_ERROR
                 % {"seq": self._sequence_name, "table": table, "max_id_sql": table_sql}
-            )
-
-        # If we have values in the stream positions table then they have to be
-        # less than or equal to `last_value`
-        if max_in_stream_positions and max_in_stream_positions > last_value:
-            raise IncorrectDatabaseSetup(
-                _INCONSISTENT_STREAM_ERROR
-                % {"seq": self._sequence_name, "stream_name": stream_name}
             )
 
 
@@ -249,7 +208,6 @@ class LocalSequenceGenerator(SequenceGenerator):
         db_conn: Connection,
         table: str,
         id_column: str,
-        stream_name: Optional[str] = None,
         positive: bool = True,
     ) -> None:
         # There is nothing to do for in memory sequences
@@ -263,7 +221,6 @@ def build_sequence_generator(
     sequence_name: str,
     table: Optional[str],
     id_column: Optional[str],
-    stream_name: Optional[str] = None,
     positive: bool = True,
 ) -> SequenceGenerator:
     """Get the best impl of SequenceGenerator available
@@ -291,7 +248,6 @@ def build_sequence_generator(
             db_conn=db_conn,
             table=table,
             id_column=id_column,
-            stream_name=stream_name,
             positive=positive,
         )
 

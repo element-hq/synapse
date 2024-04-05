@@ -205,7 +205,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[("foobar", "instance_name", "stream_id")],
                 sequence_name="foobar_seq",
@@ -225,13 +224,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     "INSERT INTO foobar VALUES (nextval('foobar_seq'), ?)",
                     (instance_name,),
                 )
-                txn.execute(
-                    """
-                    INSERT INTO stream_positions VALUES ('test_stream', ?,  lastval())
-                    ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = lastval()
-                    """,
-                    (instance_name,),
-                )
 
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
 
@@ -249,13 +241,6 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 ),
             )
             txn.execute("SELECT setval('foobar_seq', ?)", (stream_id,))
-            txn.execute(
-                """
-                INSERT INTO stream_positions VALUES ('test_stream', ?, ?)
-                ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = ?
-                """,
-                (instance_name, stream_id, stream_id),
-            )
 
         self.get_success(self.db_pool.runInteraction("_insert_row_with_id", _insert))
 
@@ -604,6 +589,10 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
         self.assertEqual(id_gen.get_current_token_for_writer("first"), 3)
         self.assertEqual(id_gen.get_current_token_for_writer("second"), 5)
 
+        # Going to test gap closing at the bottom of the test, save this guy for later,
+        # otherwise we can not write to "first"
+        id_gen_1 = self._create_id_generator("first", writers=["first", "third"])
+
         # New config removes one of the configs. Note that if the writer is
         # removed from config we assume that it has been shut down and has
         # finished persisting, hence why the persisted upto position is 5.
@@ -628,16 +617,40 @@ class MultiWriterIdGeneratorTestCase(HomeserverTestCase):
         async def _get_next_async() -> None:
             async with id_gen_3.get_next() as stream_id:
                 self.assertEqual(stream_id, 6)
+                # Actually write a row, or the position won't advance
+                self._insert_row_with_id("third", stream_id)
 
         self.get_success(_get_next_async())
         self.assertEqual(id_gen_3.get_persisted_upto_position(), 6)
 
-        # If we add back the old "first" then we shouldn't see the persisted up
-        # to position revert back to 3.
+        # If we add back the old "first" then we should see the persisted up
+        # to position revert back to 3, as this writer hasn't written anything since.
         id_gen_5 = self._create_id_generator("five", writers=["first", "third"])
-        self.assertEqual(id_gen_5.get_persisted_upto_position(), 6)
-        self.assertEqual(id_gen_5.get_current_token_for_writer("first"), 6)
+        self.assertEqual(id_gen_5.get_persisted_upto_position(), 3)
+        self.assertEqual(id_gen_5.get_current_token_for_writer("first"), 3)
         self.assertEqual(id_gen_5.get_current_token_for_writer("third"), 6)
+
+        # Gap closing
+        # Check that writing of what should be the next token(7) written to "first"
+        # actually skips over the gap correctly.
+        async def _get_next_async_gap_closer() -> None:
+            # Recall we saved "first" writer above
+            async with id_gen_1.get_next() as stream_id:
+                self.assertEqual(stream_id, 7)
+                # Actually write a row, or the position won't advance
+                self._insert_row_with_id("first", stream_id)
+
+        self.get_success(_get_next_async_gap_closer())
+
+        # Since this is not a full Synapse Homeserver Test case, there is no
+        # replication. We have to create yet another id generator to load the new values
+        id_gen_6 = self._create_id_generator("six", writers=["first", "third"])
+
+        # Updating "first" does advance the position
+        self.assertEqual(id_gen_6.get_persisted_upto_position(), 7)
+        # Updates both tokens correctly
+        self.assertEqual(id_gen_6.get_current_token_for_writer("first"), 7)
+        self.assertEqual(id_gen_6.get_current_token_for_writer("third"), 7)
 
     def test_sequence_consistency(self) -> None:
         """Test that we error out if the table and sequence diverges."""
@@ -752,7 +765,6 @@ class BackwardsMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[("foobar", "instance_name", "stream_id")],
                 sequence_name="foobar_seq",
@@ -772,13 +784,6 @@ class BackwardsMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     stream_id,
                     instance_name,
                 ),
-            )
-            txn.execute(
-                """
-                INSERT INTO stream_positions VALUES ('test_stream', ?, ?)
-                ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = ?
-                """,
-                (instance_name, -stream_id, -stream_id),
             )
 
         self.get_success(self.db_pool.runInteraction("_insert_row", _insert))
@@ -889,7 +894,6 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                 conn,
                 self.db_pool,
                 notifier=self.hs.get_replication_notifier(),
-                stream_name="test_stream",
                 instance_name=instance_name,
                 tables=[
                     ("foobar1", "instance_name", "stream_id"),
@@ -906,7 +910,6 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
         table: str,
         instance_name: str,
         number: int,
-        update_stream_table: bool = True,
     ) -> None:
         """Insert N rows as the given instance, inserting with stream IDs pulled
         from the postgres sequence.
@@ -918,29 +921,18 @@ class MultiTableMultiWriterIdGeneratorTestCase(HomeserverTestCase):
                     "INSERT INTO %s VALUES (nextval('foobar_seq'), ?)" % (table,),
                     (instance_name,),
                 )
-                if update_stream_table:
-                    txn.execute(
-                        """
-                        INSERT INTO stream_positions VALUES ('test_stream', ?,  lastval())
-                        ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = lastval()
-                        """,
-                        (instance_name,),
-                    )
 
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
 
     def test_load_existing_stream(self) -> None:
-        """Test creating ID gens with multiple tables that have rows from after
-        the position in `stream_positions` table.
-        """
+        """Test creating ID gens with multiple tables load positions correctly."""
         self._insert_rows("foobar1", "first", 3)
-        self._insert_rows("foobar2", "second", 3)
-        self._insert_rows("foobar2", "second", 1, update_stream_table=False)
+        self._insert_rows("foobar2", "second", 4)
 
         first_id_gen = self._create_id_generator("first", writers=["first", "second"])
         second_id_gen = self._create_id_generator("second", writers=["first", "second"])
 
-        self.assertEqual(first_id_gen.get_positions(), {"first": 3, "second": 6})
+        self.assertEqual(first_id_gen.get_positions(), {"first": 3, "second": 7})
         self.assertEqual(first_id_gen.get_current_token_for_writer("first"), 7)
         self.assertEqual(first_id_gen.get_current_token_for_writer("second"), 7)
         self.assertEqual(first_id_gen.get_persisted_upto_position(), 7)

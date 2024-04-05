@@ -48,7 +48,6 @@ from typing import (
 import attr
 from sortedcontainers import SortedList, SortedSet
 
-from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -343,8 +342,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     Args:
         db_conn
         db
-        stream_name: A name for the stream, for use in the `stream_positions`
-            table. (Does not need to be the same as the replication stream name)
         instance_name: The name of this instance.
         tables: List of tables associated with the stream. Tuple of table
             name, column name that stores the writer's instance name, and
@@ -363,7 +360,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         db_conn: LoggingDatabaseConnection,
         db: DatabasePool,
         notifier: "ReplicationNotifier",
-        stream_name: str,
         instance_name: str,
         tables: List[Tuple[str, str, str]],
         sequence_name: str,
@@ -372,7 +368,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
     ) -> None:
         self._db = db
         self._notifier = notifier
-        self._stream_name = stream_name
         self._instance_name = instance_name
         self._positive = positive
         self._writers = writers
@@ -412,16 +407,14 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # will be gapless; gaps can form when e.g. a transaction was rolled
         # back. This means that sometimes we won't be able to skip forward the
         # position even though everything has been persisted. However, since
-        # gaps should be relatively rare it's still worth doing the book keeping
+        # gaps should be relatively rare it's still worth doing the bookkeeping
         # that allows us to skip forwards when there are gapless runs of
         # positions.
         #
         # We start at 1 here as a) the first generated stream ID will be 2, and
         # b) other parts of the code assume that stream IDs are strictly greater
         # than 0.
-        self._persisted_upto_position = (
-            min(self._current_positions.values()) if self._current_positions else 1
-        )
+        self._persisted_upto_position = 1
         self._known_persisted_positions: List[int] = []
 
         # The maximum stream ID that we have seen been allocated across any writer.
@@ -440,7 +433,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 db_conn,
                 table=table,
                 id_column=id_column,
-                stream_name=stream_name,
                 positive=positive,
             )
 
@@ -451,7 +443,8 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             self._current_positions.values(), default=1
         )
 
-        # For the case where `stream_positions` is not up to date,
+        # TODO: this needs updating or verifying
+        # For the case where `stream_positions` is not up-to-date,
         # `_persisted_upto_position` may be higher.
         self._max_seen_allocated_stream_id = max(
             self._max_seen_allocated_stream_id, self._persisted_upto_position
@@ -463,7 +456,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
 
         if not writers:
             # If there have been no explicit writers given then any instance can
-            # write to the stream. In which case, let's pre-seed our own
+            # write to the stream. In which case, lets pre-seed our own
             # position with the current minimum.
             self._current_positions[self._instance_name] = self._persisted_upto_position
 
@@ -473,57 +466,66 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         tables: List[Tuple[str, str, str]],
     ) -> None:
         cur = db_conn.cursor(txn_name="_load_current_ids")
+        max_stream_id = 1
 
-        # Load the current positions of all writers for the stream.
-        if self._writers:
-            # We delete any stale entries in the positions table. This is
-            # important if we add back a writer after a long time; we want to
-            # consider that a "new" writer, rather than using the old stale
-            # entry here.
+        # Load the current positions of all writers for the stream from its provided
+        # table. Differentiate between(potentially) multiple workers for a stream by the
+        # instance_name. For a multiple event writer example:
+        # event_persister1 could be at 6
+        # but event_persister2 could be at 3
+        # For the case of no explicit writers, this will still pull the data for
+        # populating max_stream_id.
+        rows: List[Tuple[str, int]] = []
+        for table, instance_column, id_column in tables:
             sql = """
-                DELETE FROM stream_positions
-                WHERE
-                    stream_name = ?
-                    AND instance_name != ALL(?)
-            """
-            cur.execute(sql, (self._stream_name, self._writers))
-
-            sql = """
-                SELECT instance_name, stream_id FROM stream_positions
-                WHERE stream_name = ?
-            """
-            cur.execute(sql, (self._stream_name,))
-
-            self._current_positions = {
-                instance: stream_id * self._return_factor
-                for instance, stream_id in cur
-                if instance in self._writers
+                SELECT %(instance)s, %(agg)s(%(id)s) FROM %(table)s
+                GROUP BY %(instance)s
+            """ % {
+                "id": id_column,
+                "table": table,
+                "instance": instance_column,
+                "agg": "MAX" if self._positive else "MIN",
             }
+            cur.execute(sql)
+
+            # Cast safety: this corresponds to the types returned by the query above.
+            rows.extend(cast(Iterable[Tuple[str, int]], cur))
+
+        # This is filtered by writer...
+        self._current_positions = {
+            instance: stream_id * self._return_factor
+            for instance, stream_id in rows
+            if instance in self._writers
+        }
+
+        # ...where this is not
+        for _, stream_id in rows:
+            max_stream_id = max(max_stream_id, stream_id)
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
+
+        # Note some oddities around writer instances that disappear then reappear.
+        # For example with an events stream writer:
+        #  1. Using the main process to persist events
+        #  2. Declaring a separate events worker for some time
+        #  3. Resetting back to the main process
+        # It should resolve itself the first time (3) writes a row, thereby advancing
+        # its position.
+
         min_stream_id = min(self._current_positions.values(), default=None)
 
         if min_stream_id is None:
-            # We add a GREATEST here to ensure that the result is always
-            # positive. (This can be a problem for e.g. backfill streams where
-            # the server has never backfilled).
-            max_stream_id = 1
-            for table, _, id_column in tables:
-                sql = """
-                    SELECT GREATEST(COALESCE(%(agg)s(%(id)s), 1), 1)
-                    FROM %(table)s
-                """ % {
-                    "id": id_column,
-                    "table": table,
-                    "agg": "MAX" if self._positive else "-MIN",
-                }
-                cur.execute(sql)
-                result = cur.fetchone()
-                assert result is not None
-                (stream_id,) = result
-
-                max_stream_id = max(max_stream_id, stream_id)
+            # A min_stream_id being None means:
+            # 1. This table has never been written to
+            # 2. Whatever stream writer wrote to it is no longer available
+            # 3. It doesn't matter if the writer position is tracked(see cache
+            #    invalidation stream for example)
+            # Use the max_stream_id as all of those stream ids will be guaranteed
+            # to be persisted or will default to 1.
+            # TODO: is this next comment still valid?
+            # (This can be a problem for e.g. backfill streams where the server has
+            # never backfilled).
 
             self._persisted_upto_position = max_stream_id
         else:
@@ -531,16 +533,10 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
             # than it from the DB so that we can prefill
             # `_known_persisted_positions` and get a more accurate
             # `_persisted_upto_position`.
-            #
-            # We also check if any of the later rows are from this instance, in
-            # which case we use that for this instance's current position. This
-            # is to handle the case where we didn't finish persisting to the
-            # stream positions table before restart (or the stream position
-            # table otherwise got out of date).
 
             self._persisted_upto_position = min_stream_id
 
-            rows: List[Tuple[str, int]] = []
+            rows = []
             for table, instance_column, id_column in tables:
                 sql = """
                     SELECT %(instance)s, %(id)s FROM %(table)s
@@ -553,31 +549,16 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 }
                 cur.execute(sql, (min_stream_id * self._return_factor,))
 
-                # Cast safety: this corresponds to the types returned by the query above.
+                # Cast safety: this corresponds to the types returned by the query above
                 rows.extend(cast(Iterable[Tuple[str, int]], cur))
-
-            # Sort by stream_id (ascending, lowest -> highest) so that we handle
-            # rows in order for each instance because we don't want to overwrite
-            # the current_position of an instance to a lower stream ID than
-            # we're actually at.
-            def sort_by_stream_id_key_func(row: Tuple[str, int]) -> int:
-                (instance, stream_id) = row
-                # If `stream_id` is ever `None`, we will see a `TypeError: '<'
-                # not supported between instances of 'NoneType' and 'X'` error.
-                return stream_id
-
-            rows.sort(key=sort_by_stream_id_key_func)
 
             with self._lock:
                 for (
-                    instance,
+                    _,
                     stream_id,
                 ) in rows:
                     stream_id = self._return_factor * stream_id
                     self._add_persisted_position(stream_id)
-
-                    if instance == self._instance_name:
-                        self._current_positions[instance] = stream_id
 
         if self._writers:
             # If we have explicit writers then make sure that each instance has
@@ -661,21 +642,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         txn.call_on_exception(self._mark_ids_as_finished, [next_id])
         txn.call_after(self._notifier.notify_replication)
 
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        if self._writers:
-            txn.call_after(
-                run_as_background_process,
-                "MultiWriterIdGenerator._update_table",
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
-            )
-
         return self._return_factor * next_id
 
     def get_next_mult_txn(self, txn: LoggingTransaction, n: int) -> List[int]:
@@ -696,21 +662,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         txn.call_after(self._mark_ids_as_finished, next_ids)
         txn.call_on_exception(self._mark_ids_as_finished, next_ids)
         txn.call_after(self._notifier.notify_replication)
-
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        if self._writers:
-            txn.call_after(
-                run_as_background_process,
-                "MultiWriterIdGenerator._update_table",
-                self._db.runInteraction,
-                "MultiWriterIdGenerator._update_table",
-                self._update_stream_positions_table_txn,
-            )
 
         return [self._return_factor * next_id for next_id in next_ids]
 
@@ -905,27 +856,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 # do.
                 break
 
-    def _update_stream_positions_table_txn(self, txn: Cursor) -> None:
-        """Update the `stream_positions` table with newly persisted position."""
-
-        if not self._writers:
-            return
-
-        # We upsert the value, ensuring on conflict that we always increase the
-        # value (or decrease if stream goes backwards).
-        sql = """
-            INSERT INTO stream_positions (stream_name, instance_name, stream_id)
-            VALUES (?, ?, ?)
-            ON CONFLICT (stream_name, instance_name)
-            DO UPDATE SET
-                stream_id = %(agg)s(stream_positions.stream_id, EXCLUDED.stream_id)
-        """ % {
-            "agg": "GREATEST" if self._positive else "LEAST",
-        }
-
-        pos = (self.get_current_token_for_writer(self._instance_name),)
-        txn.execute(sql, (self._stream_name, self._instance_name, pos))
-
 
 @attr.s(frozen=True, auto_attribs=True)
 class _AsyncCtxManagerWrapper(Generic[T]):
@@ -985,23 +915,5 @@ class _MultiWriterCtxManager:
 
         if exc_type is not None:
             return False
-
-        # Update the `stream_positions` table with newly updated stream
-        # ID (unless self._writers is not set in which case we don't
-        # bother, as nothing will read it).
-        #
-        # We only do this on the success path so that the persisted current
-        # position points to a persisted row with the correct instance name.
-        #
-        # We do this in autocommit mode as a) the upsert works correctly outside
-        # transactions and b) reduces the amount of time the rows are locked
-        # for. If we don't do this then we'll often hit serialization errors due
-        # to the fact we default to REPEATABLE READ isolation levels.
-        if self.id_gen._writers:
-            await self.id_gen._db.runInteraction(
-                "MultiWriterIdGenerator._update_table",
-                self.id_gen._update_stream_positions_table_txn,
-                db_autocommit=True,
-            )
 
         return False

@@ -89,7 +89,6 @@ class ReceiptsWorkerStore(SQLBaseStore):
                 db_conn=db_conn,
                 db=database,
                 notifier=hs.get_replication_notifier(),
-                stream_name="receipts",
                 instance_name=self._instance_name,
                 tables=[("receipts_linearized", "instance_name", "stream_id")],
                 sequence_name="receipts_sequence",

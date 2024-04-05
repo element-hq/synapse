@@ -107,7 +107,6 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 db_conn,
                 database,
                 notifier=hs.get_replication_notifier(),
-                stream_name="caches",
                 instance_name=hs.get_instance_name(),
                 tables=[
                     (
