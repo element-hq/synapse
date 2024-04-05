@@ -2108,6 +2108,13 @@ class RegistrationBackgroundUpdateStore(RegistrationWorkerStore):
             unique=False,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="access_tokens_refresh_token_id_idx",
+            index_name="access_tokens_refresh_token_id_idx",
+            table="access_tokens",
+            columns=("refresh_token_id",),
+        )
+
     async def _background_update_set_deactivated_flag(
         self, progress: JsonDict, batch_size: int
     ) -> int:
@@ -2265,13 +2272,6 @@ class RegistrationStore(StatsStore, RegistrationBackgroundUpdateStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
-
-        self.db_pool.updates.register_background_index_update(
-            update_name="access_tokens_refresh_token_id_idx",
-            index_name="access_tokens_refresh_token_id_idx",
-            table="access_tokens",
-            columns=("refresh_token_id",),
-        )
 
         self._ignore_unknown_session_error = (
             hs.config.server.request_token_inhibit_3pid_errors
