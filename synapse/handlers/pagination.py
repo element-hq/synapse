@@ -468,16 +468,6 @@ class PaginationHandler:
                 room_id, requester, allow_departed_users=True
             )
 
-        if pagin_config.direction == Direction.BACKWARDS:
-            # if we're going backwards, we might need to backfill. This
-            # requires that we have a topo token.
-            if room_token.topological:
-                curr_topo = room_token.topological
-            else:
-                curr_topo = await self.store.get_current_topological_token(
-                    room_id, room_token.stream
-                )
-
         # If they have left the room then clamp the token to be before
         # they left the room, to save the effort of loading from the
         # database.
@@ -495,6 +485,14 @@ class PaginationHandler:
                 member_event_id
             )
             assert leave_token.topological is not None
+
+            # We need the topological part of the token to compare against.
+            if room_token.topological:
+                curr_topo = room_token.topological
+            else:
+                curr_topo = await self.store.get_current_topological_token(
+                    room_id, room_token.stream
+                )
 
             if leave_token.topological < curr_topo:
                 from_token = from_token.copy_and_replace(
@@ -560,6 +558,19 @@ class PaginationHandler:
                     found_big_gap = True
                     break
                 previous_event_depth = event_depth
+
+            # if we're going backwards, we might need to backfill. This
+            # requires that we have a topo token.
+            if room_token.topological:
+                curr_topo = room_token.topological
+            elif events:
+                # If we've already fetched some events then we can just use
+                # those to get the right depth.
+                curr_topo = events[0].depth
+            else:
+                curr_topo = await self.store.get_current_topological_token(
+                    room_id, room_token.stream
+                )
 
             # Backfill in the foreground if we found a big gap, have too many holes,
             # or we don't have enough events to fill the limit that the client asked
