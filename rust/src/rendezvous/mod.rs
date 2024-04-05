@@ -16,9 +16,14 @@
 use std::{collections::HashMap, time::Duration};
 
 use bytes::Bytes;
-use headers::{ContentLength, ContentType, HeaderMapExt};
-use http::{Response, StatusCode};
-use pyo3::{pyclass, pymethods, types::PyModule, PyAny, PyResult, Python};
+use headers::{
+    AccessControlAllowOrigin, AccessControlExposeHeaders, ContentLength, ContentType, HeaderMapExt,
+    IfMatch, IfNoneMatch,
+};
+use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
+use pyo3::{
+    exceptions::PyValueError, pyclass, pymethods, types::PyModule, PyAny, PyResult, Python,
+};
 use ulid::Ulid;
 
 use crate::{
@@ -30,18 +35,31 @@ mod session;
 
 use self::session::Session;
 
+fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
+    headers.typed_insert(AccessControlAllowOrigin::ANY);
+    headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
+    headers.typed_insert(session.etag());
+    headers.typed_insert(session.expires());
+    headers.typed_insert(session.last_modified());
+}
+
 // TODO: handle eviction
-#[derive(Default)]
 #[pyclass]
 struct Rendezvous {
+    base: Uri,
     sessions: HashMap<Ulid, Session>,
 }
 
 #[pymethods]
 impl Rendezvous {
     #[new]
-    fn new() -> Self {
-        Rendezvous::default()
+    fn new(base: &str) -> PyResult<Self> {
+        let base = Uri::try_from(base).map_err(|_| PyValueError::new_err("Invalid base URI"))?;
+
+        Ok(Self {
+            base,
+            sessions: HashMap::new(),
+        })
     }
 
     fn handle_post(&mut self, twisted_request: &PyAny) -> PyResult<()> {
@@ -63,25 +81,21 @@ impl Rendezvous {
 
         let id = Ulid::new();
 
-        // XXX: this is lazy
-        let source_uri = request.uri();
-        let uri = format!("{source_uri}/{id}");
+        let uri = format!("{base}/{id}", base = self.base);
 
         let body = request.into_body();
 
         let session = Session::new(body, content_type.into(), Duration::from_secs(5 * 60));
 
         let response = serde_json::json!({
-            "uri": uri,
+            "url": uri,
         })
         .to_string();
 
         let mut response = Response::new(response.as_bytes());
         *response.status_mut() = StatusCode::CREATED;
         response.headers_mut().typed_insert(ContentType::json());
-        response.headers_mut().typed_insert(session.etag());
-        response.headers_mut().typed_insert(session.expires());
-        response.headers_mut().typed_insert(session.last_modified());
+        prepare_headers(response.headers_mut(), &session);
         http_response_to_twisted(twisted_request, response)?;
 
         self.sessions.insert(id, session);
@@ -90,19 +104,27 @@ impl Rendezvous {
     }
 
     fn handle_get(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
-        let _request = http_request_from_twisted(twisted_request)?;
+        let request = http_request_from_twisted(twisted_request)?;
 
-        // TODO: handle If-None-Match
+        let if_none_match: Option<IfNoneMatch> = request.headers().typed_get();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self.sessions.get(&id).ok_or_else(NotFoundError::new)?;
 
+        if let Some(if_none_match) = if_none_match {
+            if !if_none_match.precondition_passes(&session.etag()) {
+                let mut response = Response::new(Bytes::new());
+                *response.status_mut() = StatusCode::NOT_MODIFIED;
+                prepare_headers(response.headers_mut(), session);
+                http_response_to_twisted(twisted_request, response)?;
+                return Ok(());
+            }
+        }
+
         let mut response = Response::new(session.data());
         *response.status_mut() = StatusCode::OK;
+        prepare_headers(response.headers_mut(), session);
         response.headers_mut().typed_insert(session.content_type());
-        response.headers_mut().typed_insert(session.etag());
-        response.headers_mut().typed_insert(session.expires());
-        response.headers_mut().typed_insert(session.last_modified());
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
@@ -111,20 +133,43 @@ impl Rendezvous {
     fn handle_put(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
-        // TODO: handle If-Match
+        let ContentLength(content_length) = request.headers().typed_get_required()?;
+
+        if content_length > 1024 * 100 {
+            return Err(SynapseError::new(
+                StatusCode::BAD_REQUEST,
+                "Content-Length too large".to_owned(),
+                "M_INVALID_PARAM",
+                None,
+                None,
+            ));
+        }
 
         let content_type: ContentType = request.headers().typed_get_required()?;
+        let if_match: IfMatch = request.headers().typed_get_required()?;
+
         let data = request.into_body();
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self.sessions.get_mut(&id).ok_or_else(NotFoundError::new)?;
+
+        if !if_match.precondition_passes(&session.etag()) {
+            let mut headers = HeaderMap::new();
+            prepare_headers(&mut headers, session);
+            return Err(SynapseError::new(
+                StatusCode::PRECONDITION_FAILED,
+                "ETag does not match".to_owned(),
+                "M_CONCURRENT_WRITE",
+                None,
+                Some(headers),
+            ));
+        }
+
         session.update(data, content_type.into());
 
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::ACCEPTED;
-        response.headers_mut().typed_insert(session.etag());
-        response.headers_mut().typed_insert(session.expires());
-        response.headers_mut().typed_insert(session.last_modified());
+        prepare_headers(response.headers_mut(), session);
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
@@ -138,6 +183,9 @@ impl Rendezvous {
 
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::NO_CONTENT;
+        response
+            .headers_mut()
+            .typed_insert(AccessControlAllowOrigin::ANY);
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
