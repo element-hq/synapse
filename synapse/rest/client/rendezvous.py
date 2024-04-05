@@ -92,6 +92,7 @@ class MSC4108RendezvousServlet(RestServlet):
         self._store.handle_post(request)
 
 class MSC4108RendezvousSessionServlet(RestServlet):
+    # TODO: this should probably be mounted on the _synapse/client namespace
     PATTERNS = client_patterns(
         "/org.matrix.msc4108/rendezvous/(?P<session_id>[^/]+)$",
         releases=[],
@@ -118,6 +119,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
         MSC3886RendezvousServlet(hs).register(http_server)
 
     # TODO: gate this behind a feature flag and store the rendezvous object in the HS
-    rendezvous = RendezVous()
+    base = hs.config.server.public_baseurl + "_matrix/client/unstable/org.matrix.msc4108/rendezvous"
+    rendezvous = RendezVous(base)
     MSC4108RendezvousServlet(rendezvous).register(http_server)
     MSC4108RendezvousSessionServlet(rendezvous).register(http_server)

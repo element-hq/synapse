@@ -20,15 +20,38 @@
 
 #![allow(clippy::new_ret_no_self)]
 
-use http::StatusCode;
+use std::collections::HashMap;
+
+use http::{HeaderMap, StatusCode};
 use pyo3::import_exception;
 
 import_exception!(synapse.api.errors, SynapseError);
 
 impl SynapseError {
     pub fn new(code: StatusCode, message: &'static str) -> pyo3::PyErr {
-        // TODO: additional headers and matrix error code
         SynapseError::new_err((code.as_u16(), message))
+    }
+
+    pub fn new_with_headers(
+        code: StatusCode,
+        message: &'static str,
+        headers: HeaderMap,
+    ) -> pyo3::PyErr {
+        let headers = headers
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string(),
+                    value
+                        .to_str()
+                        // XXX: will that ever throw?
+                        .expect("header value is valid ASCII")
+                        .to_owned(),
+                )
+            })
+            .collect::<HashMap<String, String>>();
+
+        SynapseError::new_err((code.as_u16(), message, None::<()>, headers))
     }
 }
 
