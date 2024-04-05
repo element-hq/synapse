@@ -84,50 +84,40 @@ class MSC4108RendezvousServlet(RestServlet):
         "/org.matrix.msc4108/rendezvous$", releases=[], v1=False, unstable=True
     )
 
-    def __init__(self, hs: "HomeServer") -> None:
+    def __init__(self, store: RendezVous) -> None:
         super().__init__()
+        self._store = store
 
-        self.max_upload_size = 100_000
-        self._store = RendezVous()
+    def on_POST(self, request: SynapseRequest) -> None:
+        self._store.handle_post(request)
 
-    async def on_POST(self, request: SynapseRequest) -> None:
-        content_type = request.getHeader("Content-Type")
-        if content_type is None:
-            raise SynapseError(msg="Request must specify a Content-Type", code=400,
-                               errcode=Codes.MISSING_PARAM)
+class MSC4108RendezvousSessionServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4108/rendezvous/(?P<session_id>[^/]+)$",
+        releases=[],
+        v1=False,
+        unstable=True,
+    )
 
-        raw_content_length = request.getHeader("Content-Length")
-        if raw_content_length is None:
-            raise SynapseError(msg="Request must specify a Content-Length", code=400,
-                               errcode=Codes.MISSING_PARAM)
-        try:
-            content_length = int(raw_content_length)
-        except ValueError:
-            raise SynapseError(msg="Content-Length value is invalid", code=400)
-        if content_length > self.max_upload_size:
-            raise SynapseError(
-                msg="Upload request body is too large",
-                code=413,
-                errcode=Codes.TOO_LARGE,
-            )
+    def __init__(self, store: RendezVous) -> None:
+        super().__init__()
+        self._store = store
 
-        body = request.content.read(content_length + 1)
-        if len(body) != content_length:
-            raise SynapseError(
-                msg="Request body does not match Content-Length",
-                code=400,
-                errcode=Codes.INVALID_PARAM
-            )
+    def on_GET(self, request: SynapseRequest, session_id: str) -> None:
+        self._store.handle_get(request, session_id)
 
-        self._store.handle_new(content_type, body)
+    def on_PUT(self, request: SynapseRequest, session_id: str) -> None:
+        self._store.handle_put(request, session_id)
 
-        respond_with_json(request, 200, {"success": True})
-
+    def on_DELETE(self, request: SynapseRequest, session_id: str) -> None:
+        self._store.handle_delete(request, session_id)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3886_endpoint is not None:
         MSC3886RendezvousServlet(hs).register(http_server)
 
-    # TODO: gate this behind a feature flag
-    MSC4108RendezvousServlet(hs).register(http_server)
+    # TODO: gate this behind a feature flag and store the rendezvous object in the HS
+    rendezvous = RendezVous()
+    MSC4108RendezvousServlet(rendezvous).register(http_server)
+    MSC4108RendezvousSessionServlet(rendezvous).register(http_server)
