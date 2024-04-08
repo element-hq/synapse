@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use bytes::Bytes;
-use headers::{ContentType, ETag, Expires, LastModified};
+use headers::{ContentLength, ContentType, ETag, Expires, LastModified};
 use mime::Mime;
 use sha2::{Digest, Sha256};
 
@@ -50,6 +50,10 @@ impl Session {
 
     pub fn content_type(&self) -> ContentType {
         self.content_type.clone().into()
+    }
+
+    pub fn content_length(&self) -> ContentLength {
+        ContentLength(self.data.len() as _)
     }
 
     pub fn etag(&self) -> ETag {

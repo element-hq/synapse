@@ -150,6 +150,7 @@ from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
 from synapse.util.stringutils import random_string
 from synapse.util.task_scheduler import TaskScheduler
+from synapse.synapse_rust.rendezvous import RendezVousHandler
 
 logger = logging.getLogger(__name__)
 
@@ -858,6 +859,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_room_forgetter_handler(self) -> RoomForgetterHandler:
         return RoomForgetterHandler(self)
+
+    @cache_in_self
+    def get_rendezvous_handler(self) -> RendezVousHandler:
+        return RendezVousHandler(self)
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
