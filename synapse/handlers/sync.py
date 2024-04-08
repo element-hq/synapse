@@ -1266,7 +1266,15 @@ class SyncHandler:
         #
         # c.f. #16941 for an example of why we can't do this for all non-gappy
         # syncs.
-        is_linear_timeline = all(len(e.prev_event_ids()) <= 1 for e in batch.events)
+        is_linear_timeline = False
+        if batch.events:
+            prev_event_id = batch.events[0].event_id
+            for e in batch.events[1:]:
+                if e.prev_event_ids() != [prev_event_id]:
+                    break
+            else:
+                is_linear_timeline = True
+
         if is_linear_timeline and not batch.limited:
             state_ids: StateMap[str] = {}
             if lazy_load_members:
