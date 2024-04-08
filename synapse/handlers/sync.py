@@ -1272,8 +1272,11 @@ class SyncHandler:
             for e in batch.events[1:]:
                 if e.prev_event_ids() != [prev_event_id]:
                     break
+                prev_event_id = e.event_id
             else:
                 is_linear_timeline = True
+        else:
+            is_linear_timeline = True
 
         if is_linear_timeline and not batch.limited:
             state_ids: StateMap[str] = {}
