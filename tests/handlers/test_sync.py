@@ -435,6 +435,101 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [s2_event],
         )
 
+    def test_state_includes_changes_on_long_lived_forks(self) -> None:
+        """State changes that happen on a fork of the DAG must be included in `state`
+
+        Given the following DAG:
+
+             E1
+           ↗    ↖
+          |      S2
+          |      ↑
+        --|------|----
+          E3     |
+        --|------|----
+          |      E4
+          |      |
+
+        ... and a filter that means we only return 1 events, represented by the dashed
+        horizontal line: `S2` must be included in the `state` section on the second sync.
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync as Alice to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester, generate_sync_config(alice)
+            )
+        )
+        last_room_creation_event_id = (
+            initial_sync_result.joined[0].timeline.events[-1].event_id
+        )
+
+        # Send a state event, and a regular event, both using the same prev ID
+        with self._patch_get_latest_events([last_room_creation_event_id]):
+            s2_event = self.helper.send_state(room_id, "s2", {}, tok=alice_tok)[
+                "event_id"
+            ]
+            e3_event = self.helper.send(room_id, "e3", tok=alice_tok)["event_id"]
+
+        # Do an incremental sync, this will return E3 but *not* S2 at this
+        # point.
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(
+                        self.hs, {"room": {"timeline": {"limit": 1}}}
+                    ),
+                ),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertTrue(room_sync.timeline.limited)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e3_event],
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [],
+        )
+
+        # Now send another event that points to S2, but not E3.
+        with self._patch_get_latest_events([s2_event]):
+            e4_event = self.helper.send(room_id, "e4", tok=alice_tok)["event_id"]
+
+        # Doing an incremental sync should return S2 in state.
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(
+                    alice,
+                    filter_collection=FilterCollection(
+                        self.hs, {"room": {"timeline": {"limit": 1}}}
+                    ),
+                ),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertFalse(room_sync.timeline.limited)
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e4_event],
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [s2_event],
+        )
+
     def test_state_includes_changes_on_ungappy_syncs(self) -> None:
         """Test `state` where the sync is not gappy.
 
