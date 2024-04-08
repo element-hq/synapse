@@ -21,11 +21,13 @@ use headers::{
     IfMatch, IfNoneMatch,
 };
 use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
+use mime::Mime;
 use pyo3::{
     exceptions::PyValueError, pyclass, pymethods, types::PyModule, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
+use self::session::Session;
 use crate::{
     errors::{NotFoundError, SynapseError},
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
@@ -33,7 +35,7 @@ use crate::{
 
 mod session;
 
-use self::session::Session;
+const MAX_CONTENT_LENGTH: u64 = 1024 * 100;
 
 fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
@@ -41,6 +43,24 @@ fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(session.etag());
     headers.typed_insert(session.expires());
     headers.typed_insert(session.last_modified());
+}
+
+fn check_input_headers(headers: &HeaderMap) -> PyResult<Mime> {
+    let ContentLength(content_length) = headers.typed_get_required()?;
+
+    if content_length > MAX_CONTENT_LENGTH {
+        return Err(SynapseError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Payload too large".to_owned(),
+            "M_TOO_LARGE",
+            None,
+            None,
+        ));
+    }
+
+    let content_type: ContentType = headers.typed_get_required()?;
+
+    Ok(content_type.into())
 }
 
 // TODO: handle eviction
@@ -65,19 +85,7 @@ impl Rendezvous {
     fn handle_post(&mut self, twisted_request: &PyAny) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
-        let ContentLength(content_length) = request.headers().typed_get_required()?;
-
-        if content_length > 1024 * 100 {
-            return Err(SynapseError::new(
-                StatusCode::BAD_REQUEST,
-                "Content-Length too large".to_owned(),
-                "M_INVALID_PARAM",
-                None,
-                None,
-            ));
-        }
-
-        let content_type: ContentType = request.headers().typed_get_required()?;
+        let content_type = check_input_headers(request.headers())?;
 
         let id = Ulid::new();
 
@@ -85,7 +93,7 @@ impl Rendezvous {
 
         let body = request.into_body();
 
-        let session = Session::new(body, content_type.into(), Duration::from_secs(5 * 60));
+        let session = Session::new(body, content_type, Duration::from_secs(5 * 60));
 
         let response = serde_json::json!({
             "url": uri,
@@ -106,7 +114,7 @@ impl Rendezvous {
     fn handle_get(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
-        let if_none_match: Option<IfNoneMatch> = request.headers().typed_get();
+        let if_none_match: Option<IfNoneMatch> = request.headers().typed_get_optional()?;
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self.sessions.get(&id).ok_or_else(NotFoundError::new)?;
@@ -133,19 +141,8 @@ impl Rendezvous {
     fn handle_put(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
-        let ContentLength(content_length) = request.headers().typed_get_required()?;
+        let content_type = check_input_headers(request.headers())?;
 
-        if content_length > 1024 * 100 {
-            return Err(SynapseError::new(
-                StatusCode::BAD_REQUEST,
-                "Content-Length too large".to_owned(),
-                "M_INVALID_PARAM",
-                None,
-                None,
-            ));
-        }
-
-        let content_type: ContentType = request.headers().typed_get_required()?;
         let if_match: IfMatch = request.headers().typed_get_required()?;
 
         let data = request.into_body();
@@ -156,6 +153,7 @@ impl Rendezvous {
         if !if_match.precondition_passes(&session.etag()) {
             let mut headers = HeaderMap::new();
             prepare_headers(&mut headers, session);
+
             return Err(SynapseError::new(
                 StatusCode::PRECONDITION_FAILED,
                 "ETag does not match".to_owned(),
@@ -165,7 +163,7 @@ impl Rendezvous {
             ));
         }
 
-        session.update(data, content_type.into());
+        session.update(data, content_type);
 
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::ACCEPTED;
