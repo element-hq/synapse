@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use bytes::Bytes;
-use headers::{ContentType, ETag, Expires, LastModified};
+use headers::{ContentLength, ContentType, ETag, Expires, LastModified};
 use mime::Mime;
 use sha2::{Digest, Sha256};
 
@@ -54,6 +54,12 @@ impl Session {
         self.content_type.clone().into()
     }
 
+    /// Returns the Content-Length header of the session.
+    pub fn content_length(&self) -> ContentLength {
+        ContentLength(self.data.len() as _)
+    }
+
+    /// Returns the ETag header of the session.
     pub fn etag(&self) -> ETag {
         let encoded = URL_SAFE_NO_PAD.encode(self.hash);
         // SAFETY: Base64 encoding is URL-safe, so ETag-safe

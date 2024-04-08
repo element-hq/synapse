@@ -18,7 +18,7 @@ use std::{collections::HashMap, time::Duration};
 use bytes::Bytes;
 use headers::{
     AccessControlAllowOrigin, AccessControlExposeHeaders, ContentLength, ContentType, HeaderMapExt,
-    IfMatch, IfNoneMatch,
+    IfMatch, IfNoneMatch, Pragma,
 };
 use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
 use mime::Mime;
@@ -40,6 +40,7 @@ const MAX_CONTENT_LENGTH: u64 = 1024 * 100;
 fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
     headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
+    headers.typed_insert(Pragma::no_cache());
     headers.typed_insert(session.etag());
     headers.typed_insert(session.expires());
     headers.typed_insert(session.last_modified());
@@ -65,16 +66,24 @@ fn check_input_headers(headers: &HeaderMap) -> PyResult<Mime> {
 
 // TODO: handle eviction
 #[pyclass]
-struct Rendezvous {
+struct RendezvousHandler {
     base: Uri,
     sessions: HashMap<Ulid, Session>,
 }
 
 #[pymethods]
-impl Rendezvous {
+impl RendezvousHandler {
     #[new]
-    fn new(base: &str) -> PyResult<Self> {
-        let base = Uri::try_from(base).map_err(|_| PyValueError::new_err("Invalid base URI"))?;
+    fn new(homeserver: &PyAny) -> PyResult<Self> {
+        let base: String = homeserver
+            .getattr("config")?
+            .getattr("server")?
+            .getattr("public_baseurl")?
+            .extract()?;
+        let base = Uri::try_from(format!(
+            "{base}_matrix/client/unstable/org.matrix.msc4108/rendezvous"
+        ))
+        .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
         Ok(Self {
             base,
@@ -131,8 +140,10 @@ impl Rendezvous {
 
         let mut response = Response::new(session.data());
         *response.status_mut() = StatusCode::OK;
-        prepare_headers(response.headers_mut(), session);
-        response.headers_mut().typed_insert(session.content_type());
+        let headers = response.headers_mut();
+        prepare_headers(headers, session);
+        headers.typed_insert(session.content_type());
+        headers.typed_insert(session.content_length());
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
@@ -193,7 +204,7 @@ impl Rendezvous {
 pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     let child_module = PyModule::new(py, "rendezvous")?;
 
-    child_module.add_class::<Rendezvous>()?;
+    child_module.add_class::<RendezvousHandler>()?;
 
     m.add_submodule(child_module)?;
 

@@ -27,7 +27,6 @@ from synapse.http.server import HttpServer, respond_with_redirect
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.synapse_rust.rendezvous import Rendezvous
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -103,12 +102,12 @@ class MSC4108RendezvousServlet(RestServlet):
         "/org.matrix.msc4108/rendezvous$", releases=[], v1=False, unstable=True
     )
 
-    def __init__(self, store: Rendezvous) -> None:
+    def __init__(self, hs: "HomeServer") -> None:
         super().__init__()
-        self._store = store
+        self._handler = hs.get_rendezvous_handler()
 
     def on_POST(self, request: SynapseRequest) -> None:
-        self._store.handle_post(request)
+        self._handler.handle_post(request)
 
 
 class MSC4108RendezvousSessionServlet(RestServlet):
@@ -120,32 +119,27 @@ class MSC4108RendezvousSessionServlet(RestServlet):
         unstable=True,
     )
 
-    def __init__(self, store: Rendezvous) -> None:
+    def __init__(self, hs: "HomeServer") -> None:
         super().__init__()
-        self._store = store
+        self._handler = hs.get_rendezvous_handler()
 
     def on_GET(self, request: SynapseRequest, session_id: str) -> None:
-        self._store.handle_get(request, session_id)
+        self._handler.handle_get(request, session_id)
 
     def on_PUT(self, request: SynapseRequest, session_id: str) -> None:
-        self._store.handle_put(request, session_id)
+        self._handler.handle_put(request, session_id)
 
     def on_DELETE(self, request: SynapseRequest, session_id: str) -> None:
-        self._store.handle_delete(request, session_id)
+        self._handler.handle_delete(request, session_id)
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3886_endpoint is not None:
         MSC3886RendezvousServlet(hs).register(http_server)
 
-    # TODO: gate this behind a feature flag and store the rendezvous object in the HS
-    base = (
-        hs.config.server.public_baseurl
-        + "_matrix/client/unstable/org.matrix.msc4108/rendezvous"
-    )
-    rendezvous = Rendezvous(base)
-    MSC4108RendezvousServlet(rendezvous).register(http_server)
-    MSC4108RendezvousSessionServlet(rendezvous).register(http_server)
+    if hs.config.experimental.msc4108_enabled:
+        MSC4108RendezvousServlet(hs).register(http_server)
+        MSC4108RendezvousSessionServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4108_delegation_endpoint is not None:
         MSC4108DelegationRendezvousServlet(hs).register(http_server)

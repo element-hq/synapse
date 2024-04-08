@@ -143,6 +143,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
 from synapse.util.distributor import Distributor
@@ -858,6 +859,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_room_forgetter_handler(self) -> RoomForgetterHandler:
         return RoomForgetterHandler(self)
+
+    @cache_in_self
+    def get_rendezvous_handler(self) -> RendezvousHandler:
+        return RendezvousHandler(self)
 
     @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
