@@ -21,9 +21,10 @@ use headers::{
     IfMatch, IfNoneMatch, Pragma,
 };
 use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
+use log::info;
 use mime::Mime;
 use pyo3::{
-    exceptions::PyValueError, pyclass, pymethods, types::PyModule, PyAny, PyResult, Python,
+    exceptions::PyValueError, pyclass, pymethods, types::PyModule, Py, PyAny, PyResult, Python,
 };
 use ulid::Ulid;
 
@@ -74,7 +75,7 @@ struct RendezvousHandler {
 #[pymethods]
 impl RendezvousHandler {
     #[new]
-    fn new(homeserver: &PyAny) -> PyResult<Self> {
+    fn new(py: Python<'_>, homeserver: &PyAny) -> PyResult<Py<Self>> {
         let base: String = homeserver
             .getattr("config")?
             .getattr("server")?
@@ -85,10 +86,26 @@ impl RendezvousHandler {
         ))
         .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
-        Ok(Self {
-            base,
-            sessions: HashMap::new(),
-        })
+        // Construct a Python object so that we can get a reference to the
+        // evict method and schedule it to run.
+        let self_ = Py::new(
+            py,
+            Self {
+                base,
+                sessions: HashMap::new(),
+            },
+        )?;
+
+        let evict = self_.getattr(py, "_evict")?;
+        homeserver
+            .call_method0("get_clock")?
+            .call_method("looping_call", (evict, 500), None)?;
+
+        Ok(self_)
+    }
+
+    fn _evict(&mut self) {
+        info!("Evicting sessions");
     }
 
     fn handle_post(&mut self, twisted_request: &PyAny) -> PyResult<()> {
