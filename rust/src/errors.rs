@@ -10,48 +10,19 @@
  *
  * See the GNU Affero General Public License for more details:
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
- *
- * Originally licensed under the Apache License, Version 2.0:
- * <http://www.apache.org/licenses/LICENSE-2.0>.
- *
- * [This file includes modifications made by New Vector Limited]
- *
  */
 
 #![allow(clippy::new_ret_no_self)]
 
-use std::collections::HashMap;
-
-use http::{HeaderMap, StatusCode};
-use pyo3::import_exception;
+use headers::{Header, HeaderMapExt};
+use http::{HeaderName, StatusCode};
+use pyo3::{import_exception, PyResult};
 
 import_exception!(synapse.api.errors, SynapseError);
 
 impl SynapseError {
     pub fn new(code: StatusCode, message: &'static str) -> pyo3::PyErr {
         SynapseError::new_err((code.as_u16(), message))
-    }
-
-    pub fn new_with_headers(
-        code: StatusCode,
-        message: &'static str,
-        headers: HeaderMap,
-    ) -> pyo3::PyErr {
-        let headers = headers
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.to_string(),
-                    value
-                        .to_str()
-                        // XXX: will that ever throw?
-                        .expect("header value is valid ASCII")
-                        .to_owned(),
-                )
-            })
-            .collect::<HashMap<String, String>>();
-
-        SynapseError::new_err((code.as_u16(), message, None::<()>, headers))
     }
 }
 
@@ -62,3 +33,53 @@ impl NotFoundError {
         NotFoundError::new_err(())
     }
 }
+
+import_exception!(synapse.api.errors, MissingHeaderError);
+
+impl MissingHeaderError {
+    pub fn new(header: &HeaderName) -> pyo3::PyErr {
+        let header = header.as_str().to_owned();
+        Self::new_err(header)
+    }
+}
+
+import_exception!(synapse.api.errors, InvalidHeaderError);
+
+impl InvalidHeaderError {
+    pub fn new(header: &HeaderName) -> pyo3::PyErr {
+        let header = header.as_str().to_owned();
+        Self::new_err(header)
+    }
+}
+
+import_exception!(synapse.api.errors, PayloadTooLargeError);
+
+impl PayloadTooLargeError {
+    pub fn new() -> pyo3::PyErr {
+        Self::new_err(())
+    }
+}
+
+/// An extension trait for [`HeaderMap`] that provides typed access to headers, and throws the
+/// right python exceptions when the header is missing or fails to parse.
+pub(crate) trait HeaderMapPyExt: HeaderMapExt {
+    /// Get a header from the map, returning an error if it is missing or invalid.
+    fn typed_get_required<H>(&self) -> PyResult<H>
+    where
+        H: Header,
+    {
+        self.typed_get_optional::<H>()?
+            .ok_or_else(|| MissingHeaderError::new(H::name()))
+    }
+
+    /// Get a header from the map, returning `None` if it is missing and an error if it is invalid.
+    fn typed_get_optional<H>(&self) -> PyResult<Option<H>>
+    where
+        H: Header,
+    {
+        self.typed_try_get::<H>()
+            .map_err(|_| InvalidHeaderError::new(H::name()))
+    }
+}
+
+impl<T: HeaderMapExt> HeaderMapPyExt for T {}

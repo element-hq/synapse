@@ -659,6 +659,36 @@ class NotApprovedError(SynapseError):
             additional_fields={"approval_notice_medium": approval_notice_medium},
         )
 
+class InvalidHeaderError(SynapseError):
+    """An error raised when a request has an invalid header"""
+
+    def __init__(self, header: str):
+        super().__init__(
+            code=400,
+            msg=f"Invalid header {header}",
+            errcode=Codes.INVALID_PARAM,
+        )
+
+class MissingHeaderError(SynapseError):
+    """An error raised when a request is missing a required header"""
+
+    def __init__(self, header: str):
+        super().__init__(
+            code=400,
+            msg=f"Missing required headers {header}",
+            errcode=Codes.MISSING_PARAM,
+        )
+
+class PayloadTooLargeError(SynapseError):
+    """An error raised when a request is too large"""
+
+    def __init__(self, msg: str = "Payload too large"):
+        super().__init__(
+            code=413,
+            msg=msg,
+            errcode=Codes.TOO_LARGE,
+        )
+
 
 def cs_error(msg: str, code: str = Codes.UNKNOWN, **kwargs: Any) -> "JsonDict":
     """Utility method for constructing an error response for client-server
