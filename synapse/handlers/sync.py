@@ -1259,6 +1259,42 @@ class SyncHandler:
             await_full_state = True
             lazy_load_members = False
 
+        # For a non-gappy sync if the events in the timeline are simply a linear
+        # chain (i.e. no merging/branching of the graph), then we know the state
+        # delta between the end of the previous sync and start of the new one is
+        # empty.
+        #
+        # c.f. #16941 for an example of why we can't do this for all non-gappy
+        # syncs.
+        is_linear_timeline = False
+        if batch.events:
+            prev_event_id = batch.events[0].event_id
+            for e in batch.events[1:]:
+                if e.prev_event_ids() != [prev_event_id]:
+                    break
+            else:
+                is_linear_timeline = True
+
+        if is_linear_timeline and not batch.limited:
+            state_ids: StateMap[str] = {}
+            if lazy_load_members:
+                if members_to_fetch and batch.events:
+                    # We're lazy-loading, so the client might need some more
+                    # member events to understand the events in this timeline.
+                    # So we fish out all the member events corresponding to the
+                    # timeline here. The caller will then dedupe any redundant
+                    # ones.
+
+                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
+                        batch.events[0].event_id,
+                        # we only want members!
+                        state_filter=StateFilter.from_types(
+                            (EventTypes.Member, member) for member in members_to_fetch
+                        ),
+                        await_full_state=False,
+                    )
+            return state_ids
+
         if batch:
             state_at_timeline_start = (
                 await self._state_storage_controller.get_state_ids_for_event(
