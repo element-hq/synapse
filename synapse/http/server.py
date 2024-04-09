@@ -909,7 +909,16 @@ def set_cors_headers(request: "SynapseRequest") -> None:
     request.setHeader(
         b"Access-Control-Allow-Methods", b"GET, HEAD, POST, PUT, DELETE, OPTIONS"
     )
-    if request.experimental_cors_msc3886:
+    if request.path.startswith(b"/_matrix/client/unstable/org.matrix.msc4108/rendezvous"):
+        request.setHeader(
+            b"Access-Control-Allow-Headers",
+            b"Content-Type, If-Match, If-None-Match",
+        )
+        request.setHeader(
+            b"Access-Control-Expose-Headers",
+            b"Synapse-Trace-Id, Server, ETag",
+        )
+    elif request.experimental_cors_msc3886:
         request.setHeader(
             b"Access-Control-Allow-Headers",
             b"X-Requested-With, Content-Type, Authorization, Date, If-Match, If-None-Match",
