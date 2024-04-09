@@ -143,6 +143,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
 from synapse.util.distributor import Distributor
@@ -150,7 +151,6 @@ from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
 from synapse.util.stringutils import random_string
 from synapse.util.task_scheduler import TaskScheduler
-from synapse.synapse_rust.rendezvous import RendezvousHandler
 
 logger = logging.getLogger(__name__)
 

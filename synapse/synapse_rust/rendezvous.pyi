@@ -10,8 +10,9 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from synapse.server import HomeServer
 from twisted.web.iweb import IRequest
+
+from synapse.server import HomeServer
 
 class RendezvousHandler:
     def __init__(self, homeserver: HomeServer): ...

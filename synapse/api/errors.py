@@ -659,6 +659,7 @@ class NotApprovedError(SynapseError):
             additional_fields={"approval_notice_medium": approval_notice_medium},
         )
 
+
 class InvalidHeaderError(SynapseError):
     """An error raised when a request has an invalid header"""
 
@@ -669,6 +670,7 @@ class InvalidHeaderError(SynapseError):
             errcode=Codes.INVALID_PARAM,
         )
 
+
 class MissingHeaderError(SynapseError):
     """An error raised when a request is missing a required header"""
 
@@ -678,6 +680,7 @@ class MissingHeaderError(SynapseError):
             msg=f"Missing required headers {header}",
             errcode=Codes.MISSING_PARAM,
         )
+
 
 class PayloadTooLargeError(SynapseError):
     """An error raised when a request is too large"""
