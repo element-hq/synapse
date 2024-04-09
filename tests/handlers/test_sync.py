@@ -450,8 +450,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
           |      E4
           |      |
 
-        ... and a filter that means we only return 1 events, represented by the dashed
-        horizontal line: `S2` must be included in the `state` section on the second sync.
+        ... and a filter that means we only return 1 event, represented by the dashed
+        horizontal lines: `S2` must be included in the `state` section on the second sync.
         """
         alice = self.register_user("alice", "password")
         alice_tok = self.login(alice, "password")
