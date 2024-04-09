@@ -60,13 +60,13 @@ fn check_input_headers(headers: &HeaderMap) -> PyResult<Mime> {
 
 // TODO: handle eviction
 #[pyclass]
-struct RendezVousHandler {
+struct RendezvousHandler {
     base: Uri,
     sessions: HashMap<Ulid, Session>,
 }
 
 #[pymethods]
-impl RendezVousHandler {
+impl RendezvousHandler {
     #[new]
     fn new(py: Python<'_>, homeserver: &PyAny) -> PyResult<Py<Self>> {
         let base: String = homeserver
@@ -228,7 +228,7 @@ impl RendezVousHandler {
 pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     let child_module = PyModule::new(py, "rendezvous")?;
 
-    child_module.add_class::<RendezVousHandler>()?;
+    child_module.add_class::<RendezvousHandler>()?;
 
     m.add_submodule(child_module)?;
 
