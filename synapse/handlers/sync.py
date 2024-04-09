@@ -1266,17 +1266,23 @@ class SyncHandler:
         #
         # c.f. #16941 for an example of why we can't do this for all non-gappy
         # syncs.
-        is_linear_timeline = False
+        is_linear_timeline = True
         if batch.events:
-            prev_event_id = batch.events[0].event_id
-            for e in batch.events[1:]:
+            # We need to make sure the first event in our batch points to the
+            # last event in the previous batch.
+            last_event_id_prev_batch = (
+                await self.store.get_last_event_in_room_before_stream_ordering(
+                    room_id,
+                    end_token=since_token.room_key,
+                )
+            )
+
+            prev_event_id = last_event_id_prev_batch
+            for e in batch.events:
                 if e.prev_event_ids() != [prev_event_id]:
+                    is_linear_timeline = False
                     break
                 prev_event_id = e.event_id
-            else:
-                is_linear_timeline = True
-        else:
-            is_linear_timeline = True
 
         if is_linear_timeline and not batch.limited:
             state_ids: StateMap[str] = {}
