@@ -16,10 +16,12 @@ use std::{collections::HashMap, time::Duration};
 
 use bytes::Bytes;
 use headers::{
-    AccessControlAllowOrigin, AccessControlExposeHeaders, ContentLength, ContentType, HeaderMapExt,
-    IfMatch, IfNoneMatch, Pragma,
+    AccessControlAllowOrigin, AccessControlExposeHeaders, CacheControl, ContentLength, ContentType,
+    HeaderMapExt, IfMatch, IfNoneMatch, Pragma,
 };
-use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
+use http::{
+    header::ETAG, header::IF_MATCH, header::IF_NONE_MATCH, HeaderMap, Response, StatusCode, Uri,
+};
 use log::info;
 use mime::Mime;
 use pyo3::{
@@ -40,7 +42,12 @@ const MAX_CONTENT_LENGTH: u64 = 1024 * 100;
 fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
     headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
+    headers.typed_insert(AccessControlExposeHeaders::from_iter([
+        IF_MATCH,
+        IF_NONE_MATCH,
+    ]));
     headers.typed_insert(Pragma::no_cache());
+    headers.typed_insert(CacheControl::new().with_no_store());
     headers.typed_insert(session.etag());
     headers.typed_insert(session.expires());
     headers.typed_insert(session.last_modified());
