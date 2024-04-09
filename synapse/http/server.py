@@ -909,7 +909,9 @@ def set_cors_headers(request: "SynapseRequest") -> None:
     request.setHeader(
         b"Access-Control-Allow-Methods", b"GET, HEAD, POST, PUT, DELETE, OPTIONS"
     )
-    if request.path.startswith(b"/_matrix/client/unstable/org.matrix.msc4108/rendezvous"):
+    if request.path is not None and request.path.startswith(
+        b"/_matrix/client/unstable/org.matrix.msc4108/rendezvous"
+    ):
         request.setHeader(
             b"Access-Control-Allow-Headers",
             b"Content-Type, If-Match, If-None-Match",
