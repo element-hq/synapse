@@ -30,9 +30,9 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(data: Bytes, content_type: Mime, ttl: Duration) -> Self {
+    /// Create a new session with the given data, content type, and time-to-live.
+    pub fn new(data: Bytes, content_type: Mime, now: SystemTime, ttl: Duration) -> Self {
         let hash = Sha256::digest(&data).into();
-        let now = SystemTime::now();
         Self {
             hash,
             data,
@@ -42,11 +42,11 @@ impl Session {
         }
     }
 
-    pub fn update(&mut self, data: Bytes, content_type: Mime) {
+    pub fn update(&mut self, data: Bytes, content_type: Mime, now: SystemTime) {
         self.hash = Sha256::digest(&data).into();
         self.data = data;
         self.content_type = content_type;
-        self.last_modified = SystemTime::now();
+        self.last_modified = now;
     }
 
     /// Returns the Content-Type header of the session.

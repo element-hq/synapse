@@ -13,7 +13,10 @@
  *
  */
 
-use std::{collections::HashMap, time::Duration};
+use std::{
+    collections::HashMap,
+    time::{Duration, SystemTime},
+};
 
 use bytes::Bytes;
 use headers::{
@@ -24,7 +27,8 @@ use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
 use log::info;
 use mime::Mime;
 use pyo3::{
-    exceptions::PyValueError, pyclass, pymethods, types::PyModule, Py, PyAny, PyResult, Python,
+    exceptions::PyValueError, pyclass, pymethods, types::PyModule, Py, PyAny, PyObject, PyResult,
+    Python, ToPyObject,
 };
 use ulid::Ulid;
 
@@ -69,6 +73,7 @@ fn check_input_headers(headers: &HeaderMap) -> PyResult<Mime> {
 #[pyclass]
 struct RendezvousHandler {
     base: Uri,
+    clock: PyObject,
     sessions: HashMap<Ulid, Session>,
 }
 
@@ -86,12 +91,15 @@ impl RendezvousHandler {
         ))
         .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
+        let clock = homeserver.call_method0("get_clock")?.to_object(py);
+
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
         let self_ = Py::new(
             py,
             Self {
                 base,
+                clock,
                 sessions: HashMap::new(),
             },
         )?;
@@ -108,18 +116,22 @@ impl RendezvousHandler {
         info!("Evicting sessions");
     }
 
-    fn handle_post(&mut self, twisted_request: &PyAny) -> PyResult<()> {
+    fn handle_post(&mut self, py: Python<'_>, twisted_request: &PyAny) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = check_input_headers(request.headers())?;
 
-        let id = Ulid::new();
+        // Generate a new ULID for the session from the current time.
+        let clock = self.clock.as_ref(py);
+        let now: u64 = clock.call_method0("time_msec")?.extract()?;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        let id = Ulid::from_datetime(now);
 
         let uri = format!("{base}/{id}", base = self.base);
 
         let body = request.into_body();
 
-        let session = Session::new(body, content_type, Duration::from_secs(5 * 60));
+        let session = Session::new(body, content_type, now, Duration::from_secs(5 * 60));
 
         let response = serde_json::json!({
             "url": uri,
@@ -166,7 +178,7 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_put(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
+    fn handle_put(&mut self, py: Python<'_>, twisted_request: &PyAny, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = check_input_headers(request.headers())?;
@@ -174,6 +186,9 @@ impl RendezvousHandler {
         let if_match: IfMatch = request.headers().typed_get_required()?;
 
         let data = request.into_body();
+
+        let now: u64 = self.clock.call_method0(py, "time_msec")?.extract(py)?;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
         let session = self.sessions.get_mut(&id).ok_or_else(NotFoundError::new)?;
@@ -191,7 +206,7 @@ impl RendezvousHandler {
             ));
         }
 
-        session.update(data, content_type);
+        session.update(data, content_type, now);
 
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::ACCEPTED;
