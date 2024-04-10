@@ -42,6 +42,12 @@ impl Session {
         }
     }
 
+    /// Returns true if the session has expired at the given time.
+    pub fn expired(&self, now: SystemTime) -> bool {
+        self.expires <= now
+    }
+
+    /// Update the session with new data, content type, and last modified time.
     pub fn update(&mut self, data: Bytes, content_type: Mime, now: SystemTime) {
         self.hash = Sha256::digest(&data).into();
         self.data = data;

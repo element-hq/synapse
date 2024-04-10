@@ -14,7 +14,7 @@
  */
 
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     time::{Duration, SystemTime},
 };
 
@@ -24,7 +24,6 @@ use headers::{
     HeaderMapExt, IfMatch, IfNoneMatch, Pragma,
 };
 use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
-use log::info;
 use mime::Mime;
 use pyo3::{
     exceptions::PyValueError, pyclass, pymethods, types::PyModule, Py, PyAny, PyObject, PyResult,
@@ -41,6 +40,7 @@ use crate::{
 mod session;
 
 const MAX_CONTENT_LENGTH: u64 = 1024 * 100;
+const CAPACITY: usize = 100;
 
 // n.b. Because OPTIONS requests are handled by the Python code, we don't need to set Access-Control-Allow-Headers.
 fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
@@ -71,12 +71,23 @@ fn check_input_headers(headers: &HeaderMap) -> PyResult<Mime> {
     Ok(content_type.into())
 }
 
-// TODO: handle eviction
 #[pyclass]
 struct RendezvousHandler {
     base: Uri,
     clock: PyObject,
-    sessions: HashMap<Ulid, Session>,
+    sessions: BTreeMap<Ulid, Session>,
+}
+
+impl RendezvousHandler {
+    fn evict(&mut self, now: SystemTime, max_entries: usize) {
+        // First remove all the entries which expired
+        self.sessions.retain(|_, session| !session.expired(now));
+
+        // Then we remove the oldest entires until we're under the limit
+        while self.sessions.len() > max_entries {
+            self.sessions.pop_first();
+        }
+    }
 }
 
 #[pymethods]
@@ -102,7 +113,7 @@ impl RendezvousHandler {
             Self {
                 base,
                 clock,
-                sessions: HashMap::new(),
+                sessions: BTreeMap::new(),
             },
         )?;
 
@@ -114,8 +125,13 @@ impl RendezvousHandler {
         Ok(self_)
     }
 
-    fn _evict(&mut self) {
-        info!("Evicting sessions");
+    fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
+        let clock = self.clock.as_ref(py);
+        let now: u64 = clock.call_method0("time_msec")?.extract()?;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+        self.evict(now, CAPACITY);
+
+        Ok(())
     }
 
     fn handle_post(&mut self, py: Python<'_>, twisted_request: &PyAny) -> PyResult<()> {
@@ -123,10 +139,16 @@ impl RendezvousHandler {
 
         let content_type = check_input_headers(request.headers())?;
 
-        // Generate a new ULID for the session from the current time.
         let clock = self.clock.as_ref(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+
+        // We trigger an immediate eviction if we're at 2x the capacity
+        if self.sessions.len() >= CAPACITY * 2 {
+            self.evict(now, CAPACITY);
+        }
+
+        // Generate a new ULID for the session from the current time.
         let id = Ulid::from_datetime(now);
 
         let uri = format!("{base}/{id}", base = self.base);
