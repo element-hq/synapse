@@ -173,13 +173,20 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_get(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
+    fn handle_get(&mut self, py: Python<'_>, twisted_request: &PyAny, id: &str) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let if_none_match: Option<IfNoneMatch> = request.headers().typed_get_optional()?;
 
+        let now: u64 = self.clock.call_method0(py, "time_msec")?.extract(py)?;
+        let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
+
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
-        let session = self.sessions.get(&id).ok_or_else(NotFoundError::new)?;
+        let session = self
+            .sessions
+            .get(&id)
+            .filter(|s| !s.expired(now))
+            .ok_or_else(NotFoundError::new)?;
 
         if let Some(if_none_match) = if_none_match {
             if !if_none_match.precondition_passes(&session.etag()) {
@@ -215,7 +222,11 @@ impl RendezvousHandler {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
-        let session = self.sessions.get_mut(&id).ok_or_else(NotFoundError::new)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .filter(|s| !s.expired(now))
+            .ok_or_else(NotFoundError::new)?;
 
         if !if_match.precondition_passes(&session.etag()) {
             let mut headers = HeaderMap::new();
