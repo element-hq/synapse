@@ -16,12 +16,10 @@ use std::{collections::HashMap, time::Duration};
 
 use bytes::Bytes;
 use headers::{
-    AccessControlAllowHeaders, AccessControlAllowOrigin, AccessControlExposeHeaders, CacheControl,
-    ContentLength, ContentType, HeaderMapExt, IfMatch, IfNoneMatch, Pragma,
+    AccessControlAllowOrigin, AccessControlExposeHeaders, CacheControl, ContentLength, ContentType,
+    HeaderMapExt, IfMatch, IfNoneMatch, Pragma,
 };
-use http::{
-    header::ETAG, header::IF_MATCH, header::IF_NONE_MATCH, HeaderMap, Response, StatusCode, Uri,
-};
+use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
 use log::info;
 use mime::Mime;
 use pyo3::{
@@ -39,13 +37,10 @@ mod session;
 
 const MAX_CONTENT_LENGTH: u64 = 1024 * 100;
 
+// n.b. Because OPTIONS requests are handled by the Python code, we don't need to set Access-Control-Allow-Headers.
 fn prepare_headers(headers: &mut HeaderMap, session: &Session) {
     headers.typed_insert(AccessControlAllowOrigin::ANY);
     headers.typed_insert(AccessControlExposeHeaders::from_iter([ETAG]));
-    headers.typed_insert(AccessControlAllowHeaders::from_iter([
-        IF_MATCH,
-        IF_NONE_MATCH,
-    ]));
     headers.typed_insert(Pragma::no_cache());
     headers.typed_insert(CacheControl::new().with_no_store());
     headers.typed_insert(session.etag());
