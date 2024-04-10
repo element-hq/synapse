@@ -110,36 +110,12 @@ class MSC4108RendezvousServlet(RestServlet):
         self._handler.handle_post(request)
 
 
-class MSC4108RendezvousSessionServlet(RestServlet):
-    # TODO: this should probably be mounted on the _synapse/client namespace
-    PATTERNS = client_patterns(
-        "/org.matrix.msc4108/rendezvous/(?P<session_id>[^/]+)$",
-        releases=[],
-        v1=False,
-        unstable=True,
-    )
-
-    def __init__(self, hs: "HomeServer") -> None:
-        super().__init__()
-        self._handler = hs.get_rendezvous_handler()
-
-    def on_GET(self, request: SynapseRequest, session_id: str) -> None:
-        self._handler.handle_get(request, session_id)
-
-    def on_PUT(self, request: SynapseRequest, session_id: str) -> None:
-        self._handler.handle_put(request, session_id)
-
-    def on_DELETE(self, request: SynapseRequest, session_id: str) -> None:
-        self._handler.handle_delete(request, session_id)
-
-
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3886_endpoint is not None:
         MSC3886RendezvousServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4108_enabled:
         MSC4108RendezvousServlet(hs).register(http_server)
-        MSC4108RendezvousSessionServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4108_delegation_endpoint is not None:
         MSC4108DelegationRendezvousServlet(hs).register(http_server)

@@ -99,10 +99,8 @@ impl RendezvousHandler {
             .getattr("server")?
             .getattr("public_baseurl")?
             .extract()?;
-        let base = Uri::try_from(format!(
-            "{base}_matrix/client/unstable/org.matrix.msc4108/rendezvous"
-        ))
-        .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
+        let base = Uri::try_from(format!("{base}_synapse/client/rendezvous"))
+            .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
         let clock = homeserver.call_method0("get_clock")?.to_object(py);
 
