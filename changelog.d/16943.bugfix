@@ -1,1 +1,1 @@
-Make the CSAPI endpoint /keys/device_signing/upload idempotent.
+Make the CSAPI endpoint `/keys/device_signing/upload` idempotent.
