@@ -1,3 +1,35 @@
+# Synapse 1.105.0rc1 (2024-04-11)
+
+### Features
+
+- Stabilize support for [MSC4010](https://github.com/matrix-org/matrix-spec-proposals/pull/4010) which clarifies the interaction of push rules and account data. Contributed by @clokep. ([\#17022](https://github.com/element-hq/synapse/issues/17022))
+- Stabilize support for [MSC3981](https://github.com/matrix-org/matrix-spec-proposals/pull/3981): `/relations` recursion. Contributed by @clokep. ([\#17023](https://github.com/element-hq/synapse/issues/17023))
+- Add support for moving `/pushrules` off of main process. ([\#17037](https://github.com/element-hq/synapse/issues/17037), [\#17038](https://github.com/element-hq/synapse/issues/17038))
+
+### Bugfixes
+
+- Fix various long-standing bugs which could cause incorrect state to be returned from `/sync` in certain situations. ([\#16930](https://github.com/element-hq/synapse/issues/16930), [\#16932](https://github.com/element-hq/synapse/issues/16932), [\#16942](https://github.com/element-hq/synapse/issues/16942), [\#17064](https://github.com/element-hq/synapse/issues/17064), [\#17065](https://github.com/element-hq/synapse/issues/17065), [\#17066](https://github.com/element-hq/synapse/issues/17066))
+- Fix server notice rooms not always being created as unencrypted rooms, even when `encryption_enabled_by_default_for_room_type` is in use (server notices are always unencrypted). ([\#17033](https://github.com/element-hq/synapse/issues/17033))
+- Fix the `.m.rule.encrypted_room_one_to_one` and `.m.rule.room_one_to_one` default underride push rules being in the wrong order. Contributed by @Sumpy1. ([\#17043](https://github.com/element-hq/synapse/issues/17043))
+
+### Internal Changes
+
+- Refactor auth chain fetching to reduce duplication. ([\#17044](https://github.com/element-hq/synapse/issues/17044))
+- Improve database performance by adding a missing index to `access_tokens.refresh_token_id`. ([\#17045](https://github.com/element-hq/synapse/issues/17045), [\#17054](https://github.com/element-hq/synapse/issues/17054))
+- Improve database performance by reducing number of receipts fetched when sending push notifications. ([\#17049](https://github.com/element-hq/synapse/issues/17049))
+
+
+
+### Updates to locked dependencies
+
+* Bump packaging from 23.2 to 24.0. ([\#17027](https://github.com/element-hq/synapse/issues/17027))
+* Bump regex from 1.10.3 to 1.10.4. ([\#17028](https://github.com/element-hq/synapse/issues/17028))
+* Bump ruff from 0.3.2 to 0.3.5. ([\#17060](https://github.com/element-hq/synapse/issues/17060))
+* Bump serde_json from 1.0.114 to 1.0.115. ([\#17041](https://github.com/element-hq/synapse/issues/17041))
+* Bump types-pillow from 10.2.0.20240125 to 10.2.0.20240406. ([\#17061](https://github.com/element-hq/synapse/issues/17061))
+* Bump types-requests from 2.31.0.20240125 to 2.31.0.20240406. ([\#17063](https://github.com/element-hq/synapse/issues/17063))
+* Bump typing-extensions from 4.9.0 to 4.11.0. ([\#17062](https://github.com/element-hq/synapse/issues/17062))
+
 # Synapse 1.104.0 (2024-04-02)
 
 ### Bugfixes

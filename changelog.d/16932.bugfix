@@ -1,1 +1,0 @@
-Fix various long-standing bugs which could cause incorrect state to be returned from `/sync` in certain situations.
