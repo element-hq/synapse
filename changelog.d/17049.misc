@@ -1,1 +1,0 @@
-Improve database performance by reducing number of receipts fetched when sending push notifications.
