@@ -22,12 +22,12 @@ import itertools
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from synapse.api.constants import Membership, EventTypes
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SynapseError
+from synapse.events import EventBase
 from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import Codes, Requester, UserID, create_requester
-from synapse.events import EventBase
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -271,11 +271,16 @@ class DeactivateAccountHandler:
                 # Before parting the user, redact all membership events if requested
                 if should_erase:
                     event_ids = await self.store.get_membership_event_ids_for_user(
-                        user_id, room_id)
+                        user_id, room_id
+                    )
                     events: list[EventBase] = await self.store.get_events_as_list(
-                        event_ids)
+                        event_ids
+                    )
                     for event in events:
-                        has_profile = "displayname" in event.content or "avatar_url" in event.content
+                        has_profile = (
+                            "displayname" in event.content
+                            or "avatar_url" in event.content
+                        )
                         if has_profile and "redacted_because" not in event.unsigned:
                             event_dict = {
                                 "type": EventTypes.Redaction,
@@ -286,8 +291,9 @@ class DeactivateAccountHandler:
                                 event_dict["content"]["redacts"] = event.event_id
                             else:
                                 event_dict["redacts"] = event.event_id
-                            await self._event_creation_handler.create_and_send_nonmember_event(
-                                requester, event_dict, ratelimit=False)
+                            await self._event_creation_handler.create_event(
+                                requester, event_dict, ratelimit=False
+                            )
 
                 await self._room_member_handler.update_membership(
                     requester,

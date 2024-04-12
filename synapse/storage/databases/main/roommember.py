@@ -1234,7 +1234,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return set(room_ids)
 
-    async def get_membership_event_ids_for_user(self, user_id: str, room_id: str) -> Set[str]:
+    async def get_membership_event_ids_for_user(
+        self, user_id: str, room_id: str
+    ) -> Set[str]:
         """Get all event_ids for the given user and room.
 
         Args:
@@ -1249,7 +1251,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             table="room_memberships",
             keyvalues={"user_id": user_id, "room_id": room_id},
             retcol="event_id",
-            desc="get_membership_event_ids_for_user"
+            desc="get_membership_event_ids_for_user",
         )
 
         return set(event_ids)
