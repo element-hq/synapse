@@ -1457,6 +1457,10 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
             "^/_matrix/client/unstable/im.nheko.summary"
             "/rooms/(?P<room_identifier>[^/]*)/summary$"
         ),
+        re.compile(
+            "^/_matrix/client/unstable/im.nheko.summary"
+            "/summary/(?P<room_identifier>[^/]*)$"
+        ),
     )
     CATEGORY = "Client API requests"
 
