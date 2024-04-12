@@ -22,7 +22,7 @@ import itertools
 import logging
 from typing import TYPE_CHECKING, Optional
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
 from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -272,31 +272,8 @@ class DeactivateAccountHandler:
                     event_ids = await self.store.get_membership_event_ids_for_user(
                         user_id, room_id
                     )
-                    events = await self.store.get_events_as_list(event_ids)
-                    for event in events:
-                        has_profile = (
-                            "displayname" in event.content
-                            or "avatar_url" in event.content
-                        )
-                        if has_profile and "redacted_because" not in event.unsigned:
-                            event_dict = {
-                                "type": EventTypes.Redaction,
-                                "room_id": event["room_id"],
-                                "sender": requester.user.to_string(),
-                            }
-                            if event.room_version.updated_redaction_rules:
-                                event_dict.update(
-                                    {
-                                        "content": {
-                                            "redacts": event.event_id,
-                                        }
-                                    }
-                                )
-                            else:
-                                event_dict["redacts"] = event.event_id
-                            await self._event_creation_handler.create_and_send_nonmember_event(
-                                requester, event_dict, ratelimit=False
-                            )
+                    for event_id in event_ids:
+                        await self.store.expire_event(event_id)
 
                 await self._room_member_handler.update_membership(
                     requester,
