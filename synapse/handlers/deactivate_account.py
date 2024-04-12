@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING, Optional
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import SynapseError
-from synapse.events import EventBase
 from synapse.handlers.device import DeviceHandler
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.types import Codes, Requester, UserID, create_requester
@@ -273,9 +272,7 @@ class DeactivateAccountHandler:
                     event_ids = await self.store.get_membership_event_ids_for_user(
                         user_id, room_id
                     )
-                    events: list[EventBase] = await self.store.get_events_as_list(
-                        event_ids
-                    )
+                    events = await self.store.get_events_as_list(event_ids)
                     for event in events:
                         has_profile = (
                             "displayname" in event.content
@@ -288,10 +285,16 @@ class DeactivateAccountHandler:
                                 "sender": requester.user.to_string(),
                             }
                             if event.room_version.updated_redaction_rules:
-                                event_dict["content"]["redacts"] = event.event_id
+                                event_dict.update(
+                                    {
+                                        "content": {
+                                            "redacts": event.event_id,
+                                        }
+                                    }
+                                )
                             else:
                                 event_dict["redacts"] = event.event_id
-                            await self._event_creation_handler.create_event(
+                            await self._event_creation_handler.create_and_send_nonmember_event(
                                 requester, event_dict, ratelimit=False
                             )
 
