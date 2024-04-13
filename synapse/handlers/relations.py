@@ -391,9 +391,9 @@ class RelationsHandler:
 
                 # Attempt to find another event to use as the latest event.
                 potential_events, _ = await self._main_store.get_relations_for_event(
+                    room_id,
                     event_id,
                     event,
-                    room_id,
                     RelationTypes.THREAD,
                     direction=Direction.FORWARDS,
                 )
