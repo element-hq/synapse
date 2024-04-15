@@ -794,7 +794,9 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
         self.assertEqual(200, channel.code, msg=channel.json_body)
 
         # Verify that we received only the rooms that `self.dest` is participating in.
-        self.assertListEqual(
+        # This assertion method name is a bit misleading. It does check that both lists
+        # contain the same items, and the same counts.
+        self.assertCountEqual(
             [r["room_id"] for r in channel.json_body["rooms"]], room_ids_self_dest
         )
         self.assertEqual(channel.json_body["total"], len(room_ids_self_dest))
@@ -809,7 +811,7 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
 
         # Verify that we received only the rooms that `other_destination` is
         # participating in.
-        self.assertListEqual(
+        self.assertCountEqual(
             [r["room_id"] for r in channel.json_body["rooms"]], room_ids_other_dest
         )
         self.assertEqual(channel.json_body["total"], len(room_ids_other_dest))
