@@ -27,6 +27,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.unittest import override_config
+from tests.utils import HAS_AUTHLIB
 
 msc3886_endpoint = "/_matrix/client/unstable/org.matrix.msc3886/rendezvous"
 msc4108_endpoint = "/_matrix/client/unstable/org.matrix.msc4108/rendezvous"
@@ -53,6 +54,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 307)
         self.assertEqual(channel.headers.getRawHeaders("Location"), ["/asd"])
 
+    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
         {
             "disable_registration": True,
