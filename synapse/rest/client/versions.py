@@ -132,7 +132,8 @@ class VersionsRestServlet(RestServlet):
                     # Adds support for relation-based redactions as per MSC3912.
                     "org.matrix.msc3912": self.config.experimental.msc3912_enabled,
                     # Whether recursively provide relations is supported.
-                    "org.matrix.msc3981": self.config.experimental.msc3981_recurse_relations,
+                    # TODO This is no longer needed once unstable MSC3981 does not need to be supported.
+                    "org.matrix.msc3981": True,
                     # Adds support for deleting account data.
                     "org.matrix.msc3391": self.config.experimental.msc3391_enabled,
                     # Allows clients to inhibit profile update propagation.

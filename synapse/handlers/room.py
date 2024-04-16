@@ -956,6 +956,7 @@ class RoomCreationHandler:
             room_alias=room_alias,
             power_level_content_override=power_level_content_override,
             creator_join_profile=creator_join_profile,
+            ignore_forced_encryption=ignore_forced_encryption,
         )
 
         # we avoid dropping the lock between invites, as otherwise joins can
