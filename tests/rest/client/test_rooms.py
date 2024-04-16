@@ -2188,7 +2188,7 @@ class RoomMessageListTestCase(RoomBase):
 
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
-        # Check Get with invalid json filter parameter, expect 400 INVALID_PARAM.
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
         invalid_filter_str = "}}}{}"
         channel = self.make_request(
             "GET",
@@ -2197,7 +2197,7 @@ class RoomMessageListTestCase(RoomBase):
 
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
         self.assertEqual(
-            channel.json_body["errcode"], Codes.INVALID_PARAM, channel.json_body
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
         )
 
 
@@ -3252,7 +3252,7 @@ class ContextTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
 
-        # Check Get with invalid json filter parameter, expect 400 INVALID_PARAM.
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
         invalid_filter_str = "}}}{}"
         channel = self.make_request(
             "GET",
@@ -3262,7 +3262,7 @@ class ContextTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
         self.assertEqual(
-            channel.json_body["errcode"], Codes.INVALID_PARAM, channel.json_body
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
         )
 
 
