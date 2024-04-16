@@ -74,7 +74,6 @@ class CasConfig(Config):
             ):
                 raise ConfigError(
                     "Only alphanumeric characters are allowed for numeric IDs prefix"
-                    % (self.cas_numeric_ids_prefix,),
                     ("cas_config", "numeric_ids_prefix"),
                 )
 
