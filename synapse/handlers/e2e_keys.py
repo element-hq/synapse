@@ -782,7 +782,7 @@ class E2eKeysHandler:
 
         # TODO: Validate the JSON to make sure it has the right keys.
         device_keys = keys.get("device_keys", None)
-        if device_keys:
+        if device_keys and isinstance(device_keys, dict):
             logger.info(
                 "Updating device_keys for device %r for user %s at %d",
                 device_id,
@@ -796,17 +796,26 @@ class E2eKeysHandler:
                     "device_id": device_id,
                 }
             )
-            # TODO: Sign the JSON with the server key
-            changed = await self.store.set_e2e_device_keys(
-                user_id, device_id, time_now, device_keys
-            )
-            if changed:
-                # Only notify about device updates *if* the keys actually changed
-                await self.device_handler.notify_device_update(user_id, [device_id])
+
+            # Validate that user_id and device_id match the requesting user
+            if device_keys["user_id"] == user_id and device_keys["device_id"] == device_id:
+                # TODO: Sign the JSON with the server key
+                changed = await self.store.set_e2e_device_keys(
+                    user_id, device_id, time_now, device_keys
+                )
+                if changed:
+                    # Only notify about device updates *if* the keys actually changed
+                    await self.device_handler.notify_device_update(user_id, [device_id])
+            else:
+                log_kv({"message": "Not updating device_keys for user, user_id or device_id mismatch",
+                        "user_id": user_id})
+        elif device_keys:
+            log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
         else:
             log_kv({"message": "Not updating device_keys for user", "user_id": user_id})
+
         one_time_keys = keys.get("one_time_keys", None)
-        if one_time_keys:
+        if one_time_keys and isinstance(one_time_keys, dict):
             log_kv(
                 {
                     "message": "Updating one_time_keys for device.",
@@ -817,10 +826,13 @@ class E2eKeysHandler:
             await self._upload_one_time_keys_for_user(
                 user_id, device_id, time_now, one_time_keys
             )
+        elif one_time_keys:
+            log_kv({"message": "Did not update one_time_keys", "reason": "not a dict"})
         else:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
             )
+
         fallback_keys = keys.get("fallback_keys") or keys.get(
             "org.matrix.msc2732.fallback_keys"
         )
