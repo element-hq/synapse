@@ -798,7 +798,10 @@ class E2eKeysHandler:
             )
 
             # Validate that user_id and device_id match the requesting user
-            if device_keys["user_id"] == user_id and device_keys["device_id"] == device_id:
+            if (
+                device_keys["user_id"] == user_id
+                and device_keys["device_id"] == device_id
+            ):
                 # TODO: Sign the JSON with the server key
                 changed = await self.store.set_e2e_device_keys(
                     user_id, device_id, time_now, device_keys
@@ -807,8 +810,12 @@ class E2eKeysHandler:
                     # Only notify about device updates *if* the keys actually changed
                     await self.device_handler.notify_device_update(user_id, [device_id])
             else:
-                log_kv({"message": "Not updating device_keys for user, user_id or device_id mismatch",
-                        "user_id": user_id})
+                log_kv(
+                    {
+                        "message": "Not updating device_keys for user, user_id or device_id mismatch",
+                        "user_id": user_id,
+                    }
+                )
         elif device_keys:
             log_kv({"message": "Did not update device_keys", "reason": "not a dict"})
         else:
