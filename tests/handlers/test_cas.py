@@ -224,7 +224,7 @@ class CasHandlerTestCase(HomeserverTestCase):
     @override_config(
         {"cas_config": {"allow_numeric_ids": True, "numeric_ids_prefix": "NUMERICUSER"}}
     )
-    def test_map_cas_user_does_not_register_new_user(self) -> None:
+    def test_register_user_with_numeric_ids_when_allowed(self) -> None:
         """Ensures new users with numeric user IDs are registered if the allow_numeric_ids flag is enabled."""
 
         # stub out the auth handler
