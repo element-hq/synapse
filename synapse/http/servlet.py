@@ -489,7 +489,7 @@ def parse_json_from_args(
         return json_decoder.decode(urlparse.unquote(json_str))
     except Exception:
         message = f"Query parameter {name} must be a valid JSON object"
-        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM)
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.NOT_JSON)
 
 
 EnumT = TypeVar("EnumT", bound=enum.Enum)
