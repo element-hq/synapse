@@ -3520,6 +3520,15 @@ Has the following sub-options:
    users. This allows the CAS SSO flow to be limited to sign in only, rather than
    automatically registering users that have a valid SSO login but do not have
    a pre-registered account. Defaults to true.
+* `allow_numeric_ids`: set to 'true' allow numeric user IDs (default false).
+   This allows CAS SSO flow to provide user IDs composed of numbers only.
+   These identifiers will be prefixed by the letter "U" by default.
+   The prefix can be configured using the "numeric_ids_prefix" option.
+   Be careful to choose the prefix correctly to avoid any possible conflicts
+   (e.g. user 1234 becomes U1234 when a user U1234 already exists).
+* `numeric_ids_prefix`: the prefix you wish to add in front of a numeric user ID
+   when the "allow_numeric_ids" option is set to "true".
+   By default, the prefix is the letter "U" and only alphanumeric characters are allowed.
 
    *Added in Synapse 1.93.0.*
 
@@ -3534,6 +3543,8 @@ cas_config:
     userGroup: "staff"
     department: None
   enable_registration: true
+  allow_numeric_ids: true
+  numeric_ids_prefix: "NUMERICUSER"
 ```
 ---
 ### `sso`
