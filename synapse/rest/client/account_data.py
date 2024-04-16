@@ -81,8 +81,7 @@ class AccountDataServlet(RestServlet):
             raise AuthError(403, "Cannot add account data for other users.")
 
         # Raise an error if the account data type cannot be set directly.
-        if self._hs.config.experimental.msc4010_push_rules_account_data:
-            _check_can_set_account_data_type(account_data_type)
+        _check_can_set_account_data_type(account_data_type)
 
         body = parse_json_object_from_request(request)
 
@@ -108,10 +107,7 @@ class AccountDataServlet(RestServlet):
             raise AuthError(403, "Cannot get account data for other users.")
 
         # Push rules are stored in a separate table and must be queried separately.
-        if (
-            self._hs.config.experimental.msc4010_push_rules_account_data
-            and account_data_type == AccountDataTypes.PUSH_RULES
-        ):
+        if account_data_type == AccountDataTypes.PUSH_RULES:
             account_data: Optional[JsonMapping] = (
                 await self._push_rules_handler.push_rules_for_user(requester.user)
             )
@@ -162,8 +158,7 @@ class UnstableAccountDataServlet(RestServlet):
             raise AuthError(403, "Cannot delete account data for other users.")
 
         # Raise an error if the account data type cannot be set directly.
-        if self._hs.config.experimental.msc4010_push_rules_account_data:
-            _check_can_set_account_data_type(account_data_type)
+        _check_can_set_account_data_type(account_data_type)
 
         await self.handler.remove_account_data_for_user(user_id, account_data_type)
 
@@ -209,15 +204,7 @@ class RoomAccountDataServlet(RestServlet):
             )
 
         # Raise an error if the account data type cannot be set directly.
-        if self._hs.config.experimental.msc4010_push_rules_account_data:
-            _check_can_set_account_data_type(account_data_type)
-        elif account_data_type == ReceiptTypes.FULLY_READ:
-            raise SynapseError(
-                405,
-                "Cannot set m.fully_read through this API."
-                " Use /rooms/!roomId:server.name/read_markers",
-                Codes.BAD_JSON,
-            )
+        _check_can_set_account_data_type(account_data_type)
 
         body = parse_json_object_from_request(request)
 
@@ -256,10 +243,7 @@ class RoomAccountDataServlet(RestServlet):
             )
 
         # Room-specific push rules are not currently supported.
-        if (
-            self._hs.config.experimental.msc4010_push_rules_account_data
-            and account_data_type == AccountDataTypes.PUSH_RULES
-        ):
+        if account_data_type == AccountDataTypes.PUSH_RULES:
             account_data: Optional[JsonMapping] = {}
         else:
             account_data = await self.store.get_account_data_for_room_and_type(
@@ -317,8 +301,7 @@ class UnstableRoomAccountDataServlet(RestServlet):
             )
 
         # Raise an error if the account data type cannot be set directly.
-        if self._hs.config.experimental.msc4010_push_rules_account_data:
-            _check_can_set_account_data_type(account_data_type)
+        _check_can_set_account_data_type(account_data_type)
 
         await self.handler.remove_account_data_for_room(
             user_id, room_id, account_data_type

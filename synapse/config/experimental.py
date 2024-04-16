@@ -393,11 +393,6 @@ class ExperimentalConfig(Config):
         # MSC3967: Do not require UIA when first uploading cross signing keys
         self.msc3967_enabled = experimental.get("msc3967_enabled", False)
 
-        # MSC3981: Recurse relations
-        self.msc3981_recurse_relations = experimental.get(
-            "msc3981_recurse_relations", False
-        )
-
         # MSC3861: Matrix architecture change to delegate authentication via OIDC
         try:
             self.msc3861 = MSC3861(**experimental.get("msc3861", {}))
@@ -408,11 +403,6 @@ class ExperimentalConfig(Config):
 
         # Check that none of the other config options conflict with MSC3861 when enabled
         self.msc3861.check_config_conflicts(self.root)
-
-        # MSC4010: Do not allow setting m.push_rules account data.
-        self.msc4010_push_rules_account_data = experimental.get(
-            "msc4010_push_rules_account_data", False
-        )
 
         self.msc4028_push_encrypted_events = experimental.get(
             "msc4028_push_encrypted_events", False

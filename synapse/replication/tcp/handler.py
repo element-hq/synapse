@@ -66,6 +66,7 @@ from synapse.replication.tcp.streams import (
     FederationStream,
     PresenceFederationStream,
     PresenceStream,
+    PushRulesStream,
     ReceiptsStream,
     Stream,
     ToDeviceStream,
@@ -174,6 +175,12 @@ class ReplicationCommandHandler:
                 # Only add PresenceStream as a source on the instance in charge
                 # of presence.
                 if self._is_presence_writer:
+                    self._streams_to_replicate.append(stream)
+
+                continue
+
+            if isinstance(stream, PushRulesStream):
+                if hs.get_instance_name() in hs.config.worker.writers.push_rules:
                     self._streams_to_replicate.append(stream)
 
                 continue
