@@ -221,6 +221,29 @@ class CasHandlerTestCase(HomeserverTestCase):
         # check that the auth handler was not called as expected
         auth_handler.complete_sso_login.assert_not_called()
 
+    @override_config({"cas_config": {"allow_numeric_ids": True, "numeric_ids_prefix": "NUMERICUSER"}})
+    def test_map_cas_user_does_not_register_new_user(self) -> None:
+        """Ensures new users with numeric user IDs are registered if the allow_numeric_ids flag is enabled."""
+
+        # stub out the auth handler
+        auth_handler = self.hs.get_auth_handler()
+        auth_handler.complete_sso_login = AsyncMock()  # type: ignore[method-assign]
+
+        cas_response = CasResponse("test_user", {})
+        request = _mock_request()
+        self.get_success(
+            self.handler._handle_cas_response(request, cas_response, "redirect_uri", "")
+        )
+
+        # check that the auth handler got called as expected
+        auth_handler.complete_sso_login.assert_called_once_with(
+            "@1234:test",
+            "cas",
+            request,
+            "redirect_uri",
+            None,
+            new_user=True,
+            auth_provider_session_id=None,
 
 def _mock_request() -> Mock:
     """Returns a mock which will stand in as a SynapseRequest"""
