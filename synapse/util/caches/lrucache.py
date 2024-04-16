@@ -35,6 +35,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Set,
     Tuple,
     Type,
     TypeVar,
@@ -386,6 +387,7 @@ class LruCache(Generic[KT, VT]):
         apply_cache_factor_from_config: bool = True,
         clock: Optional[Clock] = None,
         prune_unread_entries: bool = True,
+        extra_index_cb: Optional[Callable[[KT, VT], KT]] = None,
     ):
         """
         Args:
@@ -416,6 +418,20 @@ class LruCache(Generic[KT, VT]):
             prune_unread_entries: If True, cache entries that haven't been read recently
                 will be evicted from the cache in the background. Set to False to
                 opt-out of this behaviour.
+
+            extra_index_cb: If provided, the cache keeps a second index from a
+                (different) key to a cache entry based on the return value of
+                the callback. This can then be used to invalidate entries based
+                on the second type of key.
+
+                For example, for the event cache this would be a callback that
+                maps an event to its room ID, allowing invalidation of all
+                events in a given room.
+
+                Note: Though the two types of key have the same type, they are
+                in different namespaces.
+
+                Note: The new key does not have to be unique.
         """
         # Default `clock` to something sensible. Note that we rename it to
         # `real_clock` so that mypy doesn't think its still `Optional`.
@@ -462,6 +478,8 @@ class LruCache(Generic[KT, VT]):
         list_root = ListNode[_Node[KT, VT]].create_root_node()
 
         lock = threading.Lock()
+
+        extra_index: Dict[KT, Set[KT]] = {}
 
         def evict() -> None:
             while cache_len() > self.max_size:
@@ -521,6 +539,11 @@ class LruCache(Generic[KT, VT]):
             if size_callback:
                 cached_cache_len[0] += size_callback(node.value)
 
+            if extra_index_cb:
+                index_key = extra_index_cb(node.key, node.value)
+                mapped_keys = extra_index.setdefault(index_key, set())
+                mapped_keys.add(node.key)
+
             if caches.TRACK_MEMORY_USAGE and metrics:
                 metrics.inc_memory_usage(node.memory)
 
@@ -537,6 +560,14 @@ class LruCache(Generic[KT, VT]):
 
             node.run_and_clear_callbacks()
 
+            if extra_index_cb:
+                index_key = extra_index_cb(node.key, node.value)
+                mapped_keys = extra_index.get(index_key)
+                if mapped_keys is not None:
+                    mapped_keys.discard(node.key)
+                    if not mapped_keys:
+                        extra_index.pop(index_key, None)
+
             if caches.TRACK_MEMORY_USAGE and metrics:
                 metrics.dec_memory_usage(node.memory)
 
@@ -549,8 +580,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Optional[VT]:
-            ...
+        ) -> Optional[VT]: ...
 
         @overload
         def cache_get(
@@ -559,8 +589,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Union[T, VT]:
-            ...
+        ) -> Union[T, VT]: ...
 
         @synchronized
         def cache_get(
@@ -603,16 +632,14 @@ class LruCache(Generic[KT, VT]):
             key: tuple,
             default: Literal[None] = None,
             update_metrics: bool = True,
-        ) -> Union[None, Iterable[Tuple[KT, VT]]]:
-            ...
+        ) -> Union[None, Iterable[Tuple[KT, VT]]]: ...
 
         @overload
         def cache_get_multi(
             key: tuple,
             default: T,
             update_metrics: bool = True,
-        ) -> Union[T, Iterable[Tuple[KT, VT]]]:
-            ...
+        ) -> Union[T, Iterable[Tuple[KT, VT]]]: ...
 
         @synchronized
         def cache_get_multi(
@@ -697,12 +724,10 @@ class LruCache(Generic[KT, VT]):
                 return value
 
         @overload
-        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]:
-            ...
+        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]: ...
 
         @overload
-        def cache_pop(key: KT, default: T) -> Union[T, VT]:
-            ...
+        def cache_pop(key: KT, default: T) -> Union[T, VT]: ...
 
         @synchronized
         def cache_pop(key: KT, default: Optional[T] = None) -> Union[None, T, VT]:
@@ -748,12 +773,36 @@ class LruCache(Generic[KT, VT]):
             if size_callback:
                 cached_cache_len[0] = 0
 
+            extra_index.clear()
+
             if caches.TRACK_MEMORY_USAGE and metrics:
                 metrics.clear_memory_usage()
 
         @synchronized
         def cache_contains(key: KT) -> bool:
             return key in cache
+
+        @synchronized
+        def cache_invalidate_on_extra_index(index_key: KT) -> None:
+            """Invalidates all entries that match the given extra index key.
+
+            This can only be called when `extra_index_cb` was specified.
+            """
+
+            assert extra_index_cb is not None
+
+            keys = extra_index.pop(index_key, None)
+            if not keys:
+                return
+
+            for key in keys:
+                node = cache.pop(key, None)
+                if not node:
+                    continue
+
+                evicted_len = delete_node(node)
+                if metrics:
+                    metrics.inc_evictions(EvictionReason.invalidation, evicted_len)
 
         # make sure that we clear out any excess entries after we get resized.
         self._on_resize = evict
@@ -771,6 +820,7 @@ class LruCache(Generic[KT, VT]):
         self.len = synchronized(cache_len)
         self.contains = cache_contains
         self.clear = cache_clear
+        self.invalidate_on_extra_index = cache_invalidate_on_extra_index
 
     def __getitem__(self, key: KT) -> VT:
         result = self.get(key, _Sentinel.sentinel)
@@ -863,6 +913,9 @@ class AsyncLruCache(Generic[KT, VT]):
     async def invalidate(self, key: KT) -> None:
         # This method should invalidate any external cache and then invalidate the LruCache.
         return self._lru_cache.invalidate(key)
+
+    def invalidate_on_extra_index_local(self, index_key: KT) -> None:
+        self._lru_cache.invalidate_on_extra_index(index_key)
 
     def invalidate_local(self, key: KT) -> None:
         """Remove an entry from the local cache

@@ -369,6 +369,22 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             user_id, [Membership.INVITE]
         )
 
+    async def get_knocked_at_rooms_for_local_user(
+        self, user_id: str
+    ) -> Sequence[RoomsForUser]:
+        """Get all the rooms the *local* user has knocked at.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            A list of RoomsForUser.
+        """
+
+        return await self.get_rooms_for_local_user_where_membership_is(
+            user_id, [Membership.KNOCK]
+        )
+
     async def get_invite_for_local_user_in_room(
         self, user_id: str, room_id: str
     ) -> Optional[RoomsForUser]:

@@ -60,7 +60,7 @@ from synapse.logging.context import (
 )
 from synapse.notifier import ReplicationNotifier
 from synapse.storage.database import DatabasePool, LoggingTransaction, make_conn
-from synapse.storage.databases.main import FilteringWorkerStore, PushRuleStore
+from synapse.storage.databases.main import FilteringWorkerStore
 from synapse.storage.databases.main.account_data import AccountDataWorkerStore
 from synapse.storage.databases.main.client_ips import ClientIpBackgroundUpdateStore
 from synapse.storage.databases.main.deviceinbox import DeviceInboxBackgroundUpdateStore
@@ -77,10 +77,8 @@ from synapse.storage.databases.main.media_repository import (
 )
 from synapse.storage.databases.main.presence import PresenceBackgroundUpdateStore
 from synapse.storage.databases.main.profile import ProfileWorkerStore
-from synapse.storage.databases.main.pusher import (
-    PusherBackgroundUpdatesStore,
-    PusherWorkerStore,
-)
+from synapse.storage.databases.main.push_rule import PusherWorkerStore
+from synapse.storage.databases.main.pusher import PusherBackgroundUpdatesStore
 from synapse.storage.databases.main.receipts import ReceiptsBackgroundUpdateStore
 from synapse.storage.databases.main.registration import (
     RegistrationBackgroundUpdateStore,
@@ -245,7 +243,6 @@ class Store(
     AccountDataWorkerStore,
     FilteringWorkerStore,
     ProfileWorkerStore,
-    PushRuleStore,
     PusherWorkerStore,
     PusherBackgroundUpdatesStore,
     PresenceBackgroundUpdateStore,
@@ -1040,10 +1037,10 @@ class Porter:
         return done, remaining + done
 
     async def _setup_state_group_id_seq(self) -> None:
-        curr_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
-            table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
+        curr_id: Optional[int] = (
+            await self.sqlite_store.db_pool.simple_select_one_onecol(
+                table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
+            )
         )
 
         if not curr_id:
@@ -1132,13 +1129,13 @@ class Porter:
         )
 
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: Optional[
-            int
-        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
-            table="event_auth_chains",
-            keyvalues={},
-            retcol="MAX(chain_id)",
-            allow_none=True,
+        curr_chain_id: Optional[int] = (
+            await self.sqlite_store.db_pool.simple_select_one_onecol(
+                table="event_auth_chains",
+                keyvalues={},
+                retcol="MAX(chain_id)",
+                allow_none=True,
+            )
         )
 
         def r(txn: LoggingTransaction) -> None:

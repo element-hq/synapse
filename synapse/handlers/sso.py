@@ -150,7 +150,7 @@ class UserAttributes:
     display_name: Optional[str] = None
     picture: Optional[str] = None
     # mypy thinks these are incompatible for some reason.
-    emails: StrCollection = attr.Factory(list)  # type: ignore[assignment]
+    emails: StrCollection = attr.Factory(list)
 
 
 @attr.s(slots=True, auto_attribs=True)

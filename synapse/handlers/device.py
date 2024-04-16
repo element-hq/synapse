@@ -429,6 +429,10 @@ class DeviceHandler(DeviceWorkerHandler):
         self._storage_controllers = hs.get_storage_controllers()
         self.db_pool = hs.get_datastores().main.db_pool
 
+        self._dont_notify_new_devices_for = (
+            hs.config.registration.dont_notify_new_devices_for
+        )
+
         self.device_list_updater = DeviceListUpdater(hs, self)
 
         federation_registry = hs.get_federation_registry()
@@ -505,6 +509,9 @@ class DeviceHandler(DeviceWorkerHandler):
 
         self._check_device_name_length(initial_device_display_name)
 
+        # Check if we should send out device lists updates for this new device.
+        notify = user_id not in self._dont_notify_new_devices_for
+
         if device_id is not None:
             new_device = await self.store.store_device(
                 user_id=user_id,
@@ -514,7 +521,8 @@ class DeviceHandler(DeviceWorkerHandler):
                 auth_provider_session_id=auth_provider_session_id,
             )
             if new_device:
-                await self.notify_device_update(user_id, [device_id])
+                if notify:
+                    await self.notify_device_update(user_id, [device_id])
             return device_id
 
         # if the device id is not specified, we'll autogen one, but loop a few
@@ -530,7 +538,8 @@ class DeviceHandler(DeviceWorkerHandler):
                 auth_provider_session_id=auth_provider_session_id,
             )
             if new_device:
-                await self.notify_device_update(user_id, [new_device_id])
+                if notify:
+                    await self.notify_device_update(user_id, [new_device_id])
                 return new_device_id
             attempts += 1
 

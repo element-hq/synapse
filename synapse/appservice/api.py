@@ -362,16 +362,16 @@ class ApplicationServiceApi(SimpleHttpClient):
         # TODO: Update to stable prefixes once MSC3202 completes FCP merge
         if service.msc3202_transaction_extensions:
             if one_time_keys_count:
-                body[
-                    "org.matrix.msc3202.device_one_time_key_counts"
-                ] = one_time_keys_count
-                body[
-                    "org.matrix.msc3202.device_one_time_keys_count"
-                ] = one_time_keys_count
+                body["org.matrix.msc3202.device_one_time_key_counts"] = (
+                    one_time_keys_count
+                )
+                body["org.matrix.msc3202.device_one_time_keys_count"] = (
+                    one_time_keys_count
+                )
             if unused_fallback_keys:
-                body[
-                    "org.matrix.msc3202.device_unused_fallback_key_types"
-                ] = unused_fallback_keys
+                body["org.matrix.msc3202.device_unused_fallback_key_types"] = (
+                    unused_fallback_keys
+                )
             if device_list_summary:
                 body["org.matrix.msc3202.device_lists"] = {
                     "changed": list(device_list_summary.changed),

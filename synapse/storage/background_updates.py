@@ -836,9 +836,9 @@ class BackgroundUpdater:
                 c.execute(sql)
 
         if isinstance(self.db_pool.engine, engines.PostgresEngine):
-            runner: Optional[
-                Callable[[LoggingDatabaseConnection], None]
-            ] = create_index_psql
+            runner: Optional[Callable[[LoggingDatabaseConnection], None]] = (
+                create_index_psql
+            )
         elif psql_only:
             runner = None
         else:

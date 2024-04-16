@@ -839,11 +839,12 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
             Map from server_name -> key_id -> FetchKeyResult
         """
 
+        # We only need to do one request per server.
+        servers_to_fetch = {k.server_name for k in keys_to_fetch}
+
         results = {}
 
-        async def get_keys(key_to_fetch_item: _FetchKeyRequest) -> None:
-            server_name = key_to_fetch_item.server_name
-
+        async def get_keys(server_name: str) -> None:
             try:
                 keys = await self.get_server_verify_keys_v2_direct(server_name)
                 results[server_name] = keys
@@ -852,7 +853,7 @@ class ServerKeyFetcher(BaseV2KeyFetcher):
             except Exception:
                 logger.exception("Error getting keys from %s", server_name)
 
-        await yieldable_gather_results(get_keys, keys_to_fetch)
+        await yieldable_gather_results(get_keys, servers_to_fetch)
         return results
 
     async def get_server_verify_keys_v2_direct(

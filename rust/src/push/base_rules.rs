@@ -304,12 +304,12 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
-        rule_id: Cow::Borrowed("global/underride/.m.rule.room_one_to_one"),
+        rule_id: Cow::Borrowed("global/underride/.m.rule.encrypted_room_one_to_one"),
         priority_class: 1,
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
                 key: Cow::Borrowed("type"),
-                pattern: Cow::Borrowed("m.room.message"),
+                pattern: Cow::Borrowed("m.room.encrypted"),
             })),
             Condition::Known(KnownCondition::RoomMemberCount {
                 is: Some(Cow::Borrowed("2")),
@@ -320,12 +320,12 @@ pub const BASE_APPEND_UNDERRIDE_RULES: &[PushRule] = &[
         default_enabled: true,
     },
     PushRule {
-        rule_id: Cow::Borrowed("global/underride/.m.rule.encrypted_room_one_to_one"),
+        rule_id: Cow::Borrowed("global/underride/.m.rule.room_one_to_one"),
         priority_class: 1,
         conditions: Cow::Borrowed(&[
             Condition::Known(KnownCondition::EventMatch(EventMatchCondition {
                 key: Cow::Borrowed("type"),
-                pattern: Cow::Borrowed("m.room.encrypted"),
+                pattern: Cow::Borrowed("m.room.message"),
             })),
             Condition::Known(KnownCondition::RoomMemberCount {
                 is: Some(Cow::Borrowed("2")),

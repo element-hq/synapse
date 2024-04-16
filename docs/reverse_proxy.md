@@ -186,6 +186,25 @@ Example configuration, if using a UNIX socket. The configuration lines regarding
 backend matrix
   server matrix unix@/run/synapse/main_public.sock
 ```
+Example configuration when using a single port for both client and federation traffic.
+```
+frontend https
+  bind *:443,[::]:443 ssl crt /etc/ssl/haproxy/ strict-sni alpn h2,http/1.1
+  http-request set-header X-Forwarded-Proto https if { ssl_fc }
+  http-request set-header X-Forwarded-Proto http  if !{ ssl_fc }
+  http-request set-header X-Forwarded-For %[src]
+
+  acl matrix-host hdr(host) -i matrix.example.com matrix.example.com:443
+  acl matrix-sni  ssl_fc_sni   matrix.example.com
+  acl matrix-path path_beg     /_matrix
+  acl matrix-path path_beg     /_synapse/client
+
+  use_backend matrix if matrix-host matrix-path
+  use_backend matrix if matrix-sni
+
+backend matrix
+  server matrix 127.0.0.1:8008
+```
 
 [Delegation](delegate.md) example:
 ```

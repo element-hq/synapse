@@ -87,8 +87,7 @@ class RestHelper:
         expect_code: Literal[200] = ...,
         extra_content: Optional[Dict] = ...,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = ...,
-    ) -> str:
-        ...
+    ) -> str: ...
 
     @overload
     def create_room_as(
@@ -100,8 +99,7 @@ class RestHelper:
         expect_code: int = ...,
         extra_content: Optional[Dict] = ...,
         custom_headers: Optional[Iterable[Tuple[AnyStr, AnyStr]]] = ...,
-    ) -> Optional[str]:
-        ...
+    ) -> Optional[str]: ...
 
     def create_room_as(
         self,
@@ -172,8 +170,8 @@ class RestHelper:
         targ: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
-    ) -> None:
-        self.change_membership(
+    ) -> JsonDict:
+        return self.change_membership(
             room=room,
             src=src,
             targ=targ,
@@ -191,8 +189,8 @@ class RestHelper:
         appservice_user_id: Optional[str] = None,
         expect_errcode: Optional[Codes] = None,
         expect_additional_fields: Optional[dict] = None,
-    ) -> None:
-        self.change_membership(
+    ) -> JsonDict:
+        return self.change_membership(
             room=room,
             src=user,
             targ=user,
@@ -244,8 +242,8 @@ class RestHelper:
         user: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
-    ) -> None:
-        self.change_membership(
+    ) -> JsonDict:
+        return self.change_membership(
             room=room,
             src=user,
             targ=user,
@@ -284,7 +282,7 @@ class RestHelper:
         expect_code: int = HTTPStatus.OK,
         expect_errcode: Optional[str] = None,
         expect_additional_fields: Optional[dict] = None,
-    ) -> None:
+    ) -> JsonDict:
         """
         Send a membership state event into a room.
 
@@ -300,6 +298,9 @@ class RestHelper:
                 using an application service access token in `tok`.
             expect_code: The expected HTTP response code
             expect_errcode: The expected Matrix error code
+
+        Returns:
+            The JSON response
         """
         temp_id = self.auth_user_id
         self.auth_user_id = src
@@ -358,6 +359,7 @@ class RestHelper:
                 )
 
         self.auth_user_id = temp_id
+        return channel.json_body
 
     def send(
         self,

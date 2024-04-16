@@ -532,6 +532,13 @@ the stream writer for the `presence` stream:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
 
+##### The `push_rules` stream
+
+The following endpoints should be routed directly to the worker configured as
+the stream writer for the `push` stream:
+
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
+
 #### Restrict outbound federation traffic to a specific set of workers
 
 The
@@ -629,7 +636,7 @@ worker application type.
 
 You can designate generic worker to sending push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
-[sygnal](https://github.com/vector-im/sygnal) and email.
+[sygnal](https://github.com/matrix-org/sygnal) and email.
 
 This will stop the main process sending push notifications.
 

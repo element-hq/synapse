@@ -160,8 +160,7 @@ def decode_body(
 
     # Attempt to parse the body. Returns None if the body was successfully
     # parsed, but no tree was found.
-    # TODO Develop of lxml-stubs has this correct.
-    return etree.fromstring(body, parser)  # type: ignore[arg-type]
+    return etree.fromstring(body, parser)
 
 
 def _get_meta_tags(

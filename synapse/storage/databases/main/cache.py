@@ -373,7 +373,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         deleted.
         """
 
-        self._invalidate_local_get_event_cache_all()  # type: ignore[attr-defined]
+        self._invalidate_local_get_event_cache_room_id(room_id)  # type: ignore[attr-defined]
 
         self._attempt_to_invalidate_cache("have_seen_event", (room_id,))
         self._attempt_to_invalidate_cache("get_latest_event_ids_in_room", (room_id,))

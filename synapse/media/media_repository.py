@@ -1002,9 +1002,9 @@ class MediaRepository:
                     )
                     t_width = min(m_width, t_width)
                     t_height = min(m_height, t_height)
-                    thumbnails[
-                        (t_width, t_height, requirement.media_type)
-                    ] = requirement.method
+                    thumbnails[(t_width, t_height, requirement.media_type)] = (
+                        requirement.method
+                    )
 
             # Now we generate the thumbnails for each dimension, store it
             for (t_width, t_height, t_type), t_method in thumbnails.items():

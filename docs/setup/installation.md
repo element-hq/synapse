@@ -26,7 +26,7 @@ for most users.
 #### Docker images and Ansible playbooks
 
 There is an official synapse image available at
-<https://hub.docker.com/r/vectorim/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
+<https://hub.docker.com/r/matrixdotorg/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
 which can be used with the docker-compose file available at
 [contrib/docker](https://github.com/element-hq/synapse/tree/develop/contrib/docker).
 Further information on this including configuration options is available in the README
@@ -325,6 +325,17 @@ Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) fo
 
 You may need to install icu, and make the icu binaries and libraries accessible.
 Please follow [the official instructions of PyICU](https://pypi.org/project/PyICU/) to do so.
+
+If you're struggling to get icu discovered, and see:
+```
+  RuntimeError:
+  Please install pkg-config on your system or set the ICU_VERSION environment
+  variable to the version of ICU you have installed.
+```
+despite it being installed and having your `PATH` updated, you can omit this dependency by
+not specifying `--extras all` to `poetry`. If using postgres, you can install Synapse via
+`poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry`.
+ICU is not a hard dependency on getting a working installation.
 
 On ARM-based Macs you may also need to install libjpeg and libpq:
 ```sh

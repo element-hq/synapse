@@ -160,11 +160,6 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
 
-    if ownership is not None:
-        # make sure that synapse has perms to write to the data dir.
-        log(f"Setting ownership on {data_dir} to {ownership}")
-        subprocess.run(["chown", ownership, data_dir], check=True)
-
     # create a suitable log config from our template
     log_config_file = "%s/%s.log.config" % (config_dir, server_name)
     if not os.path.exists(log_config_file):
@@ -189,9 +184,15 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
         "--generate-config",
         "--open-private-ports",
     ]
+
+    if ownership is not None:
+        # make sure that synapse has perms to write to the data dir.
+        log(f"Setting ownership on {data_dir} to {ownership}")
+        subprocess.run(["chown", ownership, data_dir], check=True)
+        args = ["gosu", ownership] + args
+
     # log("running %s" % (args, ))
-    flush_buffers()
-    os.execv(sys.executable, args)
+    subprocess.run(args, check=True)
 
 
 def main(args: List[str], environ: MutableMapping[str, str]) -> None:

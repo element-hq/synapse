@@ -342,6 +342,9 @@ def _parse_oidc_config_dict(
         user_mapping_provider_config=user_mapping_provider_config,
         attribute_requirements=attribute_requirements,
         enable_registration=oidc_config.get("enable_registration", True),
+        additional_authorization_parameters=oidc_config.get(
+            "additional_authorization_parameters", {}
+        ),
     )
 
 
@@ -444,3 +447,6 @@ class OidcProviderConfig:
 
     # Whether automatic registrations are enabled in the ODIC flow. Defaults to True
     enable_registration: bool
+
+    # Additional parameters that will be passed to the authorization grant URL
+    additional_authorization_parameters: Mapping[str, str]

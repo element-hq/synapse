@@ -191,10 +191,10 @@ class RemoteKey(RestServlet):
         server_keys: Dict[Tuple[str, str], Optional[FetchKeyResultForRemote]] = {}
         for server_name, key_ids in query.items():
             if key_ids:
-                results: Mapping[
-                    str, Optional[FetchKeyResultForRemote]
-                ] = await self.store.get_server_keys_json_for_remote(
-                    server_name, key_ids
+                results: Mapping[str, Optional[FetchKeyResultForRemote]] = (
+                    await self.store.get_server_keys_json_for_remote(
+                        server_name, key_ids
+                    )
                 )
             else:
                 results = await self.store.get_all_server_keys_json_for_remote(

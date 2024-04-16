@@ -16,3 +16,5 @@
 -- figuring that out by itself.
 ALTER TABLE event_auth_chain_links ALTER origin_chain_id SET (n_distinct = -0.5);
 ALTER TABLE event_auth_chain_links ALTER target_chain_id SET (n_distinct = -0.5);
+
+-- We should have done an `ANALYZE event_auth_chain_links` here, but we forgot.

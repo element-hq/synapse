@@ -1001,11 +1001,11 @@ class FederationHandler:
                     )
 
                 if include_auth_user_id:
-                    event_content[
-                        EventContentFields.AUTHORISING_USER
-                    ] = await self._event_auth_handler.get_user_which_could_invite(
-                        room_id,
-                        state_ids,
+                    event_content[EventContentFields.AUTHORISING_USER] = (
+                        await self._event_auth_handler.get_user_which_could_invite(
+                            room_id,
+                            state_ids,
+                        )
                     )
 
         builder = self.event_builder_factory.for_room_version(
