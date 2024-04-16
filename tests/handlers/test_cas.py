@@ -245,7 +245,7 @@ class CasHandlerTestCase(HomeserverTestCase):
             new_user=True,
             auth_provider_session_id=None,
 
-def _mock_request() -> Mock:
+    def _mock_request() -> Mock:
     """Returns a mock which will stand in as a SynapseRequest"""
     mock = Mock(
         spec=[
