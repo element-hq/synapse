@@ -221,7 +221,9 @@ class CasHandlerTestCase(HomeserverTestCase):
         # check that the auth handler was not called as expected
         auth_handler.complete_sso_login.assert_not_called()
 
-    @override_config({"cas_config": {"allow_numeric_ids": True, "numeric_ids_prefix": "NUMERICUSER"}})
+    @override_config(
+        {"cas_config": {"allow_numeric_ids": True, "numeric_ids_prefix": "NUMERICUSER"}}
+    )
     def test_map_cas_user_does_not_register_new_user(self) -> None:
         """Ensures new users with numeric user IDs are registered if the allow_numeric_ids flag is enabled."""
 
