@@ -1,3 +1,1 @@
-Adds parse_json servlet function for standardized JSON parsing from query parameters, ensuring enhanced data validation and error handling.
-Introduces INVALID_PARAM error response for invalid JSON objects, improving parameter validation feedback.
-Adds validation check to prevent 500 internal server error on invalid Json Filter request.
+Return `400 M_NOT_JSON` upon receiving invalid JSON in query parameters across various client and admin endpoints, rather than an internal server error.
