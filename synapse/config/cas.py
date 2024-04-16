@@ -73,8 +73,9 @@ class CasConfig(Config):
                 and self.cas_numeric_ids_prefix.isalnum() is False
             ):
                 raise ConfigError(
-                    "Only alphanumeric characters are allowed for numeric IDs prefix"
-                    ("cas_config", "numeric_ids_prefix"),
+                    "Only alphanumeric characters are allowed for numeric IDs prefix"(
+                        "cas_config", "numeric_ids_prefix"
+                    ),
                 )
 
             self.idp_name = cas_config.get("idp_name", "CAS")
