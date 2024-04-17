@@ -49,7 +49,7 @@ fn read_io_body(body: &PyAny, chunk_size: usize) -> PyResult<Bytes> {
 ///
 /// # Errors
 ///
-/// Returns an error if the Python object doens't properly implement `IRequest`
+/// Returns an error if the Python object doesn't properly implement `IRequest`
 pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
     let content = request.getattr("content")?;
     let body = read_io_body(content, 4096)?;
@@ -99,7 +99,7 @@ pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
 ///
 ///  # Errors
 ///
-/// Returns an error if the Python object doens't properly implement `IRequest`
+/// Returns an error if the Python object doesn't properly implement `IRequest`
 pub fn http_response_to_twisted<B>(request: &PyAny, response: Response<B>) -> PyResult<()>
 where
     B: Buf,
