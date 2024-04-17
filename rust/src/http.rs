@@ -126,6 +126,8 @@ where
 
 /// An extension trait for [`HeaderMap`] that provides typed access to headers, and throws the
 /// right python exceptions when the header is missing or fails to parse.
+///
+/// [`HeaderMap`]: headers::HeaderMap
 pub trait HeaderMapPyExt: HeaderMapExt {
     /// Get a header from the map, returning an error if it is missing or invalid.
     fn typed_get_required<H>(&self) -> PyResult<H>
