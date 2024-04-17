@@ -136,7 +136,7 @@ pub trait HeaderMapPyExt: HeaderMapExt {
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 format!("Missing required header: {}", H::name()),
-                "M_MISSING_HEADER",
+                "M_MISSING_PARAM",
                 None,
                 None,
             )
@@ -152,7 +152,7 @@ pub trait HeaderMapPyExt: HeaderMapExt {
             SynapseError::new(
                 StatusCode::BAD_REQUEST,
                 format!("Invalid header: {}", H::name()),
-                "M_INVALID_HEADER",
+                "M_INVALID_PARAM",
                 None,
                 None,
             )
