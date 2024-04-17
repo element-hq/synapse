@@ -48,7 +48,6 @@ class DeactivateAccountHandler:
         self.user_directory_handler = hs.get_user_directory_handler()
         self._server_name = hs.hostname
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
-        self._event_creation_handler = hs.get_event_creation_handler()
 
         # Flag that indicates whether the process to part users from rooms is running
         self._user_parter_running = False
@@ -266,6 +265,7 @@ class DeactivateAccountHandler:
         should_erase = await self.store.is_user_erased(user_id)
 
         for room_id in rooms_for_user:
+            logger.info("User parter parting %r from %r", user_id, room_id)
             try:
                 # Before parting the user, redact all membership events if requested
                 if should_erase:
