@@ -27,7 +27,7 @@ use crate::errors::SynapseError;
 ///
 /// # Errors
 ///
-/// Returns an error if calling the ``read`` on the Python object failed
+/// Returns an error if calling the `read` on the Python object failed
 fn read_io_body(body: &PyAny, chunk_size: usize) -> PyResult<Bytes> {
     let mut buf = BytesMut::new();
     loop {
@@ -39,17 +39,17 @@ fn read_io_body(body: &PyAny, chunk_size: usize) -> PyResult<Bytes> {
     }
 }
 
-/// Transform a Twisted ``IRequest`` to an [`http::Request`]
+/// Transform a Twisted `IRequest` to an [`http::Request`]
 ///
-/// It uses the following members of ``IRequest``:
-///   - ``content``, which is expected to be a file-like object with a ``read`` method
-///   - ``uri``, which is expected to be a valid URI as ``bytes``
-///   - ``method``, which is expected to be a valid HTTP method as ``bytes``
-///   - ``requestHeaders``, which is expected to have a ``getAllRawHeaders`` method
+/// It uses the following members of `IRequest`:
+///   - `content`, which is expected to be a file-like object with a `read` method
+///   - `uri`, which is expected to be a valid URI as `bytes`
+///   - `method`, which is expected to be a valid HTTP method as `bytes`
+///   - `requestHeaders`, which is expected to have a `getAllRawHeaders` method
 ///
 /// # Errors
 ///
-/// Returns an error if the Python object doens't properly implement ``IRequest``
+/// Returns an error if the Python object doens't properly implement `IRequest`
 pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
     let content = request.getattr("content")?;
     let body = read_io_body(content, 4096)?;
@@ -88,18 +88,18 @@ pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
     Ok(req)
 }
 
-/// Send an [`http::Response`] through a Twisted ``IRequest``
+/// Send an [`http::Response`] through a Twisted `IRequest`
 ///
-/// It uses the following members of ``IRequest``:
+/// It uses the following members of `IRequest`:
 ///
-///  - ``responseHeaders``, which is expected to have a `addRawHeader(bytes, bytes)` method
-///  - ``setResponseCode(int)`` method
-///  - ``write(bytes)`` method
-///  - ``finish()`` method
+///  - `responseHeaders`, which is expected to have a `addRawHeader(bytes, bytes)` method
+///  - `setResponseCode(int)` method
+///  - `write(bytes)` method
+///  - `finish()` method
 ///
 ///  # Errors
 ///
-/// Returns an error if the Python object doens't properly implement ``IRequest``
+/// Returns an error if the Python object doens't properly implement `IRequest`
 pub fn http_response_to_twisted<B>(request: &PyAny, response: Response<B>) -> PyResult<()>
 where
     B: Buf,
