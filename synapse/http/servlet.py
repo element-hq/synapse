@@ -19,7 +19,8 @@
 #
 #
 
-""" This module contains base REST classes for constructing REST servlets. """
+"""This module contains base REST classes for constructing REST servlets."""
+
 import enum
 import logging
 import urllib.parse as urlparse
@@ -66,17 +67,49 @@ def parse_integer(request: Request, name: str, default: int) -> int: ...
 
 
 @overload
-def parse_integer(request: Request, name: str, *, required: Literal[True]) -> int: ...
+def parse_integer(
+    request: Request, name: str, *, default: int, negative: bool
+) -> int: ...
 
 
 @overload
 def parse_integer(
-    request: Request, name: str, default: Optional[int] = None, required: bool = False
+    request: Request, name: str, *, default: int, negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, required: Literal[True], negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, default: Literal[None], negative: bool = False
+) -> None: ...
+
+
+@overload
+def parse_integer(request: Request, name: str, *, negative: bool) -> Optional[int]: ...
+
+
+@overload
+def parse_integer(
+    request: Request,
+    name: str,
+    default: Optional[int] = None,
+    required: bool = False,
+    negative: bool = False,
 ) -> Optional[int]: ...
 
 
 def parse_integer(
-    request: Request, name: str, default: Optional[int] = None, required: bool = False
+    request: Request,
+    name: str,
+    default: Optional[int] = None,
+    required: bool = False,
+    negative: bool = False,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -86,16 +119,17 @@ def parse_integer(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-
+        negative: whether to allow negative integers, defaults to True.
     Returns:
         An int value or the default.
 
     Raises:
-        SynapseError: if the parameter is absent and required, or if the
-            parameter is present and not an integer.
+        SynapseError: if the parameter is absent and required, if the
+            parameter is present and not an integer, or if the
+            parameter is illegitimate negative.
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
-    return parse_integer_from_args(args, name, default, required)
+    return parse_integer_from_args(args, name, default, required, negative)
 
 
 @overload
@@ -121,6 +155,7 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
+    negative: bool = False,
 ) -> Optional[int]: ...
 
 
@@ -129,6 +164,7 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
+    negative: bool = True,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -138,32 +174,36 @@ def parse_integer_from_args(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
+        negative: whether to allow negative integers, defaults to True.
 
     Returns:
         An int value or the default.
 
     Raises:
-        SynapseError: if the parameter is absent and required, or if the
-            parameter is present and not an integer.
+        SynapseError: if the parameter is absent and required, if the
+            parameter is present and not an integer, or if the
+            parameter is illegitimate negative.
     """
     name_bytes = name.encode("ascii")
 
-    if name_bytes in args:
-        try:
-            return int(args[name_bytes][0])
-        except Exception:
-            message = "Query parameter %r must be an integer" % (name,)
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
-            )
-    else:
-        if required:
-            message = "Missing integer query parameter %r" % (name,)
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM
-            )
-        else:
+    if name_bytes not in args:
+        if not required:
             return default
+
+        message = f"Missing required integer query parameter {name}"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM)
+
+    try:
+        integer = int(args[name_bytes][0])
+    except Exception:
+        message = f"Query parameter {name} must be an integer"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM)
+
+    if not negative and integer < 0:
+        message = f"Query parameter {name} must be a positive integer."
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM)
+
+    return integer
 
 
 @overload
