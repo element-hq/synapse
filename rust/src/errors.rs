@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 
 use http::{HeaderMap, StatusCode};
-use pyo3::import_exception;
+use pyo3::{exceptions::PyValueError, import_exception};
 
 import_exception!(synapse.api.errors, SynapseError);
 
@@ -30,21 +30,22 @@ impl SynapseError {
         headers: Option<HeaderMap>,
     ) -> pyo3::PyErr {
         // Transform the HeaderMap into a HashMap<String, String>
-        let headers = headers.map(|headers| {
-            headers
-                .iter()
-                .map(|(key, value)| {
-                    (
-                        key.as_str().to_owned(),
-                        value
-                            .to_str()
-                            // XXX: will that ever panic?
-                            .expect("header value is valid ASCII")
-                            .to_owned(),
-                    )
-                })
-                .collect::<HashMap<String, String>>()
-        });
+        let headers = if let Some(headers) = headers {
+            let mut map = HashMap::with_capacity(headers.len());
+            for (key, value) in headers.iter() {
+                let Ok(value) = value.to_str() else {
+                    // This should never happen, but we don't want to panic in case it does
+                    return PyValueError::new_err(
+                        "Could not construct SynapseError: header value is not valid ASCII",
+                    );
+                };
+
+                map.insert(key.as_str().to_owned(), value.to_owned());
+            }
+            Some(map)
+        } else {
+            None
+        };
 
         SynapseError::new_err((code.as_u16(), message, errcode, additional_fields, headers))
     }
