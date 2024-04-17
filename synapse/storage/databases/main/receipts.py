@@ -734,9 +734,13 @@ class ReceiptsWorkerStore(SQLBaseStore):
                 thread_clause = "r.thread_id = ?"
                 thread_args = (thread_id,)
 
+            # If the receipt doesn't have a stream ordering it is because we
+            # don't have the associated event, and so must be a remote receipt.
+            # Hence it's safe to just allow new receipts to clobber it.
             sql = f"""
             SELECT r.event_stream_ordering, r.event_id FROM receipts_linearized AS r
-            WHERE r.room_id = ? AND r.receipt_type = ? AND r.user_id = ? AND {thread_clause}
+            WHERE r.room_id = ? AND r.receipt_type = ? AND r.user_id = ?
+            AND r.event_stream_ordering IS NOT NULL AND {thread_clause}
             """
             txn.execute(
                 sql,
