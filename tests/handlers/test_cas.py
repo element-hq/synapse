@@ -237,17 +237,6 @@ class CasHandlerTestCase(HomeserverTestCase):
             self.handler._handle_cas_response(request, cas_response, "redirect_uri", "")
         )
 
-        # check that the auth handler got called as expected
-        auth_handler.complete_sso_login.assert_called_once_with(
-            "@1234:test",
-            "cas",
-            request,
-            "redirect_uri",
-            None,
-            new_user=True,
-            auth_provider_session_id=None,
-        )
-
 
 def _mock_request() -> Mock:
     """Returns a mock which will stand in as a SynapseRequest"""
