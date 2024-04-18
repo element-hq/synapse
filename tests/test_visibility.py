@@ -21,6 +21,7 @@ import logging
 from typing import Optional
 from unittest.mock import patch
 
+from synapse.api.constants import EventUnsignedContentFields
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
@@ -29,6 +30,7 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
 from synapse.visibility import filter_events_for_client, filter_events_for_server
+
 from tests import unittest
 from tests.test_utils.event_injection import inject_event, inject_member_event
 from tests.unittest import HomeserverTestCase
@@ -286,22 +288,22 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         room_id = self.helper.create_room_as("resident", tok=resident_token)
 
         self.get_success(
-            inject_visibility_event(self.hs, room_id, "@resident:hs", "joined")
+            inject_visibility_event(self.hs, room_id, "@resident:test", "joined")
         )
         before_event = self.get_success(
-            inject_message_event(self.hs, room_id, "@resident:hs", body="before")
+            inject_message_event(self.hs, room_id, "@resident:test", body="before")
         )
         join_event = self.get_success(
-            inject_member_event(self.hs, room_id, "@joiner:hs", "join")
+            inject_member_event(self.hs, room_id, "@joiner:test", "join")
         )
         during_event = self.get_success(
-            inject_message_event(self.hs, room_id, "@resident:hs", body="during")
+            inject_message_event(self.hs, room_id, "@resident:test", body="during")
         )
         leave_event = self.get_success(
-            inject_member_event(self.hs, room_id, "@joiner:hs", "leave")
+            inject_member_event(self.hs, room_id, "@joiner:test", "leave")
         )
         after_event = self.get_success(
-            inject_message_event(self.hs, room_id, "@resident:hs", body="after")
+            inject_message_event(self.hs, room_id, "@resident:test", body="after")
         )
 
         # We have to reload the events from the db, to ensure that prev_content is
@@ -322,17 +324,64 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
             ]
         ]
 
-        filtered_events = self.get_success(
+        # Now run the events through the filter, and check that we can see the events
+        # we expect, and that the membership prop is as expected.
+        #
+        # We deliberately do the queries for both users upfront; this simulates
+        # concurrent queries on the server, and helps ensure that we aren't
+        # accidentally serving the same event object (with the same unsigned.membership
+        # property) to both users.
+        joiner_filtered_events = self.get_success(
             filter_events_for_client(
                 self.hs.get_storage_controllers(),
-                "@joiner:hs",
+                "@joiner:test",
                 events_to_filter,
+                msc4115_membership_on_events=True,
+            )
+        )
+        resident_filtered_events = self.get_success(
+            filter_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@resident:test",
+                events_to_filter,
+                msc4115_membership_on_events=True,
             )
         )
 
+        # The joiner should be able to seem the join and leave,
+        # and messages sent between the two, but not before or after.
         self.assertEqual(
             [e.event_id for e in [join_event, during_event, leave_event]],
-            [e.event_id for e in filtered_events],
+            [e.event_id for e in joiner_filtered_events],
+        )
+        self.assertEqual(
+            ["join", "join", "leave"],
+            [
+                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                for e in joiner_filtered_events
+            ],
+        )
+
+        # The resident user should see all the events.
+        self.assertEqual(
+            [
+                e.event_id
+                for e in [
+                    before_event,
+                    join_event,
+                    during_event,
+                    leave_event,
+                    after_event,
+                ]
+            ],
+            [e.event_id for e in resident_filtered_events],
+        )
+        self.assertEqual(
+            ["join", "join", "join", "join", "join"],
+            [
+                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                for e in resident_filtered_events
+            ],
         )
 
 
@@ -387,15 +436,24 @@ class FilterEventsOutOfBandEventsForClientTestCase(
         )
 
         # the invited user should be able to see both the invite and the rejection
+        filtered_events = self.get_success(
+            filter_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@user:test",
+                [invite_event, reject_event],
+                msc4115_membership_on_events=True,
+            )
+        )
         self.assertEqual(
-            self.get_success(
-                filter_events_for_client(
-                    self.hs.get_storage_controllers(),
-                    "@user:test",
-                    [invite_event, reject_event],
-                )
-            ),
-            [invite_event, reject_event],
+            [e.event_id for e in filtered_events],
+            [e.event_id for e in [invite_event, reject_event]],
+        )
+        self.assertEqual(
+            ["invite", "leave"],
+            [
+                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                for e in filtered_events
+            ],
         )
 
         # other users should see neither
@@ -405,6 +463,7 @@ class FilterEventsOutOfBandEventsForClientTestCase(
                     self.hs.get_storage_controllers(),
                     "@other:test",
                     [invite_event, reject_event],
+                    msc4115_membership_on_events=True,
                 )
             ),
             [],

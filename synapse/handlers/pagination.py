@@ -623,6 +623,7 @@ class PaginationHandler:
                 user_id,
                 events,
                 is_peeking=(member_event_id is None),
+                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
         # if after the filter applied there are no more events

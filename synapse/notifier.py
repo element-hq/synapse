@@ -721,6 +721,7 @@ class Notifier:
                         user.to_string(),
                         new_events,
                         is_peeking=is_peeking,
+                        msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
                     )
                 elif keyname == StreamKeyType.PRESENCE:
                     now = self.clock.time_msec()

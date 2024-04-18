@@ -49,7 +49,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.types import JsonDict, Requester
 
-from . import EventBase
+from . import EventBase, make_event_from_dict
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -82,8 +82,6 @@ def prune_event(event: EventBase) -> EventBase:
     """
     pruned_event_dict = prune_event_dict(event.room_version, event.get_dict())
 
-    from . import make_event_from_dict
-
     pruned_event = make_event_from_dict(
         pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
     )
@@ -99,6 +97,25 @@ def prune_event(event: EventBase) -> EventBase:
     pruned_event.internal_metadata.redacted = True
 
     return pruned_event
+
+
+def clone_event(event: EventBase) -> EventBase:
+    """Take a copy of the event.
+
+    This is mostly useful because it does a *shallow* copy of the `unsigned` data,
+    which means it can then be updated without corrupting the in-memory cache.
+    """
+    new_event = make_event_from_dict(
+        event.get_dict(), event.room_version, event.internal_metadata.get_dict()
+    )
+
+    # copy the internal fields
+    new_event.internal_metadata.stream_ordering = (
+        event.internal_metadata.stream_ordering
+    )
+    new_event.internal_metadata.outlier = event.internal_metadata.outlier
+
+    return new_event
 
 
 def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:

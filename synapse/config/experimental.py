@@ -422,3 +422,7 @@ class ExperimentalConfig(Config):
                 "MSC4108 requires MSC3861 to be enabled",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
+
+        self.msc4115_membership_on_events = experimental.get(
+            "msc4115_membership_on_events", False
+        )

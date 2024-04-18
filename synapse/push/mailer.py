@@ -513,7 +513,10 @@ class Mailer:
         }
 
         the_events = await filter_events_for_client(
-            self._storage_controllers, user_id, results.events_before
+            self._storage_controllers,
+            user_id,
+            results.events_before,
+            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
         the_events.append(notif_event)
 
