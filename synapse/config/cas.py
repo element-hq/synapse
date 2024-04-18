@@ -89,7 +89,7 @@ class CasConfig(Config):
             self.cas_required_attributes = []
             self.cas_enable_registration = False
             self.cas_allow_numeric_ids = False
-            self.cas_numeric_ids_prefix = "U"
+            self.cas_numeric_ids_prefix = "u"
 
 
 # CAS uses a legacy required attributes mapping, not the one provided by
