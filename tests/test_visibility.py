@@ -24,10 +24,11 @@ from unittest.mock import patch
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.types import JsonDict, create_requester
+from synapse.server import HomeServer
+from synapse.types import create_requester
 from synapse.visibility import filter_events_for_client, filter_events_for_server
-
 from tests import unittest
+from tests.test_utils.event_injection import inject_event, inject_member_event
 from tests.utils import create_room
 
 logger = logging.getLogger(__name__)
@@ -56,15 +57,31 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         #
 
         # before we do that, we persist some other events to act as state.
-        self._inject_visibility("@admin:hs", "joined")
+        self.get_success(
+            inject_visibility_event(self.hs, TEST_ROOM_ID, "@admin:hs", "joined")
+        )
         for i in range(10):
-            self._inject_room_member("@resident%i:hs" % i)
+            self.get_success(
+                inject_member_event(
+                    self.hs,
+                    TEST_ROOM_ID,
+                    "@resident%i:hs" % i,
+                    "join",
+                )
+            )
 
         events_to_filter = []
 
         for i in range(10):
-            user = "@user%i:%s" % (i, "test_server" if i == 5 else "other_server")
-            evt = self._inject_room_member(user, extra_content={"a": "b"})
+            evt = self.get_success(
+                inject_member_event(
+                    self.hs,
+                    TEST_ROOM_ID,
+                    "@user%i:%s" % (i, "test_server" if i == 5 else "other_server"),
+                    "join",
+                    extra_content={"a": "b"},
+                )
+            )
             events_to_filter.append(evt)
 
         filtered = self.get_success(
@@ -90,8 +107,19 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
 
     def test_filter_outlier(self) -> None:
         # outlier events must be returned, for the good of the collective federation
-        self._inject_room_member("@resident:remote_hs")
-        self._inject_visibility("@resident:remote_hs", "joined")
+        self.get_success(
+            inject_member_event(
+                self.hs,
+                TEST_ROOM_ID,
+                "@resident:remote_hs",
+                "join",
+            )
+        )
+        self.get_success(
+            inject_visibility_event(
+                self.hs, TEST_ROOM_ID, "@resident:remote_hs", "joined"
+            )
+        )
 
         outlier = self._inject_outlier()
         self.assertEqual(
@@ -110,7 +138,9 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         )
 
         # it should also work when there are other events in the list
-        evt = self._inject_message("@unerased:local_hs")
+        evt = self.get_success(
+            inject_message_event(self.hs, TEST_ROOM_ID, "@unerased:local_hs")
+        )
 
         filtered = self.get_success(
             filter_events_for_server(
@@ -150,19 +180,34 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         # change in the middle of them.
         events_to_filter = []
 
-        evt = self._inject_message("@unerased:local_hs")
+        evt = self.get_success(
+            inject_message_event(self.hs, TEST_ROOM_ID, "@unerased:local_hs")
+        )
         events_to_filter.append(evt)
 
-        evt = self._inject_message("@erased:local_hs")
+        evt = self.get_success(
+            inject_message_event(self.hs, TEST_ROOM_ID, "@erased:local_hs")
+        )
         events_to_filter.append(evt)
 
-        evt = self._inject_room_member("@joiner:remote_hs")
+        evt = self.get_success(
+            inject_member_event(
+                self.hs,
+                TEST_ROOM_ID,
+                "@joiner:remote_hs",
+                "join",
+            )
+        )
         events_to_filter.append(evt)
 
-        evt = self._inject_message("@unerased:local_hs")
+        evt = self.get_success(
+            inject_message_event(self.hs, TEST_ROOM_ID, "@unerased:local_hs")
+        )
         events_to_filter.append(evt)
 
-        evt = self._inject_message("@erased:local_hs")
+        evt = self.get_success(
+            inject_message_event(self.hs, TEST_ROOM_ID, "@erased:local_hs")
+        )
         events_to_filter.append(evt)
 
         # the erasey user gets erased
@@ -199,76 +244,6 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
 
         for i in (1, 4):
             self.assertNotIn("body", filtered[i].content)
-
-    def _inject_visibility(self, user_id: str, visibility: str) -> EventBase:
-        content = {"history_visibility": visibility}
-        builder = self.event_builder_factory.for_room_version(
-            RoomVersions.V1,
-            {
-                "type": "m.room.history_visibility",
-                "sender": user_id,
-                "state_key": "",
-                "room_id": TEST_ROOM_ID,
-                "content": content,
-            },
-        )
-
-        event, unpersisted_context = self.get_success(
-            self.event_creation_handler.create_new_client_event(builder)
-        )
-        context = self.get_success(unpersisted_context.persist(event))
-        self.get_success(self._persistence.persist_event(event, context))
-        return event
-
-    def _inject_room_member(
-        self,
-        user_id: str,
-        membership: str = "join",
-        extra_content: Optional[JsonDict] = None,
-    ) -> EventBase:
-        content = {"membership": membership}
-        content.update(extra_content or {})
-        builder = self.event_builder_factory.for_room_version(
-            RoomVersions.V1,
-            {
-                "type": "m.room.member",
-                "sender": user_id,
-                "state_key": user_id,
-                "room_id": TEST_ROOM_ID,
-                "content": content,
-            },
-        )
-
-        event, unpersisted_context = self.get_success(
-            self.event_creation_handler.create_new_client_event(builder)
-        )
-        context = self.get_success(unpersisted_context.persist(event))
-
-        self.get_success(self._persistence.persist_event(event, context))
-        return event
-
-    def _inject_message(
-        self, user_id: str, content: Optional[JsonDict] = None
-    ) -> EventBase:
-        if content is None:
-            content = {"body": "testytest", "msgtype": "m.text"}
-        builder = self.event_builder_factory.for_room_version(
-            RoomVersions.V1,
-            {
-                "type": "m.room.message",
-                "sender": user_id,
-                "room_id": TEST_ROOM_ID,
-                "content": content,
-            },
-        )
-
-        event, unpersisted_context = self.get_success(
-            self.event_creation_handler.create_new_client_event(builder)
-        )
-        context = self.get_success(unpersisted_context.persist(event))
-
-        self.get_success(self._persistence.persist_event(event, context))
-        return event
 
     def _inject_outlier(self) -> EventBase:
         builder = self.event_builder_factory.for_room_version(
@@ -363,3 +338,34 @@ class FilterEventsForClientTestCase(unittest.FederatingHomeserverTestCase):
             ),
             [],
         )
+
+
+async def inject_visibility_event(
+    hs: HomeServer,
+    room_id: str,
+    sender: str,
+    visibility: str,
+) -> EventBase:
+    return await inject_event(
+        hs,
+        type="m.room.history_visibility",
+        sender=sender,
+        state_key="",
+        room_id=room_id,
+        content={"history_visibility": visibility},
+    )
+
+
+async def inject_message_event(
+    hs: HomeServer,
+    room_id: str,
+    sender: str,
+    body: Optional[str] = "testytest",
+) -> EventBase:
+    return await inject_event(
+        hs,
+        type="m.room.message",
+        sender=sender,
+        room_id=room_id,
+        content={"body": body, "msgtype": "m.text"},
+    )
