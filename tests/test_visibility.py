@@ -24,11 +24,14 @@ from unittest.mock import patch
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
+from synapse.rest import admin
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.types import create_requester
 from synapse.visibility import filter_events_for_client, filter_events_for_server
 from tests import unittest
 from tests.test_utils.event_injection import inject_event, inject_member_event
+from tests.unittest import HomeserverTestCase
 from tests.utils import create_room
 
 logger = logging.getLogger(__name__)
@@ -267,7 +270,75 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         return event
 
 
-class FilterEventsForClientTestCase(unittest.FederatingHomeserverTestCase):
+class FilterEventsForClientTestCase(HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_joined_history_visibility(self) -> None:
+        # User joins and leaves room. Should be able to seem the join and leave,
+        # and messages sent between the two, but not before or after.
+
+        self.register_user("resident", "p1")
+        resident_token = self.login("resident", "p1")
+        room_id = self.helper.create_room_as("resident", tok=resident_token)
+
+        self.get_success(
+            inject_visibility_event(self.hs, room_id, "@resident:hs", "joined")
+        )
+        before_event = self.get_success(
+            inject_message_event(self.hs, room_id, "@resident:hs", body="before")
+        )
+        join_event = self.get_success(
+            inject_member_event(self.hs, room_id, "@joiner:hs", "join")
+        )
+        during_event = self.get_success(
+            inject_message_event(self.hs, room_id, "@resident:hs", body="during")
+        )
+        leave_event = self.get_success(
+            inject_member_event(self.hs, room_id, "@joiner:hs", "leave")
+        )
+        after_event = self.get_success(
+            inject_message_event(self.hs, room_id, "@resident:hs", body="after")
+        )
+
+        # We have to reload the events from the db, to ensure that prev_content is
+        # populated.
+        events_to_filter = [
+            self.get_success(
+                self.hs.get_storage_controllers().main.get_event(
+                    e.event_id,
+                    get_prev_content=True,
+                )
+            )
+            for e in [
+                before_event,
+                join_event,
+                during_event,
+                leave_event,
+                after_event,
+            ]
+        ]
+
+        filtered_events = self.get_success(
+            filter_events_for_client(
+                self.hs.get_storage_controllers(),
+                "@joiner:hs",
+                events_to_filter,
+            )
+        )
+
+        self.assertEqual(
+            [e.event_id for e in [join_event, during_event, leave_event]],
+            [e.event_id for e in filtered_events],
+        )
+
+
+class FilterEventsOutOfBandEventsForClientTestCase(
+    unittest.FederatingHomeserverTestCase
+):
     def test_out_of_band_invite_rejection(self) -> None:
         # this is where we have received an invite event over federation, and then
         # rejected it.
