@@ -396,9 +396,13 @@ def _check_client_allowed_to_see_event(
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _CheckMembershipReturn:
-    "Return value of _check_membership"
+    """Return value of _check_membership"""
+
     allowed: bool
+    """Whether the user should be allowed to see the event"""
+
     joined: bool
+    """Whether the user was joined at the event"""
 
 
 def _check_membership(
@@ -409,10 +413,6 @@ def _check_membership(
     is_peeking: bool,
 ) -> _CheckMembershipReturn:
     """Check whether the user can see the event due to their membership
-
-    Returns:
-        True if they can, False if they can't, plus the membership of the user
-        at the event.
     """
     # If the event is the user's own membership event, use the 'most joined'
     # membership
@@ -435,7 +435,7 @@ def _check_membership(
         if membership == "leave" and (
             prev_membership == "join" or prev_membership == "invite"
         ):
-            return _CheckMembershipReturn(True, membership == Membership.JOIN)
+            return _CheckMembershipReturn(True, False)
 
         new_priority = MEMBERSHIP_PRIORITY.index(membership)
         old_priority = MEMBERSHIP_PRIORITY.index(prev_membership)
