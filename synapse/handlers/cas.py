@@ -191,7 +191,11 @@ class CasHandler:
             if child.tag.endswith("user"):
                 user = child.text
                 # if numeric user IDs are allowed and username is numeric then we add the prefix so Synapse can handle it
-                if self._cas_allow_numeric_ids is True and user.isdigit():
+                if (
+                    self._cas_allow_numeric_ids
+                    and user is not None
+                    and user.isdigit()
+                ):
                     user = f"{self._cas_numeric_ids_prefix}{user}"
             if child.tag.endswith("attributes"):
                 for attribute in child:
