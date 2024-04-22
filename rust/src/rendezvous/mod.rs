@@ -255,7 +255,7 @@ impl RendezvousHandler {
                 StatusCode::PRECONDITION_FAILED,
                 "ETag does not match".to_owned(),
                 "M_UNKNOWN", // Would be M_CONCURRENT_WRITE
-                Option::from(additional_fields),
+                Some(additional_fields),
                 Some(headers),
             ));
         }

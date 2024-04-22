@@ -20,7 +20,7 @@ class RendezvousHandler:
         homeserver: HomeServer,
         /,
         capacity: int = 100,
-        max_content_length: int = 4 * 1024,  # the MSC specifies 4KB
+        max_content_length: int = 4 * 1024,  # MSC4108 specifies 4KB
         eviction_interval: int = 60 * 1000,
         ttl: int = 60 * 1000,
     ) -> None: ...
