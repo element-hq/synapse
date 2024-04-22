@@ -270,8 +270,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.text_body, "foo=bar")
 
-        # Advance the clock, TTL of entries is 5 minutes
-        self.reactor.advance(300)
+        # Advance the clock, TTL of entries is 1 minute
+        self.reactor.advance(60)
 
         # Get the data back, it should be gone
         channel = self.make_request(
