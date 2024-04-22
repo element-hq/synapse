@@ -3051,14 +3051,17 @@ twisted = "*"
 
 [[package]]
 name = "types-bleach"
-version = "6.1.0.1"
+version = "6.1.0.20240331"
 description = "Typing stubs for bleach"
 optional = false
-python-versions = ">=3.7"
+python-versions = ">=3.8"
 files = [
-    {file = "types-bleach-6.1.0.1.tar.gz", hash = "sha256:1e43c437e734a90efe4f40ebfe831057599568d3b275939ffbd6094848a18a27"},
-    {file = "types_bleach-6.1.0.1-py3-none-any.whl", hash = "sha256:f83f80e0709f13d809a9c79b958a1089df9b99e68059287beb196e38967e4ddf"},
+    {file = "types-bleach-6.1.0.20240331.tar.gz", hash = "sha256:2ee858a84fb06fc2225ff56ba2f7f6c88b65638659efae0d7bfd6b24a1b5a524"},
+    {file = "types_bleach-6.1.0.20240331-py3-none-any.whl", hash = "sha256:399bc59bfd20a36a56595f13f805e56c8a08e5a5c07903e5cf6fafb5a5107dd4"},
 ]
+
+[package.dependencies]
+types-html5lib = "*"
 
 [[package]]
 name = "types-commonmark"
@@ -3069,6 +3072,17 @@ python-versions = ">=3.8"
 files = [
     {file = "types-commonmark-0.9.2.20240106.tar.gz", hash = "sha256:52a062b71766d6ab258fca2d8e19fb0853796e25ca9afa9d0f67a1e42c93479f"},
     {file = "types_commonmark-0.9.2.20240106-py3-none-any.whl", hash = "sha256:606d9de1e3a96cab0b1c0b6cccf4df099116148d1d864d115fde2e27ad6877c3"},
+]
+
+[[package]]
+name = "types-html5lib"
+version = "1.1.11.20240228"
+description = "Typing stubs for html5lib"
+optional = false
+python-versions = ">=3.8"
+files = [
+    {file = "types-html5lib-1.1.11.20240228.tar.gz", hash = "sha256:22736b7299e605ec4ba539d48691e905fd0c61c3ea610acc59922232dc84cede"},
+    {file = "types_html5lib-1.1.11.20240228-py3-none-any.whl", hash = "sha256:af5de0125cb0fe5667543b158db83849b22e25c0e36c9149836b095548bf1020"},
 ]
 
 [[package]]
