@@ -95,7 +95,7 @@ impl RendezvousHandler {
 #[pymethods]
 impl RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=1024*1024, eviction_interval=60*1000, ttl=60*1000))]
+    #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=60*1000))]
     fn new(
         py: Python<'_>,
         homeserver: &PyAny,
