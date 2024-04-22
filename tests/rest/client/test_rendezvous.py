@@ -196,7 +196,9 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 412)
         self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
-        self.assertEqual(channel.json_body["org.matrix.msc4108.errcode"], "M_CONCURRENT_WRITE")
+        self.assertEqual(
+            channel.json_body["org.matrix.msc4108.errcode"], "M_CONCURRENT_WRITE"
+        )
 
         # If we try to get with the old etag, we should get the updated data
         channel = self.make_request(
