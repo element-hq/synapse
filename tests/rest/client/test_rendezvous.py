@@ -388,6 +388,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 201)
         session_endpoint = urlparse(channel.json_body["url"]).path
+        # We advance the clock to make sure that this entry is the "lowest" in the session list
+        self.reactor.advance(1)
 
         # Sanity check that we can get the data back
         channel = self.make_request(
