@@ -2585,13 +2585,13 @@ testing-integration = ["build[virtualenv]", "filelock (>=3.4.0)", "jaraco.envs (
 
 [[package]]
 name = "setuptools-rust"
-version = "1.8.1"
+version = "1.9.0"
 description = "Setuptools Rust extension plugin"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "setuptools-rust-1.8.1.tar.gz", hash = "sha256:94b1dd5d5308b3138d5b933c3a2b55e6d6927d1a22632e509fcea9ddd0f7e486"},
-    {file = "setuptools_rust-1.8.1-py3-none-any.whl", hash = "sha256:b5324493949ccd6aa0c03890c5f6b5f02de4512e3ac1697d02e9a6c02b18aa8e"},
+    {file = "setuptools-rust-1.9.0.tar.gz", hash = "sha256:704df0948f2e4cc60c2596ad6e840ea679f4f43e58ed4ad0c1857807240eab96"},
+    {file = "setuptools_rust-1.9.0-py3-none-any.whl", hash = "sha256:409caf49dcf7ad9bd510b4bf4011fbad504e745fae98f57fe1c06f3a97719638"},
 ]
 
 [package.dependencies]
