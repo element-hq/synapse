@@ -1,3 +1,17 @@
+# Synapse 1.105.1 (2024-04-23)
+
+## Security advisory
+
+The following issues are fixed in 1.105.1.
+
+- [GHSA-3h7q-rfh9-xm4v](https://github.com/element-hq/synapse/security/advisories/GHSA-3h7q-rfh9-xm4v) / [CVE-2024-31208](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-31208) — High Severity
+
+  Weakness in auth chain indexing allows DoS from remote room members through disk fill and high CPU usage.
+
+See the advisories for more details. If you have any questions, email security@element.io.
+
+
+
 # Synapse 1.105.0 (2024-04-16)
 
 No significant changes since 1.105.0rc1.
