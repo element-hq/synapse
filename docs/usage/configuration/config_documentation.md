@@ -676,8 +676,8 @@ This setting has the following sub-options:
     trailing 's'.
 * `app_name`: `app_name` defines the default value for '%(app)s' in `notif_from` and email
    subjects. It defaults to 'Matrix'.
-* `enable_notifs`: Set to true to enable sending emails for messages that the user
-   has missed. Disabled by default.
+* `enable_notifs`: Set to true to allow users to receive e-mail notifications. If this is not set,
+    users can configure e-mail notifications but will not receive them. Disabled by default.
 * `notif_for_new_users`: Set to false to disable automatic subscription to email
    notifications for new users. Enabled by default.
 * `notif_delay_before_mail`: The time to wait before emailing about a notification.
