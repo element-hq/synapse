@@ -276,8 +276,12 @@ fi
 export PASS_SYNAPSE_LOG_TESTING=1
 
 # Run the tests!
-test_packages=$(find tests -type d)
-echo "Images built; running complement with ${extra_test_args[@]} $@ $test_packages"
 cd "$COMPLEMENT_DIR"
 
-go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" $test_packages
+# This isn't whitespace-safe but *does* work on the prehistoric version of bash
+# on OSX.
+test_packages=( $(find ./tests -type d) )
+
+echo "Images built; running complement with ${extra_test_args[@]} $@ ${test_packages[@]}"
+
+go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" "${test_packages[@]}"
