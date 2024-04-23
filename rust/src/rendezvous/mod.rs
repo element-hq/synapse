@@ -14,7 +14,7 @@
  */
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     time::{Duration, SystemTime},
 };
 
@@ -57,6 +57,7 @@ struct RendezvousHandler {
     sessions: BTreeMap<Ulid, Session>,
     capacity: usize,
     max_content_length: u64,
+    ttl: Duration,
 }
 
 impl RendezvousHandler {
@@ -94,13 +95,14 @@ impl RendezvousHandler {
 #[pymethods]
 impl RendezvousHandler {
     #[new]
-    #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=1024*1024, eviction_interval=60*1000))]
+    #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=60*1000))]
     fn new(
         py: Python<'_>,
         homeserver: &PyAny,
         capacity: usize,
         max_content_length: u64,
         eviction_interval: u64,
+        ttl: u64,
     ) -> PyResult<Py<Self>> {
         let base: String = homeserver
             .getattr("config")?
@@ -122,6 +124,7 @@ impl RendezvousHandler {
                 sessions: BTreeMap::new(),
                 capacity,
                 max_content_length,
+                ttl: Duration::from_millis(ttl),
             },
         )?;
 
@@ -165,7 +168,7 @@ impl RendezvousHandler {
 
         let body = request.into_body();
 
-        let session = Session::new(body, content_type, now, Duration::from_secs(5 * 60));
+        let session = Session::new(body, content_type, now, self.ttl);
 
         let response = serde_json::json!({
             "url": uri,
@@ -242,11 +245,17 @@ impl RendezvousHandler {
             let mut headers = HeaderMap::new();
             prepare_headers(&mut headers, session);
 
+            let mut additional_fields = HashMap::with_capacity(1);
+            additional_fields.insert(
+                String::from("org.matrix.msc4108.errcode"),
+                String::from("M_CONCURRENT_WRITE"),
+            );
+
             return Err(SynapseError::new(
                 StatusCode::PRECONDITION_FAILED,
                 "ETag does not match".to_owned(),
-                "M_CONCURRENT_WRITE",
-                None,
+                "M_UNKNOWN", // Would be M_CONCURRENT_WRITE
+                Some(additional_fields),
                 Some(headers),
             ));
         }

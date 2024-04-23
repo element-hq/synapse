@@ -195,7 +195,10 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 412)
-        self.assertEqual(channel.json_body["errcode"], "M_CONCURRENT_WRITE")
+        self.assertEqual(channel.json_body["errcode"], "M_UNKNOWN")
+        self.assertEqual(
+            channel.json_body["org.matrix.msc4108.errcode"], "M_CONCURRENT_WRITE"
+        )
 
         # If we try to get with the old etag, we should get the updated data
         channel = self.make_request(
@@ -270,8 +273,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.text_body, "foo=bar")
 
-        # Advance the clock, TTL of entries is 5 minutes
-        self.reactor.advance(300)
+        # Advance the clock, TTL of entries is 1 minute
+        self.reactor.advance(60)
 
         # Get the data back, it should be gone
         channel = self.make_request(
@@ -385,6 +388,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 201)
         session_endpoint = urlparse(channel.json_body["url"]).path
+        # We advance the clock to make sure that this entry is the "lowest" in the session list
+        self.reactor.advance(1)
 
         # Sanity check that we can get the data back
         channel = self.make_request(
