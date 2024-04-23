@@ -409,7 +409,18 @@ class SigningKeyUploadServlet(RestServlet):
             # But first-time setup is fine
 
         elif self.hs.config.experimental.msc3967_enabled:
-            # If we already have a master key then cross signing is set up and we require UIA to reset
+            # MSC3967 allows this endpoint to 200 OK for idempotency. Resending exactly the same
+            # keys should just 200 OK without doing a UIA prompt.
+            keys_are_different = await self.e2e_keys_handler.has_different_keys(
+                user_id, body
+            )
+            if not keys_are_different:
+                # FIXME: we do not fallthrough to upload_signing_keys_for_user because confusingly
+                # if we do, we 500 as it looks like it tries to INSERT the same key twice, causing a
+                # unique key constraint violation. This sounds like a bug?
+                return 200, {}
+            # the keys are different, is x-signing set up? If no, then the keys don't exist which is
+            # why they are different. If yes, then we need to UIA to change them.
             if is_cross_signing_setup:
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
@@ -420,7 +431,6 @@ class SigningKeyUploadServlet(RestServlet):
                     can_skip_ui_auth=False,
                 )
             # Otherwise we don't require UIA since we are setting up cross signing for first time
-
         else:
             # Previous behaviour is to always require UIA but allow it to be skipped
             await self.auth_handler.validate_user_via_ui_auth(

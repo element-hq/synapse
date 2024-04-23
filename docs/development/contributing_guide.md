@@ -68,7 +68,7 @@ Of their installation methods, we recommend
 
 ```shell
 pip install --user pipx
-pipx install poetry==1.5.1  # Problems with Poetry 1.6, see https://github.com/matrix-org/synapse/issues/16147
+pipx install poetry
 ```
 
 but see poetry's [installation instructions](https://python-poetry.org/docs/#installation)
@@ -85,6 +85,8 @@ poetry install --extras all
 
 This will install the runtime and developer dependencies for the project.  Be sure to check
 that the `poetry install` step completed cleanly.
+
+For OSX users, be sure to set `PKG_CONFIG_PATH` to support `icu4c`. Run `brew info icu4c` for more details.
 
 ## Running Synapse via poetry
 

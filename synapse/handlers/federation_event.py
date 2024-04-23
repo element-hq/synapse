@@ -1367,9 +1367,9 @@ class FederationEventHandler:
             )
 
         if remote_event.is_state() and remote_event.rejected_reason is None:
-            state_map[
-                (remote_event.type, remote_event.state_key)
-            ] = remote_event.event_id
+            state_map[(remote_event.type, remote_event.state_key)] = (
+                remote_event.event_id
+            )
 
         return state_map
 

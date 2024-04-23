@@ -580,8 +580,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Optional[VT]:
-            ...
+        ) -> Optional[VT]: ...
 
         @overload
         def cache_get(
@@ -590,8 +589,7 @@ class LruCache(Generic[KT, VT]):
             callbacks: Collection[Callable[[], None]] = ...,
             update_metrics: bool = ...,
             update_last_access: bool = ...,
-        ) -> Union[T, VT]:
-            ...
+        ) -> Union[T, VT]: ...
 
         @synchronized
         def cache_get(
@@ -634,16 +632,14 @@ class LruCache(Generic[KT, VT]):
             key: tuple,
             default: Literal[None] = None,
             update_metrics: bool = True,
-        ) -> Union[None, Iterable[Tuple[KT, VT]]]:
-            ...
+        ) -> Union[None, Iterable[Tuple[KT, VT]]]: ...
 
         @overload
         def cache_get_multi(
             key: tuple,
             default: T,
             update_metrics: bool = True,
-        ) -> Union[T, Iterable[Tuple[KT, VT]]]:
-            ...
+        ) -> Union[T, Iterable[Tuple[KT, VT]]]: ...
 
         @synchronized
         def cache_get_multi(
@@ -728,12 +724,10 @@ class LruCache(Generic[KT, VT]):
                 return value
 
         @overload
-        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]:
-            ...
+        def cache_pop(key: KT, default: Literal[None] = None) -> Optional[VT]: ...
 
         @overload
-        def cache_pop(key: KT, default: T) -> Union[T, VT]:
-            ...
+        def cache_pop(key: KT, default: T) -> Union[T, VT]: ...
 
         @synchronized
         def cache_pop(key: KT, default: Optional[T] = None) -> Union[None, T, VT]:

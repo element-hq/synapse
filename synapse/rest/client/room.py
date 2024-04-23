@@ -52,6 +52,7 @@ from synapse.http.servlet import (
     parse_boolean,
     parse_enum,
     parse_integer,
+    parse_json,
     parse_json_object_from_request,
     parse_string,
     parse_strings_from_args,
@@ -65,7 +66,6 @@ from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder
 from synapse.util.cancellation import cancellable
 from synapse.util.stringutils import parse_and_validate_server_name, random_string
 
@@ -499,7 +499,7 @@ class PublicRoomListRestServlet(RestServlet):
             if server:
                 raise e
 
-        limit: Optional[int] = parse_integer(request, "limit", 0)
+        limit: Optional[int] = parse_integer(request, "limit", 0, negative=False)
         since_token = parse_string(request, "since")
 
         if limit == 0:
@@ -703,21 +703,16 @@ class RoomMessageListRestServlet(RestServlet):
         )
         # Twisted will have processed the args by now.
         assert request.args is not None
+
+        filter_json = parse_json(request, "filter", encoding="utf-8")
+        event_filter = Filter(self._hs, filter_json) if filter_json else None
+
         as_client_event = b"raw" not in request.args
-        filter_str = parse_string(request, "filter", encoding="utf-8")
-        if filter_str:
-            filter_json = urlparse.unquote(filter_str)
-            event_filter: Optional[Filter] = Filter(
-                self._hs, json_decoder.decode(filter_json)
-            )
-            if (
-                event_filter
-                and event_filter.filter_json.get("event_format", "client")
-                == "federation"
-            ):
-                as_client_event = False
-        else:
-            event_filter = None
+        if (
+            event_filter
+            and event_filter.filter_json.get("event_format", "client") == "federation"
+        ):
+            as_client_event = False
 
         msgs = await self.pagination_handler.get_messages(
             room_id=room_id,
@@ -898,14 +893,8 @@ class RoomEventContextServlet(RestServlet):
         limit = parse_integer(request, "limit", default=10)
 
         # picking the API shape for symmetry with /messages
-        filter_str = parse_string(request, "filter", encoding="utf-8")
-        if filter_str:
-            filter_json = urlparse.unquote(filter_str)
-            event_filter: Optional[Filter] = Filter(
-                self._hs, json_decoder.decode(filter_json)
-            )
-        else:
-            event_filter = None
+        filter_json = parse_json(request, "filter", encoding="utf-8")
+        event_filter = Filter(self._hs, filter_json) if filter_json else None
 
         event_context = await self.room_context_handler.get_event_context(
             requester, room_id, event_id, limit, event_filter

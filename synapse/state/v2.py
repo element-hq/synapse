@@ -52,8 +52,7 @@ class Clock(Protocol):
     # This is usually synapse.util.Clock, but it's replaced with a FakeClock in tests.
     # We only ever sleep(0) though, so that other async functions can make forward
     # progress without waiting for stateres to complete.
-    def sleep(self, duration_ms: float) -> Awaitable[None]:
-        ...
+    def sleep(self, duration_ms: float) -> Awaitable[None]: ...
 
 
 class StateResolutionStore(Protocol):
@@ -61,13 +60,11 @@ class StateResolutionStore(Protocol):
     # TestStateResolutionStore in tests.
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
-    ) -> Awaitable[Dict[str, EventBase]]:
-        ...
+    ) -> Awaitable[Dict[str, EventBase]]: ...
 
     def get_auth_chain_difference(
         self, room_id: str, state_sets: List[Set[str]]
-    ) -> Awaitable[Set[str]]:
-        ...
+    ) -> Awaitable[Set[str]]: ...
 
 
 # We want to await to the reactor occasionally during state res when dealing
@@ -742,8 +739,7 @@ async def _get_event(
     event_map: Dict[str, EventBase],
     state_res_store: StateResolutionStore,
     allow_none: Literal[False] = False,
-) -> EventBase:
-    ...
+) -> EventBase: ...
 
 
 @overload
@@ -753,8 +749,7 @@ async def _get_event(
     event_map: Dict[str, EventBase],
     state_res_store: StateResolutionStore,
     allow_none: Literal[True],
-) -> Optional[EventBase]:
-    ...
+) -> Optional[EventBase]: ...
 
 
 async def _get_event(

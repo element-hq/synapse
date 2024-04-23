@@ -136,12 +136,12 @@ class TaskSchedulerWorkerStore(SQLBaseStore):
                 "status": task.status,
                 "timestamp": task.timestamp,
                 "resource_id": task.resource_id,
-                "params": None
-                if task.params is None
-                else json_encoder.encode(task.params),
-                "result": None
-                if task.result is None
-                else json_encoder.encode(task.result),
+                "params": (
+                    None if task.params is None else json_encoder.encode(task.params)
+                ),
+                "result": (
+                    None if task.result is None else json_encoder.encode(task.result)
+                ),
                 "error": task.error,
             },
             desc="insert_scheduled_task",

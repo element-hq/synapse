@@ -205,3 +205,12 @@ SELECT user_id, device_id, user_agent, TO_TIMESTAMP(last_seen / 1000) AS "last_s
   FROM devices
   WHERE last_seen < DATE_PART('epoch', NOW() - INTERVAL '3 month') * 1000;
 ```
+
+## Clear the cache of a remote user's device list
+
+Forces the resync of a remote user's device list - if you have somehow cached a bad state, and the remote server is
+will not send out a device list update.
+```sql
+INSERT INTO device_lists_remote_resync
+VALUES ('USER_ID', (EXTRACT(epoch FROM NOW()) * 1000)::BIGINT);
+```
