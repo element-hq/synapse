@@ -98,6 +98,7 @@ A custom mapping provider must specify the following methods:
         either accept this localpart or pick their own username. Otherwise this
         option has no effect. If omitted, defaults to `False`.
       - `display_name`: An optional string, the display name for the user.
+      - `picture`: An optional string, the avatar url for the user.
       - `emails`: A list of strings, the email address(es) to associate with
         this user. If omitted, defaults to an empty list.
 * `async def get_extra_attributes(self, userinfo, token)`
