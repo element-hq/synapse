@@ -1476,6 +1476,42 @@ class E2eKeysHandler:
         else:
             return exists, self.clock.time_msec() < ts_replacable_without_uia_before
 
+    async def has_different_keys(self, user_id: str, body: JsonDict) -> bool:
+        """
+        Check if a key provided in `body` differs from the same key stored in the DB. Returns
+        true on the first difference. If a key exists in `body` but does not exist in the DB,
+        returns True. If `body` has no keys, this always returns False.
+        Note by 'key' we mean Matrix key rather than JSON key.
+
+        The purpose of this function is to detect whether or not we need to apply UIA checks.
+        We must apply UIA checks if any key in the database is being overwritten. If a key is
+        being inserted for the first time, or if the key exactly matches what is in the database,
+        then no UIA check needs to be performed.
+
+        Args:
+            user_id: The user who sent the `body`.
+            body: The JSON request body from POST /keys/device_signing/upload
+        Returns:
+            True if any key in `body` has a different value in the database.
+        """
+        # Ensure that each key provided in the request body exactly matches the one we have stored.
+        # The first time we see the DB having a different key to the matching request key, bail.
+        # Note: we do not care if the DB has a key which the request does not specify, as we only
+        # care about *replacements* or *insertions* (i.e UPSERT)
+        req_body_key_to_db_key = {
+            "master_key": "master",
+            "self_signing_key": "self_signing",
+            "user_signing_key": "user_signing",
+        }
+        for req_body_key, db_key in req_body_key_to_db_key.items():
+            if req_body_key in body:
+                existing_key = await self.store.get_e2e_cross_signing_key(
+                    user_id, db_key
+                )
+                if existing_key != body[req_body_key]:
+                    return True
+        return False
+
 
 def _check_cross_signing_key(
     key: JsonDict, user_id: str, key_type: str, signing_key: Optional[VerifyKey] = None
