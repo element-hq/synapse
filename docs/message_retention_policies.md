@@ -7,8 +7,10 @@ follow the semantics described in
 and allow server and room admins to configure how long messages should
 be kept in a homeserver's database before being purged from it.
 **Please note that, as this feature isn't part of the Matrix
-specification yet, this implementation is to be considered as
-experimental.**
+specification yet, the use of `m.room.retention` events for per-room
+retention policies is to be considered as experimental. However, the use
+of a default message retention policy is considered a stable feature
+in Synapse.**
 
 A message retention policy is mainly defined by its `max_lifetime`
 parameter, which defines how long a message can be kept around after
