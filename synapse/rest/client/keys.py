@@ -401,9 +401,11 @@ class SigningKeyUploadServlet(RestServlet):
             # The auth service has to explicitly mark the master key as replaceable
             # without UIA to reset the device signing key with MSC3861.
             if is_cross_signing_setup and not master_key_updatable_without_uia:
+                url = self.hs.config.experimental.msc3861.account_management_url
                 raise SynapseError(
                     HTTPStatus.NOT_IMPLEMENTED,
-                    "Resetting cross signing keys is not yet supported with MSC3861",
+                    "Resetting cross signing keys with MSC3861 requires manual "
+                    f"approval at {url}?action=org.matrix.cross_signing_reset",
                     Codes.UNRECOGNIZED,
                 )
             # But first-time setup is fine
