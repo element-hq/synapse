@@ -118,8 +118,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "POST",
             msc4108_endpoint,
             "foo=bar",
-            # This sets the content type to application/x-www-form-urlencoded
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
         )
         self.assertEqual(channel.code, 201)
@@ -150,9 +149,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         headers = dict(channel.headers.getAllRawHeaders())
         self.assertEqual(headers[b"ETag"], [etag])
         self.assertIn(b"Expires", headers)
-        self.assertEqual(
-            headers[b"Content-Type"], [b"application/x-www-form-urlencoded"]
-        )
+        self.assertEqual(headers[b"Content-Type"], [b"text/plain"])
         self.assertEqual(headers[b"Access-Control-Allow-Origin"], [b"*"])
         self.assertEqual(headers[b"Access-Control-Expose-Headers"], [b"etag"])
         self.assertEqual(headers[b"Cache-Control"], [b"no-store"])
@@ -174,7 +171,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "PUT",
             session_endpoint,
             "foo=baz",
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
             custom_headers=[("If-Match", etag)],
         )
@@ -189,7 +186,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "PUT",
             session_endpoint,
             "bar=baz",
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
             custom_headers=[("If-Match", old_etag)],
         )
@@ -258,7 +255,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "POST",
             msc4108_endpoint,
             "foo=bar",
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
         )
         self.assertEqual(channel.code, 201)
@@ -311,7 +308,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "POST",
             msc4108_endpoint,
             "foo=bar",
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
         )
         self.assertEqual(channel.code, 201)
@@ -332,7 +329,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "POST",
                 msc4108_endpoint,
                 "foo=bar",
-                content_is_form=True,
+                content_type=b"text/plain",
                 access_token=None,
             )
             self.assertEqual(channel.code, 201)
@@ -383,7 +380,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
             "POST",
             msc4108_endpoint,
             "foo=bar",
-            content_is_form=True,
+            content_type=b"text/plain",
             access_token=None,
         )
         self.assertEqual(channel.code, 201)
@@ -406,7 +403,7 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
                 "POST",
                 msc4108_endpoint,
                 "foo=bar",
-                content_is_form=True,
+                content_type=b"text/plain",
                 access_token=None,
             )
             self.assertEqual(channel.code, 201)
@@ -419,3 +416,61 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         )
 
         self.assertEqual(channel.code, 404)
+
+    @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
+    @override_config(
+        {
+            "disable_registration": True,
+            "experimental_features": {
+                "msc4108_enabled": True,
+                "msc3861": {
+                    "enabled": True,
+                    "issuer": "https://issuer",
+                    "client_id": "client_id",
+                    "client_auth_method": "client_secret_post",
+                    "client_secret": "client_secret",
+                    "admin_token": "admin_token_value",
+                },
+            },
+        }
+    )
+    def test_msc4108_content_type(self) -> None:
+        """
+        Test that the content-type is restricted to text/plain.
+        """
+        # We cannot post invalid content-type arbitrary data to the endpoint
+        channel = self.make_request(
+            "POST",
+            msc4108_endpoint,
+            "foo=bar",
+            content_is_form=True,
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")
+
+        # Make a valid request
+        channel = self.make_request(
+            "POST",
+            msc4108_endpoint,
+            "foo=bar",
+            content_type=b"text/plain",
+            access_token=None,
+        )
+        self.assertEqual(channel.code, 201)
+        url = urlparse(channel.json_body["url"])
+        session_endpoint = url.path
+        headers = dict(channel.headers.getAllRawHeaders())
+        etag = headers[b"ETag"][0]
+
+        # We can't update the data with invalid content-type
+        channel = self.make_request(
+            "PUT",
+            session_endpoint,
+            "foo=baz",
+            content_is_form=True,
+            access_token=None,
+            custom_headers=[("If-Match", etag)],
+        )
+        self.assertEqual(channel.code, 400)
+        self.assertEqual(channel.json_body["errcode"], "M_INVALID_PARAM")

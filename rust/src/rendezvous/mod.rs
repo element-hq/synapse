@@ -77,6 +77,17 @@ impl RendezvousHandler {
 
         let content_type: ContentType = headers.typed_get_required()?;
 
+        // Content-Type must be text/plain
+        if content_type != ContentType::text() {
+            return Err(SynapseError::new(
+                StatusCode::BAD_REQUEST,
+                "Content-Type must be text/plain".to_owned(),
+                "M_INVALID_PARAM",
+                None,
+                None,
+            ));
+        }
+
         Ok(content_type.into())
     }
 
