@@ -2454,7 +2454,7 @@ class _LinkMap:
             return target_seq <= src_seq
 
         # We have to graph traverse the links to check for indirect paths.
-        visited_chains = collections.Counter()
+        visited_chains: Dict[int, int] = collections.Counter()
         search = [(src_chain, src_seq)]
         while search:
             chain, seq = search.pop()
