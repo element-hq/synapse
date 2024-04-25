@@ -3,7 +3,9 @@ use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
 
 pub mod acl;
+pub mod errors;
 pub mod events;
+pub mod http;
 pub mod push;
 
 lazy_static! {

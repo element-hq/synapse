@@ -63,7 +63,7 @@ from .openid import OpenIdStore
 from .presence import PresenceStore
 from .profile import ProfileStore
 from .purge_events import PurgeEventsStore
-from .push_rule import PushRuleStore
+from .push_rule import PushRulesWorkerStore
 from .pusher import PusherStore
 from .receipts import ReceiptsStore
 from .registration import RegistrationStore
@@ -130,7 +130,6 @@ class DataStore(
     RejectionsStore,
     FilteringWorkerStore,
     PusherStore,
-    PushRuleStore,
     ApplicationServiceTransactionStore,
     EventPushActionsStore,
     ServerMetricsStore,
@@ -140,6 +139,7 @@ class DataStore(
     SearchStore,
     TagsStore,
     AccountDataStore,
+    PushRulesWorkerStore,
     StreamWorkerStore,
     OpenIdStore,
     ClientIpWorkerStore,
@@ -176,7 +176,7 @@ class DataStore(
         user_id: Optional[str] = None,
         name: Optional[str] = None,
         guests: bool = True,
-        deactivated: bool = False,
+        deactivated: Optional[bool] = None,
         admins: Optional[bool] = None,
         order_by: str = UserSortOrder.NAME.value,
         direction: Direction = Direction.FORWARDS,
@@ -232,8 +232,11 @@ class DataStore(
             if not guests:
                 filters.append("is_guest = 0")
 
-            if not deactivated:
-                filters.append("deactivated = 0")
+            if deactivated is not None:
+                if deactivated:
+                    filters.append("deactivated = 1")
+                else:
+                    filters.append("deactivated = 0")
 
             if not locked:
                 filters.append("locked IS FALSE")

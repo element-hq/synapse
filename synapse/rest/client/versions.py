@@ -132,13 +132,17 @@ class VersionsRestServlet(RestServlet):
                     # Adds support for relation-based redactions as per MSC3912.
                     "org.matrix.msc3912": self.config.experimental.msc3912_enabled,
                     # Whether recursively provide relations is supported.
-                    "org.matrix.msc3981": self.config.experimental.msc3981_recurse_relations,
+                    # TODO This is no longer needed once unstable MSC3981 does not need to be supported.
+                    "org.matrix.msc3981": True,
                     # Adds support for deleting account data.
                     "org.matrix.msc3391": self.config.experimental.msc3391_enabled,
                     # Allows clients to inhibit profile update propagation.
                     "org.matrix.msc4069": self.config.experimental.msc4069_profile_inhibit_propagation,
                     # Allows clients to handle push for encrypted events.
                     "org.matrix.msc4028": self.config.experimental.msc4028_push_encrypted_events,
+                    # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+                    "org.matrix.msc4108": self.config.experimental.msc4108_delegation_endpoint
+                    is not None,
                 },
             },
         )

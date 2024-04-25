@@ -178,14 +178,13 @@ class ReceiptsWorkerStore(SQLBaseStore):
         )
 
         sql = f"""
-            SELECT event_id, stream_ordering
+            SELECT event_id, event_stream_ordering
             FROM receipts_linearized
-            INNER JOIN events USING (room_id, event_id)
             WHERE {clause}
             AND user_id = ?
             AND room_id = ?
             AND thread_id IS NULL
-            ORDER BY stream_ordering DESC
+            ORDER BY event_stream_ordering DESC
             LIMIT 1
         """
 
@@ -394,9 +393,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
         content: JsonDict = {}
         for receipt_type, user_id, event_id, data in rows:
-            content.setdefault(event_id, {}).setdefault(receipt_type, {})[
-                user_id
-            ] = db_to_json(data)
+            content.setdefault(event_id, {}).setdefault(receipt_type, {})[user_id] = (
+                db_to_json(data)
+            )
 
         return [{"type": EduTypes.RECEIPT, "room_id": room_id, "content": content}]
 
@@ -483,9 +482,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
             if user_id in receipt_type_dict:  # existing receipt
                 # is the existing receipt threaded and we are currently processing an unthreaded one?
                 if "thread_id" in receipt_type_dict[user_id] and not thread_id:
-                    receipt_type_dict[
-                        user_id
-                    ] = receipt_data  # replace with unthreaded one
+                    receipt_type_dict[user_id] = (
+                        receipt_data  # replace with unthreaded one
+                    )
             else:  # receipt does not exist, just set it
                 receipt_type_dict[user_id] = receipt_data
                 if thread_id:
@@ -735,10 +734,13 @@ class ReceiptsWorkerStore(SQLBaseStore):
                 thread_clause = "r.thread_id = ?"
                 thread_args = (thread_id,)
 
+            # If the receipt doesn't have a stream ordering it is because we
+            # don't have the associated event, and so must be a remote receipt.
+            # Hence it's safe to just allow new receipts to clobber it.
             sql = f"""
-            SELECT stream_ordering, event_id FROM events
-            INNER JOIN receipts_linearized AS r USING (event_id, room_id)
-            WHERE r.room_id = ? AND r.receipt_type = ? AND r.user_id = ? AND {thread_clause}
+            SELECT r.event_stream_ordering, r.event_id FROM receipts_linearized AS r
+            WHERE r.room_id = ? AND r.receipt_type = ? AND r.user_id = ?
+            AND r.event_stream_ordering IS NOT NULL AND {thread_clause}
             """
             txn.execute(
                 sql,

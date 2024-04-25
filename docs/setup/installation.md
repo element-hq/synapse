@@ -26,7 +26,7 @@ for most users.
 #### Docker images and Ansible playbooks
 
 There is an official synapse image available at
-<https://hub.docker.com/r/vectorim/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
+<https://hub.docker.com/r/matrixdotorg/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
 which can be used with the docker-compose file available at
 [contrib/docker](https://github.com/element-hq/synapse/tree/develop/contrib/docker).
 Further information on this including configuration options is available in the README

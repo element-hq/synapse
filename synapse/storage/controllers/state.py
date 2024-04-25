@@ -273,8 +273,10 @@ class StateStorageController:
         await_full_state: bool = True,
     ) -> Dict[str, StateMap[str]]:
         """
-        Get the state dicts corresponding to a list of events, containing the event_ids
-        of the state events (as opposed to the events themselves)
+        Get the room states after each of a list of events.
+
+        For each event in `event_ids`, the result contains a map from state tuple
+        to the event_ids of the state event (as opposed to the events themselves).
 
         Args:
             event_ids: events whose state should be returned
@@ -347,7 +349,7 @@ class StateStorageController:
         await_full_state: bool = True,
     ) -> StateMap[str]:
         """
-        Get the state dict corresponding to a particular event
+        Get the state dict corresponding to the state after a particular event
 
         Args:
             event_id: event whose state should be returned
@@ -562,10 +564,15 @@ class StateStorageController:
     @trace
     @tag_args
     async def get_current_state(
-        self, room_id: str, state_filter: Optional[StateFilter] = None
+        self,
+        room_id: str,
+        state_filter: Optional[StateFilter] = None,
+        await_full_state: bool = True,
     ) -> StateMap[EventBase]:
         """Same as `get_current_state_ids` but also fetches the events"""
-        state_map_ids = await self.get_current_state_ids(room_id, state_filter)
+        state_map_ids = await self.get_current_state_ids(
+            room_id, state_filter, await_full_state
+        )
 
         event_map = await self.stores.main.get_events(list(state_map_ids.values()))
 

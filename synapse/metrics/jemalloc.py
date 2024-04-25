@@ -42,14 +42,12 @@ class JemallocStats:
     @overload
     def _mallctl(
         self, name: str, read: Literal[True] = True, write: Optional[int] = None
-    ) -> int:
-        ...
+    ) -> int: ...
 
     @overload
     def _mallctl(
         self, name: str, read: Literal[False], write: Optional[int] = None
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def _mallctl(
         self, name: str, read: bool = True, write: Optional[int] = None

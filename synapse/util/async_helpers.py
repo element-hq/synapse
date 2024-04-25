@@ -284,15 +284,7 @@ async def yieldable_gather_results(
     try:
         return await make_deferred_yieldable(
             defer.gatherResults(
-                # type-ignore: mypy reports two errors:
-                # error: Argument 1 to "run_in_background" has incompatible type
-                #     "Callable[[T, **P], Awaitable[R]]"; expected
-                #     "Callable[[T, **P], Awaitable[R]]"  [arg-type]
-                # error: Argument 2 to "run_in_background" has incompatible type
-                #     "T"; expected "[T, **P.args]"  [arg-type]
-                # The former looks like a mypy bug, and the latter looks like a
-                # false positive.
-                [run_in_background(func, item, *args, **kwargs) for item in iter],  # type: ignore[arg-type]
+                [run_in_background(func, item, *args, **kwargs) for item in iter],
                 consumeErrors=True,
             )
         )
@@ -338,7 +330,7 @@ async def yieldable_gather_results_delaying_cancellation(
         return await make_deferred_yieldable(
             delay_cancellation(
                 defer.gatherResults(
-                    [run_in_background(func, item, *args, **kwargs) for item in iter],  # type: ignore[arg-type]
+                    [run_in_background(func, item, *args, **kwargs) for item in iter],
                     consumeErrors=True,
                 )
             )
@@ -357,24 +349,21 @@ T4 = TypeVar("T4")
 @overload
 def gather_results(
     deferredList: Tuple[()], consumeErrors: bool = ...
-) -> "defer.Deferred[Tuple[()]]":
-    ...
+) -> "defer.Deferred[Tuple[()]]": ...
 
 
 @overload
 def gather_results(
     deferredList: Tuple["defer.Deferred[T1]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1]]":
-    ...
+) -> "defer.Deferred[Tuple[T1]]": ...
 
 
 @overload
 def gather_results(
     deferredList: Tuple["defer.Deferred[T1]", "defer.Deferred[T2]"],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2]]": ...
 
 
 @overload
@@ -383,8 +372,7 @@ def gather_results(
         "defer.Deferred[T1]", "defer.Deferred[T2]", "defer.Deferred[T3]"
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2, T3]]": ...
 
 
 @overload
@@ -396,8 +384,7 @@ def gather_results(
         "defer.Deferred[T4]",
     ],
     consumeErrors: bool = ...,
-) -> "defer.Deferred[Tuple[T1, T2, T3, T4]]":
-    ...
+) -> "defer.Deferred[Tuple[T1, T2, T3, T4]]": ...
 
 
 def gather_results(  # type: ignore[misc]
@@ -782,18 +769,15 @@ def stop_cancellation(deferred: "defer.Deferred[T]") -> "defer.Deferred[T]":
 
 
 @overload
-def delay_cancellation(awaitable: "defer.Deferred[T]") -> "defer.Deferred[T]":
-    ...
+def delay_cancellation(awaitable: "defer.Deferred[T]") -> "defer.Deferred[T]": ...
 
 
 @overload
-def delay_cancellation(awaitable: Coroutine[Any, Any, T]) -> "defer.Deferred[T]":
-    ...
+def delay_cancellation(awaitable: Coroutine[Any, Any, T]) -> "defer.Deferred[T]": ...
 
 
 @overload
-def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:
-    ...
+def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]: ...
 
 
 def delay_cancellation(awaitable: Awaitable[T]) -> Awaitable[T]:

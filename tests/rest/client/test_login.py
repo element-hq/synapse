@@ -177,7 +177,6 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
                 # rc_login dict here, we need to set this manually as well
                 "account": {"per_second": 10000, "burst_count": 10000},
             },
-            "experimental_features": {"msc4041_enabled": True},
         }
     )
     def test_POST_ratelimiting_per_address(self) -> None:
@@ -229,7 +228,6 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
                 # rc_login dict here, we need to set this manually as well
                 "address": {"per_second": 10000, "burst_count": 10000},
             },
-            "experimental_features": {"msc4041_enabled": True},
         }
     )
     def test_POST_ratelimiting_per_account(self) -> None:
@@ -278,7 +276,6 @@ class LoginRestServletTestCase(unittest.HomeserverTestCase):
                 "address": {"per_second": 10000, "burst_count": 10000},
                 "failed_attempts": {"per_second": 0.17, "burst_count": 5},
             },
-            "experimental_features": {"msc4041_enabled": True},
         }
     )
     def test_POST_ratelimiting_per_account_failed_attempts(self) -> None:

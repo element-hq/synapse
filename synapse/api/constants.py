@@ -43,7 +43,6 @@ MAIN_TIMELINE: Final = "main"
 
 
 class Membership:
-
     """Represents the membership states of a user in a room."""
 
     INVITE: Final = "invite"
@@ -129,6 +128,8 @@ class EventTypes:
     SpaceParent: Final = "m.space.parent"
 
     Reaction: Final = "m.reaction"
+
+    CallInvite: Final = "m.call.invite"
 
 
 class ToDeviceEventTypes:
