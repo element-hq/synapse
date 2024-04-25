@@ -97,9 +97,25 @@ class MSC4108DelegationRendezvousServlet(RestServlet):
         )
 
 
+class MSC4108RendezvousServlet(RestServlet):
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4108/rendezvous$", releases=[], v1=False, unstable=True
+    )
+
+    def __init__(self, hs: "HomeServer") -> None:
+        super().__init__()
+        self._handler = hs.get_rendezvous_handler()
+
+    def on_POST(self, request: SynapseRequest) -> None:
+        self._handler.handle_post(request)
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3886_endpoint is not None:
         MSC3886RendezvousServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc4108_enabled:
+        MSC4108RendezvousServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4108_delegation_endpoint is not None:
         MSC4108DelegationRendezvousServlet(hs).register(http_server)
