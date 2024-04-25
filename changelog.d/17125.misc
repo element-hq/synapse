@@ -1,0 +1,1 @@
+Fix type annotation for `visited_chains` after `mypy` upgrade.
