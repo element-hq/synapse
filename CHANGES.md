@@ -3,8 +3,8 @@
 ### Features
 
 - Send an email if the address is already bound to an user account. ([\#16819](https://github.com/element-hq/synapse/issues/16819))
-- Implement the rendezvous mechanism described by MSC4108. ([\#17056](https://github.com/element-hq/synapse/issues/17056))
-- Support delegating the rendezvous mechanism described MSC4108 to an external implementation. ([\#17086](https://github.com/element-hq/synapse/issues/17086))
+- Implement the rendezvous mechanism described by [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/issues/4108). ([\#17056](https://github.com/element-hq/synapse/issues/17056))
+- Support delegating the rendezvous mechanism described [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/issues/4108) to an external implementation. ([\#17086](https://github.com/element-hq/synapse/issues/17086))
 
 ### Bugfixes
 
