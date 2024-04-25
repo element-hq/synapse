@@ -184,7 +184,7 @@ class UsernameMappingSession:
     # choices made by the user
     chosen_localpart: Optional[str] = None
     use_display_name: bool = True
-    use_avatar: bool = True # TODO: What should the default be?
+    use_avatar: bool = True
     emails_to_use: StrCollection = ()
     terms_accepted_version: Optional[str] = None
 
