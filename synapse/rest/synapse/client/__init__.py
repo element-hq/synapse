@@ -27,6 +27,7 @@ from synapse.rest.synapse.client.federation_whitelist import FederationWhitelist
 from synapse.rest.synapse.client.new_user_consent import NewUserConsentResource
 from synapse.rest.synapse.client.pick_idp import PickIdpResource
 from synapse.rest.synapse.client.pick_username import pick_username_resource
+from synapse.rest.synapse.client.rendezvous import MSC4108RendezvousSessionResource
 from synapse.rest.synapse.client.sso_register import SsoRegisterResource
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 
@@ -79,6 +80,9 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
 
     if hs.config.extensions.federation_whitelist_endpoint:
         resources[FederationWhitelistResource.PATH] = FederationWhitelistResource(hs)
+
+    if hs.config.experimental.msc4108_enabled:
+        resources["/_synapse/client/rendezvous"] = MSC4108RendezvousSessionResource(hs)
 
     return resources
 
