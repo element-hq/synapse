@@ -413,12 +413,22 @@ class ExperimentalConfig(Config):
         )
 
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        self.msc4108_enabled = experimental.get("msc4108_enabled", False)
+
         self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
             "msc4108_delegation_endpoint", None
         )
 
-        if self.msc4108_delegation_endpoint is not None and not self.msc3861.enabled:
+        if (
+            self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
+        ) and not self.msc3861.enabled:
             raise ConfigError(
                 "MSC4108 requires MSC3861 to be enabled",
+                ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        if self.msc4108_delegation_endpoint is not None and self.msc4108_enabled:
+            raise ConfigError(
+                "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
