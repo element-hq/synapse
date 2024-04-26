@@ -280,7 +280,7 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
     ]
 
     def test_joined_history_visibility(self) -> None:
-        # User joins and leaves room. Should be able to seem the join and leave,
+        # User joins and leaves room. Should be able to see the join and leave,
         # and messages sent between the two, but not before or after.
 
         self.register_user("resident", "p1")
