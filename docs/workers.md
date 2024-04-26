@@ -634,7 +634,7 @@ worker application type.
 
 #### Push Notifications
 
-You can designate generic worker to sending push notifications to
+You can designate generic workers to send push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
 [sygnal](https://github.com/matrix-org/sygnal) and email.
 

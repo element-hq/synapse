@@ -241,7 +241,7 @@ in memory constrained environments, or increased if performance starts to
 degrade.
 
 However, degraded performance due to a low cache factor, common on
-machines with slow disks, often leads to explosions in memory use due
+machines with slow disks, often leads to explosions in memory use due to
 backlogged requests. In this case, reducing the cache factor will make
 things worse. Instead, try increasing it drastically. 2.0 is a good
 starting value.
