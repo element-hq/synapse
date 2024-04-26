@@ -259,9 +259,9 @@ users, etc.) to the developers via the `--report-stats` argument.
 
 This command will generate you a config file that you can then customise, but it will
 also generate a set of keys for you. These keys will allow your homeserver to
-identify itself to other homeserver, so don't lose or delete them. It would be
+identify itself to other homeservers, so don't lose or delete them. It would be
 wise to back them up somewhere safe. (If, for whatever reason, you do need to
-change your homeserver's keys, you may find that other homeserver have the
+change your homeserver's keys, you may find that other homeservers have the
 old key cached. If you update the signing key, you should change the name of the
 key in the `<server name>.signing.key` file (the second word) to something
 different. See the [spec](https://matrix.org/docs/spec/server_server/latest.html#retrieving-server-keys) for more information on key management).

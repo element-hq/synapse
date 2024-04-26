@@ -51,8 +51,8 @@ clients.
 
 ## Server configuration
 
-Support for this feature can be enabled and configured by adding a the
-`retention` in the Synapse configuration file (see
+Support for this feature can be enabled and configured by adding the
+`retention` option in the Synapse configuration file (see
 [configuration manual](usage/configuration/config_documentation.md#retention)).
 
 To enable support for message retention policies, set the setting
@@ -117,7 +117,7 @@ In this example, we define three jobs:
   policy's `max_lifetime` is greater than a week.
 
 Note that this example is tailored to show different configurations and
-features slightly more jobs than it's probably necessary (in practice, a
+features slightly more jobs than is probably necessary (in practice, a
 server admin would probably consider it better to replace the two last
 jobs with one that runs once a day and handles rooms which
 policy's `max_lifetime` is greater than 3 days).
