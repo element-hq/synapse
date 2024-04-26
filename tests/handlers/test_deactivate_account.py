@@ -424,3 +424,40 @@ class DeactivateAccountTestCase(HomeserverTestCase):
             self._store.get_knocked_at_rooms_for_local_user(self.user)
         )
         self.assertEqual(len(after_deactivate_knocks), 0)
+
+    def test_membership_is_redacted_upon_deactivation(self) -> None:
+        """
+        Tests that room membership events are redacted if erasure is requested.
+        """
+        # Create a room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=True,
+            tok=self.token,
+        )
+
+        # Change the displayname
+        membership_event, _ = self.get_success(
+            self.handler.update_membership(
+                requester=create_requester(self.user),
+                target=UserID.from_string(self.user),
+                room_id=room_id,
+                action=Membership.JOIN,
+                content={"displayname": "Hello World!"},
+            )
+        )
+
+        # Deactivate the account
+        self._deactivate_my_account()
+
+        # Get the all membership event IDs
+        membership_event_ids = self.get_success(
+            self._store.get_membership_event_ids_for_user(self.user, room_id=room_id)
+        )
+
+        # Get the events incl. JSON
+        events = self.get_success(self._store.get_events_as_list(membership_event_ids))
+
+        # Validate that there is no displayname in any of the events
+        for event in events:
+            self.assertTrue("displayname" not in event.content)

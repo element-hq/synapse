@@ -23,6 +23,7 @@
 
 import enum
 import logging
+import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -448,6 +449,87 @@ def parse_string(
         allowed_values=allowed_values,
         encoding=encoding,
     )
+
+
+def parse_json(
+    request: Request,
+    name: str,
+    default: Optional[dict] = None,
+    required: bool = False,
+    encoding: str = "ascii",
+) -> Optional[JsonDict]:
+    """
+    Parse a JSON parameter from the request query string.
+
+    Args:
+        request: the twisted HTTP request.
+        name: the name of the query parameter.
+        default: value to use if the parameter is absent,
+            defaults to None.
+        required: whether to raise a 400 SynapseError if the
+           parameter is absent, defaults to False.
+        encoding: The encoding to decode the string content with.
+
+    Returns:
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
+
+    Raises:
+        SynapseError if the parameter is absent and required, or if the
+            parameter is present and not a JSON object.
+    """
+    args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
+    return parse_json_from_args(
+        args,
+        name,
+        default,
+        required=required,
+        encoding=encoding,
+    )
+
+
+def parse_json_from_args(
+    args: Mapping[bytes, Sequence[bytes]],
+    name: str,
+    default: Optional[dict] = None,
+    required: bool = False,
+    encoding: str = "ascii",
+) -> Optional[JsonDict]:
+    """
+    Parse a JSON parameter from the request query string.
+
+    Args:
+        args: a mapping of request args as bytes to a list of bytes (e.g. request.args).
+        name: the name of the query parameter.
+        default: value to use if the parameter is absent,
+            defaults to None.
+        required: whether to raise a 400 SynapseError if the
+            parameter is absent, defaults to False.
+        encoding: the encoding to decode the string content with.
+
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
+
+    Raises:
+        SynapseError if the parameter is absent and required, or if the
+            parameter is present and not a JSON object.
+    """
+    name_bytes = name.encode("ascii")
+
+    if name_bytes not in args:
+        if not required:
+            return default
+
+        message = f"Missing required integer query parameter {name}"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM)
+
+    json_str = parse_string_from_args(args, name, required=True, encoding=encoding)
+
+    try:
+        return json_decoder.decode(urlparse.unquote(json_str))
+    except Exception:
+        message = f"Query parameter {name} must be a valid JSON object"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.NOT_JSON)
 
 
 EnumT = TypeVar("EnumT", bound=enum.Enum)

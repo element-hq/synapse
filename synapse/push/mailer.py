@@ -205,6 +205,22 @@ class Mailer:
             template_vars,
         )
 
+    emails_sent_counter.labels("already_in_use")
+
+    async def send_already_in_use_mail(self, email_address: str) -> None:
+        """Send an email if the address is already bound to an user account
+
+        Args:
+            email_address: Email address we're sending to the "already in use" mail
+        """
+
+        await self.send_email(
+            email_address,
+            self.email_subjects.email_already_in_use
+            % {"server_name": self.hs.config.server.server_name, "app": self.app_name},
+            {},
+        )
+
     emails_sent_counter.labels("add_threepid")
 
     async def send_add_threepid_mail(

@@ -261,11 +261,22 @@ class DeactivateAccountHandler:
         user = UserID.from_string(user_id)
 
         rooms_for_user = await self.store.get_rooms_for_user(user_id)
+        requester = create_requester(user, authenticated_entity=self._server_name)
+        should_erase = await self.store.is_user_erased(user_id)
+
         for room_id in rooms_for_user:
             logger.info("User parter parting %r from %r", user_id, room_id)
             try:
+                # Before parting the user, redact all membership events if requested
+                if should_erase:
+                    event_ids = await self.store.get_membership_event_ids_for_user(
+                        user_id, room_id
+                    )
+                    for event_id in event_ids:
+                        await self.store.expire_event(event_id)
+
                 await self._room_member_handler.update_membership(
-                    create_requester(user, authenticated_entity=self._server_name),
+                    requester,
                     user,
                     room_id,
                     "leave",
