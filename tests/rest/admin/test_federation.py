@@ -778,19 +778,80 @@ class DestinationMembershipTestCase(unittest.HomeserverTestCase):
         self.assertEqual(number_rooms, len(channel.json_body["rooms"]))
         self._check_fields(channel.json_body["rooms"])
 
-    def _create_destination_rooms(self, number_rooms: int) -> None:
-        """Create a number rooms for destination
+    def test_room_filtering(self) -> None:
+        """Tests that rooms are correctly filtered"""
+
+        # Create two rooms on the homeserver. Each has a different remote homeserver
+        # participating in it.
+        other_destination = "other.destination.org"
+        room_ids_self_dest = self._create_destination_rooms(2, destination=self.dest)
+        room_ids_other_dest = self._create_destination_rooms(
+            1, destination=other_destination
+        )
+
+        # Ask for the rooms that `self.dest` is participating in.
+        channel = self.make_request("GET", self.url, access_token=self.admin_user_tok)
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Verify that we received only the rooms that `self.dest` is participating in.
+        # This assertion method name is a bit misleading. It does check that both lists
+        # contain the same items, and the same counts.
+        self.assertCountEqual(
+            [r["room_id"] for r in channel.json_body["rooms"]], room_ids_self_dest
+        )
+        self.assertEqual(channel.json_body["total"], len(room_ids_self_dest))
+
+        # Ask for the rooms that `other_destination` is participating in.
+        channel = self.make_request(
+            "GET",
+            self.url.replace(self.dest, other_destination),
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+        # Verify that we received only the rooms that `other_destination` is
+        # participating in.
+        self.assertCountEqual(
+            [r["room_id"] for r in channel.json_body["rooms"]], room_ids_other_dest
+        )
+        self.assertEqual(channel.json_body["total"], len(room_ids_other_dest))
+
+    def _create_destination_rooms(
+        self,
+        number_rooms: int,
+        destination: Optional[str] = None,
+    ) -> List[str]:
+        """
+        Create the given number of rooms. The given `destination` homeserver will
+        be recorded as a participant.
 
         Args:
             number_rooms: Number of rooms to be created
+            destination: The domain of the homeserver that will be considered
+                as a participant in the rooms.
+
+        Returns:
+            The IDs of the rooms that have been created.
         """
+        room_ids = []
+
+        # If no destination was provided, default to `self.dest`.
+        if destination is None:
+            destination = self.dest
+
         for _ in range(number_rooms):
             room_id = self.helper.create_room_as(
                 self.admin_user, tok=self.admin_user_tok
             )
+            room_ids.append(room_id)
+
             self.get_success(
-                self.store.store_destination_rooms_entries((self.dest,), room_id, 1234)
+                self.store.store_destination_rooms_entries(
+                    (destination,), room_id, 1234
+                )
             )
+
+        return room_ids
 
     def _check_fields(self, content: List[JsonDict]) -> None:
         """Checks that the expected room attributes are present in content

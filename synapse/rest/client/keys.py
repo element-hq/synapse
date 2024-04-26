@@ -393,17 +393,20 @@ class SigningKeyUploadServlet(RestServlet):
         # time. Because there is no UIA in MSC3861, for now we throw an error if the
         # user tries to reset the device signing key when MSC3861 is enabled, but allow
         # first-time setup.
-        #
-        # XXX: We now have a get-out clause by which MAS can temporarily mark the master
-        # key as replaceable. It should do its own equivalent of user interactive auth
-        # before doing so.
         if self.hs.config.experimental.msc3861.enabled:
             # The auth service has to explicitly mark the master key as replaceable
             # without UIA to reset the device signing key with MSC3861.
             if is_cross_signing_setup and not master_key_updatable_without_uia:
+                config = self.hs.config.experimental.msc3861
+                if config.account_management_url is not None:
+                    url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
+                else:
+                    url = config.issuer
+
                 raise SynapseError(
                     HTTPStatus.NOT_IMPLEMENTED,
-                    "Resetting cross signing keys is not yet supported with MSC3861",
+                    "To reset your end-to-end encryption cross-signing identity, "
+                    f"you first need to approve it at {url} and then try again.",
                     Codes.UNRECOGNIZED,
                 )
             # But first-time setup is fine
