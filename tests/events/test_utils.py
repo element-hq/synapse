@@ -615,13 +615,24 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
 class CloneEventTestCase(stdlib_unittest.TestCase):
     def test_unsigned_is_copied(self) -> None:
         original = make_event_from_dict(
-            {"type": "A", "event_id": "$test:domain", "unsigned": {"a": 1, "b": 2}}
+            {
+                "type": "A",
+                "event_id": "$test:domain",
+                "unsigned": {"a": 1, "b": 2},
+            },
+            RoomVersions.V1,
+            {"txn_id": "txn"},
         )
+        original.internal_metadata.stream_ordering = 1234
+        self.assertEqual(original.internal_metadata.stream_ordering, 1234)
+
         cloned = clone_event(original)
         cloned.unsigned["b"] = 3
 
         self.assertEqual(original.unsigned, {"a": 1, "b": 2})
         self.assertEqual(cloned.unsigned, {"a": 1, "b": 3})
+        self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
+        self.assertEqual(cloned.internal_metadata.txn_id, "txn")
 
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):

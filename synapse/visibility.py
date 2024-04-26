@@ -438,13 +438,15 @@ def _check_client_allowed_to_see_event(
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _CheckMembershipReturn:
-    """Return value of _check_membership"""
+    """Return value of `_check_membership`.
+
+    Attributes:
+        allowed: Whether the user should be allowed to see the event.
+        joined: Whether the user was joined to the room at the event.
+    """
 
     allowed: bool
-    """Whether the user should be allowed to see the event"""
-
     joined: bool
-    """Whether the user was joined at the event"""
 
 
 def _check_membership(
