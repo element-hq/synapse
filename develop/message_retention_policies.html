@@ -201,8 +201,8 @@ though it will always hide it from clients.</p>
 delete the last message in a room. It will, however, hide it from
 clients.</p>
 <h2 id="server-configuration"><a class="header" href="#server-configuration">Server configuration</a></h2>
-<p>Support for this feature can be enabled and configured by adding a the
-<code>retention</code> in the Synapse configuration file (see
+<p>Support for this feature can be enabled and configured by adding the
+<code>retention</code> option in the Synapse configuration file (see
 <a href="usage/configuration/config_documentation.html#retention">configuration manual</a>).</p>
 <p>To enable support for message retention policies, set the setting
 <code>enabled</code> in this section to <code>true</code>.</p>
@@ -252,7 +252,7 @@ which policy's <code>max_lifetime</code> is lower or equal to 3 days.</li>
 policy's <code>max_lifetime</code> is greater than a week.</li>
 </ul>
 <p>Note that this example is tailored to show different configurations and
-features slightly more jobs than it's probably necessary (in practice, a
+features slightly more jobs than is probably necessary (in practice, a
 server admin would probably consider it better to replace the two last
 jobs with one that runs once a day and handles rooms which
 policy's <code>max_lifetime</code> is greater than 3 days).</p>

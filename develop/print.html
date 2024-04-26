@@ -408,9 +408,9 @@ or not to report usage statistics (hostname, Synapse version, uptime, total
 users, etc.) to the developers via the <code>--report-stats</code> argument.</p>
 <p>This command will generate you a config file that you can then customise, but it will
 also generate a set of keys for you. These keys will allow your homeserver to
-identify itself to other homeserver, so don't lose or delete them. It would be
+identify itself to other homeservers, so don't lose or delete them. It would be
 wise to back them up somewhere safe. (If, for whatever reason, you do need to
-change your homeserver's keys, you may find that other homeserver have the
+change your homeserver's keys, you may find that other homeservers have the
 old key cached. If you update the signing key, you should change the name of the
 key in the <code>&lt;server name&gt;.signing.key</code> file (the second word) to something
 different. See the <a href="https://matrix.org/docs/spec/server_server/latest.html#retrieving-server-keys">spec</a> for more information on key management).</p>
@@ -780,7 +780,7 @@ can read more about that <a href="https://www.postgresql.org/docs/10/kernel-reso
 <h2 id="porting-from-sqlite"><a class="header" href="#porting-from-sqlite">Porting from SQLite</a></h2>
 <h3 id="overview"><a class="header" href="#overview">Overview</a></h3>
 <p>The script <code>synapse_port_db</code> allows porting an existing synapse server
-backed by SQLite to using PostgreSQL. This is done in as a two phase
+backed by SQLite to using PostgreSQL. This is done as a two phase
 process:</p>
 <ol>
 <li>Copy the existing SQLite database to a separate location and run
@@ -9771,9 +9771,9 @@ will be used to break the search term into words. (See the
 <li>If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
 are considered words.</li>
 </ul>
-<p>The queries for PostgreSQL and SQLite are detailed below, by their overall goal
+<p>The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are &quot;real&quot; (e.g. not bots,
-not deactivated). It is assumed that real users will have an display name and
+not deactivated). It is assumed that real users will have a display name and
 avatar set.</p>
 <h3 id="postgresql"><a class="header" href="#postgresql">PostgreSQL</a></h3>
 <p>The above words are then transformed into two queries:</p>
@@ -9858,8 +9858,8 @@ though it will always hide it from clients.</p>
 delete the last message in a room. It will, however, hide it from
 clients.</p>
 <h2 id="server-configuration"><a class="header" href="#server-configuration">Server configuration</a></h2>
-<p>Support for this feature can be enabled and configured by adding a the
-<code>retention</code> in the Synapse configuration file (see
+<p>Support for this feature can be enabled and configured by adding the
+<code>retention</code> option in the Synapse configuration file (see
 <a href="usage/configuration/config_documentation.html#retention">configuration manual</a>).</p>
 <p>To enable support for message retention policies, set the setting
 <code>enabled</code> in this section to <code>true</code>.</p>
@@ -9909,7 +9909,7 @@ which policy's <code>max_lifetime</code> is lower or equal to 3 days.</li>
 policy's <code>max_lifetime</code> is greater than a week.</li>
 </ul>
 <p>Note that this example is tailored to show different configurations and
-features slightly more jobs than it's probably necessary (in practice, a
+features slightly more jobs than is probably necessary (in practice, a
 server admin would probably consider it better to replace the two last
 jobs with one that runs once a day and handles rooms which
 policy's <code>max_lifetime</code> is greater than 3 days).</p>
@@ -11849,7 +11849,7 @@ after setting this option in the shared configuration!</p>
 <p>This style of configuration supersedes the legacy <code>synapse.app.appservice</code>
 worker application type.</p>
 <h4 id="push-notifications"><a class="header" href="#push-notifications">Push Notifications</a></h4>
-<p>You can designate generic worker to sending push notifications to
+<p>You can designate generic workers to send push notifications to
 a <a href="https://spec.matrix.org/v1.5/push-gateway-api/">push gateway</a> such as
 <a href="https://github.com/matrix-org/sygnal">sygnal</a> and email.</p>
 <p>This will stop the main process sending push notifications.</p>
@@ -12240,7 +12240,7 @@ run against the database.</p>
 <code>total_duration_ms</code> how long the background process has been running, not including time spent sleeping.
 <code>average_items_per_ms</code> how many items are processed per millisecond based on an exponential average.</p>
 <h2 id="enabled"><a class="header" href="#enabled">Enabled</a></h2>
-<p>This API allow pausing background updates.</p>
+<p>This API allows pausing background updates.</p>
 <p>Background updates should <em>not</em> be paused for significant periods of time, as
 this can affect the performance of Synapse.</p>
 <p><em>Note</em>: This won't persist over restarts.</p>
@@ -13067,7 +13067,7 @@ the <a href="https://matrix.org/docs/spec/client_server/r0.6.1#api-standards">Ma
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="edit-room-membership-api"><a class="header" href="#edit-room-membership-api">Edit Room Membership API</a></h1>
-<p>This API allows an administrator to join an user account with a given <code>user_id</code>
+<p>This API allows an administrator to join a user account with a given <code>user_id</code>
 to a room with a given <code>room_id_or_alias</code>. You can only modify the membership of
 local users. The server administrator must be in the room and have permission to
 invite users.</p>
@@ -16480,7 +16480,7 @@ variable. The default is 0.5, which can be decreased to reduce RAM usage
 in memory constrained environments, or increased if performance starts to
 degrade.</p>
 <p>However, degraded performance due to a low cache factor, common on
-machines with slow disks, often leads to explosions in memory use due
+machines with slow disks, often leads to explosions in memory use due to
 backlogged requests. In this case, reducing the cache factor will make
 things worse. Instead, try increasing it drastically. 2.0 is a good
 starting value.</p>
