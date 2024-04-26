@@ -963,6 +963,17 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     async def _check_host_room_membership(
         self, room_id: str, host: str, membership: str
     ) -> bool:
+        return await self.db_pool.runInteraction(
+            "is_host_joined",
+            self._check_host_room_membership_txn,
+            room_id,
+            host,
+            membership,
+        )
+
+    def _check_host_room_membership_txn(
+        self, txn: LoggingTransaction, room_id: str, host: str, membership: str
+    ) -> bool:
         if "%" in host or "_" in host:
             raise Exception("Invalid host name")
 
@@ -980,14 +991,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         # the returned user actually has the correct domain.
         like_clause = "%:" + host
 
-        rows = await self.db_pool.execute(
-            "is_host_joined", sql, membership, room_id, like_clause
-        )
+        txn.execute(sql, (membership, room_id, like_clause))
 
-        if not rows:
+        row = txn.fetchone()
+
+        if not row:
             return False
 
-        user_id = rows[0][0]
+        user_id = row[0]
         if get_domain_from_id(user_id) != host:
             # This can only happen if the host name has something funky in it
             raise Exception("Invalid host name")
