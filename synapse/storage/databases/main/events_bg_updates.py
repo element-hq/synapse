@@ -1236,7 +1236,7 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
                     {
                         (
                             r[0],  # room_id
-                            r[1],  # event_id
+                            r[2],  # parent_id
                         )
                         for r in relations_to_insert
                     },
