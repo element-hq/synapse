@@ -1,3 +1,45 @@
+# Synapse 1.106.0rc1 (2024-04-25)
+
+### Features
+
+- Send an email if the address is already bound to an user account. ([\#16819](https://github.com/element-hq/synapse/issues/16819))
+- Implement the rendezvous mechanism described by [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/issues/4108). ([\#17056](https://github.com/element-hq/synapse/issues/17056))
+- Support delegating the rendezvous mechanism described [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/issues/4108) to an external implementation. ([\#17086](https://github.com/element-hq/synapse/issues/17086))
+
+### Bugfixes
+
+- Add validation to ensure that the `limit` parameter on `/publicRooms` is non-negative. ([\#16920](https://github.com/element-hq/synapse/issues/16920))
+- Return `400 M_NOT_JSON` upon receiving invalid JSON in query parameters across various client and admin endpoints, rather than an internal server error. ([\#16923](https://github.com/element-hq/synapse/issues/16923))
+- Make the CSAPI endpoint `/keys/device_signing/upload` idempotent. ([\#16943](https://github.com/element-hq/synapse/issues/16943))
+- Redact membership events if the user requested erasure upon deactivating. ([\#17076](https://github.com/element-hq/synapse/issues/17076))
+
+### Improved Documentation
+
+- Add a prompt in the contributing guide to manually configure icu4c. ([\#17069](https://github.com/element-hq/synapse/issues/17069))
+- Clarify what part of message retention is still experimental. ([\#17099](https://github.com/element-hq/synapse/issues/17099))
+
+### Internal Changes
+
+- Use new receipts column to optimise receipt and push action SQL queries. Contributed by Nick @ Beeper (@fizzadar). ([\#17032](https://github.com/element-hq/synapse/issues/17032), [\#17096](https://github.com/element-hq/synapse/issues/17096))
+- Fix mypy with latest Twisted release. ([\#17036](https://github.com/element-hq/synapse/issues/17036))
+- Bump minimum supported Rust version to 1.66.0. ([\#17079](https://github.com/element-hq/synapse/issues/17079))
+- Add helpers to transform Twisted requests to Rust http Requests/Responses. ([\#17081](https://github.com/element-hq/synapse/issues/17081))
+- Fix type annotation for `visited_chains` after `mypy` upgrade. ([\#17125](https://github.com/element-hq/synapse/issues/17125))
+
+
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.81 to 1.0.82. ([\#17095](https://github.com/element-hq/synapse/issues/17095))
+* Bump peaceiris/actions-gh-pages from 3.9.3 to 4.0.0. ([\#17087](https://github.com/element-hq/synapse/issues/17087))
+* Bump peaceiris/actions-mdbook from 1.2.0 to 2.0.0. ([\#17089](https://github.com/element-hq/synapse/issues/17089))
+* Bump pyasn1-modules from 0.3.0 to 0.4.0. ([\#17093](https://github.com/element-hq/synapse/issues/17093))
+* Bump pygithub from 2.2.0 to 2.3.0. ([\#17092](https://github.com/element-hq/synapse/issues/17092))
+* Bump ruff from 0.3.5 to 0.3.7. ([\#17094](https://github.com/element-hq/synapse/issues/17094))
+* Bump sigstore/cosign-installer from 3.4.0 to 3.5.0. ([\#17088](https://github.com/element-hq/synapse/issues/17088))
+* Bump twine from 4.0.2 to 5.0.0. ([\#17091](https://github.com/element-hq/synapse/issues/17091))
+* Bump types-pillow from 10.2.0.20240406 to 10.2.0.20240415. ([\#17090](https://github.com/element-hq/synapse/issues/17090))
+
 # Synapse 1.105.1 (2024-04-23)
 
 ## Security advisory

@@ -1442,9 +1442,15 @@ class RoomHierarchyRestServlet(RestServlet):
 
 class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
     PATTERNS = (
+        # deprecated endpoint, to be removed
         re.compile(
             "^/_matrix/client/unstable/im.nheko.summary"
             "/rooms/(?P<room_identifier>[^/]*)/summary$"
+        ),
+        # recommended endpoint
+        re.compile(
+            "^/_matrix/client/unstable/im.nheko.summary"
+            "/summary/(?P<room_identifier>[^/]*)$"
         ),
     )
     CATEGORY = "Client API requests"

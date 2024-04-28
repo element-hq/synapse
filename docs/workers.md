@@ -232,7 +232,7 @@ information.
     ^/_matrix/client/v1/rooms/.*/hierarchy$
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
-    ^/_matrix/client/unstable/im.nheko.summary/rooms/.*/summary$
+    ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/devices$
@@ -634,7 +634,7 @@ worker application type.
 
 #### Push Notifications
 
-You can designate generic worker to sending push notifications to
+You can designate generic workers to send push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
 [sygnal](https://github.com/matrix-org/sygnal) and email.
 
