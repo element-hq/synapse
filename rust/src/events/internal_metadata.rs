@@ -20,8 +20,10 @@
 
 //! Implements the internal metadata class attached to events.
 //!
-//! The internal metadata is a bit like a `TypedDict`, in that it is stored as a
-//! JSON dict in the DB. Most events have zero, or only a few, of these keys
+//! The internal metadata is a bit like a `TypedDict`, in that most of
+//! it is stored as a JSON dict in the DB (the exceptions being `outlier`
+//! and `stream_ordering` which have their own columns in the database).
+//! Most events have zero, or only a few, of these keys
 //! set. Therefore, since we care more about memory size than performance here,
 //! we store these fields in a mapping.
 //!
@@ -234,6 +236,9 @@ impl EventInternalMetadata {
         self.clone()
     }
 
+    /// Get a dict holding the data stored in the `internal_metadata` column in the database.
+    ///
+    /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
     fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
         let dict = PyDict::new(py);
 
