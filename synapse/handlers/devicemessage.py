@@ -104,6 +104,9 @@ class DeviceMessageHandler:
         """
         Handle receiving to-device messages from remote homeservers.
 
+        Note that any errors thrown from this method will cause the federation /send
+        request to receive an error response.
+
         Args:
             origin: The remote homeserver.
             content: The JSON dictionary containing the to-device messages.
