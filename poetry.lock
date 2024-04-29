@@ -572,13 +572,13 @@ dev = ["Sphinx", "coverage", "flake8", "lxml", "lxml-stubs", "memory-profiler", 
 
 [[package]]
 name = "furo"
-version = "2024.1.29"
+version = "2024.4.27"
 description = "A clean customisable Sphinx documentation theme."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "furo-2024.1.29-py3-none-any.whl", hash = "sha256:3548be2cef45a32f8cdc0272d415fcb3e5fa6a0eb4ddfe21df3ecf1fe45a13cf"},
-    {file = "furo-2024.1.29.tar.gz", hash = "sha256:4d6b2fe3f10a6e36eb9cc24c1e7beb38d7a23fc7b3c382867503b7fcac8a1e02"},
+    {file = "furo-2024.4.27-py3-none-any.whl", hash = "sha256:f7eb1b2c2204fd9cbd4af42e027289a67f17a98a4e14f4f9e2f17b96d61bb020"},
+    {file = "furo-2024.4.27.tar.gz", hash = "sha256:15a9b65269038def2cefafb86c71c6616e3969b8f07ba231f588c10c4aee6d88"},
 ]
 
 [package.dependencies]
