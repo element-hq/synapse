@@ -237,7 +237,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
                     deactivated, COALESCE(shadow_banned, FALSE) AS shadow_banned,
                     COALESCE(approved, TRUE) AS approved,
                     COALESCE(locked, FALSE) AS locked,
-                    COALESCE(suspended, FALSE) AS suspended
+                    suspended
                 FROM users
                 WHERE name = ?
                 """,
@@ -1190,7 +1190,8 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             Args:
                 user_id: The user ID of the user in question
             Returns:
-                True if the user's account is suspended, false if not.
+                True if the user's account is suspended, false if it is not suspended or
+                if the user ID cannot be found.
         """
 
         res = await self.db_pool.simple_select_one_onecol(
