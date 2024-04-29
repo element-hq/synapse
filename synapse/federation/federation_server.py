@@ -548,7 +548,7 @@ class FederationServer(FederationBase):
             )
             try:
                 await self.registry.on_edu(edu.edu_type, origin, edu.content)
-            except Exception as e:
+            except Exception:
                 # If there was an error handling the EDU, we must reject the
                 # transaction.
                 #
