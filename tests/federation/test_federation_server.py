@@ -70,7 +70,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
     def test_failed_edu_causes_500(self) -> None:
         """If the EDU handler fails, /send should return a 500."""
 
-        async def failing_handler(_origin, _content):
+        async def failing_handler(_origin: str, _content: JsonDict) -> None:
             raise Exception("bleh")
 
         self.hs.get_federation_registry().register_edu_handler(
