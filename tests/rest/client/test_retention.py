@@ -163,7 +163,12 @@ class RetentionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(2, len(events), "events retrieved from database")
         filtered_events = self.get_success(
-            filter_events_for_client(storage_controllers, self.user_id, events)
+            filter_events_for_client(
+                storage_controllers,
+                self.user_id,
+                events,
+                msc4115_membership_on_events=True,
+            )
         )
 
         # We should only get one event back.

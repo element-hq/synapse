@@ -7,8 +7,10 @@ follow the semantics described in
 and allow server and room admins to configure how long messages should
 be kept in a homeserver's database before being purged from it.
 **Please note that, as this feature isn't part of the Matrix
-specification yet, this implementation is to be considered as
-experimental.**
+specification yet, the use of `m.room.retention` events for per-room
+retention policies is to be considered as experimental. However, the use
+of a default message retention policy is considered a stable feature
+in Synapse.**
 
 A message retention policy is mainly defined by its `max_lifetime`
 parameter, which defines how long a message can be kept around after
@@ -49,8 +51,8 @@ clients.
 
 ## Server configuration
 
-Support for this feature can be enabled and configured by adding a the
-`retention` in the Synapse configuration file (see
+Support for this feature can be enabled and configured by adding the
+`retention` option in the Synapse configuration file (see
 [configuration manual](usage/configuration/config_documentation.md#retention)).
 
 To enable support for message retention policies, set the setting
@@ -115,7 +117,7 @@ In this example, we define three jobs:
   policy's `max_lifetime` is greater than a week.
 
 Note that this example is tailored to show different configurations and
-features slightly more jobs than it's probably necessary (in practice, a
+features slightly more jobs than is probably necessary (in practice, a
 server admin would probably consider it better to replace the two last
 jobs with one that runs once a day and handles rooms which
 policy's `max_lifetime` is greater than 3 days).

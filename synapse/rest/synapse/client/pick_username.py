@@ -113,6 +113,7 @@ class AccountDetailsResource(DirectServeHtmlResource):
                 "display_name": session.display_name,
                 "emails": session.emails,
                 "localpart": localpart,
+                "avatar_url": session.avatar_url,
             },
         }
 
@@ -134,6 +135,7 @@ class AccountDetailsResource(DirectServeHtmlResource):
         try:
             localpart = parse_string(request, "username", required=True)
             use_display_name = parse_boolean(request, "use_display_name", default=False)
+            use_avatar = parse_boolean(request, "use_avatar", default=False)
 
             try:
                 emails_to_use: List[str] = [
@@ -147,5 +149,5 @@ class AccountDetailsResource(DirectServeHtmlResource):
             return
 
         await self._sso_handler.handle_submit_username_request(
-            request, session_id, localpart, use_display_name, emails_to_use
+            request, session_id, localpart, use_display_name, use_avatar, emails_to_use
         )

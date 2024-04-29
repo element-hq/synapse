@@ -480,7 +480,10 @@ class SearchHandler:
         filtered_events = await search_filter.filter([r["event"] for r in results])
 
         events = await filter_events_for_client(
-            self._storage_controllers, user.to_string(), filtered_events
+            self._storage_controllers,
+            user.to_string(),
+            filtered_events,
+            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
 
         events.sort(key=lambda e: -rank_map[e.event_id])
@@ -579,7 +582,10 @@ class SearchHandler:
             filtered_events = await search_filter.filter([r["event"] for r in results])
 
             events = await filter_events_for_client(
-                self._storage_controllers, user.to_string(), filtered_events
+                self._storage_controllers,
+                user.to_string(),
+                filtered_events,
+                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
             room_events.extend(events)
@@ -664,11 +670,17 @@ class SearchHandler:
             )
 
             events_before = await filter_events_for_client(
-                self._storage_controllers, user.to_string(), res.events_before
+                self._storage_controllers,
+                user.to_string(),
+                res.events_before,
+                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
             events_after = await filter_events_for_client(
-                self._storage_controllers, user.to_string(), res.events_after
+                self._storage_controllers,
+                user.to_string(),
+                res.events_after,
+                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
             context: JsonDict = {

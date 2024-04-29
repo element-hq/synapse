@@ -956,6 +956,7 @@ class RoomCreationHandler:
             room_alias=room_alias,
             power_level_content_override=power_level_content_override,
             creator_join_profile=creator_join_profile,
+            ignore_forced_encryption=ignore_forced_encryption,
         )
 
         # we avoid dropping the lock between invites, as otherwise joins can
@@ -1475,6 +1476,7 @@ class RoomContextHandler:
                 user.to_string(),
                 events,
                 is_peeking=is_peeking,
+                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
         event = await self.store.get_event(
