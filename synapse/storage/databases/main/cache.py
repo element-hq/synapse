@@ -43,6 +43,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
+from synapse.types import StrCollection
 from synapse.util.caches.descriptors import CachedFunction
 from synapse.util.iterutils import batch_iter
 
@@ -233,7 +234,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                         )
 
                     room_id = row.keys[0]
-                    server_joined = row.keys.get(1, True)
+                    server_joined = bool(row.keys.get(1, "true"))
                     self._invalidate_caches_for_room(room_id, server_joined)
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
@@ -429,7 +430,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         """
 
         self._send_invalidation_to_replication(
-            txn, DELETE_ROOM_CACHE_NAME, [room_id, server_in_room]
+            txn, DELETE_ROOM_CACHE_NAME, [room_id, "true" if server_in_room else ""]
         )
         txn.call_after(self._invalidate_caches_for_room, room_id, server_in_room)
 
@@ -568,7 +569,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             for chunk in batch_iter(members_changed, 50):
                 keys = itertools.chain([room_id], chunk)
                 self._send_invalidation_to_replication(
-                    txn, CURRENT_STATE_CACHE_NAME, keys
+                    txn, CURRENT_STATE_CACHE_NAME, list(keys)
                 )
         else:
             # if no members changed, we still need to invalidate the other caches.
@@ -587,7 +588,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         )
 
     def _send_invalidation_to_replication(
-        self, txn: LoggingTransaction, cache_name: str, keys: Optional[Iterable[Any]]
+        self, txn: LoggingTransaction, cache_name: str, keys: Optional[StrCollection]
     ) -> None:
         """Notifies replication that given cache has been invalidated.
 
