@@ -382,7 +382,7 @@ furo = ">=2022.12.7,<2025.0.0"
 # runtime errors caused by build system changes.
 # We are happy to raise these upper bounds upon request,
 # provided we check that it's safe to do so (i.e. that CI passes).
-requires = ["poetry-core>=1.1.0,<=1.9.0", "setuptools_rust>=1.3,<=1.8.1"]
+requires = ["poetry-core>=1.1.0,<=1.9.0", "setuptools_rust>=1.3,<=1.8.1", "wheel"]
 build-backend = "poetry.core.masonry.api"
 
 
@@ -400,12 +400,12 @@ skip = "cp36* cp37* pp37* *-musllinux_i686 pp*aarch64 *-musllinux_aarch64"
 
 # We need a rust compiler
 before-all =  "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y --profile minimal"
-environment= { PATH = "$PATH:$HOME/.cargo/bin" }
+environment = { PATH = "$PATH:$HOME/.cargo/bin", DIST_EXTRA_CONFIG = "/tmp/bdist.ini" }
 
 # For some reason if we don't manually clean the build directory we
 # can end up polluting the next build with a .so that is for the wrong
 # Python version.
-before-build = "rm -rf {project}/build"
+before-build = "rm -rf {project}/build && echo '[bdist_wheel]\npy_limited_api=cp38\n' > $DIST_EXTRA_CONFIG"
 build-frontend = "build; args: --config-setting=--build-option=--py-limited-api=cp38"  # Build ABI3 wheels for 3.8+
 test-command = "python -c 'from synapse.synapse_rust import sum_as_string; print(sum_as_string(1, 2))'"
 
