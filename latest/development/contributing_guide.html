@@ -214,6 +214,7 @@ poetry install --extras all
 </code></pre>
 <p>This will install the runtime and developer dependencies for the project.  Be sure to check
 that the <code>poetry install</code> step completed cleanly.</p>
+<p>For OSX users, be sure to set <code>PKG_CONFIG_PATH</code> to support <code>icu4c</code>. Run <code>brew info icu4c</code> for more details.</p>
 <h2 id="running-synapse-via-poetry"><a class="header" href="#running-synapse-via-poetry">Running Synapse via poetry</a></h2>
 <p>To start a local instance of Synapse in the locked poetry environment, create a config file:</p>
 <pre><code class="language-sh">cp docs/sample_config.yaml homeserver.yaml

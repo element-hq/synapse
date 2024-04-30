@@ -1842,7 +1842,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.105.1</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.106.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -9820,8 +9820,10 @@ follow the semantics described in
 and allow server and room admins to configure how long messages should
 be kept in a homeserver's database before being purged from it.
 <strong>Please note that, as this feature isn't part of the Matrix
-specification yet, this implementation is to be considered as
-experimental.</strong></p>
+specification yet, the use of <code>m.room.retention</code> events for per-room
+retention policies is to be considered as experimental. However, the use
+of a default message retention policy is considered a stable feature
+in Synapse.</strong></p>
 <p>A message retention policy is mainly defined by its <code>max_lifetime</code>
 parameter, which defines how long a message can be kept around after
 it was sent to the room. If a room doesn't have a message retention
@@ -16569,6 +16571,7 @@ poetry install --extras all
 </code></pre>
 <p>This will install the runtime and developer dependencies for the project.  Be sure to check
 that the <code>poetry install</code> step completed cleanly.</p>
+<p>For OSX users, be sure to set <code>PKG_CONFIG_PATH</code> to support <code>icu4c</code>. Run <code>brew info icu4c</code> for more details.</p>
 <h2 id="running-synapse-via-poetry"><a class="header" href="#running-synapse-via-poetry">Running Synapse via poetry</a></h2>
 <p>To start a local instance of Synapse in the locked poetry environment, create a config file:</p>
 <pre><code class="language-sh">cp docs/sample_config.yaml homeserver.yaml
