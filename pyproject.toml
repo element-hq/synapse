@@ -406,7 +406,7 @@ environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 # can end up polluting the next build with a .so that is for the wrong
 # Python version.
 before-build = "rm -rf {project}/build"
-build-frontend = "build; args: --config-settings=--build-option=--py-limited-api=cp38"                  # Build ABI3 wheels for 3.8+
+build-frontend = "build; args: --config-setting=--build-option=--py-limited-api=cp38"  # Build ABI3 wheels for 3.8+
 test-command = "python -c 'from synapse.synapse_rust import sum_as_string; print(sum_as_string(1, 2))'"
 
 
