@@ -247,6 +247,8 @@ Example configuration:
 presence:
   enabled: false
   include_offline_users_on_sync: false
+  sync_presence_tracking: true
+  federation_presence_tracking: true
 ```
 
 `enabled` can also be set to a special value of "untracked" which ignores updates
@@ -258,6 +260,18 @@ received via clients and federation, while still accepting updates from the
 When clients perform an initial or `full_state` sync, presence results for offline users are
 not included by default. Setting `include_offline_users_on_sync` to `true` will always include
 offline users in the results. Defaults to false.
+
+Enabling presence tracking can be resource intensive for the presence handler when server-side
+tracking of user activity is enabled. Below are some additional configuration options if you
+require additional performance:
+* `sync_presence_tracking` (Default enabled): Determines if the server tracks a user's presence
+activity when syncing. If disabled, the server will not automatically update the user's presence
+activity when the sync endpoint is called. Note that client applications can still update their
+presence by calling the respective presence endpoints.
+* `federation_presence_tracking` (Default enabled): Determines if the server will accept
+presence EDUs that only contain presence activity updates. If disabled, the server will drop
+processing EDUs that do not contain updates to the `status_msg`, `displayname`, and
+`avatar_url` fields.
 
 ---
 ### `require_auth_for_profile_requests`
@@ -1765,7 +1779,7 @@ rc_3pid_validation:
 
 This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer`
 defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
@@ -1966,7 +1980,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.
 
 Example configuration:
 ```yaml
