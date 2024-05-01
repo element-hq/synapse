@@ -752,6 +752,36 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             and requester.user.to_string() == self._server_notices_mxid
         )
 
+        requester_suspended = await self.store.get_user_suspended_status(
+            requester.user.to_string()
+        )
+        if action == Membership.INVITE and requester_suspended:
+            raise SynapseError(
+                403,
+                "Sending invites while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
+        if target.to_string() != requester.user.to_string():
+            target_suspended = await self.store.get_user_suspended_status(
+                target.to_string()
+            )
+        else:
+            target_suspended = requester_suspended
+
+        if action == Membership.JOIN and target_suspended:
+            raise SynapseError(
+                403,
+                "Joining rooms while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+        if action == Membership.KNOCK and target_suspended:
+            raise SynapseError(
+                403,
+                "Knocking on rooms while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
         if (
             not self.allow_per_room_profiles and not is_requester_server_notices_user
         ) or requester.shadow_banned:
