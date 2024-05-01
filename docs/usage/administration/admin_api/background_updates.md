@@ -44,7 +44,7 @@ For each update:
 
 ## Enabled
 
-This API allow pausing background updates.
+This API allows pausing background updates.
 
 Background updates should *not* be paused for significant periods of time, as
 this can affect the performance of Synapse.

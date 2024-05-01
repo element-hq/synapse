@@ -86,6 +86,8 @@ poetry install --extras all
 This will install the runtime and developer dependencies for the project.  Be sure to check
 that the `poetry install` step completed cleanly.
 
+For OSX users, be sure to set `PKG_CONFIG_PATH` to support `icu4c`. Run `brew info icu4c` for more details.
+
 ## Running Synapse via poetry
 
 To start a local instance of Synapse in the locked poetry environment, create a config file:

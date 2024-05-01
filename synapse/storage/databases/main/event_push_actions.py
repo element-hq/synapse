@@ -385,7 +385,6 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
             WITH all_receipts AS (
                 SELECT room_id, thread_id, MAX(event_stream_ordering) AS max_receipt_stream_ordering
                 FROM receipts_linearized
-                LEFT JOIN events USING (room_id, event_id)
                 WHERE
                     {receipt_types_clause}
                     AND user_id = ?
@@ -621,13 +620,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 SELECT notif_count, COALESCE(unread_count, 0), thread_id
                 FROM event_push_summary
                 LEFT JOIN (
-                    SELECT thread_id, MAX(stream_ordering) AS threaded_receipt_stream_ordering
+                    SELECT thread_id, MAX(event_stream_ordering) AS threaded_receipt_stream_ordering
                     FROM receipts_linearized
-                    LEFT JOIN events USING (room_id, event_id)
                     WHERE
                         user_id = ?
                         AND room_id = ?
-                        AND stream_ordering > ?
+                        AND event_stream_ordering > ?
                         AND {receipt_types_clause}
                     GROUP BY thread_id
                 ) AS receipts USING (thread_id)
@@ -659,13 +657,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         sql = f"""
             SELECT COUNT(*), thread_id FROM event_push_actions
             LEFT JOIN (
-                SELECT thread_id, MAX(stream_ordering) AS threaded_receipt_stream_ordering
+                SELECT thread_id, MAX(event_stream_ordering) AS threaded_receipt_stream_ordering
                 FROM receipts_linearized
-                LEFT JOIN events USING (room_id, event_id)
                 WHERE
                     user_id = ?
                     AND room_id = ?
-                    AND stream_ordering > ?
+                    AND event_stream_ordering > ?
                     AND {receipt_types_clause}
                 GROUP BY thread_id
             ) AS receipts USING (thread_id)
@@ -738,13 +735,12 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                 thread_id
             FROM event_push_actions
             LEFT JOIN (
-                SELECT thread_id, MAX(stream_ordering) AS threaded_receipt_stream_ordering
+                SELECT thread_id, MAX(event_stream_ordering) AS threaded_receipt_stream_ordering
                 FROM receipts_linearized
-                LEFT JOIN events USING (room_id, event_id)
                 WHERE
                     user_id = ?
                     AND room_id = ?
-                    AND stream_ordering > ?
+                    AND event_stream_ordering > ?
                     AND {receipt_types_clause}
                 GROUP BY thread_id
             ) AS receipts USING (thread_id)
@@ -910,9 +906,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         # given this function generally gets called with only one room and
         # thread ID.
         sql = f"""
-            SELECT room_id, thread_id, MAX(stream_ordering)
+            SELECT room_id, thread_id, MAX(event_stream_ordering)
             FROM receipts_linearized
-            INNER JOIN events USING (room_id, event_id)
             WHERE {receipt_types_clause}
                 AND {thread_ids_clause}
                 AND {room_ids_clause}
@@ -1442,9 +1437,8 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
         )
 
         sql = """
-            SELECT r.stream_id, r.room_id, r.user_id, r.thread_id, e.stream_ordering
+            SELECT r.stream_id, r.room_id, r.user_id, r.thread_id, r.event_stream_ordering
             FROM receipts_linearized AS r
-            INNER JOIN events AS e USING (event_id)
             WHERE ? < r.stream_id AND r.stream_id <= ? AND user_id LIKE ?
             ORDER BY r.stream_id ASC
             LIMIT ?
