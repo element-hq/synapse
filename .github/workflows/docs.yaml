@@ -85,33 +85,3 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book
           destination_dir: ./${{ needs.pre.outputs.branch-version }}
-
-################################################################################
-  pages-devdocs:
-    name: GitHub Pages (developer docs)
-    runs-on: ubuntu-latest
-    needs:
-      - pre
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: "Set up Sphinx"
-        uses: matrix-org/setup-python-poetry@v1
-        with:
-          python-version: "3.x"
-          poetry-version: "1.3.2"
-          groups: "dev-docs"
-          extras: ""
-
-      - name: Build the documentation
-        run: |
-          cd dev-docs
-          poetry run make html
-
-      # Deploy to the target directory.
-      - name: Deploy to gh pages
-        uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./dev-docs/_build/html
-          destination_dir: ./dev-docs/${{ needs.pre.outputs.branch-version }}
