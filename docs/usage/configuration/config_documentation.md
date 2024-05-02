@@ -4554,3 +4554,29 @@ background_updates:
     min_batch_size: 10
     default_batch_size: 50
 ```
+---
+## Auto Accept Invites
+Configuration settings related to automatically accepting invites.
+
+---
+### `auto_accept_invites`
+
+Automatically accepting invites controls whether users are presented with an invite request or if they
+are instead automatically joined to a room when receiving an invite. Set the `enabled` sub-option to true to
+enable auto-accepting invites. Defaults to false.
+This setting has the following sub-options:
+* `enabled`: Whether to run the auto-accept invites logic. Defaults to false. Set to true to change the default.
+* `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
+   for direct messages. Defaults to false. Set to true to change the default.
+* `only_from_local_users`: Whether invites should be automatically accepted from all users, or only from users
+   on this homeserver. Defaults to false. Set to true to change the default.
+* `worker_to_run_on`: Which worker to run this module on. Defaults to None (running on the main process).
+
+Example configuration:
+```yaml
+auto_accept_invites:
+    enabled: true
+    only_for_direct_messages: true
+    only_from_local_users: true
+    worker_to_run_on: "worker_1"
+```

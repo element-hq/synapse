@@ -1117,6 +1117,7 @@ class FederationHandler:
             [(event, context)]
         )
         try:
+            # TODO: Devon - should add auto-accept-invite logic here?
             await self._federation_event_handler.persist_events_and_notify(
                 event.room_id, [(event, context)]
             )

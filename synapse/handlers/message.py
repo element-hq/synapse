@@ -1954,6 +1954,8 @@ class EventCreationHandler:
 
         async def _notify() -> None:
             try:
+                # TODO: Devon - should auto-accept invites here (or slightly above when
+                # checking if invie)
                 await self.notifier.on_new_room_events(
                     events_and_pos, max_stream_token, extra_users=extra_users
                 )
