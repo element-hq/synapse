@@ -1286,8 +1286,12 @@ class SyncHandler:
         #
         # c.f. #16941 for an example of why we can't do this for all non-gappy
         # syncs.
+        #
+        # We can apply a similar optimization for gappy syncs if we know the room
+        # has been linear in the gap, so instead of just looking at the
+        # `timeline.batch` we can look at `timeline.fetched_events`.
         is_linear_timeline = True
-        if batch.events:
+        if batch.fetched_events:
             # We need to make sure the first event in our batch points to the
             # last event in the previous batch.
             last_event_id_prev_batch = (
@@ -1304,8 +1308,19 @@ class SyncHandler:
                     break
                 prev_event_id = e.event_id
 
-        if is_linear_timeline and not batch.limited:
+        if is_linear_timeline and not batch.fetched_limited:
             state_ids: StateMap[str] = {}
+
+            # If the returned batch is actually limited, we need to add the
+            # state events that happened in the batch.
+            if batch.limited:
+                timeline_events = {e.event_id for e in batch.events}
+                state_ids = {
+                    (e.type, e.state_key): e.event_id
+                    for e in batch.fetched_events
+                    if e.is_state() and e.event_id not in timeline_events
+                }
+
             if lazy_load_members:
                 if members_to_fetch and batch.events:
                     # We're lazy-loading, so the client might need some more
