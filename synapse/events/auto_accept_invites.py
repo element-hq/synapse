@@ -131,15 +131,7 @@ class InviteAutoAccepter:
             dm_map[dm_user_id] = (room_id,)
         else:
             dm_rooms_for_user = dm_map[dm_user_id]
-            if not isinstance(dm_rooms_for_user, (tuple, list)):
-                # Don't mangle the data if we don't understand it.
-                logger.warning(
-                    "Not marking room as DM for auto-accepted invitation; "
-                    "dm_map[%r] is a %s not a list.",
-                    type(dm_rooms_for_user),
-                    dm_user_id,
-                )
-                return
+            assert isinstance(dm_rooms_for_user, (tuple, list))
 
             dm_map[dm_user_id] = tuple(dm_rooms_for_user) + (room_id,)
 
