@@ -216,7 +216,7 @@ class DeviceWorkerHandler:
         )
 
         # Then work out if any users have since joined
-        rooms_changed = self.store.get_rooms_that_changed(room_ids, from_token.room_key)
+        rooms_changed = await self.store.get_rooms_that_changed(room_ids, from_token.room_key)
 
         member_events = await self.store.get_membership_changes_for_user(
             user_id, from_token.room_key, now_room_key
