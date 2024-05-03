@@ -1,0 +1,1 @@
+Add preliminary support for [MSC3823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823) - Account Suspension.
