@@ -374,7 +374,6 @@ class Notifier:
         the client streams.
         """
         for event_entry, event_id in event_entries:
-            # TODO: Devon - Add module call for auto-accept invites here
             self.pending_new_room_events.append(event_entry)
             await self._third_party_rules.on_new_event(event_id)
 
