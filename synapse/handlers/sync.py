@@ -126,6 +126,12 @@ class TimelineBatch:
     prev_batch: StreamToken
     events: Sequence[EventBase]
     limited: bool
+
+    # All the events that were fetched from the DB while loading the room. This
+    # is a superset of `events`.
+    fetched_events: Sequence[EventBase]
+    fetched_limited: bool
+
     # A mapping of event ID to the bundled aggregations for the above events.
     # This is only calculated if limited is true.
     bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
@@ -614,7 +620,11 @@ class SyncHandler:
                     )
 
                 return TimelineBatch(
-                    events=recents, prev_batch=prev_batch_token, limited=False
+                    events=recents,
+                    prev_batch=prev_batch_token,
+                    limited=False,
+                    fetched_events=recents,
+                    fetched_limited=False,
                 )
 
             filtering_factor = 2
@@ -630,6 +640,9 @@ class SyncHandler:
                 since_key = gap_token
             elif since_token and not newly_joined_room:
                 since_key = since_token.room_key
+
+            fetched_events: List[EventBase] = []
+            fetched_limited = True
 
             while limited and len(recents) < timeline_limit and max_repeat:
                 # If we have a since_key then we are trying to get any events
@@ -648,6 +661,8 @@ class SyncHandler:
                     events, end_key = await self.store.get_recent_events_for_room(
                         room_id, limit=load_limit + 1, end_token=end_key
                     )
+
+                fetched_events = events + fetched_events
 
                 log_kv({"loaded_recents": len(events)})
 
@@ -701,6 +716,7 @@ class SyncHandler:
 
                 if len(events) <= load_limit:
                     limited = False
+                    fetched_limited = False
                     break
                 max_repeat -= 1
 
@@ -731,6 +747,8 @@ class SyncHandler:
             # (to force client to paginate the gap).
             limited=limited or newly_joined_room or gap_token is not None,
             bundled_aggregations=bundled_aggregations,
+            fetched_events=fetched_events,
+            fetched_limited=fetched_limited,
         )
 
     async def get_state_after_event(
