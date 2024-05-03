@@ -115,7 +115,7 @@ class StreamChangeCache:
         """
         new_size = math.floor(self._original_max_size * factor)
         if new_size != self._max_size:
-            self.max_size = new_size
+            self._max_size = new_size
             self._evict()
             return True
         return False
