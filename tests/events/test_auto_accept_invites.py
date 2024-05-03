@@ -679,7 +679,7 @@ def make_multiple_awaitable(result: TV) -> Awaitable[TV]:
 
 
 def create_module(
-    config_override: Dict[str, Any] = {}, worker_name: Optional[str] = None
+    config_override: Optional[Dict[str, Any]] = None, worker_name: Optional[str] = None
 ) -> InviteAutoAccepter:
     # Create a mock based on the ModuleApi spec, but override some mocked functions
     # because some capabilities are needed for running the tests.
@@ -687,6 +687,9 @@ def create_module(
     module_api.is_mine.side_effect = lambda a: a.split(":")[1] == "test"
     module_api.worker_name = worker_name
     module_api.sleep.return_value = make_multiple_awaitable(None)
+
+    if config_override is None:
+        config_override = {}
 
     config = AutoAcceptInvitesConfig()
     config.read_config(config_override)
