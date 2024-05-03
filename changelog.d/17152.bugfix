@@ -1,0 +1,1 @@
+Fix bug where `StreamChangeCache` would not respect configured cache factors.
