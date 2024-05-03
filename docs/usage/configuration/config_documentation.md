@@ -4572,6 +4572,9 @@ This setting has the following sub-options:
    on this homeserver. Defaults to false. Set to true to change the default.
 * `worker_to_run_on`: Which worker to run this module on. Defaults to None (running on the main process).
 
+NOTE: Care should be taken not to enable this setting if the `synapse_auto_accept_invite` module is enabled and installed.
+The two modules will compete to perform the same task and may result in undesired behaviour.
+
 Example configuration:
 ```yaml
 auto_accept_invites:
