@@ -21,6 +21,7 @@
 import itertools
 import logging
 from collections import defaultdict
+import re
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
@@ -553,5 +554,27 @@ class SyncRestServlet(RestServlet):
         return result
 
 
+class SlidingSyncRestServlet(RestServlet):
+    """
+    API endpoint TODO
+    Useful for cases like TODO
+    """
+
+    PATTERNS = (re.compile("^/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee$"),)
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        return 200, {
+            "foo": "bar",
+        }
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc3575_enabled:
+        SlidingSyncRestServlet(hs).register(http_server)
