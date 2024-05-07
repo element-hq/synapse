@@ -78,19 +78,19 @@ pub mod evaluator;
 pub mod utils;
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "push")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "push")?;
     child_module.add_class::<PushRule>()?;
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
     child_module.add_class::<PushRuleEvaluator>()?;
     child_module.add_function(wrap_pyfunction!(get_base_rule_ids, m)?)?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import push` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.push", child_module)?;
 

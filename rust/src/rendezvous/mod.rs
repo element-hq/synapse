@@ -28,7 +28,7 @@ use mime::Mime;
 use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
-    types::{PyAnyMethods, PyModule},
+    types::{PyAnyMethods, PyModule, PyModuleMethods},
     Bound, Py, PyAny, PyObject, PyResult, Python, ToPyObject,
 };
 use ulid::Ulid;
@@ -310,16 +310,16 @@ impl RendezvousHandler {
     }
 }
 
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "rendezvous")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "rendezvous")?;
 
     child_module.add_class::<RendezvousHandler>()?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import rendezvous` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.rendezvous", child_module)?;
 
