@@ -34,7 +34,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
         return base
 
     def test_default(self) -> None:
-        "By default the endpoint should 404"
+        "If the config option is not enabled, the endpoint should 404"
         channel = self.make_request(
             "GET", "/_synapse/client/config/federation_whitelist", shorthand=False
         )
