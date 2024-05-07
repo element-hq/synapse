@@ -817,7 +817,7 @@ class SsoHandler:
                 server_name = profile["avatar_url"].split("/")[-2]
                 media_id = profile["avatar_url"].split("/")[-1]
                 if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)
+                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")
                         return True
