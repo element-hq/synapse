@@ -4569,7 +4569,7 @@ response format is:
 }
 ```
 
-If `whitelist_enabled` is `false` then the server can federate with all others.
+If `whitelist_enabled` is `false` then the server is permitted to federate with all others.
 
 The endpoint requires authentication.
 
