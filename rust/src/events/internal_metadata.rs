@@ -38,6 +38,7 @@ use anyhow::Context;
 use log::warn;
 use pyo3::{
     exceptions::PyAttributeError,
+    pybacked::PyBackedStr,
     pyclass, pymethods,
     types::{PyDict, PyString},
     Bound, IntoPy, PyAny, PyObject, PyResult, Python,
@@ -91,9 +92,9 @@ impl EventInternalMetadataData {
     ///
     /// Returns `None` if the key is a valid but unrecognized string.
     fn from_python_pair(key: &PyAny, value: &PyAny) -> PyResult<Option<Self>> {
-        let key_str: &str = key.extract()?;
+        let key_str: PyBackedStr = key.extract()?;
 
-        let e = match key_str {
+        let e = match &*key_str {
             "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
                 value
                     .extract()

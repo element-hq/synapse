@@ -25,7 +25,7 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use anyhow::Error;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, pybacked::PyBackedStr};
 use regex::Regex;
 
 use crate::push::utils::{glob_to_regex, GlobMatchType};
@@ -59,8 +59,8 @@ impl ServerAclEvaluator {
     #[new]
     pub fn py_new(
         allow_ip_literals: bool,
-        allow: Vec<&str>,
-        deny: Vec<&str>,
+        allow: Vec<PyBackedStr>,
+        deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
         let allow = allow
             .iter()
