@@ -209,6 +209,8 @@ information.
     ^/_matrix/federation/v1/query/
     ^/_matrix/federation/v1/make_join/
     ^/_matrix/federation/v1/make_leave/
+    ^/_matrix/federation/v1/make_knock/
+    ^/_matrix/federation/v1/send_knock/
     ^/_matrix/federation/(v1|v2)/send_join/
     ^/_matrix/federation/(v1|v2)/send_leave/
     ^/_matrix/federation/(v1|v2)/invite/
