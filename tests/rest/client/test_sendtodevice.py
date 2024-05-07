@@ -67,7 +67,9 @@ class SendToDeviceTestCase(HomeserverTestCase):
         }
         self.assertEqual(channel.json_body["to_device"], expected_result)
 
-        # it should re-appear if we do another sync
+        # it should re-appear if we do another sync because the to-device message is not
+        # deleted until we acknowledge it by sending a `?since=...` parameter in the
+        # next sync request corresponding to the `next_batch` value from the response.
         channel = self.make_request("GET", "/sync", access_token=user2_tok)
         self.assertEqual(channel.code, 200, channel.result)
         self.assertEqual(channel.json_body["to_device"], expected_result)
@@ -99,7 +101,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
             )
             self.assertEqual(chan.code, 200, chan.result)
 
-        # now sync: we should get two of the three
+        # now sync: we should get two of the three (because burst_count=2)
         channel = self.make_request("GET", "/sync", access_token=user2_tok)
         self.assertEqual(channel.code, 200, channel.result)
         msgs = channel.json_body["to_device"]["events"]

@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from enum import Enum
 import itertools
 import logging
 from typing import (
@@ -112,12 +113,21 @@ LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
 SyncRequestKey = Tuple[Any, ...]
 
 
+class SyncType(Enum):
+    """Enum for specifying the type of sync request."""
+
+    # These string values are semantically significant and are used in the the metrics
+    INITIAL_SYNC = "initial_sync"
+    FULL_STATE_SYNC = "full_state_sync"
+    INCREMENTAL_SYNC = "incremental_sync"
+    E2EE_SYNC = "e2ee_sync"
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class SyncConfig:
     user: UserID
     filter_collection: FilterCollection
     is_guest: bool
-    request_key: SyncRequestKey
     device_id: Optional[str]
 
 
@@ -263,6 +273,15 @@ class SyncResult:
         )
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class E2eeSyncResult:
+    next_batch: StreamToken
+    to_device: List[JsonDict]
+    # device_lists: DeviceListUpdates
+    # device_one_time_keys_count: JsonMapping
+    # device_unused_fallback_key_types: List[str]
+
+
 class SyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.hs_config = hs.config
@@ -309,6 +328,8 @@ class SyncHandler:
         self,
         requester: Requester,
         sync_config: SyncConfig,
+        sync_type: SyncType,
+        request_key: SyncRequestKey,
         since_token: Optional[StreamToken] = None,
         timeout: int = 0,
         full_state: bool = False,
@@ -316,6 +337,9 @@ class SyncHandler:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
+
+        Args:
+            request_key: The key to use for caching the response.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -324,9 +348,10 @@ class SyncHandler:
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
         res = await self.response_cache.wrap(
-            sync_config.request_key,
+            request_key,
             self._wait_for_sync_for_user,
             sync_config,
+            sync_type,
             since_token,
             timeout,
             full_state,
@@ -338,6 +363,7 @@ class SyncHandler:
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
+        sync_type: SyncType,
         since_token: Optional[StreamToken],
         timeout: int,
         full_state: bool,
@@ -356,13 +382,6 @@ class SyncHandler:
         Computing the body of the response begins in the next method,
         `current_sync_for_user`.
         """
-        if since_token is None:
-            sync_type = "initial_sync"
-        elif full_state:
-            sync_type = "full_state_sync"
-        else:
-            sync_type = "incremental_sync"
-
         context = current_context()
         if context:
             context.tag = sync_type
@@ -384,14 +403,16 @@ class SyncHandler:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
             result: SyncResult = await self.current_sync_for_user(
-                sync_config, since_token, full_state=full_state
+                sync_config, sync_type, since_token, full_state=full_state
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
             async def current_sync_callback(
                 before_token: StreamToken, after_token: StreamToken
             ) -> SyncResult:
-                return await self.current_sync_for_user(sync_config, since_token)
+                return await self.current_sync_for_user(
+                    sync_config, sync_type, since_token
+                )
 
             result = await self.notifier.wait_for_events(
                 sync_config.user.to_string(),
@@ -423,6 +444,7 @@ class SyncHandler:
     async def current_sync_for_user(
         self,
         sync_config: SyncConfig,
+        sync_type: SyncType,
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
     ) -> SyncResult:
@@ -434,9 +456,25 @@ class SyncHandler:
         """
         with start_active_span("sync.current_sync_for_user"):
             log_kv({"since_token": since_token})
-            sync_result = await self.generate_sync_result(
-                sync_config, since_token, full_state
-            )
+
+            # Go through the `/sync` v2 path
+            if sync_type in {
+                SyncType.INITIAL_SYNC,
+                SyncType.FULL_STATE_SYNC,
+                SyncType.INCREMENTAL_SYNC,
+            }:
+                sync_result = await self.generate_sync_result(
+                    sync_config, since_token, full_state
+                )
+            # Go through the MSC3575 Sliding Sync `/sync/e2ee` path
+            elif sync_type == SyncType.E2EE_SYNC:
+                sync_result = await self.generate_e2ee_sync_result(
+                    sync_config, since_token
+                )
+            else:
+                raise Exception(
+                    f"Unknown sync_type (this is a Synapse problem): {sync_type}"
+                )
 
             set_tag(SynapseTags.SYNC_RESULT, bool(sync_result))
             return sync_result
@@ -1748,6 +1786,50 @@ class SyncHandler:
             device_lists=device_lists,
             device_one_time_keys_count=one_time_keys_count,
             device_unused_fallback_key_types=unused_fallback_key_types,
+            next_batch=sync_result_builder.now_token,
+        )
+
+    async def generate_e2ee_sync_result(
+        self,
+        sync_config: SyncConfig,
+        since_token: Optional[StreamToken] = None,
+    ) -> SyncResult:
+        """Generates the response body of a MSC3575 Sliding Sync `/sync/e2ee` result."""
+
+        user_id = sync_config.user.to_string()
+        # TODO: Should we exclude app services here? There could be an argument to allow
+        # them since the appservice doesn't have to make a massive initial sync.
+        # (related to https://github.com/matrix-org/matrix-doc/issues/1144)
+
+        # NB: The now_token gets changed by some of the generate_sync_* methods,
+        # this is due to some of the underlying streams not supporting the ability
+        # to query up to a given point.
+        # Always use the `now_token` in `SyncResultBuilder`
+        now_token = self.event_sources.get_current_token()
+        log_kv({"now_token": now_token})
+
+        joined_room_ids = await self.store.get_rooms_for_user(user_id)
+
+        sync_result_builder = SyncResultBuilder(
+            sync_config,
+            full_state=False,
+            since_token=since_token,
+            now_token=now_token,
+            joined_room_ids=joined_room_ids,
+            # Dummy values to fill out `SyncResultBuilder`
+            excluded_room_ids=frozenset({}),
+            forced_newly_joined_room_ids=frozenset({}),
+            membership_change_events=frozenset({}),
+        )
+
+        await self._generate_sync_entry_for_to_device(sync_result_builder)
+
+        return E2eeSyncResult(
+            to_device=sync_result_builder.to_device,
+            # to_device: List[JsonDict]
+            # device_lists: DeviceListUpdates
+            # device_one_time_keys_count: JsonMapping
+            # device_unused_fallback_key_types: List[str]
             next_batch=sync_result_builder.now_token,
         )
 

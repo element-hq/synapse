@@ -41,6 +41,7 @@ from synapse.handlers.sync import (
     KnockedSyncResult,
     SyncConfig,
     SyncResult,
+    SyncType,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
@@ -198,13 +199,19 @@ class SyncRestServlet(RestServlet):
             user=user,
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
-            request_key=request_key,
             device_id=device_id,
         )
 
         since_token = None
         if since is not None:
             since_token = await StreamToken.from_string(self.store, since)
+
+        if since_token is None:
+            sync_type = SyncType.INITIAL_SYNC
+        elif full_state:
+            sync_type = SyncType.FULL_STATE_SYNC
+        else:
+            sync_type = SyncType.INCREMENTAL_SYNC
 
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
@@ -221,6 +228,8 @@ class SyncRestServlet(RestServlet):
             sync_result = await self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
+                sync_type,
+                request_key,
                 since_token=since_token,
                 timeout=timeout,
                 full_state=full_state,
@@ -554,27 +563,111 @@ class SyncRestServlet(RestServlet):
         return result
 
 
-class SlidingSyncRestServlet(RestServlet):
+class SlidingSyncE2eeRestServlet(RestServlet):
     """
-    API endpoint TODO
-    Useful for cases like TODO
+    API endpoint for MSC3575 Sliding Sync `/sync/e2ee`. This is being introduced as part
+    of Sliding Sync but doesn't have any sliding window component. It's just a way to
+    get E2EE events without having to sit through a initial sync. And not have
+    encryption events backed up by the main sync response.
+
+    GET parameters::
+        timeout(int): How long to wait for new events in milliseconds.
+        since(batch_token): Batch token when asking for incremental deltas.
+
+    Response JSON::
+        {
+            "next_batch": // batch token for the next /sync
+            "to_device": {
+                // list of to-device events
+                "events": [
+                    {
+                        "content: { "algorithm": "m.olm.v1.curve25519-aes-sha2", "ciphertext": { ... }, "org.matrix.msgid": "abcd", "session_id": "abcd" },
+                        "type": "m.room.encrypted",
+                        "sender": "@alice:example.com",
+                    }
+                    // ...
+                ]
+            },
+            "device_one_time_keys_count": {
+                "signed_curve25519": 50
+            },
+            "device_lists": {
+                "changed": ["@alice:example.com"],
+                "left": ["@bob:example.com"]
+            },
+            "device_unused_fallback_key_types": [
+                "signed_curve25519"
+            ]
+        }
     """
 
     PATTERNS = (re.compile("^/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee$"),)
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
-        self._auth = hs.get_auth()
+        self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        self.filtering = hs.get_filtering()
+        self.sync_handler = hs.get_sync_handler()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        return 200, {
-            "foo": "bar",
-        }
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        user = requester.user
+        device_id = requester.device_id
+
+        timeout = parse_integer(request, "timeout", default=0)
+        since = parse_string(request, "since")
+
+        sync_config = SyncConfig(
+            user=user,
+            # Filtering doesn't apply to this endpoint so just use a default to fill in
+            # the SyncConfig
+            filter_collection=self.filtering.DEFAULT_FILTER_COLLECTION,
+            is_guest=requester.is_guest,
+            device_id=device_id,
+        )
+        sync_type = SyncType.E2EE_SYNC
+
+        since_token = None
+        if since is not None:
+            since_token = await StreamToken.from_string(self.store, since)
+
+        # Request cache key
+        request_key = (
+            sync_type,
+            user,
+            timeout,
+            since,
+        )
+
+        # Gather data for the response
+        sync_result = await self.sync_handler.wait_for_sync_for_user(
+            requester,
+            sync_config,
+            sync_type,
+            request_key,
+            since_token=since_token,
+            timeout=timeout,
+            full_state=False,
+        )
+
+        # The client may have disconnected by now; don't bother to serialize the
+        # response if so.
+        if request._disconnected:
+            logger.info("Client has disconnected; not serializing response.")
+            return 200, {}
+
+        response: JsonDict = defaultdict(dict)
+        response["next_batch"] = await sync_result.next_batch.to_string(self.store)
+
+        if sync_result.to_device:
+            response["to_device"] = {"events": sync_result.to_device}
+
+        return 200, response
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc3575_enabled:
-        SlidingSyncRestServlet(hs).register(http_server)
+        SlidingSyncE2eeRestServlet(hs).register(http_server)
