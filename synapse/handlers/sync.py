@@ -596,6 +596,7 @@ class SyncHandler:
                     sync_config.user.to_string(),
                     recents,
                     always_include_ids=current_state_ids,
+                    msc4115_membership_on_events=self.hs_config.experimental.msc4115_membership_on_events,
                 )
                 log_kv({"recents_after_visibility_filtering": len(recents)})
             else:
@@ -681,6 +682,7 @@ class SyncHandler:
                     sync_config.user.to_string(),
                     loaded_recents,
                     always_include_ids=current_state_ids,
+                    msc4115_membership_on_events=self.hs_config.experimental.msc4115_membership_on_events,
                 )
 
                 loaded_recents = []

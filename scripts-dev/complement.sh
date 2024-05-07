@@ -214,7 +214,17 @@ fi
 
 extra_test_args=()
 
-test_packages="./tests/csapi ./tests ./tests/msc3874 ./tests/msc3890 ./tests/msc3391 ./tests/msc3930 ./tests/msc3902 ./tests/msc3967"
+test_packages=(
+    ./tests/csapi
+    ./tests
+    ./tests/msc3874
+    ./tests/msc3890
+    ./tests/msc3391
+    ./tests/msc3930
+    ./tests/msc3902
+    ./tests/msc3967
+    ./tests/msc4115
+)
 
 # Enable dirty runs, so tests will reuse the same container where possible.
 # This significantly speeds up tests, but increases the possibility of test pollution.
@@ -278,7 +288,7 @@ fi
 export PASS_SYNAPSE_LOG_TESTING=1
 
 # Run the tests!
-echo "Images built; running complement with ${extra_test_args[@]} $@ $test_packages"
+echo "Images built; running complement with ${extra_test_args[@]} $@ ${test_packages[@]}"
 cd "$COMPLEMENT_DIR"
 
-go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" $test_packages
+go test -v -tags "synapse_blacklist" -count=1 "${extra_test_args[@]}" "$@" "${test_packages[@]}"

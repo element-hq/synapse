@@ -163,7 +163,7 @@ FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
 LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
-LABEL org.opencontainers.image.licenses='Apache-2.0'
+LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \

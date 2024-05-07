@@ -92,8 +92,6 @@ allow_device_name_lookup_over_federation: true
 ## Experimental Features ##
 
 experimental_features:
-  # client-side support for partial state in /send_join responses
-  faster_joins: true
   # Enable support for polls
   msc3381_polls_enabled: true
   # Enable deleting device-specific notification settings stored in account data
@@ -104,6 +102,10 @@ experimental_features:
   msc3874_enabled: true
   # no UIA for x-signing upload for the first time
   msc3967_enabled: true
+  # Expose a room summary for public rooms
+  msc3266_enabled: true
+
+  msc4115_membership_on_events: true
 
 server_notices:
   system_mxid_localpart: _server
