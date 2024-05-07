@@ -35,8 +35,8 @@ class FederationWhitelistResource(DirectServeJsonResource):
     Response format:
 
         {
-            "whitelist_enabled": true,  // Whether there is a federation whitelist
-            "whitelist": [  // Which hosts are allowed by the whitelist
+            "whitelist_enabled": true,  // Whether the federation whitelist is being enforced
+            "whitelist": [  // Which server names are allowed by the whitelist
                 "example.com"
             ]
         }
