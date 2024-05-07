@@ -40,7 +40,7 @@ use pyo3::{
     exceptions::PyAttributeError,
     pybacked::PyBackedStr,
     pyclass, pymethods,
-    types::{PyDict, PyString},
+    types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
     Bound, IntoPy, PyAny, PyObject, PyResult, Python,
 };
 
@@ -91,7 +91,10 @@ impl EventInternalMetadataData {
     /// Converts from python key/values to the field.
     ///
     /// Returns `None` if the key is a valid but unrecognized string.
-    fn from_python_pair(key: &PyAny, value: &PyAny) -> PyResult<Option<Self>> {
+    fn from_python_pair(
+        key: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<Self>> {
         let key_str: PyBackedStr = key.extract()?;
 
         let e = match &*key_str {
@@ -211,11 +214,11 @@ pub struct EventInternalMetadata {
 #[pymethods]
 impl EventInternalMetadata {
     #[new]
-    fn new(dict: &PyDict) -> PyResult<Self> {
+    fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
-            match EventInternalMetadataData::from_python_pair(key, value) {
+            match EventInternalMetadataData::from_python_pair(&key, &value) {
                 Ok(Some(entry)) => data.push(entry),
                 Ok(None) => {}
                 Err(err) => {

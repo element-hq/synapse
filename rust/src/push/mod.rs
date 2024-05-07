@@ -66,7 +66,7 @@ use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyList, PyLong, PyString};
-use pythonize::{depythonize, pythonize};
+use pythonize::{depythonize_bound, pythonize};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -370,8 +370,8 @@ impl IntoPy<PyObject> for Condition {
 }
 
 impl<'source> FromPyObject<'source> for Condition {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        Ok(depythonize(ob)?)
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
+        Ok(depythonize_bound(ob.clone())?)
     }
 }
 
