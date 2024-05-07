@@ -152,7 +152,7 @@ impl RendezvousHandler {
     }
 
     fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.as_ref(py);
+        let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
         self.evict(now);
@@ -165,7 +165,7 @@ impl RendezvousHandler {
 
         let content_type = self.check_input_headers(request.headers())?;
 
-        let clock = self.clock.as_ref(py);
+        let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
 
