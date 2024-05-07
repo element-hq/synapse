@@ -339,7 +339,7 @@ class ProfileHandler:
             return False
 
         if self.max_avatar_size:
-            if not media_info.media_length:
+            if media_info.media_length is None:
                 logger.warning(
                     "Forbidding avatar change to %s: unknown media size",
                     mxc,
