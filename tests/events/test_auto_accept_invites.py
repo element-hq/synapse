@@ -20,6 +20,7 @@
 #
 import asyncio
 from asyncio import Future
+from http import HTTPStatus
 from typing import Any, Awaitable, Dict, List, Optional, Tuple, TypeVar, cast
 from unittest.mock import Mock
 
@@ -28,6 +29,7 @@ import attr
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes
+from synapse.api.errors import SynapseError
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.federation.federation_base import event_from_pdu_json
@@ -91,6 +93,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         # Create a room and send an invite to the other user
         room_id = self.helper.create_room_as(
             inviting_user_id,
+            is_public=False,
             tok=inviting_user_tok,
         )
 
@@ -128,7 +131,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         self.login("invitee", "pass")
 
         # Create a room and send an invite to the other user
-        room_id = self.helper.create_room_as(inviting_user_id, tok=inviting_user_tok)
+        room_id = self.helper.create_room_as(
+            inviting_user_id, is_public=False, tok=inviting_user_tok
+        )
 
         self.helper.invite(
             room_id,
@@ -163,6 +168,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         # Create a room and send an invite to the other user
         room_id = self.helper.create_room_as(
             inviting_user_id,
+            is_public=False,
             tok=inviting_user_tok,
         )
 
@@ -263,6 +269,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         # Create a room and send an invite to the other user
         room_id = self.helper.create_room_as(
             inviting_user_id,
+            is_public=False,
             tok=inviting_user_tok,
         )
 
@@ -302,6 +309,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         # Create a room and send an invite to the other user
         room_id = self.helper.create_room_as(
             inviting_user_id,
+            is_public=False,
             tok=inviting_user_tok,
         )
 
@@ -338,7 +346,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         self.login("invitee", "pass")
 
         # Create a room and send an invite to the other user
-        room_id = self.helper.create_room_as(inviting_user_id, tok=inviting_user_tok)
+        room_id = self.helper.create_room_as(
+            inviting_user_id, is_public=False, tok=inviting_user_tok
+        )
 
         self.helper.invite(
             room_id,
@@ -379,7 +389,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         self.login("invitee", "pass")
 
         room_id = self.helper.create_room_as(
-            room_creator=creator_user_id, tok=creator_user_tok
+            room_creator=creator_user_id, is_public=False, tok=creator_user_tok
         )
         room_version = self.get_success(self.store.get_room_version(room_id))
 
@@ -474,8 +484,8 @@ class InviteAutoAccepterInternalTestCase(TestCase):
         )
         # the first two calls raise an exception while the third call is successful
         self.mocked_update_membership.side_effect = [
-            Exception(),
-            Exception(),
+            SynapseError(HTTPStatus.FORBIDDEN, "Forbidden"),
+            SynapseError(HTTPStatus.FORBIDDEN, "Forbidden"),
             make_awaitable(join_event),
         ]
 
@@ -504,7 +514,9 @@ class InviteAutoAccepterInternalTestCase(TestCase):
             type="m.room.member",
             content={"membership": "invite"},
         )
-        self.mocked_update_membership.side_effect = Exception()
+        self.mocked_update_membership.side_effect = SynapseError(
+            HTTPStatus.FORBIDDEN, "Forbidden"
+        )
 
         # Stop mypy from complaining that we give on_new_event a MockEvent rather than an
         # EventBase.
@@ -584,7 +596,9 @@ class InviteAutoAccepterInternalTestCase(TestCase):
         Tests that the module only runs on the specified worker.
         """
         # By default, we run on the main process...
-        main_module = create_module(worker_name=None)
+        main_module = create_module(
+            config_override={"auto_accept_invites": {"enabled": True}}, worker_name=None
+        )
         cast(
             Mock, main_module._api.register_third_party_rules_callbacks
         ).assert_called_once()
@@ -598,7 +612,10 @@ class InviteAutoAccepterInternalTestCase(TestCase):
         # ...unless we configured them to be the designated worker.
         specified_module = create_module(
             config_override={
-                "auto_accept_invites": {"worker_to_run_on": "account_data1"}
+                "auto_accept_invites": {
+                    "enabled": True,
+                    "worker_to_run_on": "account_data1",
+                }
             },
             worker_name="account_data1",
         )

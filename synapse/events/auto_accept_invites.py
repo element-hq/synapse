@@ -19,8 +19,10 @@
 #
 #
 import logging
+from http import HTTPStatus
 from typing import Any, Dict, Tuple
 
+from synapse.api.errors import SynapseError
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.module_api import EventBase, ModuleApi, run_as_background_process
 
@@ -33,6 +35,10 @@ class InviteAutoAccepter:
         # Keep a reference to the Module API.
         self._api = api
         self._config = config
+
+        if not self._config.enabled:
+            logger.info("Not starting InviteAutoAccepter as it is not enabled")
+            return
 
         should_run_on_this_worker = config.worker_to_run_on == self._api.worker_name
 
@@ -70,7 +76,6 @@ class InviteAutoAccepter:
 
         # Only accept invites for direct messages if the configuration mandates it.
         is_direct_message = event.content.get("is_direct", False)
-        logger.info("Is Direct: %r", is_direct_message)
         is_allowed_by_direct_message_rules = (
             not self._config.accept_invites_only_for_direct_messages
             or is_direct_message is True
@@ -112,6 +117,11 @@ class InviteAutoAccepter:
         """
         Marks a room (`room_id`) as a direct message with the counterparty `dm_user_id`
         from the perspective of the user `user_id`.
+
+        Args:
+            user_id: the user for whom the membership is changing
+            dm_user_id: the user performing the membership change
+            room_id: room id of the room the user is invited to
         """
 
         # This is a dict of User IDs to tuples of Room IDs
@@ -148,7 +158,7 @@ class InviteAutoAccepter:
 
         Args:
             sender: the user performing the membership change
-            target: the for whom the membership is changing
+            target: the user for whom the membership is changing
             room_id: room id of the room to join to
             new_membership: the type of membership event (in this case will be "join")
         """
@@ -166,10 +176,20 @@ class InviteAutoAccepter:
                     room_id=room_id,
                     new_membership=new_membership,
                 )
+            except SynapseError as e:
+                if e.code == HTTPStatus.FORBIDDEN:
+                    logger.debug(
+                        f"Update_room_membership was forbidden. This can sometimes be expected for remote invites. Exception: {e}"
+                    )
+                else:
+                    logger.warn(
+                        f"Update_room_membership raised the following unexpected (SynapseError) exception: {e}"
+                    )
             except Exception as e:
-                logger.info(
-                    f"Update_room_membership raised the following exception: {e}"
+                logger.warn(
+                    f"Update_room_membership raised the following unexpected exception: {e}"
                 )
+            finally:
                 sleep = 2**retries
                 retries += 1
 
