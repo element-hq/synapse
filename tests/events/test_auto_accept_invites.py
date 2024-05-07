@@ -25,6 +25,7 @@ from typing import Any, Awaitable, Dict, List, Optional, Tuple, TypeVar, cast
 from unittest.mock import Mock
 
 import attr
+from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -71,6 +72,12 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         self.sync_handler = self.hs.get_sync_handler()
         self.module_api = hs.get_module_api()
 
+    @parameterized.expand(
+        [
+            [False],
+            [True],
+        ]
+    )
     @override_config(
         {
             "auto_accept_invites": {
@@ -78,7 +85,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    def test_simple_accept_invite(self) -> None:
+    def test_auto_accept_invites(self, direct_room: bool) -> None:
         """Test that a user automatically joins a room when invited, if the
         module is enabled.
         """
@@ -102,10 +109,11 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             inviting_user_id,
             invited_user_id,
             tok=inviting_user_tok,
+            extra_data={"is_direct": direct_room},
         )
 
         # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
+        join_updates, _ = sync_join(self, invited_user_id)
         self.assertEqual(len(join_updates), 1)
 
         join_update: JoinedSyncResult = join_updates[0]
@@ -118,7 +126,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    def test_simple_dont_accept_invite(self) -> None:
+    def test_module_not_enabled(self) -> None:
         """Test that a user does not automatically join a room when invited,
         if the module is not enabled.
         """
@@ -142,50 +150,9 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             tok=inviting_user_tok,
         )
 
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
+        # Check that the invite receiving user has not automatically joined the room when syncing
+        join_updates, _ = sync_join(self, invited_user_id)
         self.assertEqual(len(join_updates), 0)
-
-    @override_config(
-        {
-            "auto_accept_invites": {
-                "enabled": True,
-            },
-        }
-    )
-    def test_simple_accept_invite_direct_message(self) -> None:
-        """Test that a user automatically joins a room when invited, even if the invite
-        is for a direct message room.
-        """
-        # A local user who sends an invite
-        inviting_user_id = self.register_user("inviter", "pass")
-        inviting_user_tok = self.login("inviter", "pass")
-
-        # A local user who receives an invite
-        invited_user_id = self.register_user("invitee", "pass")
-        self.login("invitee", "pass")
-
-        # Create a room and send an invite to the other user
-        room_id = self.helper.create_room_as(
-            inviting_user_id,
-            is_public=False,
-            tok=inviting_user_tok,
-        )
-
-        self.helper.invite(
-            room_id,
-            inviting_user_id,
-            invited_user_id,
-            tok=inviting_user_tok,
-            extra_data={"is_direct": True},
-        )
-
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
-        self.assertEqual(len(join_updates), 1)
-
-        join_update: JoinedSyncResult = join_updates[0]
-        self.assertEqual(join_update.room_id, room_id)
 
     @override_config(
         {
@@ -238,12 +205,18 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
         )
 
         # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
+        join_updates, _ = sync_join(self, invited_user_id)
         self.assertEqual(len(join_updates), 1)
 
         join_update: JoinedSyncResult = join_updates[0]
         self.assertEqual(join_update.room_id, room_id)
 
+    @parameterized.expand(
+        [
+            [False, False],
+            [True, True],
+        ]
+    )
     @override_config(
         {
             "auto_accept_invites": {
@@ -252,11 +225,13 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    def test_accept_invite_direct_message_if_only_enabled_for_direct_messages(
+    def test_accept_invite_direct_message(
         self,
+        direct_room: bool,
+        expect_auto_join: bool,
     ) -> None:
         """Tests that, if the module is configured to only accept DM invites, invites to DM rooms are still
-        automatically accepted.
+        automatically accepted. Otherwise they are rejected.
         """
         # A local user who sends an invite
         inviting_user_id = self.register_user("inviter", "pass")
@@ -278,53 +253,27 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             inviting_user_id,
             invited_user_id,
             tok=inviting_user_tok,
-            extra_data={"is_direct": True},
+            extra_data={"is_direct": direct_room},
         )
 
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
-        self.assertEqual(len(join_updates), 1)
+        if expect_auto_join:
+            # Check that the invite receiving user has automatically joined the room when syncing
+            join_updates, _ = sync_join(self, invited_user_id)
+            self.assertEqual(len(join_updates), 1)
 
-        join_update: JoinedSyncResult = join_updates[0]
-        self.assertEqual(join_update.room_id, room_id)
+            join_update: JoinedSyncResult = join_updates[0]
+            self.assertEqual(join_update.room_id, room_id)
+        else:
+            # Check that the invite receiving user has not automatically joined the room when syncing
+            join_updates, _ = sync_join(self, invited_user_id)
+            self.assertEqual(len(join_updates), 0)
 
-    @override_config(
-        {
-            "auto_accept_invites": {
-                "enabled": True,
-                "only_for_direct_messages": True,
-            },
-        }
+    @parameterized.expand(
+        [
+            [False, True],
+            [True, False],
+        ]
     )
-    def test_ignore_invite_if_only_enabled_for_direct_messages(self) -> None:
-        """Tests that, if the module is configured to only accept DM invites, invites to non-DM rooms are ignored."""
-        # A local user who sends an invite
-        inviting_user_id = self.register_user("inviter", "pass")
-        inviting_user_tok = self.login("inviter", "pass")
-
-        # A local user who receives an invite
-        invited_user_id = self.register_user("invitee", "pass")
-        self.login("invitee", "pass")
-
-        # Create a room and send an invite to the other user
-        room_id = self.helper.create_room_as(
-            inviting_user_id,
-            is_public=False,
-            tok=inviting_user_tok,
-        )
-
-        self.helper.invite(
-            room_id,
-            inviting_user_id,
-            invited_user_id,
-            tok=inviting_user_tok,
-            extra_data={"is_direct": False},
-        )
-
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
-        self.assertEqual(len(join_updates), 0)
-
     @override_config(
         {
             "auto_accept_invites": {
@@ -333,13 +282,15 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    def test_accept_invite_local_user_if_only_enabled_for_local_users(self) -> None:
+    def test_accept_invite_local_user(
+        self, remote_inviter: bool, expect_auto_join: bool
+    ) -> None:
         """Tests that, if the module is configured to only accept invites from local users, invites
-        from local users are still automatically accepted.
+        from local users are still automatically accepted. Otherwise they are rejected.
         """
         # A local user who sends an invite
-        inviting_user_id = self.register_user("inviter", "pass")
-        inviting_user_tok = self.login("inviter", "pass")
+        creator_user_id = self.register_user("inviter", "pass")
+        creator_user_tok = self.login("inviter", "pass")
 
         # A local user who receives an invite
         invited_user_id = self.register_user("invitee", "pass")
@@ -347,77 +298,56 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
 
         # Create a room and send an invite to the other user
         room_id = self.helper.create_room_as(
-            inviting_user_id, is_public=False, tok=inviting_user_tok
+            creator_user_id, is_public=False, tok=creator_user_tok
         )
 
-        self.helper.invite(
-            room_id,
-            inviting_user_id,
-            invited_user_id,
-            tok=inviting_user_tok,
-        )
+        if remote_inviter:
+            room_version = self.get_success(self.store.get_room_version(room_id))
 
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
-        self.assertEqual(len(join_updates), 1)
+            # A remote user who sends the invite
+            remote_server = "otherserver"
+            remote_user = "@otheruser:" + remote_server
 
-        join_update: JoinedSyncResult = join_updates[0]
-        self.assertEqual(join_update.room_id, room_id)
-
-    @override_config(
-        {
-            "auto_accept_invites": {
-                "enabled": True,
-                "only_from_local_users": True,
-            },
-        }
-    )
-    def test_ignore_invite_if_only_enabled_from_local_users(self) -> None:
-        """Tests that, if the module is configured to only accept invites from local users,
-        invites from non-local users are ignored.
-        """
-        # A remote user who sends the invite
-        remote_server = "otherserver"
-        remote_user = "@otheruser:" + remote_server
-
-        # A local user who creates the room
-        creator_user_id = self.register_user("creator", "pass")
-        creator_user_tok = self.login("creator", "pass")
-
-        # A local user who receives an invite
-        invited_user_id = self.register_user("invitee", "pass")
-        self.login("invitee", "pass")
-
-        room_id = self.helper.create_room_as(
-            room_creator=creator_user_id, is_public=False, tok=creator_user_tok
-        )
-        room_version = self.get_success(self.store.get_room_version(room_id))
-
-        invite_event = event_from_pdu_json(
-            {
-                "type": EventTypes.Member,
-                "content": {"membership": "invite"},
-                "room_id": room_id,
-                "sender": remote_user,
-                "state_key": invited_user_id,
-                "depth": 32,
-                "prev_events": [],
-                "auth_events": [],
-                "origin_server_ts": self.clock.time_msec(),
-            },
-            room_version,
-        )
-        self.get_success(
-            self.handler.on_invite_request(
-                remote_server,
-                invite_event,
-                invite_event.room_version,
+            invite_event = event_from_pdu_json(
+                {
+                    "type": EventTypes.Member,
+                    "content": {"membership": "invite"},
+                    "room_id": room_id,
+                    "sender": remote_user,
+                    "state_key": invited_user_id,
+                    "depth": 32,
+                    "prev_events": [],
+                    "auth_events": [],
+                    "origin_server_ts": self.clock.time_msec(),
+                },
+                room_version,
             )
-        )
+            self.get_success(
+                self.handler.on_invite_request(
+                    remote_server,
+                    invite_event,
+                    invite_event.room_version,
+                )
+            )
+        else:
+            self.helper.invite(
+                room_id,
+                creator_user_id,
+                invited_user_id,
+                tok=creator_user_tok,
+            )
 
-        # Check that the invite receiving user has automatically joined the room when syncing
-        join_updates, sync_token = sync_join(self, invited_user_id)
-        self.assertEqual(len(join_updates), 0)
+        if expect_auto_join:
+            # Check that the invite receiving user has automatically joined the room when syncing
+            join_updates, _ = sync_join(self, invited_user_id)
+            self.assertEqual(len(join_updates), 1)
+
+            join_update: JoinedSyncResult = join_updates[0]
+            self.assertEqual(join_update.room_id, room_id)
+        else:
+            # Check that the invite receiving user has not automatically joined the room when syncing
+            join_updates, _ = sync_join(self, invited_user_id)
+            self.assertEqual(len(join_updates), 0)
 
 
 def sync_join(
