@@ -829,6 +829,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         if action in ["kick", "unban"]:
             effective_membership_state = "leave"
 
+        if effective_membership_state not in Membership.LIST:
+            raise SynapseError(400, "Invalid membership key")
+
         # Add profile data for joins etc, if no per-room profile.
         if (
             effective_membership_state
