@@ -271,12 +271,12 @@ pub enum SimpleJsonValue {
 
 impl<'source> FromPyObject<'source> for SimpleJsonValue {
     fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        if let Ok(s) = <PyString as pyo3::PyTryFrom>::try_from(ob) {
+        if let Ok(s) = ob.downcast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
-        } else if let Ok(b) = <PyBool as pyo3::PyTryFrom>::try_from(ob) {
+        } else if let Ok(b) = ob.downcast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = <PyLong as pyo3::PyTryFrom>::try_from(ob) {
+        } else if let Ok(i) = ob.downcast::<PyLong>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
@@ -299,7 +299,7 @@ pub enum JsonValue {
 
 impl<'source> FromPyObject<'source> for JsonValue {
     fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        if let Ok(l) = <PyList as pyo3::PyTryFrom>::try_from(ob) {
+        if let Ok(l) = ob.downcast::<PyList>() {
             match l.iter().map(SimpleJsonValue::extract).collect() {
                 Ok(a) => Ok(JsonValue::Array(a)),
                 Err(e) => Err(PyTypeError::new_err(format!(
