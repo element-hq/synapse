@@ -40,7 +40,7 @@ use pyo3::{
     exceptions::PyAttributeError,
     pyclass, pymethods,
     types::{PyDict, PyString},
-    IntoPy, PyAny, PyObject, PyResult, Python,
+    Bound, IntoPy, PyAny, PyObject, PyResult, Python,
 };
 
 /// Definitions of the various fields of the internal metadata.
@@ -59,7 +59,7 @@ enum EventInternalMetadataData {
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
-    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a PyString, PyObject) {
+    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, PyObject) {
         match self {
             EventInternalMetadataData::OutOfBandMembership(o) => {
                 (pyo3::intern!(py, "out_of_band_membership"), o.into_py(py))
