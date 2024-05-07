@@ -4557,7 +4557,7 @@ Configuration for extension features for Synapse
 
 Enables an endpoint for fetching the federation whitelist config.
 
-The request path is `/_synapse/client/config/federation_whitelist`, and the
+The request method and path is `GET /_synapse/client/config/federation_whitelist`, and the
 response format is:
 
 ```json
