@@ -130,7 +130,7 @@ class TimelineBatch:
     # All the events that were fetched from the DB while loading the room. This
     # is a superset of `events`.
     fetched_events: Sequence[EventBase]
-    fetched_limited: bool
+    fetched_limited: bool  # Whether there is a gap between the previous timeline batch
 
     # A mapping of event ID to the bundled aggregations for the above events.
     # This is only calculated if limited is true.
@@ -662,6 +662,8 @@ class SyncHandler:
                         room_id, limit=load_limit + 1, end_token=end_key
                     )
 
+                # We prepend as `fetched_events` is in ascending stream order,
+                # and `events` is from *before* the previously fetched events.
                 fetched_events = events + fetched_events
 
                 log_kv({"loaded_recents": len(events)})
@@ -1309,13 +1311,13 @@ class SyncHandler:
                 prev_event_id = e.event_id
 
         if is_linear_timeline and not batch.fetched_limited:
-            state_ids: StateMap[str] = {}
+            batch_state_ids: MutableStateMap[str] = {}
 
             # If the returned batch is actually limited, we need to add the
             # state events that happened in the batch.
             if batch.limited:
                 timeline_events = {e.event_id for e in batch.events}
-                state_ids = {
+                batch_state_ids = {
                     (e.type, e.state_key): e.event_id
                     for e in batch.fetched_events
                     if e.is_state() and e.event_id not in timeline_events
@@ -1329,7 +1331,7 @@ class SyncHandler:
                     # timeline here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
+                    ll_state_ids = await self._state_storage_controller.get_state_ids_for_event(
                         batch.events[0].event_id,
                         # we only want members!
                         state_filter=StateFilter.from_types(
@@ -1337,7 +1339,8 @@ class SyncHandler:
                         ),
                         await_full_state=False,
                     )
-            return state_ids
+                    batch_state_ids.update(ll_state_ids)
+            return batch_state_ids
 
         if batch:
             state_at_timeline_start = (
