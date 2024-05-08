@@ -1936,7 +1936,7 @@ class SyncHandler:
             # Dummy values to fill out `SyncResultBuilder`
             excluded_room_ids=frozenset({}),
             forced_newly_joined_room_ids=frozenset({}),
-            membership_change_events=frozenset({}),
+            membership_change_events=[],
         )
 
         await self._generate_sync_entry_for_to_device(sync_result_builder)
