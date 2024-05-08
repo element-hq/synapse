@@ -28,11 +28,14 @@ from typing import (
     Dict,
     FrozenSet,
     List,
+    Literal,
     Mapping,
     Optional,
     Sequence,
     Set,
     Tuple,
+    Union,
+    overload,
 )
 
 import attr
@@ -333,6 +336,31 @@ class SyncHandler:
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
 
+    @overload
+    async def wait_for_sync_for_user(
+        self,
+        requester: Requester,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.SYNC_V2],
+        request_key: SyncRequestKey,
+        since_token: Optional[StreamToken] = None,
+        timeout: int = 0,
+        full_state: bool = False,
+    ) -> SyncResult: ...
+
+    @overload
+    async def wait_for_sync_for_user(
+        self,
+        requester: Requester,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.E2EE_SYNC],
+        request_key: SyncRequestKey,
+        since_token: Optional[StreamToken] = None,
+        timeout: int = 0,
+        full_state: bool = False,
+    ) -> E2eeSyncResult: ...
+
+    @overload
     async def wait_for_sync_for_user(
         self,
         requester: Requester,
@@ -342,7 +370,18 @@ class SyncHandler:
         since_token: Optional[StreamToken] = None,
         timeout: int = 0,
         full_state: bool = False,
-    ) -> SyncResult:
+    ) -> Union[SyncResult, E2eeSyncResult]: ...
+
+    async def wait_for_sync_for_user(
+        self,
+        requester: Requester,
+        sync_config: SyncConfig,
+        sync_version: SyncVersion,
+        request_key: SyncRequestKey,
+        since_token: Optional[StreamToken] = None,
+        timeout: int = 0,
+        full_state: bool = False,
+    ) -> Union[SyncResult, E2eeSyncResult]:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
@@ -369,6 +408,29 @@ class SyncHandler:
         logger.debug("Returning sync response for %s", user_id)
         return res
 
+    @overload
+    async def _wait_for_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.SYNC_V2],
+        since_token: Optional[StreamToken],
+        timeout: int,
+        full_state: bool,
+        cache_context: ResponseCacheContext[SyncRequestKey],
+    ) -> SyncResult: ...
+
+    @overload
+    async def _wait_for_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.E2EE_SYNC],
+        since_token: Optional[StreamToken],
+        timeout: int,
+        full_state: bool,
+        cache_context: ResponseCacheContext[SyncRequestKey],
+    ) -> E2eeSyncResult: ...
+
+    @overload
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
@@ -377,7 +439,17 @@ class SyncHandler:
         timeout: int,
         full_state: bool,
         cache_context: ResponseCacheContext[SyncRequestKey],
-    ) -> SyncResult:
+    ) -> Union[SyncResult, E2eeSyncResult]: ...
+
+    async def _wait_for_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: SyncVersion,
+        since_token: Optional[StreamToken],
+        timeout: int,
+        full_state: bool,
+        cache_context: ResponseCacheContext[SyncRequestKey],
+    ) -> Union[SyncResult, E2eeSyncResult]:
         """The start of the machinery that produces a /sync response.
 
         See https://spec.matrix.org/v1.1/client-server-api/#syncing for full details.
@@ -420,14 +492,16 @@ class SyncHandler:
         if timeout == 0 or since_token is None or full_state:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
-            result: SyncResult = await self.current_sync_for_user(
-                sync_config, sync_version, since_token, full_state=full_state
+            result: Union[SyncResult, E2eeSyncResult] = (
+                await self.current_sync_for_user(
+                    sync_config, sync_version, since_token, full_state=full_state
+                )
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
             async def current_sync_callback(
                 before_token: StreamToken, after_token: StreamToken
-            ) -> SyncResult:
+            ) -> Union[SyncResult, E2eeSyncResult]:
                 return await self.current_sync_for_user(
                     sync_config, sync_version, since_token
                 )
@@ -459,13 +533,40 @@ class SyncHandler:
 
         return result
 
+    @overload
+    async def current_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.SYNC_V2],
+        since_token: Optional[StreamToken] = None,
+        full_state: bool = False,
+    ) -> SyncResult: ...
+
+    @overload
+    async def current_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: Literal[SyncVersion.E2EE_SYNC],
+        since_token: Optional[StreamToken] = None,
+        full_state: bool = False,
+    ) -> SyncResult: ...
+
+    @overload
     async def current_sync_for_user(
         self,
         sync_config: SyncConfig,
         sync_version: SyncVersion,
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
-    ) -> SyncResult:
+    ) -> Union[SyncResult, E2eeSyncResult]: ...
+
+    async def current_sync_for_user(
+        self,
+        sync_config: SyncConfig,
+        sync_version: SyncVersion,
+        since_token: Optional[StreamToken] = None,
+        full_state: bool = False,
+    ) -> Union[SyncResult, E2eeSyncResult]:
         """Generates the response body of a sync result, represented as a SyncResult.
 
         This is a wrapper around `generate_sync_result` which starts an open tracing
@@ -477,8 +578,10 @@ class SyncHandler:
 
             # Go through the `/sync` v2 path
             if sync_version == SyncVersion.SYNC_V2:
-                sync_result = await self.generate_sync_result(
-                    sync_config, since_token, full_state
+                sync_result: Union[SyncResult, E2eeSyncResult] = (
+                    await self.generate_sync_result(
+                        sync_config, since_token, full_state
+                    )
                 )
             # Go through the MSC3575 Sliding Sync `/sync/e2ee` path
             elif sync_version == SyncVersion.E2EE_SYNC:
@@ -1807,7 +1910,7 @@ class SyncHandler:
         self,
         sync_config: SyncConfig,
         since_token: Optional[StreamToken] = None,
-    ) -> SyncResult:
+    ) -> E2eeSyncResult:
         """Generates the response body of a MSC3575 Sliding Sync `/sync/e2ee` result."""
 
         user_id = sync_config.user.to_string()
