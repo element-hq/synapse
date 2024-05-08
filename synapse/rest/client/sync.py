@@ -41,7 +41,7 @@ from synapse.handlers.sync import (
     KnockedSyncResult,
     SyncConfig,
     SyncResult,
-    SyncType,
+    SyncVersion,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
@@ -206,13 +206,6 @@ class SyncRestServlet(RestServlet):
         if since is not None:
             since_token = await StreamToken.from_string(self.store, since)
 
-        if since_token is None:
-            sync_type = SyncType.INITIAL_SYNC
-        elif full_state:
-            sync_type = SyncType.FULL_STATE_SYNC
-        else:
-            sync_type = SyncType.INCREMENTAL_SYNC
-
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
@@ -228,7 +221,7 @@ class SyncRestServlet(RestServlet):
             sync_result = await self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
-                sync_type,
+                SyncVersion.SYNC_V2,
                 request_key,
                 since_token=since_token,
                 timeout=timeout,
@@ -567,8 +560,8 @@ class SlidingSyncE2eeRestServlet(RestServlet):
     """
     API endpoint for MSC3575 Sliding Sync `/sync/e2ee`. This is being introduced as part
     of Sliding Sync but doesn't have any sliding window component. It's just a way to
-    get E2EE events without having to sit through a initial sync. And not have
-    encryption events backed up by the main sync response.
+    get E2EE events without having to sit through a big initial sync (`/sync` v2). And
+    we can avoid encryption events being backed up by the main sync response.
 
     GET parameters::
         timeout(int): How long to wait for new events in milliseconds.
@@ -626,7 +619,6 @@ class SlidingSyncE2eeRestServlet(RestServlet):
             is_guest=requester.is_guest,
             device_id=device_id,
         )
-        sync_type = SyncType.E2EE_SYNC
 
         since_token = None
         if since is not None:
@@ -634,7 +626,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
         # Request cache key
         request_key = (
-            sync_type,
+            SyncVersion.SYNC_V2,
             user,
             timeout,
             since,
@@ -644,7 +636,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         sync_result = await self.sync_handler.wait_for_sync_for_user(
             requester,
             sync_config,
-            sync_type,
+            SyncVersion.SYNC_V2,
             request_key,
             since_token=since_token,
             timeout=timeout,
