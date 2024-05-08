@@ -1,1 +1,1 @@
-Add support for optional whitespace around Authorization param commas
+Add support for optional whitespace around the Federation API's `Authorization` header's parameter commas.
