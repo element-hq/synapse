@@ -18,9 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from enum import Enum
 import itertools
 import logging
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
