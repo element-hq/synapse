@@ -31,7 +31,7 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.handlers.sync import SyncConfig, SyncResult
+from synapse.handlers.sync import SyncConfig, SyncRequestKey, SyncResult, SyncVersion
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -40,6 +40,14 @@ from synapse.util import Clock
 
 import tests.unittest
 import tests.utils
+
+_request_key = 0
+
+
+def generate_request_key() -> SyncRequestKey:
+    global _request_key
+    _request_key += 1
+    return ("request_key", _request_key)
 
 
 class SyncTestCase(tests.unittest.HomeserverTestCase):
@@ -73,13 +81,17 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Check that the happy case does not throw errors
         self.get_success(self.store.upsert_monthly_active_user(user_id1))
         self.get_success(
-            self.sync_handler.wait_for_sync_for_user(requester, sync_config)
+            self.sync_handler.wait_for_sync_for_user(
+                requester, sync_config, SyncVersion.SYNC_V2, generate_request_key()
+            )
         )
 
         # Test that global lock works
         self.auth_blocking._hs_disabled = True
         e = self.get_failure(
-            self.sync_handler.wait_for_sync_for_user(requester, sync_config),
+            self.sync_handler.wait_for_sync_for_user(
+                requester, sync_config, SyncVersion.SYNC_V2, generate_request_key()
+            ),
             ResourceLimitError,
         )
         self.assertEqual(e.value.errcode, Codes.RESOURCE_LIMIT_EXCEEDED)
@@ -90,7 +102,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         requester = create_requester(user_id2)
 
         e = self.get_failure(
-            self.sync_handler.wait_for_sync_for_user(requester, sync_config),
+            self.sync_handler.wait_for_sync_for_user(
+                requester, sync_config, SyncVersion.SYNC_V2, generate_request_key()
+            ),
             ResourceLimitError,
         )
         self.assertEqual(e.value.errcode, Codes.RESOURCE_LIMIT_EXCEEDED)
@@ -109,7 +123,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         requester = create_requester(user)
         initial_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                requester, sync_config=generate_sync_config(user, device_id="dev")
+                requester,
+                sync_config=generate_sync_config(user, device_id="dev"),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
 
@@ -140,7 +157,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # The rooms should appear in the sync response.
         result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                requester, sync_config=generate_sync_config(user)
+                requester,
+                sync_config=generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         self.assertIn(joined_room, [r.room_id for r in result.joined])
@@ -152,6 +172,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config=generate_sync_config(user, device_id="dev"),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
         )
@@ -180,7 +202,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Get a new request key.
         result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                requester, sync_config=generate_sync_config(user)
+                requester,
+                sync_config=generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         self.assertNotIn(joined_room, [r.room_id for r in result.joined])
@@ -192,6 +217,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config=generate_sync_config(user, device_id="dev"),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_result.next_batch,
             )
         )
@@ -231,7 +258,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Do a sync as Alice to get the latest event in the room.
         alice_sync_result: SyncResult = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                create_requester(owner), generate_sync_config(owner)
+                create_requester(owner),
+                generate_sync_config(owner),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         self.assertEqual(len(alice_sync_result.joined), 1)
@@ -251,7 +281,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         eve_requester = create_requester(eve)
         eve_sync_config = generate_sync_config(eve)
         eve_sync_after_ban: SyncResult = self.get_success(
-            self.sync_handler.wait_for_sync_for_user(eve_requester, eve_sync_config)
+            self.sync_handler.wait_for_sync_for_user(
+                eve_requester,
+                eve_sync_config,
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+            ),
         )
 
         # Sanity check this sync result. We shouldn't be joined to the room.
@@ -268,6 +303,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=eve_sync_after_ban.next_batch,
             )
         )
@@ -279,6 +316,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 eve_requester,
                 eve_sync_config,
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=None,
             )
         )
@@ -310,7 +349,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Do an initial sync as Alice to get a known starting point.
         initial_sync_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                alice_requester, generate_sync_config(alice)
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
@@ -338,6 +380,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                         self.hs, {"room": {"timeline": {"limit": 2}}}
                     ),
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
         )
@@ -380,7 +424,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Do an initial sync as Alice to get a known starting point.
         initial_sync_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                alice_requester, generate_sync_config(alice)
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
@@ -418,6 +465,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                         },
                     ),
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
         )
@@ -461,7 +510,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Do an initial sync as Alice to get a known starting point.
         initial_sync_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                alice_requester, generate_sync_config(alice)
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
@@ -486,6 +538,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                         self.hs, {"room": {"timeline": {"limit": 1}}}
                     ),
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
             )
         )
@@ -515,6 +569,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                         self.hs, {"room": {"timeline": {"limit": 1}}}
                     ),
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=incremental_sync.next_batch,
             )
         )
@@ -574,7 +630,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # Do an initial sync to get a known starting point.
         initial_sync_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                alice_requester, generate_sync_config(alice)
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         last_room_creation_event_id = (
@@ -598,6 +657,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                         self.hs, {"room": {"timeline": {"limit": 1}}}
                     ),
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         room_sync = initial_sync_result.joined[0]
@@ -618,8 +679,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             self.sync_handler.wait_for_sync_for_user(
                 alice_requester,
                 generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
-            )
+            ),
         )
 
         # The state event should appear in the 'state' section of the response.
@@ -668,8 +731,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         initial_sync_result = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                bob_requester, generate_sync_config(bob)
-            )
+                bob_requester,
+                generate_sync_config(bob),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+            ),
         )
 
         # Alice sends a message and a state
@@ -699,6 +765,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 generate_sync_config(
                     bob, filter_collection=FilterCollection(self.hs, filter_dict)
                 ),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
                 since_token=None if initial_sync else initial_sync_result.next_batch,
             )
         ).archived[0]
@@ -791,7 +859,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         # but that it does not come down /sync in public room
         sync_result: SyncResult = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                create_requester(user), generate_sync_config(user)
+                create_requester(user),
+                generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         event_ids = []
@@ -837,7 +908,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         private_sync_result: SyncResult = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                create_requester(user2), generate_sync_config(user2)
+                create_requester(user2),
+                generate_sync_config(user2),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
         priv_event_ids = []
@@ -845,9 +919,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             priv_event_ids.append(event.event_id)
 
         self.assertIn(private_call_event.event_id, priv_event_ids)
-
-
-_request_key = 0
 
 
 def generate_sync_config(
@@ -866,12 +937,9 @@ def generate_sync_config(
     if filter_collection is None:
         filter_collection = Filtering(Mock()).DEFAULT_FILTER_COLLECTION
 
-    global _request_key
-    _request_key += 1
     return SyncConfig(
         user=UserID.from_string(user_id),
         filter_collection=filter_collection,
         is_guest=False,
-        request_key=("request_key", _request_key),
         device_id=device_id,
     )
