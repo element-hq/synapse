@@ -19,9 +19,11 @@
 #
 #
 
-""" This module contains base REST classes for constructing REST servlets. """
+"""This module contains base REST classes for constructing REST servlets."""
+
 import enum
 import logging
+import urllib.parse as urlparse
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -61,24 +63,53 @@ logger = logging.getLogger(__name__)
 
 
 @overload
-def parse_integer(request: Request, name: str, default: int) -> int:
-    ...
-
-
-@overload
-def parse_integer(request: Request, name: str, *, required: Literal[True]) -> int:
-    ...
+def parse_integer(request: Request, name: str, default: int) -> int: ...
 
 
 @overload
 def parse_integer(
-    request: Request, name: str, default: Optional[int] = None, required: bool = False
-) -> Optional[int]:
-    ...
+    request: Request, name: str, *, default: int, negative: bool
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, default: int, negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, required: Literal[True], negative: bool = False
+) -> int: ...
+
+
+@overload
+def parse_integer(
+    request: Request, name: str, *, default: Literal[None], negative: bool = False
+) -> None: ...
+
+
+@overload
+def parse_integer(request: Request, name: str, *, negative: bool) -> Optional[int]: ...
+
+
+@overload
+def parse_integer(
+    request: Request,
+    name: str,
+    default: Optional[int] = None,
+    required: bool = False,
+    negative: bool = False,
+) -> Optional[int]: ...
 
 
 def parse_integer(
-    request: Request, name: str, default: Optional[int] = None, required: bool = False
+    request: Request,
+    name: str,
+    default: Optional[int] = None,
+    required: bool = False,
+    negative: bool = False,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -88,16 +119,17 @@ def parse_integer(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-
+        negative: whether to allow negative integers, defaults to True.
     Returns:
         An int value or the default.
 
     Raises:
-        SynapseError: if the parameter is absent and required, or if the
-            parameter is present and not an integer.
+        SynapseError: if the parameter is absent and required, if the
+            parameter is present and not an integer, or if the
+            parameter is illegitimate negative.
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
-    return parse_integer_from_args(args, name, default, required)
+    return parse_integer_from_args(args, name, default, required, negative)
 
 
 @overload
@@ -105,8 +137,7 @@ def parse_integer_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
     default: Optional[int] = None,
-) -> Optional[int]:
-    ...
+) -> Optional[int]: ...
 
 
 @overload
@@ -115,8 +146,7 @@ def parse_integer_from_args(
     name: str,
     *,
     required: Literal[True],
-) -> int:
-    ...
+) -> int: ...
 
 
 @overload
@@ -125,8 +155,8 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
-) -> Optional[int]:
-    ...
+    negative: bool = False,
+) -> Optional[int]: ...
 
 
 def parse_integer_from_args(
@@ -134,6 +164,7 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
+    negative: bool = True,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -143,49 +174,50 @@ def parse_integer_from_args(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
+        negative: whether to allow negative integers, defaults to True.
 
     Returns:
         An int value or the default.
 
     Raises:
-        SynapseError: if the parameter is absent and required, or if the
-            parameter is present and not an integer.
+        SynapseError: if the parameter is absent and required, if the
+            parameter is present and not an integer, or if the
+            parameter is illegitimate negative.
     """
     name_bytes = name.encode("ascii")
 
-    if name_bytes in args:
-        try:
-            return int(args[name_bytes][0])
-        except Exception:
-            message = "Query parameter %r must be an integer" % (name,)
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM
-            )
-    else:
-        if required:
-            message = "Missing integer query parameter %r" % (name,)
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM
-            )
-        else:
+    if name_bytes not in args:
+        if not required:
             return default
 
+        message = f"Missing required integer query parameter {name}"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM)
+
+    try:
+        integer = int(args[name_bytes][0])
+    except Exception:
+        message = f"Query parameter {name} must be an integer"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM)
+
+    if not negative and integer < 0:
+        message = f"Query parameter {name} must be a positive integer."
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.INVALID_PARAM)
+
+    return integer
+
 
 @overload
-def parse_boolean(request: Request, name: str, default: bool) -> bool:
-    ...
+def parse_boolean(request: Request, name: str, default: bool) -> bool: ...
 
 
 @overload
-def parse_boolean(request: Request, name: str, *, required: Literal[True]) -> bool:
-    ...
+def parse_boolean(request: Request, name: str, *, required: Literal[True]) -> bool: ...
 
 
 @overload
 def parse_boolean(
     request: Request, name: str, default: Optional[bool] = None, required: bool = False
-) -> Optional[bool]:
-    ...
+) -> Optional[bool]: ...
 
 
 def parse_boolean(
@@ -216,8 +248,7 @@ def parse_boolean_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
     default: bool,
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -226,8 +257,7 @@ def parse_boolean_from_args(
     name: str,
     *,
     required: Literal[True],
-) -> bool:
-    ...
+) -> bool: ...
 
 
 @overload
@@ -236,8 +266,7 @@ def parse_boolean_from_args(
     name: str,
     default: Optional[bool] = None,
     required: bool = False,
-) -> Optional[bool]:
-    ...
+) -> Optional[bool]: ...
 
 
 def parse_boolean_from_args(
@@ -289,8 +318,7 @@ def parse_bytes_from_args(
     args: Mapping[bytes, Sequence[bytes]],
     name: str,
     default: Optional[bytes] = None,
-) -> Optional[bytes]:
-    ...
+) -> Optional[bytes]: ...
 
 
 @overload
@@ -300,8 +328,7 @@ def parse_bytes_from_args(
     default: Literal[None] = None,
     *,
     required: Literal[True],
-) -> bytes:
-    ...
+) -> bytes: ...
 
 
 @overload
@@ -310,8 +337,7 @@ def parse_bytes_from_args(
     name: str,
     default: Optional[bytes] = None,
     required: bool = False,
-) -> Optional[bytes]:
-    ...
+) -> Optional[bytes]: ...
 
 
 def parse_bytes_from_args(
@@ -355,8 +381,7 @@ def parse_string(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> str:
-    ...
+) -> str: ...
 
 
 @overload
@@ -367,8 +392,7 @@ def parse_string(
     required: Literal[True],
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> str:
-    ...
+) -> str: ...
 
 
 @overload
@@ -380,8 +404,7 @@ def parse_string(
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[str]:
-    ...
+) -> Optional[str]: ...
 
 
 def parse_string(
@@ -428,6 +451,87 @@ def parse_string(
     )
 
 
+def parse_json(
+    request: Request,
+    name: str,
+    default: Optional[dict] = None,
+    required: bool = False,
+    encoding: str = "ascii",
+) -> Optional[JsonDict]:
+    """
+    Parse a JSON parameter from the request query string.
+
+    Args:
+        request: the twisted HTTP request.
+        name: the name of the query parameter.
+        default: value to use if the parameter is absent,
+            defaults to None.
+        required: whether to raise a 400 SynapseError if the
+           parameter is absent, defaults to False.
+        encoding: The encoding to decode the string content with.
+
+    Returns:
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
+
+    Raises:
+        SynapseError if the parameter is absent and required, or if the
+            parameter is present and not a JSON object.
+    """
+    args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
+    return parse_json_from_args(
+        args,
+        name,
+        default,
+        required=required,
+        encoding=encoding,
+    )
+
+
+def parse_json_from_args(
+    args: Mapping[bytes, Sequence[bytes]],
+    name: str,
+    default: Optional[dict] = None,
+    required: bool = False,
+    encoding: str = "ascii",
+) -> Optional[JsonDict]:
+    """
+    Parse a JSON parameter from the request query string.
+
+    Args:
+        args: a mapping of request args as bytes to a list of bytes (e.g. request.args).
+        name: the name of the query parameter.
+        default: value to use if the parameter is absent,
+            defaults to None.
+        required: whether to raise a 400 SynapseError if the
+            parameter is absent, defaults to False.
+        encoding: the encoding to decode the string content with.
+
+        A JSON value, or `default` if the named query parameter was not found
+        and `required` was False.
+
+    Raises:
+        SynapseError if the parameter is absent and required, or if the
+            parameter is present and not a JSON object.
+    """
+    name_bytes = name.encode("ascii")
+
+    if name_bytes not in args:
+        if not required:
+            return default
+
+        message = f"Missing required integer query parameter {name}"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.MISSING_PARAM)
+
+    json_str = parse_string_from_args(args, name, required=True, encoding=encoding)
+
+    try:
+        return json_decoder.decode(urlparse.unquote(json_str))
+    except Exception:
+        message = f"Query parameter {name} must be a valid JSON object"
+        raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.NOT_JSON)
+
+
 EnumT = TypeVar("EnumT", bound=enum.Enum)
 
 
@@ -437,8 +541,7 @@ def parse_enum(
     name: str,
     E: Type[EnumT],
     default: EnumT,
-) -> EnumT:
-    ...
+) -> EnumT: ...
 
 
 @overload
@@ -448,8 +551,7 @@ def parse_enum(
     E: Type[EnumT],
     *,
     required: Literal[True],
-) -> EnumT:
-    ...
+) -> EnumT: ...
 
 
 def parse_enum(
@@ -526,8 +628,7 @@ def parse_strings_from_args(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]:
-    ...
+) -> Optional[List[str]]: ...
 
 
 @overload
@@ -538,8 +639,7 @@ def parse_strings_from_args(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]:
-    ...
+) -> List[str]: ...
 
 
 @overload
@@ -550,8 +650,7 @@ def parse_strings_from_args(
     required: Literal[True],
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> List[str]:
-    ...
+) -> List[str]: ...
 
 
 @overload
@@ -563,8 +662,7 @@ def parse_strings_from_args(
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[List[str]]:
-    ...
+) -> Optional[List[str]]: ...
 
 
 def parse_strings_from_args(
@@ -625,8 +723,7 @@ def parse_string_from_args(
     *,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[str]:
-    ...
+) -> Optional[str]: ...
 
 
 @overload
@@ -638,8 +735,7 @@ def parse_string_from_args(
     required: Literal[True],
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> str:
-    ...
+) -> str: ...
 
 
 @overload
@@ -650,8 +746,7 @@ def parse_string_from_args(
     required: bool = False,
     allowed_values: Optional[StrCollection] = None,
     encoding: str = "ascii",
-) -> Optional[str]:
-    ...
+) -> Optional[str]: ...
 
 
 def parse_string_from_args(
@@ -704,22 +799,19 @@ def parse_string_from_args(
 
 
 @overload
-def parse_json_value_from_request(request: Request) -> JsonDict:
-    ...
+def parse_json_value_from_request(request: Request) -> JsonDict: ...
 
 
 @overload
 def parse_json_value_from_request(
     request: Request, allow_empty_body: Literal[False]
-) -> JsonDict:
-    ...
+) -> JsonDict: ...
 
 
 @overload
 def parse_json_value_from_request(
     request: Request, allow_empty_body: bool = False
-) -> Optional[JsonDict]:
-    ...
+) -> Optional[JsonDict]: ...
 
 
 def parse_json_value_from_request(
@@ -847,7 +939,6 @@ def assert_params_in_dict(body: JsonDict, required: StrCollection) -> None:
 
 
 class RestServlet:
-
     """A Synapse REST Servlet.
 
     An implementing class can either provide its own custom 'register' method,

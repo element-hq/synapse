@@ -263,11 +263,13 @@ class EventsWorkerStore(SQLBaseStore):
                 5 * 60 * 1000,
             )
 
-        self._get_event_cache: AsyncLruCache[
-            Tuple[str], EventCacheEntry
-        ] = AsyncLruCache(
-            cache_name="*getEvent*",
-            max_size=hs.config.caches.event_cache_size,
+        self._get_event_cache: AsyncLruCache[Tuple[str], EventCacheEntry] = (
+            AsyncLruCache(
+                cache_name="*getEvent*",
+                max_size=hs.config.caches.event_cache_size,
+                # `extra_index_cb` Returns a tuple as that is the key type
+                extra_index_cb=lambda _, v: (v.event.room_id,),
+            )
         )
 
         # Map from event ID to a deferred that will result in a map from event
@@ -457,8 +459,7 @@ class EventsWorkerStore(SQLBaseStore):
         allow_rejected: bool = ...,
         allow_none: Literal[False] = ...,
         check_room_id: Optional[str] = ...,
-    ) -> EventBase:
-        ...
+    ) -> EventBase: ...
 
     @overload
     async def get_event(
@@ -469,8 +470,7 @@ class EventsWorkerStore(SQLBaseStore):
         allow_rejected: bool = ...,
         allow_none: Literal[True] = ...,
         check_room_id: Optional[str] = ...,
-    ) -> Optional[EventBase]:
-        ...
+    ) -> Optional[EventBase]: ...
 
     @cancellable
     async def get_event(
@@ -782,9 +782,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         if missing_events_ids:
 
-            async def get_missing_events_from_cache_or_db() -> Dict[
-                str, EventCacheEntry
-            ]:
+            async def get_missing_events_from_cache_or_db() -> (
+                Dict[str, EventCacheEntry]
+            ):
                 """Fetches the events in `missing_event_ids` from the database.
 
                 Also creates entries in `self._current_event_fetches` to allow
@@ -798,9 +798,9 @@ class EventsWorkerStore(SQLBaseStore):
                 # to all the events we pulled from the DB (this will result in this
                 # function returning more events than requested, but that can happen
                 # already due to `_get_events_from_db`).
-                fetching_deferred: ObservableDeferred[
-                    Dict[str, EventCacheEntry]
-                ] = ObservableDeferred(defer.Deferred(), consumeErrors=True)
+                fetching_deferred: ObservableDeferred[Dict[str, EventCacheEntry]] = (
+                    ObservableDeferred(defer.Deferred(), consumeErrors=True)
+                )
                 for event_id in missing_events_ids:
                     self._current_event_fetches[event_id] = fetching_deferred
 
@@ -910,12 +910,12 @@ class EventsWorkerStore(SQLBaseStore):
         self._event_ref.pop(event_id, None)
         self._current_event_fetches.pop(event_id, None)
 
-    def _invalidate_local_get_event_cache_all(self) -> None:
-        """Clears the in-memory get event caches.
+    def _invalidate_local_get_event_cache_room_id(self, room_id: str) -> None:
+        """Clears the in-memory get event caches for a room.
 
         Used when we purge room history.
         """
-        self._get_event_cache.clear()
+        self._get_event_cache.invalidate_on_extra_index_local((room_id,))
         self._event_ref.clear()
         self._current_event_fetches.clear()
 
@@ -1869,14 +1869,14 @@ class EventsWorkerStore(SQLBaseStore):
                 " LIMIT ?"
             )
             txn.execute(sql, (-last_id, -current_id, instance_name, limit))
-            new_event_updates: List[
-                Tuple[int, Tuple[str, str, str, str, str, str]]
-            ] = []
+            new_event_updates: List[Tuple[int, Tuple[str, str, str, str, str, str]]] = (
+                []
+            )
             row: Tuple[int, str, str, str, str, str, str]
             # Type safety: iterating over `txn` yields `Tuple`, i.e.
             # `Tuple[Any, ...]` of arbitrary length. Mypy detects assigning a
             # variadic tuple to a fixed length tuple and flags it up as an error.
-            for row in txn:  # type: ignore[assignment]
+            for row in txn:
                 new_event_updates.append((row[0], row[1:]))
 
             limited = False
@@ -1903,7 +1903,7 @@ class EventsWorkerStore(SQLBaseStore):
             # Type safety: iterating over `txn` yields `Tuple`, i.e.
             # `Tuple[Any, ...]` of arbitrary length. Mypy detects assigning a
             # variadic tuple to a fixed length tuple and flags it up as an error.
-            for row in txn:  # type: ignore[assignment]
+            for row in txn:
                 new_event_updates.append((row[0], row[1:]))
 
             if len(new_event_updates) >= limit:
@@ -1995,16 +1995,18 @@ class EventsWorkerStore(SQLBaseStore):
         return rows, to_token, True
 
     @cached(max_entries=5000)
-    async def get_event_ordering(self, event_id: str) -> Tuple[int, int]:
+    async def get_event_ordering(self, event_id: str, room_id: str) -> Tuple[int, int]:
         res = await self.db_pool.simple_select_one(
             table="events",
             retcols=["topological_ordering", "stream_ordering"],
-            keyvalues={"event_id": event_id},
+            keyvalues={"event_id": event_id, "room_id": room_id},
             allow_none=True,
         )
 
         if not res:
-            raise SynapseError(404, "Could not find event %s" % (event_id,))
+            raise SynapseError(
+                404, "Could not find event %s in room %s" % (event_id, room_id)
+            )
 
         return int(res[0]), int(res[1])
 

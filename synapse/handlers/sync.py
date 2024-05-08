@@ -41,6 +41,7 @@ from synapse.api.constants import (
     AccountDataTypes,
     EventContentFields,
     EventTypes,
+    JoinRules,
     Membership,
 )
 from synapse.api.filtering import FilterCollection
@@ -595,6 +596,7 @@ class SyncHandler:
                     sync_config.user.to_string(),
                     recents,
                     always_include_ids=current_state_ids,
+                    msc4115_membership_on_events=self.hs_config.experimental.msc4115_membership_on_events,
                 )
                 log_kv({"recents_after_visibility_filtering": len(recents)})
             else:
@@ -675,12 +677,22 @@ class SyncHandler:
                         )
                     )
 
-                loaded_recents = await filter_events_for_client(
+                filtered_recents = await filter_events_for_client(
                     self._storage_controllers,
                     sync_config.user.to_string(),
                     loaded_recents,
                     always_include_ids=current_state_ids,
+                    msc4115_membership_on_events=self.hs_config.experimental.msc4115_membership_on_events,
                 )
+
+                loaded_recents = []
+                for event in filtered_recents:
+                    if event.type == EventTypes.CallInvite:
+                        room_info = await self.store.get_room_with_stats(event.room_id)
+                        assert room_info is not None
+                        if room_info.join_rules == JoinRules.PUBLIC:
+                            continue
+                    loaded_recents.append(event)
 
                 log_kv({"loaded_recents_after_client_filtering": len(loaded_recents)})
 
@@ -943,7 +955,7 @@ class SyncHandler:
         batch: TimelineBatch,
         sync_config: SyncConfig,
         since_token: Optional[StreamToken],
-        now_token: StreamToken,
+        end_token: StreamToken,
         full_state: bool,
     ) -> MutableStateMap[EventBase]:
         """Works out the difference in state between the end of the previous sync and
@@ -954,7 +966,9 @@ class SyncHandler:
             batch: The timeline batch for the room that will be sent to the user.
             sync_config:
             since_token: Token of the end of the previous batch. May be `None`.
-            now_token: Token of the end of the current batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
             full_state: Whether to force returning the full state.
                 `lazy_load_members` still applies when `full_state` is `True`.
 
@@ -1014,39 +1028,12 @@ class SyncHandler:
                     if event.is_state():
                         timeline_state[(event.type, event.state_key)] = event.event_id
 
-                if full_state:
-                    # always make sure we LL ourselves so we know we're in the room
-                    # (if we are) to fix https://github.com/vector-im/riot-web/issues/7209
-                    # We only need apply this on full state syncs given we disabled
-                    # LL for incr syncs in https://github.com/matrix-org/synapse/pull/3840.
-                    # We don't insert ourselves into `members_to_fetch`, because in some
-                    # rare cases (an empty event batch with a now_token after the user's
-                    # leave in a partial state room which another local user has
-                    # joined), the room state will be missing our membership and there
-                    # is no guarantee that our membership will be in the auth events of
-                    # timeline events when the room is partial stated.
-                    state_filter = StateFilter.from_lazy_load_member_list(
-                        members_to_fetch.union((sync_config.user.to_string(),))
-                    )
-                else:
-                    state_filter = StateFilter.from_lazy_load_member_list(
-                        members_to_fetch
-                    )
-
-                # We are happy to use partial state to compute the `/sync` response.
-                # Since partial state may not include the lazy-loaded memberships we
-                # require, we fix up the state response afterwards with memberships from
-                # auth events.
-                await_full_state = False
             else:
                 timeline_state = {
                     (event.type, event.state_key): event.event_id
                     for event in batch.events
                     if event.is_state()
                 }
-
-                state_filter = StateFilter.all()
-                await_full_state = True
 
             # Now calculate the state to return in the sync response for the room.
             # This is more or less the change in state between the end of the previous
@@ -1057,131 +1044,28 @@ class SyncHandler:
             # whether the room is partial stated *before* fetching it.
             is_partial_state_room = await self.store.is_partial_state_room(room_id)
             if full_state:
-                if batch:
-                    state_at_timeline_end = (
-                        await self._state_storage_controller.get_state_ids_for_event(
-                            batch.events[-1].event_id,
-                            state_filter=state_filter,
-                            await_full_state=await_full_state,
-                        )
-                    )
-
-                    state_at_timeline_start = (
-                        await self._state_storage_controller.get_state_ids_for_event(
-                            batch.events[0].event_id,
-                            state_filter=state_filter,
-                            await_full_state=await_full_state,
-                        )
-                    )
-
-                else:
-                    state_at_timeline_end = await self.get_state_at(
-                        room_id,
-                        stream_position=now_token,
-                        state_filter=state_filter,
-                        await_full_state=await_full_state,
-                    )
-
-                    state_at_timeline_start = state_at_timeline_end
-
-                state_ids = _calculate_state(
-                    timeline_contains=timeline_state,
-                    timeline_start=state_at_timeline_start,
-                    timeline_end=state_at_timeline_end,
-                    previous_timeline_end={},
-                    lazy_load_members=lazy_load_members,
+                state_ids = await self._compute_state_delta_for_full_sync(
+                    room_id,
+                    sync_config.user,
+                    batch,
+                    end_token,
+                    members_to_fetch,
+                    timeline_state,
                 )
-            elif batch.limited:
-                if batch:
-                    state_at_timeline_start = (
-                        await self._state_storage_controller.get_state_ids_for_event(
-                            batch.events[0].event_id,
-                            state_filter=state_filter,
-                            await_full_state=await_full_state,
-                        )
-                    )
-                else:
-                    # We can get here if the user has ignored the senders of all
-                    # the recent events.
-                    state_at_timeline_start = await self.get_state_at(
-                        room_id,
-                        stream_position=now_token,
-                        state_filter=state_filter,
-                        await_full_state=await_full_state,
-                    )
-
-                # for now, we disable LL for gappy syncs - see
-                # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
-                # N.B. this slows down incr syncs as we are now processing way
-                # more state in the server than if we were LLing.
-                #
-                # We still have to filter timeline_start to LL entries (above) in order
-                # for _calculate_state's LL logic to work, as we have to include LL
-                # members for timeline senders in case they weren't loaded in the initial
-                # sync.  We do this by (counterintuitively) by filtering timeline_start
-                # members to just be ones which were timeline senders, which then ensures
-                # all of the rest get included in the state block (if we need to know
-                # about them).
-                state_filter = StateFilter.all()
-
+            else:
                 # If this is an initial sync then full_state should be set, and
                 # that case is handled above. We assert here to ensure that this
                 # is indeed the case.
                 assert since_token is not None
-                state_at_previous_sync = await self.get_state_at(
+
+                state_ids = await self._compute_state_delta_for_incremental_sync(
                     room_id,
-                    stream_position=since_token,
-                    state_filter=state_filter,
-                    await_full_state=await_full_state,
+                    batch,
+                    since_token,
+                    end_token,
+                    members_to_fetch,
+                    timeline_state,
                 )
-
-                if batch:
-                    state_at_timeline_end = (
-                        await self._state_storage_controller.get_state_ids_for_event(
-                            batch.events[-1].event_id,
-                            state_filter=state_filter,
-                            await_full_state=await_full_state,
-                        )
-                    )
-                else:
-                    # We can get here if the user has ignored the senders of all
-                    # the recent events.
-                    state_at_timeline_end = await self.get_state_at(
-                        room_id,
-                        stream_position=now_token,
-                        state_filter=state_filter,
-                        await_full_state=await_full_state,
-                    )
-
-                state_ids = _calculate_state(
-                    timeline_contains=timeline_state,
-                    timeline_start=state_at_timeline_start,
-                    timeline_end=state_at_timeline_end,
-                    previous_timeline_end=state_at_previous_sync,
-                    # we have to include LL members in case LL initial sync missed them
-                    lazy_load_members=lazy_load_members,
-                )
-            else:
-                state_ids = {}
-                if lazy_load_members:
-                    if members_to_fetch and batch.events:
-                        # We're returning an incremental sync, with no
-                        # "gap" since the previous sync, so normally there would be
-                        # no state to return.
-                        # But we're lazy-loading, so the client might need some more
-                        # member events to understand the events in this timeline.
-                        # So we fish out all the member events corresponding to the
-                        # timeline here, and then dedupe any redundant ones below.
-
-                        state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                            batch.events[0].event_id,
-                            # we only want members!
-                            state_filter=StateFilter.from_types(
-                                (EventTypes.Member, member)
-                                for member in members_to_fetch
-                            ),
-                            await_full_state=False,
-                        )
 
             # If we only have partial state for the room, `state_ids` may be missing the
             # memberships we wanted. We attempt to find some by digging through the auth
@@ -1244,6 +1128,240 @@ class SyncHandler:
             )
             if e.type != EventTypes.Aliases  # until MSC2261 or alternative solution
         }
+
+    async def _compute_state_delta_for_full_sync(
+        self,
+        room_id: str,
+        syncing_user: UserID,
+        batch: TimelineBatch,
+        end_token: StreamToken,
+        members_to_fetch: Optional[Set[str]],
+        timeline_state: StateMap[str],
+    ) -> StateMap[str]:
+        """Calculate the state events to be included in a full sync response.
+
+        As with `_compute_state_delta_for_incremental_sync`, the result will include
+        the membership events for the senders of each event in `members_to_fetch`.
+
+        Args:
+            room_id: The room we are calculating for.
+            syncing_user: The user that is calling `/sync`.
+            batch: The timeline batch for the room that will be sent to the user.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
+            members_to_fetch: If lazy-loading is enabled, the memberships needed for
+                events in the timeline.
+            timeline_state: The contribution to the room state from state events in
+                `batch`. Only contains the last event for any given state key.
+
+        Returns:
+            A map from (type, state_key) to event_id, for each event that we believe
+            should be included in the `state` part of the sync response.
+        """
+        if members_to_fetch is not None:
+            # Lazy-loading of membership events is enabled.
+            #
+            # Always make sure we load our own membership event so we know if
+            # we're in the room, to fix https://github.com/vector-im/riot-web/issues/7209.
+            #
+            # We only need apply this on full state syncs given we disabled
+            # LL for incr syncs in https://github.com/matrix-org/synapse/pull/3840.
+            #
+            # We don't insert ourselves into `members_to_fetch`, because in some
+            # rare cases (an empty event batch with a now_token after the user's
+            # leave in a partial state room which another local user has
+            # joined), the room state will be missing our membership and there
+            # is no guarantee that our membership will be in the auth events of
+            # timeline events when the room is partial stated.
+            state_filter = StateFilter.from_lazy_load_member_list(
+                members_to_fetch.union((syncing_user.to_string(),))
+            )
+
+            # We are happy to use partial state to compute the `/sync` response.
+            # Since partial state may not include the lazy-loaded memberships we
+            # require, we fix up the state response afterwards with memberships from
+            # auth events.
+            await_full_state = False
+            lazy_load_members = True
+        else:
+            state_filter = StateFilter.all()
+            await_full_state = True
+            lazy_load_members = False
+
+        state_at_timeline_end = await self.get_state_at(
+            room_id,
+            stream_position=end_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
+
+        if batch:
+            # Strictly speaking, this returns the state *after* the first event in the
+            # timeline, but that is good enough here.
+            state_at_timeline_start = (
+                await self._state_storage_controller.get_state_ids_for_event(
+                    batch.events[0].event_id,
+                    state_filter=state_filter,
+                    await_full_state=await_full_state,
+                )
+            )
+        else:
+            state_at_timeline_start = state_at_timeline_end
+
+        state_ids = _calculate_state(
+            timeline_contains=timeline_state,
+            timeline_start=state_at_timeline_start,
+            timeline_end=state_at_timeline_end,
+            previous_timeline_end={},
+            lazy_load_members=lazy_load_members,
+        )
+        return state_ids
+
+    async def _compute_state_delta_for_incremental_sync(
+        self,
+        room_id: str,
+        batch: TimelineBatch,
+        since_token: StreamToken,
+        end_token: StreamToken,
+        members_to_fetch: Optional[Set[str]],
+        timeline_state: StateMap[str],
+    ) -> StateMap[str]:
+        """Calculate the state events to be included in an incremental sync response.
+
+        If lazy-loading of membership events is enabled (as indicated by
+        `members_to_fetch` being not-`None`), the result will include the membership
+        events for each member in `members_to_fetch`. The caller
+        (`compute_state_delta`) is responsible for keeping track of which membership
+        events we have already sent to the client, and hence ripping them out.
+
+        Args:
+            room_id: The room we are calculating for.
+            batch: The timeline batch for the room that will be sent to the user.
+            since_token: Token of the end of the previous batch.
+            end_token: Token of the end of the current batch. Normally this will be
+                the same as the global "now_token", but if the user has left the room,
+                the point just after their leave event.
+            members_to_fetch: If lazy-loading is enabled, the memberships needed for
+                events in the timeline. Otherwise, `None`.
+            timeline_state: The contribution to the room state from state events in
+                `batch`. Only contains the last event for any given state key.
+
+        Returns:
+            A map from (type, state_key) to event_id, for each event that we believe
+            should be included in the `state` part of the sync response.
+        """
+        if members_to_fetch is not None:
+            # Lazy-loading is enabled. Only return the state that is needed.
+            state_filter = StateFilter.from_lazy_load_member_list(members_to_fetch)
+            await_full_state = False
+            lazy_load_members = True
+        else:
+            state_filter = StateFilter.all()
+            await_full_state = True
+            lazy_load_members = False
+
+        # For a non-gappy sync if the events in the timeline are simply a linear
+        # chain (i.e. no merging/branching of the graph), then we know the state
+        # delta between the end of the previous sync and start of the new one is
+        # empty.
+        #
+        # c.f. #16941 for an example of why we can't do this for all non-gappy
+        # syncs.
+        is_linear_timeline = True
+        if batch.events:
+            # We need to make sure the first event in our batch points to the
+            # last event in the previous batch.
+            last_event_id_prev_batch = (
+                await self.store.get_last_event_in_room_before_stream_ordering(
+                    room_id,
+                    end_token=since_token.room_key,
+                )
+            )
+
+            prev_event_id = last_event_id_prev_batch
+            for e in batch.events:
+                if e.prev_event_ids() != [prev_event_id]:
+                    is_linear_timeline = False
+                    break
+                prev_event_id = e.event_id
+
+        if is_linear_timeline and not batch.limited:
+            state_ids: StateMap[str] = {}
+            if lazy_load_members:
+                if members_to_fetch and batch.events:
+                    # We're lazy-loading, so the client might need some more
+                    # member events to understand the events in this timeline.
+                    # So we fish out all the member events corresponding to the
+                    # timeline here. The caller will then dedupe any redundant
+                    # ones.
+
+                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
+                        batch.events[0].event_id,
+                        # we only want members!
+                        state_filter=StateFilter.from_types(
+                            (EventTypes.Member, member) for member in members_to_fetch
+                        ),
+                        await_full_state=False,
+                    )
+            return state_ids
+
+        if batch:
+            state_at_timeline_start = (
+                await self._state_storage_controller.get_state_ids_for_event(
+                    batch.events[0].event_id,
+                    state_filter=state_filter,
+                    await_full_state=await_full_state,
+                )
+            )
+        else:
+            # We can get here if the user has ignored the senders of all
+            # the recent events.
+            state_at_timeline_start = await self.get_state_at(
+                room_id,
+                stream_position=end_token,
+                state_filter=state_filter,
+                await_full_state=await_full_state,
+            )
+
+        if batch.limited:
+            # for now, we disable LL for gappy syncs - see
+            # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
+            # N.B. this slows down incr syncs as we are now processing way
+            # more state in the server than if we were LLing.
+            #
+            # We still have to filter timeline_start to LL entries (above) in order
+            # for _calculate_state's LL logic to work, as we have to include LL
+            # members for timeline senders in case they weren't loaded in the initial
+            # sync.  We do this by (counterintuitively) by filtering timeline_start
+            # members to just be ones which were timeline senders, which then ensures
+            # all of the rest get included in the state block (if we need to know
+            # about them).
+            state_filter = StateFilter.all()
+
+        state_at_previous_sync = await self.get_state_at(
+            room_id,
+            stream_position=since_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
+
+        state_at_timeline_end = await self.get_state_at(
+            room_id,
+            stream_position=end_token,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
+
+        state_ids = _calculate_state(
+            timeline_contains=timeline_state,
+            timeline_start=state_at_timeline_start,
+            timeline_end=state_at_timeline_end,
+            previous_timeline_end=state_at_previous_sync,
+            lazy_load_members=lazy_load_members,
+        )
+
+        return state_ids
 
     async def _find_missing_partial_state_memberships(
         self,
@@ -1333,9 +1451,9 @@ class SyncHandler:
                     and auth_event.state_key == member
                 ):
                     missing_members.discard(member)
-                    additional_state_ids[
-                        (EventTypes.Member, member)
-                    ] = auth_event.event_id
+                    additional_state_ids[(EventTypes.Member, member)] = (
+                        auth_event.event_id
+                    )
                     break
 
         if missing_members:
@@ -2243,6 +2361,7 @@ class SyncHandler:
                         full_state=False,
                         since_token=since_token,
                         upto_token=leave_token,
+                        end_token=leave_token,
                         out_of_band=leave_event.internal_metadata.is_out_of_band_membership(),
                     )
                 )
@@ -2280,6 +2399,7 @@ class SyncHandler:
                     full_state=False,
                     since_token=None if newly_joined else since_token,
                     upto_token=prev_batch_token,
+                    end_token=now_token,
                 )
             else:
                 entry = RoomSyncResultBuilder(
@@ -2290,6 +2410,7 @@ class SyncHandler:
                     full_state=False,
                     since_token=since_token,
                     upto_token=since_token,
+                    end_token=now_token,
                 )
 
             room_entries.append(entry)
@@ -2348,6 +2469,7 @@ class SyncHandler:
                         full_state=True,
                         since_token=since_token,
                         upto_token=now_token,
+                        end_token=now_token,
                     )
                 )
             elif event.membership == Membership.INVITE:
@@ -2377,6 +2499,7 @@ class SyncHandler:
                         full_state=True,
                         since_token=since_token,
                         upto_token=leave_token,
+                        end_token=leave_token,
                     )
                 )
 
@@ -2447,6 +2570,7 @@ class SyncHandler:
                 {
                     "since_token": since_token,
                     "upto_token": upto_token,
+                    "end_token": room_builder.end_token,
                 }
             )
 
@@ -2520,7 +2644,7 @@ class SyncHandler:
                     batch,
                     sync_config,
                     since_token,
-                    now_token,
+                    room_builder.end_token,
                     full_state=full_state,
                 )
             else:
@@ -2680,6 +2804,61 @@ def _calculate_state(
             e for t, e in timeline_start.items() if t[0] == EventTypes.Member
         )
 
+    # Naively, we would just return the difference between the state at the start
+    # of the timeline (`timeline_start_ids`) and that at the end of the previous sync
+    # (`previous_timeline_end_ids`). However, that fails in the presence of forks in
+    # the DAG.
+    #
+    # For example, consider a DAG such as the following:
+    #
+    #       E1
+    #     ↗    ↖
+    #    |      S2
+    #    |      ↑
+    #  --|------|----
+    #    |      |
+    #    E3     |
+    #     ↖    /
+    #       E4
+    #
+    # ... and a filter that means we only return 2 events, represented by the dashed
+    # horizontal line. Assuming S2 was *not* included in the previous sync, we need to
+    # include it in the `state` section.
+    #
+    # Note that the state at the start of the timeline (E3) does not include S2. So,
+    # to make sure it gets included in the calculation here, we actually look at
+    # the state at the *end* of the timeline, and subtract any events that are present
+    # in the timeline.
+    #
+    # ----------
+    #
+    # Aside 1: You may then wonder if we need to include `timeline_start` in the
+    # calculation. Consider a linear DAG:
+    #
+    #      E1
+    #      ↑
+    #      S2
+    #      ↑
+    #  ----|------
+    #      |
+    #      E3
+    #      ↑
+    #      S4
+    #      ↑
+    #      E5
+    #
+    # ... where S2 and S4 change the same piece of state; and where we have a filter
+    # that returns 3 events (E3, S4, E5). We still need to tell the client about S2,
+    # because it might affect the display of E3. However, the state at the end of the
+    # timeline only tells us about S4; if we don't inspect `timeline_start` we won't
+    # find out about S2.
+    #
+    # (There are yet more complicated cases in which a state event is excluded from the
+    # timeline, but whose effect actually lands in the DAG in the *middle* of the
+    # timeline. We have no way to represent that in the /sync response, and we don't
+    # even try; it is ether omitted or plonked into `state` as if it were at the start
+    # of the timeline, depending on what else is in the timeline.)
+
     state_ids = (
         (timeline_end_ids | timeline_start_ids)
         - previous_timeline_end_ids
@@ -2746,7 +2925,7 @@ class SyncResultBuilder:
         if self.since_token:
             for joined_sync in self.joined:
                 it = itertools.chain(
-                    joined_sync.timeline.events, joined_sync.state.values()
+                    joined_sync.state.values(), joined_sync.timeline.events
                 )
                 for event in it:
                     if event.type == EventTypes.Member:
@@ -2758,13 +2937,20 @@ class SyncResultBuilder:
                             newly_joined_or_invited_or_knocked_users.add(
                                 event.state_key
                             )
+                            # If the user left and rejoined in the same batch, they
+                            # count as a newly-joined user, *not* a newly-left user.
+                            newly_left_users.discard(event.state_key)
                         else:
                             prev_content = event.unsigned.get("prev_content", {})
                             prev_membership = prev_content.get("membership", None)
                             if prev_membership == Membership.JOIN:
                                 newly_left_users.add(event.state_key)
+                            # If the user joined and left in the same batch, they
+                            # count as a newly-left user, not a newly-joined user.
+                            newly_joined_or_invited_or_knocked_users.discard(
+                                event.state_key
+                            )
 
-        newly_left_users -= newly_joined_or_invited_or_knocked_users
         return newly_joined_or_invited_or_knocked_users, newly_left_users
 
 
@@ -2775,13 +2961,30 @@ class RoomSyncResultBuilder:
 
     Attributes:
         room_id
+
         rtype: One of `"joined"` or `"archived"`
+
         events: List of events to include in the room (more events may be added
             when generating result).
+
         newly_joined: If the user has newly joined the room
+
         full_state: Whether the full state should be sent in result
+
         since_token: Earliest point to return events from, or None
-        upto_token: Latest point to return events from.
+
+        upto_token: Latest point to return events from. If `events` is populated,
+           this is set to the token at the start of `events`
+
+        end_token: The last point in the timeline that the client should see events
+           from. Normally this will be the same as the global `now_token`, but in
+           the case of rooms where the user has left the room, this will be the point
+           just after their leave event.
+
+           This is used in the calculation of the state which is returned in `state`:
+           any state changes *up to* `end_token` (and not beyond!) which are not
+           reflected in the timeline need to be returned in `state`.
+
         out_of_band: whether the events in the room are "out of band" events
             and the server isn't in the room.
     """
@@ -2793,5 +2996,5 @@ class RoomSyncResultBuilder:
     full_state: bool
     since_token: Optional[StreamToken]
     upto_token: StreamToken
-
+    end_token: StreamToken
     out_of_band: bool = False

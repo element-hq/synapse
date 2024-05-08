@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 84  # remember to update the list below when updating
+SCHEMA_VERSION = 85  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -132,12 +132,19 @@ Changes in SCHEMA_VERSION = 82
 
 Changes in SCHEMA_VERSION = 83
     - The event_txn_id is no longer used.
+
+Changes in SCHEMA_VERSION = 84
+    - No longer assumes that `event_auth_chain_links` holds transitive links, and
+      so read operations must do graph traversal.
+
+Changes in SCHEMA_VERSION = 85
+    - Add a column `suspended` to the `users` table
 """
 
 
 SCHEMA_COMPAT_VERSION = (
-    # The event_txn_id table and tables from MSC2716 no longer exist.
-    83
+    # Transitive links are no longer written to `event_auth_chain_links`
+    84
 )
 """Limit on how far the synapse codebase can be rolled back without breaking db compat
 

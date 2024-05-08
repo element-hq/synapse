@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Any, Optional
 import attr
 import attr.validators
 
-from synapse.api.errors import LimitExceededError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
 from synapse.config._base import Config, RootConfig
@@ -394,11 +393,6 @@ class ExperimentalConfig(Config):
         # MSC3967: Do not require UIA when first uploading cross signing keys
         self.msc3967_enabled = experimental.get("msc3967_enabled", False)
 
-        # MSC3981: Recurse relations
-        self.msc3981_recurse_relations = experimental.get(
-            "msc3981_recurse_relations", False
-        )
-
         # MSC3861: Matrix architecture change to delegate authentication via OIDC
         try:
             self.msc3861 = MSC3861(**experimental.get("msc3861", {}))
@@ -410,25 +404,37 @@ class ExperimentalConfig(Config):
         # Check that none of the other config options conflict with MSC3861 when enabled
         self.msc3861.check_config_conflicts(self.root)
 
-        # MSC4010: Do not allow setting m.push_rules account data.
-        self.msc4010_push_rules_account_data = experimental.get(
-            "msc4010_push_rules_account_data", False
-        )
-
-        # MSC4041: Use HTTP header Retry-After to enable library-assisted retry handling
-        #
-        # This is a bit hacky, but the most reasonable way to *alway* include the
-        # headers.
-        LimitExceededError.include_retry_after_header = experimental.get(
-            "msc4041_enabled", False
-        )
-
         self.msc4028_push_encrypted_events = experimental.get(
             "msc4028_push_encrypted_events", False
         )
 
         self.msc4069_profile_inhibit_propagation = experimental.get(
             "msc4069_profile_inhibit_propagation", False
+        )
+
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        self.msc4108_enabled = experimental.get("msc4108_enabled", False)
+
+        self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
+            "msc4108_delegation_endpoint", None
+        )
+
+        if (
+            self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
+        ) and not self.msc3861.enabled:
+            raise ConfigError(
+                "MSC4108 requires MSC3861 to be enabled",
+                ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        if self.msc4108_delegation_endpoint is not None and self.msc4108_enabled:
+            raise ConfigError(
+                "You cannot have MSC4108 both enabled and delegated at the same time",
+                ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        self.msc4115_membership_on_events = experimental.get(
+            "msc4115_membership_on_events", False
         )
 
         # MSC3767: time based notification filtering

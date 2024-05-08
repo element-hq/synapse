@@ -262,7 +262,8 @@ class _ProxyResponseBody(protocol.Protocol):
             self._request.finish()
         else:
             # Abort the underlying request since our remote request also failed.
-            self._request.transport.abortConnection()
+            if self._request.channel:
+                self._request.channel.forceAbortClient()
 
 
 class ProxySite(Site):

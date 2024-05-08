@@ -48,7 +48,16 @@ from synapse.appservice import ApplicationService
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
-from synapse.rest.client import account, directory, login, profile, register, room, sync
+from synapse.rest.client import (
+    account,
+    directory,
+    knock,
+    login,
+    profile,
+    register,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias, UserID, create_requester
 from synapse.util import Clock
@@ -93,6 +102,7 @@ class RoomPermissionsTestCase(RoomBase):
     rmcreator_id = "@notme:red"
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store_controllers = hs.get_storage_controllers()
         self.helper.auth_user_id = self.rmcreator_id
         # create some rooms under the name rmcreator_id
         self.uncreated_rmid = "!aa:test"
@@ -482,6 +492,23 @@ class RoomPermissionsTestCase(RoomBase):
             expect_code=HTTPStatus.OK,
         )
 
+    def test_default_call_invite_power_level(self) -> None:
+        pl_event = self.get_success(
+            self.store_controllers.state.get_current_state_event(
+                self.created_public_rmid, EventTypes.PowerLevels, ""
+            )
+        )
+        assert pl_event is not None
+        self.assertEqual(50, pl_event.content.get("m.call.invite"))
+
+        private_pl_event = self.get_success(
+            self.store_controllers.state.get_current_state_event(
+                self.created_rmid, EventTypes.PowerLevels, ""
+            )
+        )
+        assert private_pl_event is not None
+        self.assertEqual(None, private_pl_event.content.get("m.call.invite"))
+
 
 class RoomStateTestCase(RoomBase):
     """Tests /rooms/$room_id/state."""
@@ -715,7 +742,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(32, channel.resource_usage.db_txn_count)
+        self.assertEqual(33, channel.resource_usage.db_txn_count)
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -728,7 +755,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(34, channel.resource_usage.db_txn_count)
+        self.assertEqual(35, channel.resource_usage.db_txn_count)
 
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
@@ -1136,6 +1163,7 @@ class RoomJoinTestCase(RoomBase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        knock.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -1148,6 +1176,8 @@ class RoomJoinTestCase(RoomBase):
         self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
         self.room2 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
         self.room3 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+
+        self.store = hs.get_datastores().main
 
     def test_spam_checker_may_join_room_deprecated(self) -> None:
         """Tests that the user_may_join_room spam checker callback is correctly called
@@ -1222,9 +1252,9 @@ class RoomJoinTestCase(RoomBase):
         """
 
         # Register a dummy callback. Make it allow all room joins for now.
-        return_value: Union[
-            Literal["NOT_SPAM"], Tuple[Codes, dict], Codes
-        ] = synapse.module_api.NOT_SPAM
+        return_value: Union[Literal["NOT_SPAM"], Tuple[Codes, dict], Codes] = (
+            synapse.module_api.NOT_SPAM
+        )
 
         async def user_may_join_room(
             userid: str,
@@ -1297,6 +1327,57 @@ class RoomJoinTestCase(RoomBase):
             expect_errcode=return_value[0],
             tok=self.tok2,
             expect_additional_fields=return_value[1],
+        )
+
+    def test_suspended_user_cannot_join_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user2, True))
+
+        channel = self.make_request(
+            "POST", f"/join/{self.room1}", access_token=self.tok2
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        channel = self.make_request(
+            "POST", f"/rooms/{self.room1}/join", access_token=self.tok2
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_knock_on_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user2, True))
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/knock/{self.room1}",
+            access_token=self.tok2,
+            content={},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_invite_to_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # first user invites second user
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room1}/invite",
+            access_token=self.tok1,
+            content={"user_id": self.user2},
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
         )
 
 
@@ -1664,9 +1745,9 @@ class RoomMessagesTestCase(RoomBase):
         expected_fields: dict,
     ) -> None:
         class SpamCheck:
-            mock_return_value: Union[
-                str, bool, Codes, Tuple[Codes, JsonDict], bool
-            ] = "NOT_SPAM"
+            mock_return_value: Union[str, bool, Codes, Tuple[Codes, JsonDict], bool] = (
+                "NOT_SPAM"
+            )
             mock_content: Optional[JsonDict] = None
 
             async def check_event_for_spam(
@@ -2156,6 +2237,31 @@ class RoomMessageListTestCase(RoomBase):
 
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
+
+    def test_room_message_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={valid_filter_str}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={invalid_filter_str}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
 
 
 class RoomMessageFilterTestCase(RoomBase):
@@ -3194,6 +3300,33 @@ class ContextTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(events_after), 2, events_after)
         self.assertDictEqual(events_after[0].get("content"), {}, events_after[0])
         self.assertEqual(events_after[1].get("content"), {}, events_after[1])
+
+    def test_room_event_context_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+        event_id = self.helper.send(self.room_id, "message 7", tok=self.tok)["event_id"]
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={valid_filter_str}",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={invalid_filter_str}",
+            access_token=self.tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
 
 
 class RoomAliasListTestCase(unittest.HomeserverTestCase):

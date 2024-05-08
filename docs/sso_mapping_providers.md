@@ -50,11 +50,13 @@ comment these options out and use those specified by the module instead.
 
 A custom mapping provider must specify the following methods:
 
-* `def __init__(self, parsed_config)`
+* `def __init__(self, parsed_config, module_api)`
    - Arguments:
      - `parsed_config` - A configuration object that is the return value of the
        `parse_config` method. You should set any configuration options needed by
        the module here.
+     - `module_api` - a `synapse.module_api.ModuleApi` object which provides the
+       stable API available for extension modules.
 * `def parse_config(config)`
     - This method should have the `@staticmethod` decoration.
     - Arguments:
@@ -96,6 +98,7 @@ A custom mapping provider must specify the following methods:
         either accept this localpart or pick their own username. Otherwise this
         option has no effect. If omitted, defaults to `False`.
       - `display_name`: An optional string, the display name for the user.
+      - `picture`: An optional string, the avatar url for the user.
       - `emails`: A list of strings, the email address(es) to associate with
         this user. If omitted, defaults to an empty list.
 * `async def get_extra_attributes(self, userinfo, token)`

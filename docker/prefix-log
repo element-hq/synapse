@@ -7,6 +7,9 @@
 #   prefix-log command [args...]
 #
 
-exec 1> >(awk '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0}' >&1)
-exec 2> >(awk '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0}' >&2)
+# '-W interactive' is a `mawk` extension which disables buffering on stdout and sets line-buffered reads on
+# stdin. The effect is that the output is flushed after each line, rather than being batched, which helps reduce
+# confusion due to to interleaving of the different processes.
+exec 1> >(awk -W interactive '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0 }' >&1)
+exec 2> >(awk -W interactive '{print "'"${SUPERVISOR_PROCESS_NAME}"' | "$0 }' >&2)
 exec "$@"

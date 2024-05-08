@@ -51,6 +51,7 @@ from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging import opentracing
 from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.replication.http.push import ReplicationCopyPusherRestServlet
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import (
     JsonDict,
@@ -180,6 +181,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self._forgotten_room_retention_period = (
             hs.config.server.forgotten_room_retention_period
         )
+
+        self._is_push_writer = (
+            hs.get_instance_name() in hs.config.worker.writers.push_rules
+        )
+        self._push_writer = hs.config.worker.writers.push_rules[0]
+        self._copy_push_client = ReplicationCopyPusherRestServlet.make_client(hs)
 
     def _on_user_joined_room(self, event_id: str, room_id: str) -> None:
         """Notify the rate limiter that a room join has occurred.
@@ -745,6 +752,36 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             and requester.user.to_string() == self._server_notices_mxid
         )
 
+        requester_suspended = await self.store.get_user_suspended_status(
+            requester.user.to_string()
+        )
+        if action == Membership.INVITE and requester_suspended:
+            raise SynapseError(
+                403,
+                "Sending invites while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
+        if target.to_string() != requester.user.to_string():
+            target_suspended = await self.store.get_user_suspended_status(
+                target.to_string()
+            )
+        else:
+            target_suspended = requester_suspended
+
+        if action == Membership.JOIN and target_suspended:
+            raise SynapseError(
+                403,
+                "Joining rooms while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+        if action == Membership.KNOCK and target_suspended:
+            raise SynapseError(
+                403,
+                "Knocking on rooms while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
         if (
             not self.allow_per_room_profiles and not is_requester_server_notices_user
         ) or requester.shadow_banned:
@@ -1236,11 +1273,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate
         # the event.
-        content[
-            EventContentFields.AUTHORISING_USER
-        ] = await self.event_auth_handler.get_user_which_could_invite(
-            room_id,
-            state_before_join,
+        content[EventContentFields.AUTHORISING_USER] = (
+            await self.event_auth_handler.get_user_which_could_invite(
+                room_id,
+                state_before_join,
+            )
         )
 
         return False, []
@@ -1301,9 +1338,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
                     old_room_id, new_room_id, user_id
                 )
                 # Copy over push rules
-                await self.store.copy_push_rules_from_room_to_room_for_user(
-                    old_room_id, new_room_id, user_id
-                )
+                if self._is_push_writer:
+                    await self.store.copy_push_rules_from_room_to_room_for_user(
+                        old_room_id, new_room_id, user_id
+                    )
+                else:
+                    await self._copy_push_client(
+                        instance_name=self._push_writer,
+                        user_id=user_id,
+                        old_room_id=old_room_id,
+                        new_room_id=new_room_id,
+                    )
             except Exception:
                 logger.exception(
                     "Error copying tags and/or push rules from rooms %s to %s for user %s. "

@@ -43,7 +43,6 @@ MAIN_TIMELINE: Final = "main"
 
 
 class Membership:
-
     """Represents the membership states of a user in a room."""
 
     INVITE: Final = "invite"
@@ -129,6 +128,8 @@ class EventTypes:
     SpaceParent: Final = "m.space.parent"
 
     Reaction: Final = "m.reaction"
+
+    CallInvite: Final = "m.call.invite"
 
 
 class ToDeviceEventTypes:
@@ -231,6 +232,13 @@ class EventContentFields:
 
     # an unspecced field added to to-device messages to identify them uniquely-ish
     TO_DEVICE_MSGID: Final = "org.matrix.msgid"
+
+
+class EventUnsignedContentFields:
+    """Fields found inside the 'unsigned' data on events"""
+
+    # Requesting user's membership, per MSC4115
+    MSC4115_MEMBERSHIP: Final = "io.element.msc4115.membership"
 
 
 class RoomTypes:

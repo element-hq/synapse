@@ -26,7 +26,7 @@ for most users.
 #### Docker images and Ansible playbooks
 
 There is an official synapse image available at
-<https://hub.docker.com/r/vectorim/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
+<https://hub.docker.com/r/matrixdotorg/synapse> or at [`ghcr.io/element-hq/synapse`](https://ghcr.io/element-hq/synapse)
 which can be used with the docker-compose file available at
 [contrib/docker](https://github.com/element-hq/synapse/tree/develop/contrib/docker).
 Further information on this including configuration options is available in the README
@@ -259,9 +259,9 @@ users, etc.) to the developers via the `--report-stats` argument.
 
 This command will generate you a config file that you can then customise, but it will
 also generate a set of keys for you. These keys will allow your homeserver to
-identify itself to other homeserver, so don't lose or delete them. It would be
+identify itself to other homeservers, so don't lose or delete them. It would be
 wise to back them up somewhere safe. (If, for whatever reason, you do need to
-change your homeserver's keys, you may find that other homeserver have the
+change your homeserver's keys, you may find that other homeservers have the
 old key cached. If you update the signing key, you should change the name of the
 key in the `<server name>.signing.key` file (the second word) to something
 different. See the [spec](https://matrix.org/docs/spec/server_server/latest.html#retrieving-server-keys) for more information on key management).
@@ -325,6 +325,17 @@ Some extra dependencies may be needed. You can use Homebrew (https://brew.sh) fo
 
 You may need to install icu, and make the icu binaries and libraries accessible.
 Please follow [the official instructions of PyICU](https://pypi.org/project/PyICU/) to do so.
+
+If you're struggling to get icu discovered, and see:
+```
+  RuntimeError:
+  Please install pkg-config on your system or set the ICU_VERSION environment
+  variable to the version of ICU you have installed.
+```
+despite it being installed and having your `PATH` updated, you can omit this dependency by
+not specifying `--extras all` to `poetry`. If using postgres, you can install Synapse via
+`poetry install --extras saml2 --extras oidc --extras postgres --extras opentracing --extras redis --extras sentry`.
+ICU is not a hard dependency on getting a working installation.
 
 On ARM-based Macs you may also need to install libjpeg and libpq:
 ```sh

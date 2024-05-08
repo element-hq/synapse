@@ -54,7 +54,7 @@ function fetchVersions(dropdown, dropdownMenu) {
     return new Promise((resolve, reject) => {
         window.addEventListener("load", () => {
 
-            fetch("https://api.github.com/repos/matrix-org/synapse/git/trees/gh-pages", {
+            fetch("https://api.github.com/repos/element-hq/synapse/git/trees/gh-pages", {
                 cache: "force-cache",
             }).then(res => 
                 res.json()
@@ -100,10 +100,30 @@ function sortVersions(a, b) {
     if (a === 'develop' || a === 'latest') return -1;
     if (b === 'develop' || b === 'latest') return 1;
 
-    const versionA = (a.match(/v\d+(\.\d+)+/) || [])[0];
-    const versionB = (b.match(/v\d+(\.\d+)+/) || [])[0];
+    // If any of the versions do not confrom to a semantic version string, they
+    // will be sorted behind a valid version.
+    const versionA = (a.match(/v(\d+(\.\d+)+)/) || [])[1]?.split('.') ?? '';
+    const versionB = (b.match(/v(\d+(\.\d+)+)/) || [])[1]?.split('.') ?? '';
 
-    return versionB.localeCompare(versionA);
+    for (let i = 0; i < Math.max(versionA.length, versionB.length); i++) {
+        if (versionB[i] === undefined) {
+            return -1;
+        }
+        if (versionA[i] === undefined) {
+            return 1;
+        }
+
+        const partA = parseInt(versionA[i], 10);
+        const partB = parseInt(versionB[i], 10);
+
+        if (partA > partB) {
+            return -1;
+        } else if (partB > partA) {
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
 /**

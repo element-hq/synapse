@@ -128,7 +128,7 @@ can read more about that [here](https://www.postgresql.org/docs/10/kernel-resour
 ### Overview
 
 The script `synapse_port_db` allows porting an existing synapse server
-backed by SQLite to using PostgreSQL. This is done in as a two phase
+backed by SQLite to using PostgreSQL. This is done as a two phase
 process:
 
 1.  Copy the existing SQLite database to a separate location and run
@@ -182,7 +182,7 @@ synapse_port_db --sqlite-database homeserver.db.snapshot \
     --postgres-config homeserver-postgres.yaml
 ```
 
-The flag `--curses` displays a coloured curses progress UI.
+The flag `--curses` displays a coloured curses progress UI. (NOTE: if your terminal is too small the script will error out)
 
 If the script took a long time to complete, or time has otherwise passed
 since the original snapshot was taken, repeat the previous steps with a

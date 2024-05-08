@@ -469,8 +469,7 @@ class Notifier:
         new_token: RoomStreamToken,
         users: Optional[Collection[Union[str, UserID]]] = None,
         rooms: Optional[StrCollection] = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def on_new_event(
@@ -479,8 +478,7 @@ class Notifier:
         new_token: MultiWriterStreamToken,
         users: Optional[Collection[Union[str, UserID]]] = None,
         rooms: Optional[StrCollection] = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @overload
     def on_new_event(
@@ -497,8 +495,7 @@ class Notifier:
         new_token: int,
         users: Optional[Collection[Union[str, UserID]]] = None,
         rooms: Optional[StrCollection] = None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def on_new_event(
         self,
@@ -724,6 +721,7 @@ class Notifier:
                         user.to_string(),
                         new_events,
                         is_peeking=is_peeking,
+                        msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
                     )
                 elif keyname == StreamKeyType.PRESENCE:
                     now = self.clock.time_msec()

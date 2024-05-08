@@ -976,12 +976,12 @@ class StreamToken:
         return attr.evolve(self, **{key.value: new_value})
 
     @overload
-    def get_field(self, key: Literal[StreamKeyType.ROOM]) -> RoomStreamToken:
-        ...
+    def get_field(self, key: Literal[StreamKeyType.ROOM]) -> RoomStreamToken: ...
 
     @overload
-    def get_field(self, key: Literal[StreamKeyType.RECEIPT]) -> MultiWriterStreamToken:
-        ...
+    def get_field(
+        self, key: Literal[StreamKeyType.RECEIPT]
+    ) -> MultiWriterStreamToken: ...
 
     @overload
     def get_field(
@@ -995,14 +995,12 @@ class StreamToken:
             StreamKeyType.TYPING,
             StreamKeyType.UN_PARTIAL_STATED_ROOMS,
         ],
-    ) -> int:
-        ...
+    ) -> int: ...
 
     @overload
     def get_field(
         self, key: StreamKeyType
-    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]:
-        ...
+    ) -> Union[int, RoomStreamToken, MultiWriterStreamToken]: ...
 
     def get_field(
         self, key: StreamKeyType
@@ -1158,6 +1156,7 @@ class UserInfo:
         user_type:  User type (None for normal user, 'support' and 'bot' other options).
         approved: If the user has been "approved" to register on the server.
         locked: Whether the user's account has been locked
+        suspended: Whether the user's account is currently suspended
     """
 
     user_id: UserID
@@ -1173,6 +1172,7 @@ class UserInfo:
     is_shadow_banned: bool
     approved: bool
     locked: bool
+    suspended: bool
 
 
 class UserProfile(TypedDict):

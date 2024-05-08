@@ -86,9 +86,9 @@ The search term is then split into words:
 * If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
   are considered words.
 
-The queries for PostgreSQL and SQLite are detailed below, by their overall goal
+The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are "real" (e.g. not bots,
-not deactivated). It is assumed that real users will have an display name and
+not deactivated). It is assumed that real users will have a display name and
 avatar set.
 
 ### PostgreSQL

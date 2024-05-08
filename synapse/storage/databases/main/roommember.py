@@ -369,6 +369,22 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             user_id, [Membership.INVITE]
         )
 
+    async def get_knocked_at_rooms_for_local_user(
+        self, user_id: str
+    ) -> Sequence[RoomsForUser]:
+        """Get all the rooms the *local* user has knocked at.
+
+        Args:
+            user_id: The user ID.
+
+        Returns:
+            A list of RoomsForUser.
+        """
+
+        return await self.get_rooms_for_local_user_where_membership_is(
+            user_id, [Membership.KNOCK]
+        )
+
     async def get_invite_for_local_user_in_room(
         self, user_id: str, room_id: str
     ) -> Optional[RoomsForUser]:
@@ -1217,6 +1233,28 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
         return set(room_ids)
+
+    async def get_membership_event_ids_for_user(
+        self, user_id: str, room_id: str
+    ) -> Set[str]:
+        """Get all event_ids for the given user and room.
+
+        Args:
+            user_id: The user ID to get the event IDs for.
+            room_id: The room ID to look up events for.
+
+        Returns:
+            Set of event IDs
+        """
+
+        event_ids = await self.db_pool.simple_select_onecol(
+            table="room_memberships",
+            keyvalues={"user_id": user_id, "room_id": room_id},
+            retcol="event_id",
+            desc="get_membership_event_ids_for_user",
+        )
+
+        return set(event_ids)
 
     @cached(max_entries=5000)
     async def _get_membership_from_event_id(
