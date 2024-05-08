@@ -22,7 +22,7 @@ import os
 import shutil
 import tempfile
 
-from twisted.internet.testing import MemoryReactor
+from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage
