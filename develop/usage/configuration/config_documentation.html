@@ -2314,6 +2314,10 @@ federated servers if <code>autocreate_auto_join_rooms_federated</code> is true (
 <li>&quot;trusted_private_chat&quot;: an invitation is required to join this room and the invitee is
 assigned a power level of 100 upon joining the room.</li>
 </ul>
+<p>Each preset will set up a room in the same manner as if it were provided as the <code>preset</code> parameter when
+calling the
+<a href="https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom"><code>POST /_matrix/client/v3/createRoom</code></a>
+Client-Server API endpoint.</p>
 <p>If a value of &quot;private_chat&quot; or &quot;trusted_private_chat&quot; is used then
 <code>auto_join_mxid_localpart</code> must also be configured.</p>
 <p>Defaults to &quot;public_chat&quot;.</p>
