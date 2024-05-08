@@ -71,7 +71,6 @@ from synapse.util.stringutils import random_string
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-
 logger = logging.getLogger(__name__)
 
 # How often to run the background job to update the "recently accessed"

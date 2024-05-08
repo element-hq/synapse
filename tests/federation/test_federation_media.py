@@ -80,6 +80,8 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
         boundary = content_type[0].split("boundary=")[1]
         # split on boundary and check that json field and expected value exist
         stripped = channel.text_body.split("\r\n" + "--" + boundary)
+        # TODO: the json object expected will change once MSC3911 is implemented, currently
+        # {} is returned for all requests as a placeholder (per MSC3196)
         found_json = any(
             "\r\nContent-Type: application/json\r\n{}" in field for field in stripped
         )
