@@ -107,8 +107,8 @@ pub struct PushRuleEvaluator {
     /// flag as MSC1767 (extensible events core).
     msc3931_enabled: bool,
 
-    /// If MSC3767 (time based notification filtering push rule condition) is enabled
-    msc3767_time_and_day: bool,
+    /// If MSC4141 (time based notification filtering push rule condition) is enabled
+    msc4141_time_and_day: bool,
 }
 
 #[pymethods]
@@ -126,7 +126,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled,
         room_version_feature_flags,
         msc3931_enabled,
-        msc3767_time_and_day,
+        msc4141_time_and_day,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
@@ -138,7 +138,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled: bool,
         room_version_feature_flags: Vec<String>,
         msc3931_enabled: bool,
-        msc3767_time_and_day: bool,
+        msc4141_time_and_day: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
             Some(JsonValue::Value(SimpleJsonValue::Str(s))) => s.clone().into_owned(),
@@ -156,7 +156,7 @@ impl PushRuleEvaluator {
             related_event_match_enabled,
             room_version_feature_flags,
             msc3931_enabled,
-            msc3767_time_and_day,
+            msc4141_time_and_day,
         })
     }
 
@@ -392,7 +392,7 @@ impl PushRuleEvaluator {
                 }
             }
             KnownCondition::TimeAndDay(time_and_day) => {
-                if !self.msc3767_time_and_day {
+                if !self.msc4141_time_and_day {
                     false
                 } else {
                     self.match_time_and_day(time_and_day.timezone, &time_and_day.intervals)?

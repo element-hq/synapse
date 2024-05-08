@@ -174,7 +174,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
             related_event_match_enabled=True,
             room_version_feature_flags=event.room_version.msc3931_push_features,
             msc3931_enabled=True,
-            msc3767_time_and_day=True,
+            msc4141_time_and_day=True,
         )
 
     def test_display_name(self) -> None:
@@ -806,7 +806,7 @@ class PushRuleEvaluatorTestCase(unittest.TestCase):
     def test_time_and_day_match(self) -> None:
         # for testing, make whole day in do not disturb
         condition = {
-            "kind": "org.matrix.msc3767.time_and_day",
+            "kind": "org.matrix.msc4141.time_and_day",
             "timezone": None,
             "intervals": [
                 {

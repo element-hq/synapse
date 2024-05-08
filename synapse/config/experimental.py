@@ -437,7 +437,7 @@ class ExperimentalConfig(Config):
             "msc4115_membership_on_events", False
         )
 
-        # MSC3767: time based notification filtering
-        self.msc3767_time_and_day = experimental.get(
-            "org.matrix.msc3767.time_and_day", False
+        # MSC4141: time based notification filtering
+        self.msc4141_time_and_day = experimental.get(
+            "org.matrix.msc4141.time_and_day", False
         )

@@ -362,7 +362,7 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
-    #[serde(rename = "org.matrix.msc3767.time_and_day")]
+    #[serde(rename = "org.matrix.msc4141.time_and_day")]
     TimeAndDay(TimeAndDayCondition),
 }
 
@@ -455,7 +455,7 @@ pub struct TimeAndDayCondition {
 pub struct TimeAndDayIntervals {
     /// Tuple of hh::mm representing start and end times of the day
     pub time_of_day: Option<TimeInterval>,
-    /// 0 = Sunday, 1 = Monday, ..., 7 = Sunday
+    /// 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub day_of_week: Vec<u32>,
 }
 
