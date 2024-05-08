@@ -2591,6 +2591,11 @@ Possible values for this option are:
 * "trusted_private_chat": an invitation is required to join this room and the invitee is
   assigned a power level of 100 upon joining the room.
 
+Each preset will set up a room in the same manner as if it were provided as the `preset` parameter when
+calling the
+[`POST /_matrix/client/v3/createRoom`](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom)
+Client-Server API endpoint.
+
 If a value of "private_chat" or "trusted_private_chat" is used then
 `auto_join_mxid_localpart` must also be configured.
 
