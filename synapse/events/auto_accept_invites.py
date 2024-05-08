@@ -22,12 +22,12 @@ import logging
 from http import HTTPStatus
 from typing import Any, Dict, Tuple
 
+from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.config.auto_accept_invites import AutoAcceptInvitesConfig
 from synapse.module_api import EventBase, ModuleApi, run_as_background_process
 
 logger = logging.getLogger(__name__)
-ACCOUNT_DATA_DIRECT_MESSAGE_LIST = "m.direct"
 
 
 class InviteAutoAccepter:
@@ -37,7 +37,6 @@ class InviteAutoAccepter:
         self._config = config
 
         if not self._config.enabled:
-            logger.info("Not starting InviteAutoAccepter as it is not enabled")
             return
 
         should_run_on_this_worker = config.worker_to_run_on == self._api.worker_name
@@ -68,9 +67,9 @@ class InviteAutoAccepter:
         """
         # Check if the event is an invite for a local user.
         is_invite_for_local_user = (
-            event.type == "m.room.member"
+            event.type == EventTypes.Member
             and event.is_state()
-            and event.membership == "invite"
+            and event.membership == Membership.INVITE
             and self._api.is_mine(event.state_key)
         )
 
@@ -132,7 +131,7 @@ class InviteAutoAccepter:
         # etc.)
         dm_map: Dict[str, Tuple[str, ...]] = dict(
             await self._api.account_data_manager.get_global(
-                user_id, ACCOUNT_DATA_DIRECT_MESSAGE_LIST
+                user_id, AccountDataTypes.DIRECT
             )
             or {}
         )
@@ -146,7 +145,7 @@ class InviteAutoAccepter:
             dm_map[dm_user_id] = tuple(dm_rooms_for_user) + (room_id,)
 
         await self._api.account_data_manager.put_global(
-            user_id, ACCOUNT_DATA_DIRECT_MESSAGE_LIST, dm_map
+            user_id, AccountDataTypes.DIRECT, dm_map
         )
 
     async def _retry_make_join(
@@ -189,9 +188,9 @@ class InviteAutoAccepter:
                 logger.warn(
                     f"Update_room_membership raised the following unexpected exception: {e}"
                 )
-            finally:
-                sleep = 2**retries
-                retries += 1
+
+            sleep = 2**retries
+            retries += 1
 
             if join_event is not None:
                 break
