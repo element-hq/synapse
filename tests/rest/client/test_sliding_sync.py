@@ -7,7 +7,8 @@ from synapse.util import Clock
 from tests.rest.client.test_sendtodevice import SendToDeviceTestCase
 
 
-class SlidingSyncSendToDeviceTestCase(SendToDeviceTestCase):
+# Test To-Device messages working correctly with the `/sync/e2ee` endpoint (`to_device`)
+class SlidingSyncE2eeSendToDeviceTestCase(SendToDeviceTestCase):
     def default_config(self) -> JsonDict:
         config = super().default_config()
         # Enable sliding sync
@@ -18,4 +19,4 @@ class SlidingSyncSendToDeviceTestCase(SendToDeviceTestCase):
         # Use the Sliding Sync `/sync/e2ee` endpoint
         self.sync_endpoint = "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee"
 
-    # See SendToDeviceTestCase
+    # See SendToDeviceTestCase for tests
