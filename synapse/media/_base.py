@@ -25,7 +25,16 @@ import os
 import urllib
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Awaitable, Dict, Generator, List, Optional, Tuple, Type
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+)
 
 import attr
 
@@ -38,6 +47,11 @@ from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.util.stringutils import is_ascii
+
+if TYPE_CHECKING:
+    from synapse.media.media_storage import MultipartResponder
+    from synapse.storage.databases.main.media_repository import LocalMedia
+
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +272,53 @@ def _can_encode_filename_as_token(x: str) -> bool:
         if ord(c) >= 127 or ord(c) <= 32 or c in _FILENAME_SEPARATOR_CHARS:
             return False
     return True
+
+
+async def respond_with_multipart_responder(
+    request: SynapseRequest,
+    responder: "Optional[MultipartResponder]",
+    media_info: "LocalMedia",
+) -> None:
+    """
+    Responds via a Multipart responder for the federation media `/download` requests
+
+    Args:
+        request: the federation request to respond to
+        responder: the Multipart responder which will send the response
+        media_info: metadata about the media item
+    """
+    if not responder:
+        respond_404(request)
+        return
+
+    # If we have a responder we *must* use it as a context manager.
+    with responder:
+        if request._disconnected:
+            logger.warning(
+                "Not sending response to request %s, already disconnected.", request
+            )
+            return
+
+        logger.debug("Responding to media request with responder %s", responder)
+        if media_info.media_length is not None:
+            request.setHeader(b"Content-Length", b"%d" % (media_info.media_length,))
+        request.setHeader(
+            b"Content-Type", b"multipart/form-data; boundary=%s" % responder.boundary
+        )
+
+        try:
+            await responder.write_to_consumer(request)
+        except Exception as e:
+            # The majority of the time this will be due to the client having gone
+            # away. Unfortunately, Twisted simply throws a generic exception at us
+            # in that case.
+            logger.warning("Failed to write to consumer: %s %s", type(e), e)
+
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
+
+    finish_request(request)
 
 
 async def respond_with_responder(
