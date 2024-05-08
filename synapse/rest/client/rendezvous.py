@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# n.b [MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886) has now been closed.
+# However, we want to keep this implementation around for some time.
+# TODO: define an end-of-life date for this implementation.
 class MSC3886RendezvousServlet(RestServlet):
     """
     This is a placeholder implementation of [MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886)
