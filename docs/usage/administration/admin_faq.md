@@ -250,10 +250,10 @@ Using [libjemalloc](https://jemalloc.net) can also yield a significant
 improvement in overall memory use, and especially in terms of giving back
 RAM to the OS. To use it, the library must simply be put in the
 LD_PRELOAD environment variable when launching Synapse. On Debian, this
-can be done by installing the `libjemalloc1` package and adding this
+can be done by installing the `libjemalloc2` package and adding this
 line to `/etc/default/matrix-synapse`:
 
-    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.1
+    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
 This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.
