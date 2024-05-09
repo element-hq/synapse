@@ -9,6 +9,7 @@ from synapse.util import Clock
 #
 # from tests.rest.client.test_sync import DeviceListSyncTestCase
 # from tests.rest.client.test_sync import DeviceOneTimeKeysSyncTestCase
+# from tests.rest.client.test_sync import DeviceUnusedFallbackKeySyncTestCase
 from tests.rest.client.test_sendtodevice_base import SendToDeviceTestCaseBase
 from tests.unittest import HomeserverTestCase
 

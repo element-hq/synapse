@@ -893,7 +893,7 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
 
     def test_no_device_one_time_keys(self) -> None:
         """
-        Tests that no one time keys still has the default `signed_curve25519` in
+        Tests when no one time keys set, it still has the default `signed_curve25519` in
         `device_one_time_keys_count`
         """
         test_device_id = "TESTDEVICE"
@@ -960,6 +960,91 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["device_one_time_keys_count"],
             {"alg1": 1, "alg2": 2, "signed_curve25519": 0},
             channel.json_body["device_one_time_keys_count"],
+        )
+
+
+class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
+    """Tests regarding device one time keys (`device_unused_fallback_key_types`) changes."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_endpoint = "/sync"
+        self.store = self.hs.get_datastores().main
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+
+    def test_no_device_unused_fallback_key(self) -> None:
+        """
+        Test when no unused fallback key is set, TODO
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertListEqual(
+            channel.json_body["device_unused_fallback_key_types"],
+            [],
+            channel.json_body["device_unused_fallback_key_types"],
+        )
+
+    def test_returns_device_one_time_keys(self) -> None:
+        """
+        Tests that device unused fallback key type is returned correctly in the `/sync`
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # We shouldn't have any unused fallback keys yet
+        res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(alice_user_id, test_device_id)
+        )
+        self.assertEqual(res, [])
+
+        # Upload a fallback key for the user/device
+        fallback_key = {"alg1:k1": "fallback_key1"}
+        self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                alice_user_id,
+                test_device_id,
+                {"fallback_keys": fallback_key},
+            )
+        )
+        # We should now have an unused alg1 key
+        fallback_res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(alice_user_id, test_device_id)
+        )
+        self.assertEqual(fallback_res, ["alg1"], fallback_res)
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for the unused fallback key types
+        self.assertListEqual(
+            channel.json_body["device_unused_fallback_key_types"],
+            ["alg1"],
+            channel.json_body["device_unused_fallback_key_types"],
         )
 
 
