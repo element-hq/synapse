@@ -980,7 +980,10 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
 
     def test_no_device_unused_fallback_key(self) -> None:
         """
-        Test when no unused fallback key is set, TODO
+        Test when no unused fallback key is set, it just returns an empty list. The MSC
+        says "The device_unused_fallback_key_types parameter must be present if the
+        server supports fallback keys.",
+        https://github.com/matrix-org/matrix-spec-proposals/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
         """
         test_device_id = "TESTDEVICE"
 
