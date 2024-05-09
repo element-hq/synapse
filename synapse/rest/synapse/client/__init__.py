@@ -78,7 +78,7 @@ def build_synapse_client_resource_tree(hs: "HomeServer") -> Mapping[str, Resourc
         # To be removed in Synapse v1.32.0.
         resources["/_matrix/saml2"] = res
 
-    if hs.config.extensions.federation_whitelist_endpoint:
+    if hs.config.federation.federation_whitelist_endpoint_enabled:
         resources[FederationWhitelistResource.PATH] = FederationWhitelistResource(hs)
 
     if hs.config.experimental.msc4108_enabled:

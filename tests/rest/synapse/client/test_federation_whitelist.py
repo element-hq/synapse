@@ -41,7 +41,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 404)
 
-    @unittest.override_config({"extension_federation_whitelist_endpoint": True})
+    @unittest.override_config({"federation_whitelist_endpoint_enabled": True})
     def test_no_auth(self) -> None:
         "Endpoint requires auth when enabled"
 
@@ -51,7 +51,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, 401)
 
-    @unittest.override_config({"extension_federation_whitelist_endpoint": True})
+    @unittest.override_config({"federation_whitelist_endpoint_enabled": True})
     def test_no_whitelist(self) -> None:
         "Test when there is no whitelist configured"
 
@@ -72,7 +72,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
     @unittest.override_config(
         {
-            "extension_federation_whitelist_endpoint": True,
+            "federation_whitelist_endpoint_enabled": True,
             "federation_domain_whitelist": ["example.com"],
         }
     )
@@ -96,7 +96,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
     @unittest.override_config(
         {
-            "extension_federation_whitelist_endpoint": True,
+            "federation_whitelist_endpoint_enabled": True,
             "federation_domain_whitelist": ["example.com", "example.com"],
         }
     )

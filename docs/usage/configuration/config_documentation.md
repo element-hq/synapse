@@ -1232,6 +1232,31 @@ federation_domain_whitelist:
   - syd.example.com
 ```
 ---
+### `federation_whitelist_endpoint_enabled`
+
+Enables an endpoint for fetching the federation whitelist config.
+
+The request method and path is `GET /_synapse/client/config/federation_whitelist`, and the
+response format is:
+
+```json
+{
+    "whitelist_enabled": true,  // Whether the federation whitelist is being enforced
+    "whitelist": [  // Which server names are allowed by the whitelist
+        "example.com"
+    ]
+}
+```
+
+If `whitelist_enabled` is `false` then the server is permitted to federate with all others.
+
+The endpoint requires authentication.
+
+Example configuration:
+```yaml
+federation_whitelist_endpoint_enabled: true
+```
+---
 ### `federation_metrics_domains`
 
 Report prometheus metrics on the age of PDUs being sent to and received from
@@ -4545,35 +4570,4 @@ background_updates:
     sleep_duration_ms: 300
     min_batch_size: 10
     default_batch_size: 50
-```
-
-
----
-## Extension features
-Configuration for extension features for Synapse
-
----
-### `extension_federation_whitelist_endpoint`
-
-Enables an endpoint for fetching the federation whitelist config.
-
-The request method and path is `GET /_synapse/client/config/federation_whitelist`, and the
-response format is:
-
-```json
-{
-    "whitelist_enabled": true,  // Whether the federation whitelist is being enforced
-    "whitelist": [  // Which server names are allowed by the whitelist
-        "example.com"
-    ]
-}
-```
-
-If `whitelist_enabled` is `false` then the server is permitted to federate with all others.
-
-The endpoint requires authentication.
-
-Example configuration:
-```yaml
-extension_federation_whitelist_endpoint: true
 ```

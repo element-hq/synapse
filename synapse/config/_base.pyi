@@ -31,7 +31,6 @@ from synapse.config import (  # noqa: F401
     database,
     emailconfig,
     experimental,
-    extensions,
     federation,
     jwt,
     key,
@@ -121,7 +120,6 @@ class RootConfig:
     federation: federation.FederationConfig
     retention: retention.RetentionConfig
     background_updates: background_updates.BackgroundUpdateConfig
-    extensions: extensions.ExtensionsConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]
