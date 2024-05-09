@@ -11788,7 +11788,7 @@ the stream writer for the <code>presence</code> stream:</p>
 </code></pre>
 <h5 id="the-push_rules-stream"><a class="header" href="#the-push_rules-stream">The <code>push_rules</code> stream</a></h5>
 <p>The following endpoints should be routed directly to the worker configured as
-the stream writer for the <code>push</code> stream:</p>
+the stream writer for the <code>push_rules</code> stream:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
@@ -16498,9 +16498,9 @@ starting value.</p>
 improvement in overall memory use, and especially in terms of giving back
 RAM to the OS. To use it, the library must simply be put in the
 LD_PRELOAD environment variable when launching Synapse. On Debian, this
-can be done by installing the <code>libjemalloc1</code> package and adding this
+can be done by installing the <code>libjemalloc2</code> package and adding this
 line to <code>/etc/default/matrix-synapse</code>:</p>
-<pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.1
+<pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 </code></pre>
 <p>This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.</p>
