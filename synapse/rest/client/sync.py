@@ -624,9 +624,11 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         if since is not None:
             since_token = await StreamToken.from_string(self.store, since)
 
+        logger.info(f"sync with since_token: {since_token}")
+
         # Request cache key
         request_key = (
-            SyncVersion.SYNC_V2,
+            SyncVersion.E2EE_SYNC,
             user,
             timeout,
             since,
@@ -636,7 +638,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         sync_result = await self.sync_handler.wait_for_sync_for_user(
             requester,
             sync_config,
-            SyncVersion.SYNC_V2,
+            SyncVersion.E2EE_SYNC,
             request_key,
             since_token=since_token,
             timeout=timeout,
@@ -654,6 +656,24 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
         if sync_result.to_device:
             response["to_device"] = {"events": sync_result.to_device}
+
+        if sync_result.device_lists.changed:
+            response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
+        if sync_result.device_lists.left:
+            response["device_lists"]["left"] = list(sync_result.device_lists.left)
+
+        # We always include this because https://github.com/vector-im/element-android/issues/3725
+        # The spec isn't terribly clear on when this can be omitted and how a client would tell
+        # the difference between "no keys present" and "nothing changed" in terms of whole field
+        # absent / individual key type entry absent
+        # Corresponding synapse issue: https://github.com/matrix-org/synapse/issues/10456
+        response["device_one_time_keys_count"] = sync_result.device_one_time_keys_count
+
+        # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
+        # states that this field should always be included, as long as the server supports the feature.
+        response["device_unused_fallback_key_types"] = (
+            sync_result.device_unused_fallback_key_types
+        )
 
         return 200, response
 

@@ -289,9 +289,9 @@ class SyncResult:
 class E2eeSyncResult:
     next_batch: StreamToken
     to_device: List[JsonDict]
-    # device_lists: DeviceListUpdates
-    # device_one_time_keys_count: JsonMapping
-    # device_unused_fallback_key_types: List[str]
+    device_lists: DeviceListUpdates
+    device_one_time_keys_count: JsonMapping
+    device_unused_fallback_key_types: List[str]
 
 
 class SyncHandler:
@@ -1813,19 +1813,46 @@ class SyncHandler:
             full_state=False,
         )
 
-        # 1. Calculate `device_lists`
-        device_lists = await self._generate_sync_entry_for_device_list(
-            sync_result_builder
-        )
-
-        # 2. Calculate `to_device` events
+        # 1. Calculate `to_device` events
         await self._generate_sync_entry_for_to_device(sync_result_builder)
+
+        # 2. Calculate `device_lists`
+        # Device list updates are sent if a since token is provided.
+        device_lists = DeviceListUpdates()
+        include_device_list_updates = bool(since_token and since_token.device_list_key)
+        if include_device_list_updates:
+            device_lists = await self._generate_sync_entry_for_device_list(
+                sync_result_builder,
+                # TODO: Do we need to worry about these? All of this info is
+                # normally calculated when we `_generate_sync_entry_for_rooms()` but we
+                # probably don't want to do all of that work for this endpoint.
+                newly_joined_rooms=frozenset(),
+                newly_joined_or_invited_or_knocked_users=frozenset(),
+                newly_left_rooms=frozenset(),
+                newly_left_users=frozenset(),
+            )
+
+        # 3. Calculate `device_one_time_keys_count` and `device_unused_fallback_key_types`
+        device_id = sync_config.device_id
+        one_time_keys_count: JsonMapping = {}
+        unused_fallback_key_types: List[str] = []
+        if device_id:
+            # TODO: We should have a way to let clients differentiate between the states of:
+            #   * no change in OTK count since the provided since token
+            #   * the server has zero OTKs left for this device
+            #  Spec issue: https://github.com/matrix-org/matrix-doc/issues/3298
+            one_time_keys_count = await self.store.count_e2e_one_time_keys(
+                user_id, device_id
+            )
+            unused_fallback_key_types = list(
+                await self.store.get_e2e_unused_fallback_key_types(user_id, device_id)
+            )
 
         return E2eeSyncResult(
             to_device=sync_result_builder.to_device,
             device_lists=device_lists,
-            # device_one_time_keys_count: JsonMapping
-            # device_unused_fallback_key_types: List[str]
+            device_one_time_keys_count=one_time_keys_count,
+            device_unused_fallback_key_types=unused_fallback_key_types,
             next_batch=sync_result_builder.now_token,
         )
 
@@ -2007,7 +2034,7 @@ class SyncHandler:
 
         users_that_have_changed = set()
 
-        joined_rooms = sync_result_builder.joined_room_ids
+        joined_room_ids = sync_result_builder.joined_room_ids
 
         # Step 1a, check for changes in devices of users we share a room
         # with
@@ -2032,14 +2059,14 @@ class SyncHandler:
                 # or if the changed user is the syncing user (as we always
                 # want to include device list updates of their own devices).
                 if user_id == changed_user_id or any(
-                    rid in joined_rooms for rid in entries
+                    rid in joined_room_ids for rid in entries
                 ):
                     users_that_have_changed.add(changed_user_id)
         else:
             users_that_have_changed = (
                 await self._device_handler.get_device_changes_in_shared_rooms(
                     user_id,
-                    sync_result_builder.joined_room_ids,
+                    joined_room_ids,
                     from_token=since_token,
                 )
             )
@@ -2066,7 +2093,7 @@ class SyncHandler:
         # Remove any users that we still share a room with.
         left_users_rooms = await self.store.get_rooms_for_users(newly_left_users)
         for user_id, entries in left_users_rooms.items():
-            if any(rid in joined_rooms for rid in entries):
+            if any(rid in joined_room_ids for rid in entries):
                 newly_left_users.discard(user_id)
 
         return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
