@@ -62,6 +62,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, Error};
+use chrono::NaiveTime;
 use chrono_tz::Tz;
 use log::warn;
 use pyo3::exceptions::PyTypeError;
@@ -462,16 +463,22 @@ pub struct TimeAndDayIntervals {
 /// Defines the time_of_day of `TimeAndDayIntervals`
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TimeInterval {
-    start_time: Cow<'static, str>,
-    end_time: Cow<'static, str>,
+    start_time: NaiveTime,
+    end_time: NaiveTime,
 }
 
 /// Implementation for `TimeInterval`
 impl TimeInterval {
+    pub fn new(start: &str, end: &str) -> Self {
+        TimeInterval {
+            start_time: start.parse::<NaiveTime>().expect("Invalid start time."),
+            end_time: end.parse::<NaiveTime>().expect("Invalid end time."),
+        }
+    }
     /// Checks if the provided time is within the interval.
-    pub fn contains(&self, time: String) -> bool {
+    pub fn contains(&self, time: NaiveTime) -> bool {
         // Since MSC specifies ISO 8601 which uses 24h, string comparison is valid.
-        time >= self.start_time.parse().unwrap() && time <= self.end_time.parse().unwrap()
+        time >= self.start_time && time <= self.end_time
     }
 
     /// Checks if the interval is empty.
@@ -819,4 +826,13 @@ fn test_custom_action() {
 
     let new_json = serde_json::to_string(&action).unwrap();
     assert_eq!(json, new_json);
+}
+
+#[test]
+fn test_time_interval_contains() {
+    let interval = TimeInterval::new("08:00", "12:00");
+    let time = "08:00".parse::<NaiveTime>().unwrap();
+    let does_it = interval.contains(time);
+
+    println!("{}", does_it)
 }

@@ -22,7 +22,7 @@
 use anyhow::bail;
 use anyhow::Context;
 use anyhow::Error;
-use chrono::{Datelike, Utc};
+use chrono::{Datelike, NaiveTime, Utc};
 use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use regex;
@@ -168,12 +168,12 @@ impl Matcher {
 }
 
 /// Returns `today` and `current_time` based on the given timezone. Otherwise, Utc.
-pub fn day_and_time_with_timezone(timezone: Option<Tz>) -> (u32, String) {
+pub fn day_and_time_with_timezone(timezone: Option<Tz>) -> (u32, NaiveTime) {
     let tz: Tz = timezone.unwrap_or(Tz::UTC);
     let time_with_tz = Utc::now().with_timezone(&tz);
 
     let today_with_timezone = time_with_tz.weekday().num_days_from_sunday();
-    let current_time_with_timezone = time_with_tz.time().format("%H:%M").to_string();
+    let current_time_with_timezone = time_with_tz.time();
 
     (today_with_timezone, current_time_with_timezone)
 }

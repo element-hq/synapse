@@ -536,7 +536,7 @@ impl PushRuleEvaluator {
             interval.day_of_week.contains(&today)
                 && (interval.time_of_day.is_none()
                     || interval.time_of_day.as_ref().map_or(true, |time_interval| {
-                        time_interval.contains(current_time.to_string()) || time_interval.is_empty()
+                        time_interval.contains(current_time) || time_interval.is_empty()
                     }))
         });
 
