@@ -4,6 +4,10 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
 
+# TODO: Uncomment this line when we have a pattern to share tests across files, see
+# https://github.com/element-hq/synapse/pull/17167#discussion_r1594517041
+#
+# from tests.rest.client.test_sync import DeviceListSyncTestCase
 from tests.rest.client.test_sendtodevice_base import SendToDeviceTestCaseBase
 from tests.unittest import HomeserverTestCase
 
