@@ -563,6 +563,12 @@ class SlidingSyncE2eeRestServlet(RestServlet):
     get E2EE events without having to sit through a big initial sync (`/sync` v2). And
     we can avoid encryption events being backed up by the main sync response.
 
+    Having To-Device messages split out to this sync endpoint also helps when clients
+    need to have 2 or more sync streams open at a time, e.g a push notification process
+    and a main process. This can cause the two processes to race to fetch the To-Device
+    events, resulting in the need for complex synchronisation rules to ensure the token
+    is correctly and atomically exchanged between processes.
+
     GET parameters::
         timeout(int): How long to wait for new events in milliseconds.
         since(batch_token): Batch token when asking for incremental deltas.
@@ -623,8 +629,6 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         since_token = None
         if since is not None:
             since_token = await StreamToken.from_string(self.store, since)
-
-        logger.info(f"sync with since_token: {since_token}")
 
         # Request cache key
         request_key = (

@@ -27,10 +27,10 @@ from synapse.rest.client import login, sendtodevice, sync
 from synapse.server import HomeServer
 from synapse.util import Clock
 
-from tests.unittest import override_config
+from tests.unittest import HomeserverTestCase, override_config
 
 
-class SendToDeviceTestCaseBase:
+class SendToDeviceTestCaseBase(HomeserverTestCase):
     """
     Test `/sendToDevice` will deliver messages across to people receiving them over `/sync`.
 

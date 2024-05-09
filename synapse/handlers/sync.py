@@ -287,6 +287,16 @@ class SyncResult:
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class E2eeSyncResult:
+    """
+    Attributes:
+        to_device: List of direct messages for the device.
+        device_lists: List of user_ids whose devices have changed
+        device_one_time_keys_count: Dict of algorithm to count for one time keys
+            for this device
+        device_unused_fallback_key_types: List of key types that have an unused fallback
+            key
+    """
+
     next_batch: StreamToken
     to_device: List[JsonDict]
     device_lists: DeviceListUpdates
@@ -387,7 +397,17 @@ class SyncHandler:
         return an empty sync result.
 
         Args:
+            requester: The user requesting the sync response.
+            sync_config: Config/info necessary to process the sync request.
+            sync_version: Determines what kind of sync response to generate.
             request_key: The key to use for caching the response.
+            since_token: The point in the stream to sync from.
+            timeout: How long to wait for new data to arrive before giving up.
+            full_state: Whether to return the full state for each room.
+
+        Returns:
+            When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
+            When `SyncVersion.E2EE_SYNC`, returns a `E2eeSyncResult`.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -567,11 +587,21 @@ class SyncHandler:
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
     ) -> Union[SyncResult, E2eeSyncResult]:
-        """Generates the response body of a sync result, represented as a SyncResult.
+        """Generates the response body of a sync result, represented as a `SyncResult`/`E2eeSyncResult`.
 
         This is a wrapper around `generate_sync_result` which starts an open tracing
         span to track the sync. See `generate_sync_result` for the next part of your
         indoctrination.
+
+        Args:
+            sync_config: Config/info necessary to process the sync request.
+            sync_version: Determines what kind of sync response to generate.
+            since_token: The point in the stream to sync from.p.
+            full_state: Whether to return the full state for each room.
+
+        Returns:
+            When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
+            When `SyncVersion.E2EE_SYNC`, returns a `E2eeSyncResult`.
         """
         with start_active_span("sync.current_sync_for_user"):
             log_kv({"since_token": since_token})
@@ -1800,7 +1830,18 @@ class SyncHandler:
         sync_config: SyncConfig,
         since_token: Optional[StreamToken] = None,
     ) -> E2eeSyncResult:
-        """Generates the response body of a MSC3575 Sliding Sync `/sync/e2ee` result."""
+        """
+        Generates the response body of a MSC3575 Sliding Sync `/sync/e2ee` result.
+
+        This is represented by a `E2eeSyncResult` struct, which is built from small
+        pieces using a `SyncResultBuilder`. The `sync_result_builder` is passed as a
+        mutable ("inout") parameter to various helper functions. These retrieve and
+        process the data which forms the sync body, often writing to the
+        `sync_result_builder` to store their output.
+
+        At the end, we transfer data from the `sync_result_builder` to a new `E2eeSyncResult`
+        instance to signify that the sync calculation is complete.
+        """
 
         user_id = sync_config.user.to_string()
         # TODO: Should we exclude app services here? There could be an argument to allow
@@ -1863,7 +1904,20 @@ class SyncHandler:
         full_state: bool = False,
     ) -> "SyncResultBuilder":
         """
-        Assemble a `SyncResultBuilder` with all of the necessary context
+        Assemble a `SyncResultBuilder` with all of the initial context to
+        start building up the sync response:
+
+        - Membership changes between the last sync and the current sync.
+        - Joined room IDs (minus any rooms to exclude).
+        - Rooms that became fully-stated/un-partial stated since the last sync.
+
+        Args:
+            sync_config: Config/info necessary to process the sync request.
+            since_token: The point in the stream to sync from.
+            full_state: Whether to return the full state for each room.
+
+        Returns:
+            `SyncResultBuilder` ready to start generating parts of the sync response.
         """
         user_id = sync_config.user.to_string()
 
