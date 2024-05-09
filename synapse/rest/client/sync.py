@@ -587,12 +587,12 @@ class SlidingSyncE2eeRestServlet(RestServlet):
                     // ...
                 ]
             },
-            "device_one_time_keys_count": {
-                "signed_curve25519": 50
-            },
             "device_lists": {
                 "changed": ["@alice:example.com"],
                 "left": ["@bob:example.com"]
+            },
+            "device_one_time_keys_count": {
+                "signed_curve25519": 50
             },
             "device_unused_fallback_key_types": [
                 "signed_curve25519"

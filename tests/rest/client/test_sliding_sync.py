@@ -8,6 +8,7 @@ from synapse.util import Clock
 # https://github.com/element-hq/synapse/pull/17167#discussion_r1594517041
 #
 # from tests.rest.client.test_sync import DeviceListSyncTestCase
+# from tests.rest.client.test_sync import DeviceOneTimeKeysSyncTestCase
 from tests.rest.client.test_sendtodevice_base import SendToDeviceTestCaseBase
 from tests.unittest import HomeserverTestCase
 

@@ -689,7 +689,7 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
 
 
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device list changes."""
+    """Tests regarding device list (`device_lists`) changes."""
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -698,6 +698,9 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         sync.register_servlets,
         devices.register_servlets,
     ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_endpoint = "/sync"
 
     def test_receiving_local_device_list_changes(self) -> None:
         """Tests that a local users that share a room receive each other's device list
@@ -728,7 +731,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Now have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            "/sync",
+            self.sync_endpoint,
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -738,7 +741,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"/sync?since={next_batch_token}&timeout=30000",
+            f"{self.sync_endpoint}?since={next_batch_token}&timeout=30000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -785,7 +788,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # Have Bob initiate an initial sync (in order to get a since token)
         channel = self.make_request(
             "GET",
-            "/sync",
+            self.sync_endpoint,
             access_token=bob_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
@@ -795,7 +798,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # which we hope will happen as a result of Alice updating their device list.
         bob_sync_channel = self.make_request(
             "GET",
-            f"/sync?since={next_batch_token}&timeout=1000",
+            f"{self.sync_endpoint}?since={next_batch_token}&timeout=1000",
             access_token=bob_access_token,
             # Start the request, then continue on.
             await_result=False,
@@ -834,7 +837,9 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Request an initial sync
-        channel = self.make_request("GET", "/sync", access_token=alice_access_token)
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
         self.assertEqual(channel.code, 200, channel.json_body)
         next_batch = channel.json_body["next_batch"]
 
@@ -842,7 +847,7 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # It won't return until something has happened
         incremental_sync_channel = self.make_request(
             "GET",
-            f"/sync?since={next_batch}&timeout=30000",
+            f"{self.sync_endpoint}?since={next_batch}&timeout=30000",
             access_token=alice_access_token,
             await_result=False,
         )
@@ -869,6 +874,92 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
 
         self.assertIn(
             alice_user_id, device_list_changes, incremental_sync_channel.json_body
+        )
+
+
+class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
+    """Tests regarding device one time keys (`device_one_time_keys_count`) changes."""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_endpoint = "/sync"
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+
+    def test_no_device_one_time_keys(self) -> None:
+        """
+        Tests that no one time keys still has the default `signed_curve25519` in
+        `device_one_time_keys_count`
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertDictEqual(
+            channel.json_body["device_one_time_keys_count"],
+            # Note that "signed_curve25519" is always returned in key count responses
+            # regardless of whether we uploaded any keys for it. This is necessary until
+            # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+            {"signed_curve25519": 0},
+            channel.json_body["device_one_time_keys_count"],
+        )
+
+    def test_returns_device_one_time_keys(self) -> None:
+        """
+        Tests that one time keys for the device/user are counted correctly in the `/sync`
+        response
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Upload one time keys for the user/device
+        keys: JsonDict = {
+            "alg1:k1": "key1",
+            "alg2:k2": {"key": "key2", "signatures": {"k1": "sig1"}},
+            "alg2:k3": {"key": "key3"},
+        }
+        res = self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                alice_user_id, test_device_id, {"one_time_keys": keys}
+            )
+        )
+        # Note that "signed_curve25519" is always returned in key count responses
+        # regardless of whether we uploaded any keys for it. This is necessary until
+        # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+        self.assertDictEqual(
+            res, {"one_time_key_counts": {"alg1": 1, "alg2": 2, "signed_curve25519": 0}}
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertDictEqual(
+            channel.json_body["device_one_time_keys_count"],
+            {"alg1": 1, "alg2": 2, "signed_curve25519": 0},
+            channel.json_body["device_one_time_keys_count"],
         )
 
 
