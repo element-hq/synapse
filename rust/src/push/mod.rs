@@ -831,8 +831,10 @@ fn test_custom_action() {
 #[test]
 fn test_time_interval_contains() {
     let interval = TimeInterval::new("08:00", "12:00");
-    let time = "08:00".parse::<NaiveTime>().unwrap();
-    let does_it = interval.contains(time);
 
-    println!("{}", does_it)
+    let contains = interval.contains("09:00".parse::<NaiveTime>().unwrap());
+    assert!(contains);
+
+    let not_contains = interval.contains("20:00".parse::<NaiveTime>().unwrap());
+    assert!(!not_contains);
 }
