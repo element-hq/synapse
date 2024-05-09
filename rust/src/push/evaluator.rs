@@ -665,7 +665,9 @@ fn test_time_and_day_condition() {
             TimeAndDayCondition {
                 timezone: None,
                 intervals: vec![TimeAndDayIntervals {
-                    // for testing, to avoid flakiness, make all days as dnd
+                    // for testing, to avoid flakiness, make all days/times as dnd
+                    // the logic for time_of_day is tested in a unit test
+                    // see test_time_interval_contains
                     time_of_day: None,
                     day_of_week: vec![0, 1, 2, 3, 4, 5, 6],
                 }],

@@ -454,7 +454,7 @@ pub struct TimeAndDayCondition {
 /// Defines the intervals of `TimeAndDayCondition`
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TimeAndDayIntervals {
-    /// Tuple of hh::mm representing start and end times of the day
+    /// Optional Struct of NaiveTime representing start and end times of the day
     pub time_of_day: Option<TimeInterval>,
     /// 0 = Sunday, 1 = Monday, ..., 6 = Saturday
     pub day_of_week: Vec<u32>,
@@ -469,6 +469,7 @@ pub struct TimeInterval {
 
 /// Implementation for `TimeInterval`
 impl TimeInterval {
+    /// Creates a new TimeInterval from passed start and end times strings
     pub fn new(start: &str, end: &str) -> Self {
         TimeInterval {
             start_time: start.parse::<NaiveTime>().expect("Invalid start time."),
@@ -477,7 +478,6 @@ impl TimeInterval {
     }
     /// Checks if the provided time is within the interval.
     pub fn contains(&self, time: NaiveTime) -> bool {
-        // Since MSC specifies ISO 8601 which uses 24h, string comparison is valid.
         time >= self.start_time && time <= self.end_time
     }
 
