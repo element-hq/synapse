@@ -26,10 +26,11 @@ from parameterized import parameterized
 from twisted.internet.testing import MemoryReactor
 
 import synapse.types
+from synapse.api.constants import EventTypes
 from synapse.api.errors import AuthError, SynapseError
-from synapse.rest import admin
+from synapse.rest import admin, login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, get_localpart_from_id
 from synapse.util import Clock
 
 from tests import unittest
@@ -38,7 +39,11 @@ from tests import unittest
 class ProfileTestCase(unittest.HomeserverTestCase):
     """Tests profile management."""
 
-    servlets = [admin.register_servlets]
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.mock_federation = AsyncMock()
@@ -67,9 +72,55 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.bob = UserID.from_string("@4567:test")
         self.alice = UserID.from_string("@alice:remote")
 
-        self.register_user(self.frank.localpart, "frankpassword")
+        frank_password = "frankpassword"
+        self.frank_registered = self.register_user(self.frank.localpart, frank_password)
+        self.frank_token = self.login(self.frank_registered, frank_password)
 
         self.handler = hs.get_profile_handler()
+
+    def test_set_displayname_scales_to_many_rooms(self) -> None:
+        room_count = 100
+        room_ids = []
+        for _ in range(room_count):
+            room_ids.append(
+                self.helper.create_room_as(
+                    self.frank_registered, tok=self.frank_token, is_public=True
+                )
+            )
+
+        event_content = self.helper.get_state(
+            room_id=room_ids[0],
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        self.assertEqual(
+            get_localpart_from_id(self.frank_registered), event_content["displayname"]
+        )
+
+        user1_displayname = "user1 displayname"
+        self.get_success(
+            self.handler.set_displayname(
+                self.frank,
+                synapse.types.create_requester(self.frank_registered),
+                user1_displayname,
+            )
+        )
+
+        event_content = self.helper.get_state(
+            room_id=room_ids[room_count - 1],
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        # This check fails, it appears that the call in profile.py to off load
+        # the state updates to a queue runs synchronously and L105 does not
+        # does not return until all state has been updated. This can be worked
+        # around by scheduling the task for the future, which seems like the
+        # wrong approach.
+        self.assertNotEqual(user1_displayname, event_content["displayname"])
+        self.reactor.advance(1000)
+        self.assertEqual(user1_displayname, event_content["displayname"])
 
     def test_get_my_name(self) -> None:
         self.get_success(self.store.set_profile_displayname(self.frank, "Frank"))
@@ -79,28 +130,58 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual("Frank", displayname)
 
     def test_set_my_name(self) -> None:
+        room_id = self.helper.create_room_as(
+            self.frank_registered, tok=self.frank_token, is_public=True
+        )
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        self.assertEqual(
+            get_localpart_from_id(self.frank_registered), event_content["displayname"]
+        )
+
+        displayname1 = "Frank Jr."
         self.get_success(
             self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank Jr."
+                self.frank, synapse.types.create_requester(self.frank), displayname1
             )
         )
 
         self.assertEqual(
             (self.get_success(self.store.get_profile_displayname(self.frank))),
-            "Frank Jr.",
+            displayname1,
         )
+
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        self.assertEqual(displayname1, event_content["displayname"])
 
         # Set displayname again
+        displayname2 = "Frank"
         self.get_success(
             self.handler.set_displayname(
-                self.frank, synapse.types.create_requester(self.frank), "Frank"
+                self.frank, synapse.types.create_requester(self.frank), displayname2
             )
         )
 
         self.assertEqual(
             (self.get_success(self.store.get_profile_displayname(self.frank))),
-            "Frank",
+            displayname2,
         )
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        self.assertEqual(displayname2, event_content["displayname"])
 
         # Set displayname to an empty string
         self.get_success(
@@ -112,6 +193,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertIsNone(
             self.get_success(self.store.get_profile_displayname(self.frank))
         )
+        event_content = self.helper.get_state(
+            room_id=room_id,
+            event_type=EventTypes.Member,
+            tok=self.frank_token,
+            state_key=self.frank,
+        )
+        self.assertEqual(None, event_content.get("displayname"))
 
     def test_set_my_name_if_disabled(self) -> None:
         self.hs.config.registration.enable_set_displayname = False
