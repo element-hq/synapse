@@ -36,7 +36,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
     def test_default(self) -> None:
         "If the config option is not enabled, the endpoint should 404"
         channel = self.make_request(
-            "GET", "/_synapse/client/config/federation_whitelist", shorthand=False
+            "GET", "/_synapse/client/v1/config/federation_whitelist", shorthand=False
         )
 
         self.assertEqual(channel.code, 404)
@@ -46,7 +46,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
         "Endpoint requires auth when enabled"
 
         channel = self.make_request(
-            "GET", "/_synapse/client/config/federation_whitelist", shorthand=False
+            "GET", "/_synapse/client/v1/config/federation_whitelist", shorthand=False
         )
 
         self.assertEqual(channel.code, 401)
@@ -60,7 +60,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_synapse/client/config/federation_whitelist",
+            "/_synapse/client/v1/config/federation_whitelist",
             shorthand=False,
             access_token=tok,
         )
@@ -84,7 +84,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_synapse/client/config/federation_whitelist",
+            "/_synapse/client/v1/config/federation_whitelist",
             shorthand=False,
             access_token=tok,
         )
@@ -108,7 +108,7 @@ class FederationWhitelistTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_synapse/client/config/federation_whitelist",
+            "/_synapse/client/v1/config/federation_whitelist",
             shorthand=False,
             access_token=tok,
         )

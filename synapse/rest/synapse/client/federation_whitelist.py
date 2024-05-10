@@ -42,7 +42,7 @@ class FederationWhitelistResource(DirectServeJsonResource):
         }
     """
 
-    PATH = "/_synapse/client/config/federation_whitelist"
+    PATH = "/_synapse/client/v1/config/federation_whitelist"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
