@@ -1207,6 +1207,23 @@ the same whitelist.</p>
   - syd.example.com
 </code></pre>
 <hr />
+<h3 id="federation_whitelist_endpoint_enabled"><a class="header" href="#federation_whitelist_endpoint_enabled"><code>federation_whitelist_endpoint_enabled</code></a></h3>
+<p>Enables an endpoint for fetching the federation whitelist config.</p>
+<p>The request method and path is <code>GET /_synapse/client/config/federation_whitelist</code>, and the
+response format is:</p>
+<pre><code class="language-json">{
+    &quot;whitelist_enabled&quot;: true,  // Whether the federation whitelist is being enforced
+    &quot;whitelist&quot;: [  // Which server names are allowed by the whitelist
+        &quot;example.com&quot;
+    ]
+}
+</code></pre>
+<p>If <code>whitelist_enabled</code> is <code>false</code> then the server is permitted to federate with all others.</p>
+<p>The endpoint requires authentication.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">federation_whitelist_endpoint_enabled: true
+</code></pre>
+<hr />
 <h3 id="federation_metrics_domains"><a class="header" href="#federation_metrics_domains"><code>federation_metrics_domains</code></a></h3>
 <p>Report prometheus metrics on the age of PDUs being sent to and received from
 the given domains. This can be used to give an idea of &quot;delay&quot; on inbound
