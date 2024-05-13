@@ -516,27 +516,37 @@ class MultipartFileSender:
         return deferred
 
     def resumeProducing(self) -> None:
+        # write the first field, which will always be a json field
         if not self.json_field_written:
-            self.consumer.write(CRLF + b"--" + self.boundary + b"" + CRLF)
+            self.consumer.write(CRLF + b"--" + self.boundary + CRLF)
+
             content_type = Header(b"Content-Type", b"application/json")
             self.consumer.write(bytes(content_type) + CRLF)
+
             json_field = json.dumps(self.json_field)
             json_bytes = json_field.encode("utf-8")
             self.consumer.write(json_bytes)
-            self.consumer.write(CRLF + b"--" + self.boundary + b"" + CRLF)
+            self.consumer.write(CRLF + b"--" + self.boundary + CRLF)
+
             self.json_field_written = True
+
         chunk: Any = ""
         if self.file:
+            # if we haven't written the content type yet, do so
             if not self.content_type_written:
                 type = self.file_content_type.encode("utf-8")
                 content_type = Header(b"Content-Type", type)
                 self.consumer.write(bytes(content_type) + CRLF)
                 self.content_type_written = True
+
             chunk = self.file.read(self.CHUNK_SIZE)
+
         if not chunk:
+            # we've reached the end of the file
             self.consumer.write(CRLF + b"--" + self.boundary + b"--" + CRLF)
             self.file = None
             self.consumer.unregisterProducer()
+
             if self.deferred:
                 self.deferred.callback(self.lastSent)
                 self.deferred = None
