@@ -355,6 +355,10 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # structuring the recursive part of query to pull out the links without
         # also returning large quantities of redundant data (which can make it a
         # lot slower).
+
+        txn.execute("SET LOCAL jit = off")
+        txn.execute("SET LOCAL enable_seqscan = off")
+
         sql = """
             WITH RECURSIVE links(chain_id) AS (
                 SELECT
