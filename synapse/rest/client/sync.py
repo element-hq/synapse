@@ -682,8 +682,40 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         return 200, response
 
 
+class SlidingSyncRestServlet(RestServlet):
+    """
+    API endpoint for MSC3575 Sliding Sync `/sync`. TODO
+
+    GET parameters::
+        timeout(int): How long to wait for new events in milliseconds.
+        since(batch_token): Batch token when asking for incremental deltas.
+
+    Response JSON::
+        {
+            TODO
+        }
+    """
+
+    PATTERNS = (re.compile("^/_matrix/client/unstable/org.matrix.msc3575/sync$"),)
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+        self.filtering = hs.get_filtering()
+        self.sync_handler = hs.get_sync_handler()
+
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        user = requester.user
+        device_id = requester.device_id
+
+        return 200, {"foo": "bar"}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc3575_enabled:
+        SlidingSyncRestServlet(hs).register(http_server)
         SlidingSyncE2eeRestServlet(hs).register(http_server)
