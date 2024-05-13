@@ -316,11 +316,12 @@ def register_servlets(
             ):
                 continue
 
-            if (
-                servletclass == FederationUnstableMediaDownloadServlet
-                and not hs.config.server.enable_media_repo
-            ):
-                continue
+            if servletclass == FederationUnstableMediaDownloadServlet:
+                if (
+                    not hs.config.server.enable_media_repo
+                    or not hs.config.experimental.msc3916_authenticated_media_enabled
+                ):
+                    continue
 
             servletclass(
                 hs=hs,

@@ -33,6 +33,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 
 
 class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
@@ -54,6 +55,9 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
         )
         self.media_repo = hs.get_media_repository()
 
+    @override_config(
+        {"experimental_features": {"msc3916_authenticated_media_enabled": True}}
+    )
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
