@@ -1,0 +1,1 @@
+Fix bug where disabling room publication prevented public rooms being created on workers.

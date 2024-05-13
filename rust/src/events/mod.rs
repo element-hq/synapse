@@ -20,20 +20,23 @@
 
 //! Classes for representing Events.
 
-use pyo3::{types::PyModule, PyResult, Python};
+use pyo3::{
+    types::{PyAnyMethods, PyModule, PyModuleMethods},
+    Bound, PyResult, Python,
+};
 
 mod internal_metadata;
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "events")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "events")?;
     child_module.add_class::<internal_metadata::EventInternalMetadata>()?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import events` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.events", child_module)?;
 

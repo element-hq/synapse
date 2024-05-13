@@ -17,8 +17,8 @@ use headers::{Header, HeaderMapExt};
 use http::{HeaderName, HeaderValue, Method, Request, Response, StatusCode, Uri};
 use pyo3::{
     exceptions::PyValueError,
-    types::{PyBytes, PySequence, PyTuple},
-    PyAny, PyResult,
+    types::{PyAnyMethods, PyBytes, PyBytesMethods, PySequence, PyTuple},
+    Bound, PyAny, PyResult,
 };
 
 use crate::errors::SynapseError;
@@ -28,10 +28,11 @@ use crate::errors::SynapseError;
 /// # Errors
 ///
 /// Returns an error if calling the `read` on the Python object failed
-fn read_io_body(body: &PyAny, chunk_size: usize) -> PyResult<Bytes> {
+fn read_io_body(body: &Bound<'_, PyAny>, chunk_size: usize) -> PyResult<Bytes> {
     let mut buf = BytesMut::new();
     loop {
-        let bytes: &PyBytes = body.call_method1("read", (chunk_size,))?.downcast()?;
+        let bound = &body.call_method1("read", (chunk_size,))?;
+        let bytes: &Bound<'_, PyBytes> = bound.downcast()?;
         if bytes.as_bytes().is_empty() {
             return Ok(buf.into());
         }
@@ -50,17 +51,19 @@ fn read_io_body(body: &PyAny, chunk_size: usize) -> PyResult<Bytes> {
 /// # Errors
 ///
 /// Returns an error if the Python object doesn't properly implement `IRequest`
-pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
+pub fn http_request_from_twisted(request: &Bound<'_, PyAny>) -> PyResult<Request<Bytes>> {
     let content = request.getattr("content")?;
-    let body = read_io_body(content, 4096)?;
+    let body = read_io_body(&content, 4096)?;
 
     let mut req = Request::new(body);
 
-    let uri: &PyBytes = request.getattr("uri")?.downcast()?;
+    let bound = &request.getattr("uri")?;
+    let uri: &Bound<'_, PyBytes> = bound.downcast()?;
     *req.uri_mut() =
         Uri::try_from(uri.as_bytes()).map_err(|_| PyValueError::new_err("invalid uri"))?;
 
-    let method: &PyBytes = request.getattr("method")?.downcast()?;
+    let bound = &request.getattr("method")?;
+    let method: &Bound<'_, PyBytes> = bound.downcast()?;
     *req.method_mut() = Method::from_bytes(method.as_bytes())
         .map_err(|_| PyValueError::new_err("invalid method"))?;
 
@@ -71,14 +74,17 @@ pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
 
     for header in headers_iter {
         let header = header?;
-        let header: &PyTuple = header.downcast()?;
-        let name: &PyBytes = header.get_item(0)?.downcast()?;
+        let header: &Bound<'_, PyTuple> = header.downcast()?;
+        let bound = &header.get_item(0)?;
+        let name: &Bound<'_, PyBytes> = bound.downcast()?;
         let name = HeaderName::from_bytes(name.as_bytes())
             .map_err(|_| PyValueError::new_err("invalid header name"))?;
 
-        let values: &PySequence = header.get_item(1)?.downcast()?;
+        let bound = &header.get_item(1)?;
+        let values: &Bound<'_, PySequence> = bound.downcast()?;
         for index in 0..values.len()? {
-            let value: &PyBytes = values.get_item(index)?.downcast()?;
+            let bound = &values.get_item(index)?;
+            let value: &Bound<'_, PyBytes> = bound.downcast()?;
             let value = HeaderValue::from_bytes(value.as_bytes())
                 .map_err(|_| PyValueError::new_err("invalid header value"))?;
             req.headers_mut().append(name.clone(), value);
@@ -100,7 +106,10 @@ pub fn http_request_from_twisted(request: &PyAny) -> PyResult<Request<Bytes>> {
 ///  # Errors
 ///
 /// Returns an error if the Python object doesn't properly implement `IRequest`
-pub fn http_response_to_twisted<B>(request: &PyAny, response: Response<B>) -> PyResult<()>
+pub fn http_response_to_twisted<B>(
+    request: &Bound<'_, PyAny>,
+    response: Response<B>,
+) -> PyResult<()>
 where
     B: Buf,
 {

@@ -676,8 +676,8 @@ This setting has the following sub-options:
     trailing 's'.
 * `app_name`: `app_name` defines the default value for '%(app)s' in `notif_from` and email
    subjects. It defaults to 'Matrix'.
-* `enable_notifs`: Set to true to enable sending emails for messages that the user
-   has missed. Disabled by default.
+* `enable_notifs`: Set to true to allow users to receive e-mail notifications. If this is not set,
+    users can configure e-mail notifications but will not receive them. Disabled by default.
 * `notif_for_new_users`: Set to false to disable automatic subscription to email
    notifications for new users. Enabled by default.
 * `notif_delay_before_mail`: The time to wait before emailing about a notification.
@@ -1342,6 +1342,12 @@ Options related to caching.
 The number of events to cache in memory. Defaults to 10K. Like other caches,
 this is affected by `caches.global_factor` (see below).
 
+For example, the default is 10K and the global_factor default is 0.5.
+
+Since 10K * 0.5 is 5K then the event cache size will be 5K.
+
+The cache affected by this configuration is named as "*getEvent*".
+
 Note that this option is not part of the `caches` section.
 
 Example configuration:
@@ -1366,6 +1372,8 @@ number of entries that can be stored.
   setting through the config file.
 
   Defaults to 0.5, which will halve the size of all caches.
+
+  Note that changing this value also affects the HTTP connection pool.
 
 * `per_cache_factors`: A dictionary of cache name to cache factor for that individual
    cache. Overrides the global cache factor for a given cache.
@@ -2607,6 +2615,11 @@ Possible values for this option are:
 * "private_chat": an invitation is required to join these rooms.
 * "trusted_private_chat": an invitation is required to join this room and the invitee is
   assigned a power level of 100 upon joining the room.
+
+Each preset will set up a room in the same manner as if it were provided as the `preset` parameter when
+calling the
+[`POST /_matrix/client/v3/createRoom`](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom)
+Client-Server API endpoint.
 
 If a value of "private_chat" or "trusted_private_chat" is used then
 `auto_join_mxid_localpart` must also be configured.

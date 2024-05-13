@@ -432,3 +432,7 @@ class ExperimentalConfig(Config):
                 "You cannot have MSC4108 both enabled and delegated at the same time",
                 ("experimental", "msc4108_delegation_endpoint"),
             )
+
+        self.msc4115_membership_on_events = experimental.get(
+            "msc4115_membership_on_events", False
+        )
