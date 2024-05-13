@@ -1935,13 +1935,57 @@ class RoomBackgroundUpdateStore(SQLBaseStore):
 
         return len(rooms)
 
-    @abstractmethod
-    def set_room_is_public(self, room_id: str, is_public: bool) -> Awaitable[None]:
-        # this will need to be implemented if a background update is performed with
-        # existing (tombstoned, public) rooms in the database.
-        #
-        # It's overridden by RoomStore for the synapse master.
-        raise NotImplementedError()
+    async def set_room_is_public(self, room_id: str, is_public: bool) -> None:
+        await self.db_pool.simple_update_one(
+            table="rooms",
+            keyvalues={"room_id": room_id},
+            updatevalues={"is_public": is_public},
+            desc="set_room_is_public",
+        )
+
+    async def set_room_is_public_appservice(
+        self, room_id: str, appservice_id: str, network_id: str, is_public: bool
+    ) -> None:
+        """Edit the appservice/network specific public room list.
+
+        Each appservice can have a number of published room lists associated
+        with them, keyed off of an appservice defined `network_id`, which
+        basically represents a single instance of a bridge to a third party
+        network.
+
+        Args:
+            room_id
+            appservice_id
+            network_id
+            is_public: Whether to publish or unpublish the room from the list.
+        """
+
+        if is_public:
+            await self.db_pool.simple_upsert(
+                table="appservice_room_list",
+                keyvalues={
+                    "appservice_id": appservice_id,
+                    "network_id": network_id,
+                    "room_id": room_id,
+                },
+                values={},
+                insertion_values={
+                    "appservice_id": appservice_id,
+                    "network_id": network_id,
+                    "room_id": room_id,
+                },
+                desc="set_room_is_public_appservice_true",
+            )
+        else:
+            await self.db_pool.simple_delete(
+                table="appservice_room_list",
+                keyvalues={
+                    "appservice_id": appservice_id,
+                    "network_id": network_id,
+                    "room_id": room_id,
+                },
+                desc="set_room_is_public_appservice_false",
+            )
 
     async def has_auth_chain_index(self, room_id: str) -> bool:
         """Check if the room has (or can have) a chain cover index.
@@ -2348,62 +2392,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "has_auth_chain_index": has_auth_chain_index,
             },
         )
-
-    async def set_room_is_public(self, room_id: str, is_public: bool) -> None:
-        await self.db_pool.simple_update_one(
-            table="rooms",
-            keyvalues={"room_id": room_id},
-            updatevalues={"is_public": is_public},
-            desc="set_room_is_public",
-        )
-
-        self.hs.get_notifier().on_new_replication_data()
-
-    async def set_room_is_public_appservice(
-        self, room_id: str, appservice_id: str, network_id: str, is_public: bool
-    ) -> None:
-        """Edit the appservice/network specific public room list.
-
-        Each appservice can have a number of published room lists associated
-        with them, keyed off of an appservice defined `network_id`, which
-        basically represents a single instance of a bridge to a third party
-        network.
-
-        Args:
-            room_id
-            appservice_id
-            network_id
-            is_public: Whether to publish or unpublish the room from the list.
-        """
-
-        if is_public:
-            await self.db_pool.simple_upsert(
-                table="appservice_room_list",
-                keyvalues={
-                    "appservice_id": appservice_id,
-                    "network_id": network_id,
-                    "room_id": room_id,
-                },
-                values={},
-                insertion_values={
-                    "appservice_id": appservice_id,
-                    "network_id": network_id,
-                    "room_id": room_id,
-                },
-                desc="set_room_is_public_appservice_true",
-            )
-        else:
-            await self.db_pool.simple_delete(
-                table="appservice_room_list",
-                keyvalues={
-                    "appservice_id": appservice_id,
-                    "network_id": network_id,
-                    "room_id": room_id,
-                },
-                desc="set_room_is_public_appservice_false",
-            )
-
-        self.hs.get_notifier().on_new_replication_data()
 
     async def add_event_report(
         self,
