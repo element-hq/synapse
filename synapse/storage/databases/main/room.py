@@ -51,7 +51,7 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.config.homeserver import HomeServerConfig
 from synapse.events import EventBase
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedRoomStream
-from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
+from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
@@ -1752,7 +1752,7 @@ _REPLACE_ROOM_DEPTH_SQL_COMMANDS = (
 )
 
 
-class RoomBackgroundUpdateStore(SQLBaseStore):
+class RoomBackgroundUpdateStore(RoomWorkerStore):
     def __init__(
         self,
         database: DatabasePool,
