@@ -29,8 +29,7 @@ class FederationWhitelistResource(DirectServeJsonResource):
     """Custom endpoint (disabled by default) to fetch the federation whitelist
     config.
 
-    Only enabled if `federation_whitelist_endpoint` extension feature is
-    enabled.
+    Only enabled if `federation_whitelist_endpoint_enabled` feature is enabled.
 
     Response format:
 
