@@ -38,9 +38,10 @@ use anyhow::Context;
 use log::warn;
 use pyo3::{
     exceptions::PyAttributeError,
+    pybacked::PyBackedStr,
     pyclass, pymethods,
-    types::{PyDict, PyString},
-    IntoPy, PyAny, PyObject, PyResult, Python,
+    types::{PyAnyMethods, PyDict, PyDictMethods, PyString},
+    Bound, IntoPy, PyAny, PyObject, PyResult, Python,
 };
 
 /// Definitions of the various fields of the internal metadata.
@@ -59,7 +60,7 @@ enum EventInternalMetadataData {
 
 impl EventInternalMetadataData {
     /// Convert the field to its name and python object.
-    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a PyString, PyObject) {
+    fn to_python_pair<'a>(&self, py: Python<'a>) -> (&'a Bound<'a, PyString>, PyObject) {
         match self {
             EventInternalMetadataData::OutOfBandMembership(o) => {
                 (pyo3::intern!(py, "out_of_band_membership"), o.into_py(py))
@@ -90,10 +91,13 @@ impl EventInternalMetadataData {
     /// Converts from python key/values to the field.
     ///
     /// Returns `None` if the key is a valid but unrecognized string.
-    fn from_python_pair(key: &PyAny, value: &PyAny) -> PyResult<Option<Self>> {
-        let key_str: &str = key.extract()?;
+    fn from_python_pair(
+        key: &Bound<'_, PyAny>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<Option<Self>> {
+        let key_str: PyBackedStr = key.extract()?;
 
-        let e = match key_str {
+        let e = match &*key_str {
             "out_of_band_membership" => EventInternalMetadataData::OutOfBandMembership(
                 value
                     .extract()
@@ -210,11 +214,11 @@ pub struct EventInternalMetadata {
 #[pymethods]
 impl EventInternalMetadata {
     #[new]
-    fn new(dict: &PyDict) -> PyResult<Self> {
+    fn new(dict: &Bound<'_, PyDict>) -> PyResult<Self> {
         let mut data = Vec::with_capacity(dict.len());
 
         for (key, value) in dict.iter() {
-            match EventInternalMetadataData::from_python_pair(key, value) {
+            match EventInternalMetadataData::from_python_pair(&key, &value) {
                 Ok(Some(entry)) => data.push(entry),
                 Ok(None) => {}
                 Err(err) => {
@@ -240,7 +244,7 @@ impl EventInternalMetadata {
     ///
     /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
     fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new(py);
+        let dict = PyDict::new_bound(py);
 
         for entry in &self.data {
             let (key, value) = entry.to_python_pair(py);
