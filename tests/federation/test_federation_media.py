@@ -139,7 +139,6 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
 
-
     @override_config(
         {"experimental_features": {"msc3916_authenticated_media_enabled": False}}
     )
