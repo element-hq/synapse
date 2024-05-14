@@ -76,10 +76,12 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
         )
         self.pump()
         self.assertEqual(200, channel.code)
+
         content_type = channel.headers.getRawHeaders("content-type")
         assert content_type is not None
         assert "multipart/form-data" in content_type[0]
         assert "boundary" in content_type[0]
+
         # extract boundary
         boundary = content_type[0].split("boundary=")[1]
         # split on boundary and check that json field and expected value exist
@@ -90,6 +92,7 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
             "\r\nContent-Type: application/json\r\n{}" in field for field in stripped
         )
         self.assertTrue(found_json)
+
         # check that text file and expected value exist
         found_file = any(
             "\r\nContent-Type: text/plain\r\nfile_to_stream" in field
@@ -114,10 +117,12 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
         )
         self.pump()
         self.assertEqual(200, channel.code)
+
         content_type = channel.headers.getRawHeaders("content-type")
         assert content_type is not None
         assert "multipart/form-data" in content_type[0]
         assert "boundary" in content_type[0]
+
         # extract boundary
         boundary = content_type[0].split("boundary=")[1]
         # split on boundary and check that json field and expected value exist
@@ -129,6 +134,30 @@ class FederationUnstableMediaDownloads(unittest.FederatingHomeserverTestCase):
             for field in stripped_bytes
         )
         self.assertTrue(found_json)
+
         # check that png file exists and matches what was uploaded
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
+
+
+    @override_config(
+        {"experimental_features": {"msc3916_authenticated_media_enabled": False}}
+    )
+    def test_disable_config(self) -> None:
+        content = io.BytesIO(b"file_to_stream")
+        content_uri = self.get_success(
+            self.media_repo.create_content(
+                "text/plain",
+                "test_upload",
+                content,
+                46,
+                UserID.from_string("@user_id:whatever.org"),
+            )
+        )
+        channel = self.make_signed_federation_request(
+            "GET",
+            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{self.hs.hostname}/{content_uri.media_id}",
+        )
+        self.pump()
+        self.assertEqual(404, channel.code)
+        self.assertEqual(channel.json_body.get("errcode"), "M_UNRECOGNIZED")

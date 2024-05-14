@@ -511,7 +511,8 @@ class MultipartFileSender:
         self.boundary = boundary
         self.deferred: Deferred = defer.Deferred()
         self.consumer.registerProducer(self, False)
-
+        # while it's not entirely clear why this assignment is necessary, it mirrors
+        # the behavior in FileSender.beginFileTransfer and thus is preserved here
         deferred = self.deferred
         return deferred
 
