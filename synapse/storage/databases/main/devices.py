@@ -70,10 +70,7 @@ from synapse.types import (
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.lrucache import LruCache
-from synapse.util.caches.stream_change_cache import (
-    AllEntitiesChangedResult,
-    StreamChangeCache,
-)
+from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import shortstr
@@ -834,16 +831,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
         return {device[0]: db_to_json(device[1]) for device in devices}
 
-    def get_cached_device_list_changes(
-        self,
-        from_key: int,
-    ) -> AllEntitiesChangedResult:
-        """Get set of users whose devices have changed since `from_key`, or None
-        if that information is not in our cache.
-        """
-
-        return self._device_list_stream_cache.get_all_entities_changed(from_key)
-
     @cancellable
     async def get_all_devices_changed(
         self,
@@ -1477,7 +1464,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         sql = """
             SELECT DISTINCT user_id FROM device_lists_changes_in_room
-            WHERE {clause} AND stream_id >= ?
+            WHERE {clause} AND stream_id > ?
         """
 
         def _get_device_list_changes_in_rooms_txn(
