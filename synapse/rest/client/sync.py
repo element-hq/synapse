@@ -32,7 +32,6 @@ if TYPE_CHECKING or HAS_PYDANTIC_V2:
         StrictBool,
         StrictInt,
         StrictStr,
-        StringConstraints,
         constr,
         validator,
     )
@@ -41,7 +40,6 @@ else:
         StrictBool,
         StrictInt,
         StrictStr,
-        StringConstraints,
         constr,
         validator,
     )
@@ -831,7 +829,7 @@ class SlidingSyncBody(RequestBodyModel):
         lists: Optional[List[StrictStr]]
         rooms: Optional[List[StrictStr]]
 
-    lists: Dict[Annotated[StrictStr, StringConstraints(max_length=64)], SlidingSyncList]
+    lists: Dict[constr(max_length=64, strict=True), SlidingSyncList]
     room_subscriptions: Dict[StrictStr, RoomSubscription]
     extensions: Dict[StrictStr, Extension]
 
@@ -864,7 +862,8 @@ class SlidingSyncRestServlet(RestServlet):
         self.filtering = hs.get_filtering()
         self.sync_handler = hs.get_sync_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+    # TODO: Update this to `on_GET` once we figure out how we want to handle params
+    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user = requester.user
         device_id = requester.device_id
@@ -874,6 +873,8 @@ class SlidingSyncRestServlet(RestServlet):
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
+
+        logger.info("Sliding sync request: %r", body)
 
         return 200, {"foo": "bar"}
 
