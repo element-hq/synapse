@@ -383,7 +383,7 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # the chain IDs in reverse order, as there will be a correlation between
         # the order of chain IDs and links (i.e., higher chain IDs are more
         # likely to depend on lower chain IDs than vice versa).
-        BATCH_SIZE = 1000
+        BATCH_SIZE = 5000
         chains_to_fetch_sorted = SortedSet(chains_to_fetch)
 
         logger.info("CHAINS: Fetching chain links %d", len(chains_to_fetch_sorted))
