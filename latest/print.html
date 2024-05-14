@@ -408,9 +408,9 @@ or not to report usage statistics (hostname, Synapse version, uptime, total
 users, etc.) to the developers via the <code>--report-stats</code> argument.</p>
 <p>This command will generate you a config file that you can then customise, but it will
 also generate a set of keys for you. These keys will allow your homeserver to
-identify itself to other homeserver, so don't lose or delete them. It would be
+identify itself to other homeservers, so don't lose or delete them. It would be
 wise to back them up somewhere safe. (If, for whatever reason, you do need to
-change your homeserver's keys, you may find that other homeserver have the
+change your homeserver's keys, you may find that other homeservers have the
 old key cached. If you update the signing key, you should change the name of the
 key in the <code>&lt;server name&gt;.signing.key</code> file (the second word) to something
 different. See the <a href="https://matrix.org/docs/spec/server_server/latest.html#retrieving-server-keys">spec</a> for more information on key management).</p>
@@ -780,7 +780,7 @@ can read more about that <a href="https://www.postgresql.org/docs/10/kernel-reso
 <h2 id="porting-from-sqlite"><a class="header" href="#porting-from-sqlite">Porting from SQLite</a></h2>
 <h3 id="overview"><a class="header" href="#overview">Overview</a></h3>
 <p>The script <code>synapse_port_db</code> allows porting an existing synapse server
-backed by SQLite to using PostgreSQL. This is done in as a two phase
+backed by SQLite to using PostgreSQL. This is done as a two phase
 process:</p>
 <ol>
 <li>Copy the existing SQLite database to a separate location and run
@@ -1842,7 +1842,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.106.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.107.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1860,13 +1860,18 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
-<h1 id="upgrading-to-v11000"><a class="header" href="#upgrading-to-v11000">Upgrading to v1.100.0</a></h1>
+<h1 id="upgrading-to-v11060"><a class="header" href="#upgrading-to-v11060">Upgrading to v1.106.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
+<p>The minimum supported Rust version has been increased from v1.65.0 to v1.66.0.
+Users building from source will need to ensure their <code>rustc</code> version is up to
+date.</p>
+<h1 id="upgrading-to-v11000"><a class="header" href="#upgrading-to-v11000">Upgrading to v1.100.0</a></h1>
+<h2 id="minimum-supported-rust-version-1"><a class="header" href="#minimum-supported-rust-version-1">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.61.0 to v1.65.0.
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
 <h1 id="upgrading-to-v1930"><a class="header" href="#upgrading-to-v1930">Upgrading to v1.93.0</a></h1>
-<h2 id="minimum-supported-rust-version-1"><a class="header" href="#minimum-supported-rust-version-1">Minimum supported Rust version</a></h2>
+<h2 id="minimum-supported-rust-version-2"><a class="header" href="#minimum-supported-rust-version-2">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.60.0 to v1.61.0.
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
@@ -1906,7 +1911,7 @@ are being removed in this release of Synapse:</p>
 administrators of single-process (monolith) installations don't need to do anything.</p>
 <p>For an illustrative example, please see <a href="upgrade.html#upgrading-to-v1840">Upgrading to v1.84.0</a> below.</p>
 <h1 id="upgrading-to-v1860"><a class="header" href="#upgrading-to-v1860">Upgrading to v1.86.0</a></h1>
-<h2 id="minimum-supported-rust-version-2"><a class="header" href="#minimum-supported-rust-version-2">Minimum supported Rust version</a></h2>
+<h2 id="minimum-supported-rust-version-3"><a class="header" href="#minimum-supported-rust-version-3">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.58.1 to v1.60.0.
 Users building from source will need to ensure their <code>rustc</code> version is up to
 date.</p>
@@ -4368,8 +4373,8 @@ trailing 's'.</p>
 subjects. It defaults to 'Matrix'.</p>
 </li>
 <li>
-<p><code>enable_notifs</code>: Set to true to enable sending emails for messages that the user
-has missed. Disabled by default.</p>
+<p><code>enable_notifs</code>: Set to true to allow users to receive e-mail notifications. If this is not set,
+users can configure e-mail notifications but will not receive them. Disabled by default.</p>
 </li>
 <li>
 <p><code>notif_for_new_users</code>: Set to false to disable automatic subscription to email
@@ -4890,6 +4895,9 @@ for a given destination and the state of the backoff is stored in the database.<
 <h3 id="event_cache_size"><a class="header" href="#event_cache_size"><code>event_cache_size</code></a></h3>
 <p>The number of events to cache in memory. Defaults to 10K. Like other caches,
 this is affected by <code>caches.global_factor</code> (see below).</p>
+<p>For example, the default is 10K and the global_factor default is 0.5.</p>
+<p>Since 10K * 0.5 is 5K then the event cache size will be 5K.</p>
+<p>The cache affected by this configuration is named as &quot;<em>getEvent</em>&quot;.</p>
 <p>Note that this option is not part of the <code>caches</code> section.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">event_cache_size: 15K
@@ -4909,6 +4917,7 @@ set.</p>
 variable. Setting by environment variable takes priority over
 setting through the config file.</p>
 <p>Defaults to 0.5, which will halve the size of all caches.</p>
+<p>Note that changing this value also affects the HTTP connection pool.</p>
 </li>
 <li>
 <p><code>per_cache_factors</code>: A dictionary of cache name to cache factor for that individual
@@ -8931,6 +8940,7 @@ string is returned from this method, Synapse will prompt the user to
 either accept this localpart or pick their own username. Otherwise this
 option has no effect. If omitted, defaults to <code>False</code>.</li>
 <li><code>display_name</code>: An optional string, the display name for the user.</li>
+<li><code>picture</code>: An optional string, the avatar url for the user.</li>
 <li><code>emails</code>: A list of strings, the email address(es) to associate with
 this user. If omitted, defaults to an empty list.</li>
 </ul>
@@ -9767,9 +9777,9 @@ will be used to break the search term into words. (See the
 <li>If unavailable, then runs of ASCII characters, numbers, underscores, and hyphens
 are considered words.</li>
 </ul>
-<p>The queries for PostgreSQL and SQLite are detailed below, by their overall goal
+<p>The queries for PostgreSQL and SQLite are detailed below, but their overall goal
 is to find matching users, preferring users who are &quot;real&quot; (e.g. not bots,
-not deactivated). It is assumed that real users will have an display name and
+not deactivated). It is assumed that real users will have a display name and
 avatar set.</p>
 <h3 id="postgresql"><a class="header" href="#postgresql">PostgreSQL</a></h3>
 <p>The above words are then transformed into two queries:</p>
@@ -9854,8 +9864,8 @@ though it will always hide it from clients.</p>
 delete the last message in a room. It will, however, hide it from
 clients.</p>
 <h2 id="server-configuration"><a class="header" href="#server-configuration">Server configuration</a></h2>
-<p>Support for this feature can be enabled and configured by adding a the
-<code>retention</code> in the Synapse configuration file (see
+<p>Support for this feature can be enabled and configured by adding the
+<code>retention</code> option in the Synapse configuration file (see
 <a href="usage/configuration/config_documentation.html#retention">configuration manual</a>).</p>
 <p>To enable support for message retention policies, set the setting
 <code>enabled</code> in this section to <code>true</code>.</p>
@@ -9905,7 +9915,7 @@ which policy's <code>max_lifetime</code> is lower or equal to 3 days.</li>
 policy's <code>max_lifetime</code> is greater than a week.</li>
 </ul>
 <p>Note that this example is tailored to show different configurations and
-features slightly more jobs than it's probably necessary (in practice, a
+features slightly more jobs than is probably necessary (in practice, a
 server admin would probably consider it better to replace the two last
 jobs with one that runs once a day and handles rooms which
 policy's <code>max_lifetime</code> is greater than 3 days).</p>
@@ -11494,7 +11504,7 @@ information.</p>
 ^/_matrix/client/v1/rooms/.*/hierarchy$
 ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
 ^/_matrix/client/v1/rooms/.*/threads$
-^/_matrix/client/unstable/im.nheko.summary/rooms/.*/summary$
+^/_matrix/client/unstable/im.nheko.summary/summary/.*$
 ^/_matrix/client/(r0|v3|unstable)/account/3pid$
 ^/_matrix/client/(r0|v3|unstable)/account/whoami$
 ^/_matrix/client/(r0|v3|unstable)/devices$
@@ -11845,7 +11855,7 @@ after setting this option in the shared configuration!</p>
 <p>This style of configuration supersedes the legacy <code>synapse.app.appservice</code>
 worker application type.</p>
 <h4 id="push-notifications"><a class="header" href="#push-notifications">Push Notifications</a></h4>
-<p>You can designate generic worker to sending push notifications to
+<p>You can designate generic workers to send push notifications to
 a <a href="https://spec.matrix.org/v1.5/push-gateway-api/">push gateway</a> such as
 <a href="https://github.com/matrix-org/sygnal">sygnal</a> and email.</p>
 <p>This will stop the main process sending push notifications.</p>
@@ -12236,7 +12246,7 @@ run against the database.</p>
 <code>total_duration_ms</code> how long the background process has been running, not including time spent sleeping.
 <code>average_items_per_ms</code> how many items are processed per millisecond based on an exponential average.</p>
 <h2 id="enabled"><a class="header" href="#enabled">Enabled</a></h2>
-<p>This API allow pausing background updates.</p>
+<p>This API allows pausing background updates.</p>
 <p>Background updates should <em>not</em> be paused for significant periods of time, as
 this can affect the performance of Synapse.</p>
 <p><em>Note</em>: This won't persist over restarts.</p>
@@ -13063,7 +13073,7 @@ the <a href="https://matrix.org/docs/spec/client_server/r0.6.1#api-standards">Ma
 }
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="edit-room-membership-api"><a class="header" href="#edit-room-membership-api">Edit Room Membership API</a></h1>
-<p>This API allows an administrator to join an user account with a given <code>user_id</code>
+<p>This API allows an administrator to join a user account with a given <code>user_id</code>
 to a room with a given <code>room_id_or_alias</code>. You can only modify the membership of
 local users. The server administrator must be in the room and have permission to
 invite users.</p>
@@ -16476,7 +16486,7 @@ variable. The default is 0.5, which can be decreased to reduce RAM usage
 in memory constrained environments, or increased if performance starts to
 degrade.</p>
 <p>However, degraded performance due to a low cache factor, common on
-machines with slow disks, often leads to explosions in memory use due
+machines with slow disks, often leads to explosions in memory use due to
 backlogged requests. In this case, reducing the cache factor will make
 things worse. Instead, try increasing it drastically. 2.0 is a good
 starting value.</p>

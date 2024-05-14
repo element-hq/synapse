@@ -753,8 +753,8 @@ trailing 's'.</p>
 subjects. It defaults to 'Matrix'.</p>
 </li>
 <li>
-<p><code>enable_notifs</code>: Set to true to enable sending emails for messages that the user
-has missed. Disabled by default.</p>
+<p><code>enable_notifs</code>: Set to true to allow users to receive e-mail notifications. If this is not set,
+users can configure e-mail notifications but will not receive them. Disabled by default.</p>
 </li>
 <li>
 <p><code>notif_for_new_users</code>: Set to false to disable automatic subscription to email
@@ -1275,6 +1275,9 @@ for a given destination and the state of the backoff is stored in the database.<
 <h3 id="event_cache_size"><a class="header" href="#event_cache_size"><code>event_cache_size</code></a></h3>
 <p>The number of events to cache in memory. Defaults to 10K. Like other caches,
 this is affected by <code>caches.global_factor</code> (see below).</p>
+<p>For example, the default is 10K and the global_factor default is 0.5.</p>
+<p>Since 10K * 0.5 is 5K then the event cache size will be 5K.</p>
+<p>The cache affected by this configuration is named as &quot;<em>getEvent</em>&quot;.</p>
 <p>Note that this option is not part of the <code>caches</code> section.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">event_cache_size: 15K
@@ -1294,6 +1297,7 @@ set.</p>
 variable. Setting by environment variable takes priority over
 setting through the config file.</p>
 <p>Defaults to 0.5, which will halve the size of all caches.</p>
+<p>Note that changing this value also affects the HTTP connection pool.</p>
 </li>
 <li>
 <p><code>per_cache_factors</code>: A dictionary of cache name to cache factor for that individual
