@@ -318,7 +318,7 @@ class RoomStateEventRestServlet(RestServlet):
                     event,
                     _,
                 ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                    requester, event_dict, txn_id=txn_id
+                    requester, event_dict, txn_id=txn_id, None, None, False
                 )
                 event_id = event.event_id
         except ShadowBanError:
@@ -370,7 +370,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 event,
                 _,
             ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                requester, event_dict, txn_id=txn_id
+                requester, event_dict, txn_id=txn_id, None, None, False
             )
             event_id = event.event_id
         except ShadowBanError:
@@ -1153,7 +1153,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                     event,
                     _,
                 ) = await self.event_creation_handler.create_and_send_nonmember_event(
-                    requester, event_dict, txn_id=txn_id
+                    requester, event_dict, txn_id=txn_id, None, None, False
                 )
 
                 if with_relations:
