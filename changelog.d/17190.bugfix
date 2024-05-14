@@ -1,0 +1,1 @@
+Remove ratelimit from `/state`, `/redact` and `/send`. Contributed by Krishan (@kfiven).
