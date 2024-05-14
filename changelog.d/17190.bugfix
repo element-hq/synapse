@@ -1,1 +1,1 @@
-Remove ratelimit from `/state`, `/redact` and `/send`. Contributed by Krishan (@kfiven).
+Remove ratelimit from rooms `/state`, `/redact` and `/send`. Contributed by Krishan (@kfiven).
