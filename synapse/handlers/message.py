@@ -587,8 +587,6 @@ class EventCreationHandler:
         Creates an FrozenEvent object, filling out auth_events, prev_events,
         etc.
 
-        Adds display names to Join membership events.
-
         Args:
             requester
             event_dict: An entire event
