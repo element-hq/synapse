@@ -1891,6 +1891,7 @@ class SyncHandler:
                 user_id,
                 sync_result_builder.joined_room_ids,
                 from_token=since_token,
+                now_token=sync_result_builder.now_token,
             )
         )
 
