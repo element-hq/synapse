@@ -185,6 +185,7 @@ class SlidingSyncHandler:
         pass
 
     async def current_sync_for_user(
+        self,
         sync_config: SlidingSyncConfig,
         from_token: Optional[StreamToken] = None,
         to_token: Optional[StreamToken] = None,

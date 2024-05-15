@@ -739,7 +739,9 @@ class SlidingSyncRestServlet(RestServlet):
         sync_config = SlidingSyncConfig(
             user=user,
             device_id=device_id,
-            # TODO: Copy SlidingSyncBody fields into SlidingSyncConfig
+            lists=body.lists,
+            room_subscriptions=body.room_subscriptions,
+            extensions=body.extensions,
         )
 
         sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
