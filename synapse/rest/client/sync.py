@@ -829,9 +829,9 @@ class SlidingSyncBody(RequestBodyModel):
         lists: Optional[List[StrictStr]]
         rooms: Optional[List[StrictStr]]
 
-    lists: Dict[constr(max_length=64, strict=True), SlidingSyncList]
-    room_subscriptions: Dict[StrictStr, RoomSubscription]
-    extensions: Dict[StrictStr, Extension]
+    lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]]
+    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]]
+    extensions: Optional[Dict[StrictStr, Extension]]
 
     @validator("lists")
     def lists_length_check(cls, v):
