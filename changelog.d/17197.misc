@@ -1,0 +1,1 @@
+Fix bug where we sent down redundant device list changes down `/sync`.
