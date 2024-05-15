@@ -25,35 +25,18 @@ from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Annotated
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import (
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        constr,
-        validator,
-    )
-else:
-    from pydantic import (
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        constr,
-        validator,
-    )
-
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
+from synapse.rest.client.models import SlidingSyncBody
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
@@ -709,164 +692,13 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         return 200, response
 
 
-class SlidingSyncBody(RequestBodyModel):
-    """
-    Attributes:
-        lists: Sliding window API. A map of list key to list information
-            (:class:`SlidingSyncList`). Max lists: 100. The list keys should be
-            arbitrary strings which the client is using to refer to the list. Keep this
-            small as it needs to be sent a lot. Max length: 64 bytes.
-        room_subscriptions: Room subscription API. A map of room ID to room subscription
-            information. Used to subscribe to a specific room. Sometimes clients know
-            exactly which room they want to get information about e.g by following a
-            permalink or by refreshing a webapp currently viewing a specific room. The
-            sliding window API alone is insufficient for this use case because there's
-            no way to say "please track this room explicitly".
-        extensions: TODO
-    """
-
-    class CommonRoomParameters(RequestBodyModel):
-        """
-        Common parameters shared between the sliding window and room subscription APIs.
-
-        Attributes:
-            required_state: Required state for each room returned. An array of event
-                type and state key tuples. Elements in this array are ORd together to
-                produce the final set of state events to return. One unique exception is
-                when you request all state events via `["*", "*"]`. When used, all state
-                events are returned by default, and additional entries FILTER OUT the
-                returned set of state events. These additional entries cannot use `*`
-                themselves. For example, `["*", "*"], ["m.room.member",
-                "@alice:example.com"]` will *exclude* every `m.room.member` event
-                *except* for `@alice:example.com`, and include every other state event.
-                In addition, `["*", "*"], ["m.space.child", "*"]` is an error, the
-                `m.space.child` filter is not required as it would have been returned
-                anyway.
-            timeline_limit: The maximum number of timeline events to return per response.
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
-        """
-
-        class IncludeOldRooms(RequestBodyModel):
-            timeline_limit: StrictInt
-            required_state: List[Tuple[StrictStr, StrictStr]]
-
-        required_state: List[Tuple[StrictStr, StrictStr]]
-        timeline_limit: StrictInt
-        include_old_rooms: Optional[IncludeOldRooms]
-
-    class SlidingSyncList(CommonRoomParameters):
-        """
-        Attributes:
-            ranges: Sliding window ranges. If this field is missing, no sliding window
-                is used and all rooms are returned in this list. Integers are
-                *inclusive*.
-            sort: How the list should be sorted on the server. The first value is
-                applied first, then tiebreaks are performed with each subsequent sort
-                listed.
-
-                    FIXME: Furthermore, it's not currently defined how servers should behave
-                    if they encounter a filter or sort operation they do not recognise. If
-                    the server rejects the request with an HTTP 400 then that will break
-                    backwards compatibility with new clients vs old servers. However, the
-                    client would be otherwise unaware that only some of the sort/filter
-                    operations have taken effect. We may need to include a "warnings"
-                    section to indicate which sort/filter operations are unrecognised,
-                    allowing for some form of graceful degradation of service.
-                    -- https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/sync-v3/proposals/3575-sync.md#filter-and-sort-extensions
-
-            slow_get_all_rooms: Just get all rooms (for clients that don't want to deal with
-                sliding windows). When true, the `ranges` and `sort` fields are ignored.
-            required_state: Required state for each room returned. An array of event
-                type and state key tuples. Elements in this array are ORd together to
-                produce the final set of state events to return.
-
-                One unique exception is when you request all state events via `["*",
-                "*"]`. When used, all state events are returned by default, and
-                additional entries FILTER OUT the returned set of state events. These
-                additional entries cannot use `*` themselves. For example, `["*", "*"],
-                ["m.room.member", "@alice:example.com"]` will *exclude* every
-                `m.room.member` event *except* for `@alice:example.com`, and include
-                every other state event. In addition, `["*", "*"], ["m.space.child",
-                "*"]` is an error, the `m.space.child` filter is not required as it
-                would have been returned anyway.
-
-                Room members can be lazily-loaded by using the special `$LAZY` state key
-                (`["m.room.member", "$LAZY"]`). Typically, when you view a room, you
-                want to retrieve all state events except for m.room.member events which
-                you want to lazily load. To get this behaviour, clients can send the
-                following::
-
-                    {
-                        "required_state": [
-                            // activate lazy loading
-                            ["m.room.member", "$LAZY"],
-                            // request all state events _except_ for m.room.member
-                            events which are lazily loaded
-                            ["*", "*"]
-                        ]
-                    }
-
-            timeline_limit: The maximum number of timeline events to return per response.
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
-            include_heroes: Return a stripped variant of membership events (containing
-                `user_id` and optionally `avatar_url` and `displayname`) for the users used
-                to calculate the room name.
-            filters: Filters to apply to the list before sorting.
-            bump_event_types: Allowlist of event types which should be considered recent activity
-                when sorting `by_recency`. By omitting event types from this field,
-                clients can ensure that uninteresting events (e.g. a profile rename) do
-                not cause a room to jump to the top of its list(s). Empty or omitted
-                `bump_event_types` have no effect—all events in a room will be
-                considered recent activity.
-        """
-
-        class Filters(RequestBodyModel):
-            is_dm: Optional[StrictBool]
-            spaces: Optional[List[StrictStr]]
-            is_encrypted: Optional[StrictBool]
-            is_invite: Optional[StrictBool]
-            room_types: Optional[List[Union[StrictStr, None]]]
-            not_room_types: Optional[List[StrictStr]]
-            room_name_like: Optional[StrictStr]
-            tags: Optional[List[StrictStr]]
-            not_tags: Optional[List[StrictStr]]
-
-        ranges: Optional[List[Tuple[StrictInt, StrictInt]]]
-        sort: Optional[List[StrictStr]]
-        slow_get_all_rooms: Optional[StrictBool] = False
-        include_heroes: Optional[StrictBool] = False
-        filters: Optional[Filters]
-        bump_event_types: Optional[List[StrictStr]]
-
-    class RoomSubscription(CommonRoomParameters):
-        pass
-
-    class Extension(RequestBodyModel):
-        enabled: Optional[StrictBool] = False
-        lists: Optional[List[StrictStr]]
-        rooms: Optional[List[StrictStr]]
-
-    lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]]
-    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]]
-    extensions: Optional[Dict[StrictStr, Extension]]
-
-    @validator("lists")
-    def lists_length_check(cls, v):
-        assert len(v) <= 100, f"Max lists: 100 but saw {len(v)}"
-        return v
-
-
 class SlidingSyncRestServlet(RestServlet):
     """
     API endpoint for MSC3575 Sliding Sync `/sync`. TODO
 
     GET parameters::
-        timeout(int): How long to wait for new events in milliseconds.
-        since(batch_token): Batch token when asking for incremental deltas.
+        timeout: How long to wait for new events in milliseconds.
+        pos: Stream position token when asking for incremental deltas.
 
     Response JSON::
         {
@@ -891,17 +723,31 @@ class SlidingSyncRestServlet(RestServlet):
 
         timeout = parse_integer(request, "timeout", default=0)
         # Position in the stream
-        since_token = parse_string(request, "pos")
+        from_token_string = parse_string(request, "pos")
+
+        from_token = None
+        if from_token_string is not None:
+            from_token = await StreamToken.from_string(self.store, from_token_string)
 
         # TODO: We currently don't know whether we're going to use sticky params or
         # maybe some filters like sync v2  where they are built up once and referenced
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
-
-        sliding_sync_results = await wait_for_sync_for_user()
-
         logger.info("Sliding sync request: %r", body)
+
+        sync_config = SlidingSyncConfig(
+            user=user,
+            device_id=device_id,
+            # TODO: Copy SlidingSyncBody fields into SlidingSyncConfig
+        )
+
+        sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
+            requester,
+            sync_config,
+            from_token,
+            timeout,
+        )
 
         return 200, {"foo": "bar"}
 
