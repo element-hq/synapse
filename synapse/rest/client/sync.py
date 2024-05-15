@@ -776,18 +776,38 @@ class SlidingSyncBody(RequestBodyModel):
                     allowing for some form of graceful degradation of service.
                     -- https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/sync-v3/proposals/3575-sync.md#filter-and-sort-extensions
 
+            slow_get_all_rooms: Just get all rooms (for clients that don't want to deal with
+                sliding windows). When true, the `ranges` and `sort` fields are ignored.
             required_state: Required state for each room returned. An array of event
                 type and state key tuples. Elements in this array are ORd together to
-                produce the final set of state events to return. One unique exception is
-                when you request all state events via `["*", "*"]`. When used, all state
-                events are returned by default, and additional entries FILTER OUT the
-                returned set of state events. These additional entries cannot use `*`
-                themselves. For example, `["*", "*"], ["m.room.member",
-                "@alice:example.com"]` will *exclude* every `m.room.member` event
-                *except* for `@alice:example.com`, and include every other state event.
-                In addition, `["*", "*"], ["m.space.child", "*"]` is an error, the
-                `m.space.child` filter is not required as it would have been returned
-                anyway.
+                produce the final set of state events to return.
+
+                One unique exception is when you request all state events via `["*",
+                "*"]`. When used, all state events are returned by default, and
+                additional entries FILTER OUT the returned set of state events. These
+                additional entries cannot use `*` themselves. For example, `["*", "*"],
+                ["m.room.member", "@alice:example.com"]` will *exclude* every
+                `m.room.member` event *except* for `@alice:example.com`, and include
+                every other state event. In addition, `["*", "*"], ["m.space.child",
+                "*"]` is an error, the `m.space.child` filter is not required as it
+                would have been returned anyway.
+
+                Room members can be lazily-loaded by using the special `$LAZY` state key
+                (`["m.room.member", "$LAZY"]`). Typically, when you view a room, you
+                want to retrieve all state events except for m.room.member events which
+                you want to lazily load. To get this behaviour, clients can send the
+                following::
+
+                    {
+                        "required_state": [
+                            // activate lazy loading
+                            ["m.room.member", "$LAZY"],
+                            // request all state events _except_ for m.room.member
+                            events which are lazily loaded
+                            ["*", "*"]
+                        ]
+                    }
+
             timeline_limit: The maximum number of timeline events to return per response.
             include_old_rooms: Determines if `predecessor` rooms are included in the
                 `rooms` response. The user MUST be joined to old rooms for them to show up
@@ -817,6 +837,7 @@ class SlidingSyncBody(RequestBodyModel):
 
         ranges: Optional[List[Tuple[StrictInt, StrictInt]]]
         sort: Optional[List[StrictStr]]
+        slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
         filters: Optional[Filters]
         bump_event_types: Optional[List[StrictStr]]
