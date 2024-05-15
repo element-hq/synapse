@@ -335,6 +335,17 @@ class SyncHandler:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
+
+        Args:
+            requester: The user requesting the sync response.
+            sync_config: Config/info necessary to process the sync request.
+            sync_version: Determines what kind of sync response to generate.
+            since_token: The point in the stream to sync from.
+            timeout: How long to wait for new data to arrive before giving up.
+            full_state: Whether to return the full state for each room.
+
+        Returns:
+            When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -457,6 +468,7 @@ class SyncHandler:
         This is a wrapper around `generate_sync_result` which starts an open tracing
         span to track the sync. See `generate_sync_result` for the next part of your
         indoctrination.
+
         Args:
             sync_config: Config/info necessary to process the sync request.
             sync_version: Determines what kind of sync response to generate.
