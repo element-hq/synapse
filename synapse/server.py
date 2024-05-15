@@ -111,6 +111,7 @@ from synapse.handlers.send_email import SendEmailHandler
 from synapse.handlers.set_password import SetPasswordHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
+from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sync import SyncHandler
 from synapse.handlers.typing import FollowerTypingHandler, TypingWriterHandler
 from synapse.handlers.user_directory import UserDirectoryHandler
@@ -553,6 +554,9 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_sync_handler(self) -> SyncHandler:
         return SyncHandler(self)
+
+    def get_sliding_sync_handler(self) -> SlidingSyncHandler:
+        return SlidingSyncHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:

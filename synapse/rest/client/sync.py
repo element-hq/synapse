@@ -881,7 +881,7 @@ class SlidingSyncRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
         self.filtering = hs.get_filtering()
-        self.sync_handler = hs.get_sync_handler()
+        self.sliding_sync_handler = hs.get_sliding_sync_handler()
 
     # TODO: Update this to `on_GET` once we figure out how we want to handle params
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -889,11 +889,17 @@ class SlidingSyncRestServlet(RestServlet):
         user = requester.user
         device_id = requester.device_id
 
+        timeout = parse_integer(request, "timeout", default=0)
+        # Position in the stream
+        since_token = parse_string(request, "pos")
+
         # TODO: We currently don't know whether we're going to use sticky params or
         # maybe some filters like sync v2  where they are built up once and referenced
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
+
+        sliding_sync_results = await wait_for_sync_for_user()
 
         logger.info("Sliding sync request: %r", body)
 
