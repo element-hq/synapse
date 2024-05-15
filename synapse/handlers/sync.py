@@ -135,7 +135,6 @@ class SyncConfig:
     user: UserID
     filter_collection: FilterCollection
     is_guest: bool
-    request_key: SyncRequestKey
     device_id: Optional[str]
 
 
@@ -328,6 +327,7 @@ class SyncHandler:
         requester: Requester,
         sync_config: SyncConfig,
         sync_version: SyncVersion,
+        request_key: SyncRequestKey,
         since_token: Optional[StreamToken] = None,
         timeout: int = 0,
         full_state: bool = False,
@@ -340,10 +340,10 @@ class SyncHandler:
             requester: The user requesting the sync response.
             sync_config: Config/info necessary to process the sync request.
             sync_version: Determines what kind of sync response to generate.
+            request_key: The key to use for caching the response.
             since_token: The point in the stream to sync from.
             timeout: How long to wait for new data to arrive before giving up.
             full_state: Whether to return the full state for each room.
-
         Returns:
             When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
         """
@@ -354,7 +354,7 @@ class SyncHandler:
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
         res = await self.response_cache.wrap(
-            sync_config.request_key,
+            request_key,
             self._wait_for_sync_for_user,
             sync_config,
             sync_version,
