@@ -1,0 +1,1 @@
+Prepare sync handler to be able to return different sync responses (`SyncVersion`).
