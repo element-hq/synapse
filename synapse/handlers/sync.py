@@ -1799,7 +1799,7 @@ class SyncHandler:
 
         users_that_have_changed = set()
 
-        joined_rooms = sync_result_builder.joined_room_ids
+        joined_room_ids = sync_result_builder.joined_room_ids
 
         # Step 1a, check for changes in devices of users we share a room
         # with
@@ -1833,7 +1833,7 @@ class SyncHandler:
         # Remove any users that we still share a room with.
         left_users_rooms = await self.store.get_rooms_for_users(newly_left_users)
         for user_id, entries in left_users_rooms.items():
-            if any(rid in joined_rooms for rid in entries):
+            if any(rid in joined_room_ids for rid in entries):
                 newly_left_users.discard(user_id)
 
         return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
