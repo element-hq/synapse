@@ -928,7 +928,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             priv_event_ids.append(event.event_id)
 
         self.assertIn(private_call_event.event_id, priv_event_ids)
-   
+
     def test_push_rules_with_bad_account_data(self) -> None:
         """Some old accounts have managed to set a `m.push_rules` account data,
         which we should ignore in /sync response.
@@ -943,7 +943,10 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         sync_result: SyncResult = self.get_success(
             self.sync_handler.wait_for_sync_for_user(
-                create_requester(user), generate_sync_config(user)
+                create_requester(user),
+                generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
             )
         )
 
@@ -955,6 +958,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 return
 
         self.fail("No push rules found")
+
 
 def generate_sync_config(
     user_id: str,
