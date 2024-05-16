@@ -26,8 +26,10 @@ use headers::{
 use http::{header::ETAG, HeaderMap, Response, StatusCode, Uri};
 use mime::Mime;
 use pyo3::{
-    exceptions::PyValueError, pyclass, pymethods, types::PyModule, Py, PyAny, PyObject, PyResult,
-    Python, ToPyObject,
+    exceptions::PyValueError,
+    pyclass, pymethods,
+    types::{PyAnyMethods, PyModule, PyModuleMethods},
+    Bound, Py, PyAny, PyObject, PyResult, Python, ToPyObject,
 };
 use ulid::Ulid;
 
@@ -109,7 +111,7 @@ impl RendezvousHandler {
     #[pyo3(signature = (homeserver, /, capacity=100, max_content_length=4*1024, eviction_interval=60*1000, ttl=60*1000))]
     fn new(
         py: Python<'_>,
-        homeserver: &PyAny,
+        homeserver: &Bound<'_, PyAny>,
         capacity: usize,
         max_content_length: u64,
         eviction_interval: u64,
@@ -150,7 +152,7 @@ impl RendezvousHandler {
     }
 
     fn _evict(&mut self, py: Python<'_>) -> PyResult<()> {
-        let clock = self.clock.as_ref(py);
+        let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
         self.evict(now);
@@ -158,12 +160,12 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_post(&mut self, py: Python<'_>, twisted_request: &PyAny) -> PyResult<()> {
+    fn handle_post(&mut self, py: Python<'_>, twisted_request: &Bound<'_, PyAny>) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = self.check_input_headers(request.headers())?;
 
-        let clock = self.clock.as_ref(py);
+        let clock = self.clock.bind(py);
         let now: u64 = clock.call_method0("time_msec")?.extract()?;
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now);
 
@@ -197,7 +199,12 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_get(&mut self, py: Python<'_>, twisted_request: &PyAny, id: &str) -> PyResult<()> {
+    fn handle_get(
+        &mut self,
+        py: Python<'_>,
+        twisted_request: &Bound<'_, PyAny>,
+        id: &str,
+    ) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let if_none_match: Option<IfNoneMatch> = request.headers().typed_get_optional()?;
@@ -233,7 +240,12 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_put(&mut self, py: Python<'_>, twisted_request: &PyAny, id: &str) -> PyResult<()> {
+    fn handle_put(
+        &mut self,
+        py: Python<'_>,
+        twisted_request: &Bound<'_, PyAny>,
+        id: &str,
+    ) -> PyResult<()> {
         let request = http_request_from_twisted(twisted_request)?;
 
         let content_type = self.check_input_headers(request.headers())?;
@@ -281,7 +293,7 @@ impl RendezvousHandler {
         Ok(())
     }
 
-    fn handle_delete(&mut self, twisted_request: &PyAny, id: &str) -> PyResult<()> {
+    fn handle_delete(&mut self, twisted_request: &Bound<'_, PyAny>, id: &str) -> PyResult<()> {
         let _request = http_request_from_twisted(twisted_request)?;
 
         let id: Ulid = id.parse().map_err(|_| NotFoundError::new())?;
@@ -298,16 +310,16 @@ impl RendezvousHandler {
     }
 }
 
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "rendezvous")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "rendezvous")?;
 
     child_module.add_class::<RendezvousHandler>()?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import rendezvous` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.rendezvous", child_module)?;
 

@@ -66,7 +66,7 @@ use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyList, PyLong, PyString};
-use pythonize::{depythonize, pythonize};
+use pythonize::{depythonize_bound, pythonize};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -78,19 +78,19 @@ pub mod evaluator;
 pub mod utils;
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "push")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "push")?;
     child_module.add_class::<PushRule>()?;
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
     child_module.add_class::<PushRuleEvaluator>()?;
     child_module.add_function(wrap_pyfunction!(get_base_rule_ids, m)?)?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import push` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.push", child_module)?;
 
@@ -271,12 +271,12 @@ pub enum SimpleJsonValue {
 
 impl<'source> FromPyObject<'source> for SimpleJsonValue {
     fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        if let Ok(s) = <PyString as pyo3::PyTryFrom>::try_from(ob) {
+        if let Ok(s) = ob.downcast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
-        } else if let Ok(b) = <PyBool as pyo3::PyTryFrom>::try_from(ob) {
+        } else if let Ok(b) = ob.downcast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = <PyLong as pyo3::PyTryFrom>::try_from(ob) {
+        } else if let Ok(i) = ob.downcast::<PyLong>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
@@ -299,7 +299,7 @@ pub enum JsonValue {
 
 impl<'source> FromPyObject<'source> for JsonValue {
     fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        if let Ok(l) = <PyList as pyo3::PyTryFrom>::try_from(ob) {
+        if let Ok(l) = ob.downcast::<PyList>() {
             match l.iter().map(SimpleJsonValue::extract).collect() {
                 Ok(a) => Ok(JsonValue::Array(a)),
                 Err(e) => Err(PyTypeError::new_err(format!(
@@ -370,8 +370,8 @@ impl IntoPy<PyObject> for Condition {
 }
 
 impl<'source> FromPyObject<'source> for Condition {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
-        Ok(depythonize(ob)?)
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
+        Ok(depythonize_bound(ob.clone())?)
     }
 }
 

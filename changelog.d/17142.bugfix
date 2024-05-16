@@ -1,0 +1,1 @@
+Fix bug where push rules would be empty in `/sync` for some accounts. Introduced in v1.93.0.

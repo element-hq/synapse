@@ -180,7 +180,11 @@ def _parse_auth_header(header_bytes: bytes) -> Tuple[str, str, str, Optional[str
     """
     try:
         header_str = header_bytes.decode("utf-8")
-        params = re.split(" +", header_str)[1].split(",")
+        space_or_tab = "[ \t]"
+        params = re.split(
+            rf"{space_or_tab}*,{space_or_tab}*",
+            re.split(r"^X-Matrix +", header_str, maxsplit=1)[1],
+        )
         param_dict: Dict[str, str] = {
             k.lower(): v for k, v in [param.split("=", maxsplit=1) for param in params]
         }

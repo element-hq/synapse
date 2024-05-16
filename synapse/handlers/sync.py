@@ -1921,17 +1921,17 @@ class SyncHandler:
         """
         user_id = sync_config.user.to_string()
 
+        # Note: we get the users room list *before* we get the current token, this
+        # avoids checking back in history if rooms are joined after the token is fetched.
+        token_before_rooms = self.event_sources.get_current_token()
+        mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
+
         # NB: The `now_token` gets changed by some of the `generate_sync_*` methods,
         # this is due to some of the underlying streams not supporting the ability
         # to query up to a given point.
         # Always use the `now_token` in `SyncResultBuilder`
         now_token = self.event_sources.get_current_token()
         log_kv({"now_token": now_token})
-
-        # Note: we get the users room list *before* we get the current token, this
-        # avoids checking back in history if rooms are joined after the token is fetched.
-        token_before_rooms = self.event_sources.get_current_token()
-        mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
 
         # Since we fetched the users room list before the token, there's a small window
         # during which membership events may have been persisted, so we fetch these now
@@ -2234,23 +2234,19 @@ class SyncHandler:
             )
 
             if push_rules_changed:
-                global_account_data = {
-                    AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                        sync_config.user
-                    ),
-                    **global_account_data,
-                }
+                global_account_data = dict(global_account_data)
+                global_account_data[AccountDataTypes.PUSH_RULES] = (
+                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
+                )
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
-            global_account_data = {
-                AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                    sync_config.user
-                ),
-                **all_global_account_data,
-            }
+            global_account_data = dict(all_global_account_data)
+            global_account_data[AccountDataTypes.PUSH_RULES] = (
+                await self._push_rules_handler.push_rules_for_user(sync_config.user)
+            )
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(

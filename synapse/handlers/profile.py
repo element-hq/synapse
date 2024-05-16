@@ -20,7 +20,7 @@
 #
 import logging
 import random
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from synapse.api.errors import (
     AuthError,
@@ -64,8 +64,10 @@ class ProfileHandler:
         self.user_directory_handler = hs.get_user_directory_handler()
         self.request_ratelimiter = hs.get_request_ratelimiter()
 
-        self.max_avatar_size = hs.config.server.max_avatar_size
-        self.allowed_avatar_mimetypes = hs.config.server.allowed_avatar_mimetypes
+        self.max_avatar_size: Optional[int] = hs.config.server.max_avatar_size
+        self.allowed_avatar_mimetypes: Optional[List[str]] = (
+            hs.config.server.allowed_avatar_mimetypes
+        )
 
         self._is_mine_server_name = hs.is_mine_server_name
 
@@ -337,6 +339,12 @@ class ProfileHandler:
             return False
 
         if self.max_avatar_size:
+            if media_info.media_length is None:
+                logger.warning(
+                    "Forbidding avatar change to %s: unknown media size",
+                    mxc,
+                )
+                return False
             # Ensure avatar does not exceed max allowed avatar size
             if media_info.media_length > self.max_avatar_size:
                 logger.warning(
