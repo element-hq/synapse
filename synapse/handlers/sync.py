@@ -1875,7 +1875,7 @@ class SyncHandler:
                 # or if the changed user is the syncing user (as we always
                 # want to include device list updates of their own devices).
                 if user_id == changed_user_id or any(
-                    rid in joined_rooms for rid in entries
+                    rid in joined_room_ids for rid in entries
                 ):
                     users_that_have_changed.add(changed_user_id)
         else:
