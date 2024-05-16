@@ -570,7 +570,7 @@ class SyncHandler:
         sync_version: Literal[SyncVersion.E2EE_SYNC],
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
-    ) -> SyncResult: ...
+    ) -> E2eeSyncResult: ...
 
     @overload
     async def current_sync_for_user(
@@ -588,7 +588,9 @@ class SyncHandler:
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
     ) -> Union[SyncResult, E2eeSyncResult]:
-        """Generates the response body of a sync result, represented as a `SyncResult`/`E2eeSyncResult`.
+        """
+        Generates the response body of a sync result, represented as a
+        `SyncResult`/`E2eeSyncResult`.
 
         This is a wrapper around `generate_sync_result` which starts an open tracing
         span to track the sync. See `generate_sync_result` for the next part of your
