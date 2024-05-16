@@ -20,6 +20,7 @@
 #
 import itertools
 import logging
+from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -110,6 +111,23 @@ LAZY_LOADED_MEMBERS_CACHE_MAX_SIZE = 100
 
 
 SyncRequestKey = Tuple[Any, ...]
+
+
+class SyncVersion(Enum):
+    """
+    Enum for specifying the version of sync request. This is used to key which type of
+    sync response that we are generating.
+
+    This is different than the `sync_type` you might see used in other code below; which
+    specifies the sub-type sync request (e.g. initial_sync, full_state_sync,
+    incremental_sync) and is really only relevant for the `/sync` v2 endpoint.
+    """
+
+    # These string values are semantically significant because they are used in the the
+    # metrics
+
+    # Traditional `/sync` endpoint
+    SYNC_V2 = "sync_v2"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -309,6 +327,7 @@ class SyncHandler:
         self,
         requester: Requester,
         sync_config: SyncConfig,
+        sync_version: SyncVersion,
         since_token: Optional[StreamToken] = None,
         timeout: int = 0,
         full_state: bool = False,
@@ -316,6 +335,17 @@ class SyncHandler:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
+
+        Args:
+            requester: The user requesting the sync response.
+            sync_config: Config/info necessary to process the sync request.
+            sync_version: Determines what kind of sync response to generate.
+            since_token: The point in the stream to sync from.
+            timeout: How long to wait for new data to arrive before giving up.
+            full_state: Whether to return the full state for each room.
+
+        Returns:
+            When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -327,6 +357,7 @@ class SyncHandler:
             sync_config.request_key,
             self._wait_for_sync_for_user,
             sync_config,
+            sync_version,
             since_token,
             timeout,
             full_state,
@@ -338,6 +369,7 @@ class SyncHandler:
     async def _wait_for_sync_for_user(
         self,
         sync_config: SyncConfig,
+        sync_version: SyncVersion,
         since_token: Optional[StreamToken],
         timeout: int,
         full_state: bool,
@@ -363,9 +395,11 @@ class SyncHandler:
         else:
             sync_type = "incremental_sync"
 
+        sync_label = f"{sync_version}:{sync_type}"
+
         context = current_context()
         if context:
-            context.tag = sync_type
+            context.tag = sync_label
 
         # if we have a since token, delete any to-device messages before that token
         # (since we now know that the device has received them)
@@ -384,14 +418,16 @@ class SyncHandler:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
             result: SyncResult = await self.current_sync_for_user(
-                sync_config, since_token, full_state=full_state
+                sync_config, sync_version, since_token, full_state=full_state
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
             async def current_sync_callback(
                 before_token: StreamToken, after_token: StreamToken
             ) -> SyncResult:
-                return await self.current_sync_for_user(sync_config, since_token)
+                return await self.current_sync_for_user(
+                    sync_config, sync_version, since_token
+                )
 
             result = await self.notifier.wait_for_events(
                 sync_config.user.to_string(),
@@ -416,13 +452,14 @@ class SyncHandler:
                 lazy_loaded = "true"
             else:
                 lazy_loaded = "false"
-            non_empty_sync_counter.labels(sync_type, lazy_loaded).inc()
+            non_empty_sync_counter.labels(sync_label, lazy_loaded).inc()
 
         return result
 
     async def current_sync_for_user(
         self,
         sync_config: SyncConfig,
+        sync_version: SyncVersion,
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
     ) -> SyncResult:
@@ -431,12 +468,26 @@ class SyncHandler:
         This is a wrapper around `generate_sync_result` which starts an open tracing
         span to track the sync. See `generate_sync_result` for the next part of your
         indoctrination.
+
+        Args:
+            sync_config: Config/info necessary to process the sync request.
+            sync_version: Determines what kind of sync response to generate.
+            since_token: The point in the stream to sync from.p.
+            full_state: Whether to return the full state for each room.
+        Returns:
+            When `SyncVersion.SYNC_V2`, returns a full `SyncResult`.
         """
         with start_active_span("sync.current_sync_for_user"):
             log_kv({"since_token": since_token})
-            sync_result = await self.generate_sync_result(
-                sync_config, since_token, full_state
-            )
+            # Go through the `/sync` v2 path
+            if sync_version == SyncVersion.SYNC_V2:
+                sync_result: SyncResult = await self.generate_sync_result(
+                    sync_config, since_token, full_state
+                )
+            else:
+                raise Exception(
+                    f"Unknown sync_version (this is a Synapse problem): {sync_version}"
+                )
 
             set_tag(SynapseTags.SYNC_RESULT, bool(sync_result))
             return sync_result
@@ -1803,13 +1854,38 @@ class SyncHandler:
 
         # Step 1a, check for changes in devices of users we share a room
         # with
-        users_that_have_changed = (
-            await self._device_handler.get_device_changes_in_shared_rooms(
-                user_id,
-                sync_result_builder.joined_room_ids,
-                from_token=since_token,
-            )
+        #
+        # We do this in two different ways depending on what we have cached.
+        # If we already have a list of all the user that have changed since
+        # the last sync then it's likely more efficient to compare the rooms
+        # they're in with the rooms the syncing user is in.
+        #
+        # If we don't have that info cached then we get all the users that
+        # share a room with our user and check if those users have changed.
+        cache_result = self.store.get_cached_device_list_changes(
+            since_token.device_list_key
         )
+        if cache_result.hit:
+            changed_users = cache_result.entities
+
+            result = await self.store.get_rooms_for_users(changed_users)
+
+            for changed_user_id, entries in result.items():
+                # Check if the changed user shares any rooms with the user,
+                # or if the changed user is the syncing user (as we always
+                # want to include device list updates of their own devices).
+                if user_id == changed_user_id or any(
+                    rid in joined_rooms for rid in entries
+                ):
+                    users_that_have_changed.add(changed_user_id)
+        else:
+            users_that_have_changed = (
+                await self._device_handler.get_device_changes_in_shared_rooms(
+                    user_id,
+                    sync_result_builder.joined_room_ids,
+                    from_token=since_token,
+                )
+            )
 
         # Step 1b, check for newly joined rooms
         for room_id in newly_joined_rooms:
@@ -1920,23 +1996,19 @@ class SyncHandler:
             )
 
             if push_rules_changed:
-                global_account_data = {
-                    AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                        sync_config.user
-                    ),
-                    **global_account_data,
-                }
+                global_account_data = dict(global_account_data)
+                global_account_data[AccountDataTypes.PUSH_RULES] = (
+                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
+                )
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
-            global_account_data = {
-                AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                    sync_config.user
-                ),
-                **all_global_account_data,
-            }
+            global_account_data = dict(all_global_account_data)
+            global_account_data[AccountDataTypes.PUSH_RULES] = (
+                await self._push_rules_handler.push_rules_for_user(sync_config.user)
+            )
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(

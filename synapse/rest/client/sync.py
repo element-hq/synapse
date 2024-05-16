@@ -40,6 +40,7 @@ from synapse.handlers.sync import (
     KnockedSyncResult,
     SyncConfig,
     SyncResult,
+    SyncVersion,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
@@ -232,6 +233,7 @@ class SyncRestServlet(RestServlet):
             sync_result = await self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
+                SyncVersion.SYNC_V2,
                 since_token=since_token,
                 timeout=timeout,
                 full_state=full_state,
