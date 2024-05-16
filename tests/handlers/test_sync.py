@@ -24,7 +24,7 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, JoinRules
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
 from synapse.api.errors import Codes, ResourceLimitError
 from synapse.api.filtering import FilterCollection, Filtering
 from synapse.api.room_versions import RoomVersion, RoomVersions
@@ -928,7 +928,33 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             priv_event_ids.append(event.event_id)
 
         self.assertIn(private_call_event.event_id, priv_event_ids)
+   
+    def test_push_rules_with_bad_account_data(self) -> None:
+        """Some old accounts have managed to set a `m.push_rules` account data,
+        which we should ignore in /sync response.
+        """
 
+        user = self.register_user("alice", "password")
+
+        # Insert the bad account data.
+        self.get_success(
+            self.store.add_account_data_for_user(user, AccountDataTypes.PUSH_RULES, {})
+        )
+
+        sync_result: SyncResult = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(user), generate_sync_config(user)
+            )
+        )
+
+        for account_dict in sync_result.account_data:
+            if account_dict["type"] == AccountDataTypes.PUSH_RULES:
+                # We should have lots of push rules here, rather than the bad
+                # empty data.
+                self.assertNotEqual(account_dict["content"], {})
+                return
+
+        self.fail("No push rules found")
 
 def generate_sync_config(
     user_id: str,
