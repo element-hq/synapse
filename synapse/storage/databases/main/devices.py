@@ -129,6 +129,20 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             prefilled_cache=device_list_prefill,
         )
 
+        device_list_room_prefill, min_device_list_room_id = self.db_pool.get_cache_dict(
+            db_conn,
+            "device_lists_changes_in_room",
+            entity_column="room_id",
+            stream_column="stream_id",
+            max_value=device_list_max,
+            limit=10000,
+        )
+        self._device_list_room_stream_cache = StreamChangeCache(
+            "DeviceListRoomStreamChangeCache",
+            min_device_list_room_id,
+            prefilled_cache=device_list_room_prefill,
+        )
+
         (
             user_signature_stream_prefill,
             user_signature_stream_list_id,
@@ -205,6 +219,13 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 self._device_list_federation_stream_cache.entity_has_changed(
                     row.entity, token
                 )
+
+    def device_lists_in_rooms_have_changed(
+        self, room_ids: StrCollection, token: int
+    ) -> None:
+        "Record that device lists have changed in rooms"
+        for room_id in room_ids:
+            self._device_list_room_stream_cache.entity_has_changed(room_id, token)
 
     def get_device_stream_token(self) -> int:
         return self._device_list_id_gen.get_current_token()
@@ -1460,6 +1481,12 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if min_stream_id > from_id:
             return None
 
+        changed_room_ids = self._device_list_room_stream_cache.get_entities_changed(
+            room_ids, from_id
+        )
+        if not changed_room_ids:
+            return set()
+
         sql = """
             SELECT DISTINCT user_id FROM device_lists_changes_in_room
             WHERE {clause} AND stream_id > ? AND stream_id <= ?
@@ -1474,7 +1501,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             return {user_id for user_id, in txn}
 
         changes = set()
-        for chunk in batch_iter(room_ids, 1000):
+        for chunk in batch_iter(changed_room_ids, 1000):
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", chunk
             )
@@ -1489,6 +1516,34 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
         return changes
+
+    async def get_all_device_list_changes(self, from_id: int, to_id: int) -> Set[str]:
+        """Return the set of rooms where devices have changed since the given
+        stream ID.
+
+        Will raise an exception if the given stream ID is too old.
+        """
+
+        min_stream_id = await self._get_min_device_lists_changes_in_room()
+
+        if min_stream_id > from_id:
+            raise Exception("stream ID is too old")
+
+        sql = """
+            SELECT DISTINCT room_id FROM device_lists_changes_in_room
+            WHERE stream_id > ? AND stream_id <= ?
+        """
+
+        def _get_all_device_list_changes_txn(
+            txn: LoggingTransaction,
+        ) -> Set[str]:
+            txn.execute(sql, (from_id, to_id))
+            return {room_id for room_id, in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_all_device_list_changes",
+            _get_all_device_list_changes_txn,
+        )
 
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
@@ -1950,8 +2005,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
     async def add_device_change_to_streams(
         self,
         user_id: str,
-        device_ids: Collection[str],
-        room_ids: Collection[str],
+        device_ids: StrCollection,
+        room_ids: StrCollection,
     ) -> Optional[int]:
         """Persist that a user's devices have been updated, and which hosts
         (if any) should be poked.
@@ -2110,8 +2165,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         self,
         txn: LoggingTransaction,
         user_id: str,
-        device_ids: Iterable[str],
-        room_ids: Collection[str],
+        device_ids: StrCollection,
+        room_ids: StrCollection,
         stream_ids: List[int],
         context: Dict[str, str],
     ) -> None:
@@ -2147,6 +2202,10 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 for room_id in room_ids
                 for device_id, stream_id in zip(device_ids, stream_ids)
             ],
+        )
+
+        txn.call_after(
+            self.device_lists_in_rooms_have_changed, room_ids, max(stream_ids)
         )
 
     async def get_uncoverted_outbound_room_pokes(
