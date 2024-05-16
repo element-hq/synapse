@@ -1,5 +1,3 @@
-
-
 from tests.rest.client.test_sendtodevice_base import SendToDeviceTestCaseBase
 from tests.unittest import HomeserverTestCase
 
