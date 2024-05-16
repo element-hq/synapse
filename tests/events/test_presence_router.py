@@ -36,7 +36,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamToken, create_requester
 from synapse.util import Clock
 
-from tests.handlers.test_sync import generate_sync_config
+from tests.handlers.test_sync import SyncVersion, generate_sync_config
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -521,7 +521,7 @@ def sync_presence(
     sync_config = generate_sync_config(requester.user.to_string())
     sync_result = testcase.get_success(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
-            requester, sync_config, since_token
+            requester, sync_config, SyncVersion.SYNC_V2, since_token
         )
     )
 
