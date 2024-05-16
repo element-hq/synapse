@@ -691,7 +691,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_version=SyncVersion.SYNC_V2,
                 request_key=generate_request_key(),
                 since_token=initial_sync_result.next_batch,
-            ),
+            )
         )
 
         # The state event should appear in the 'state' section of the response.
@@ -933,6 +933,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         """Some old accounts have managed to set a `m.push_rules` account data,
         which we should ignore in /sync response.
         """
+
         user = self.register_user("alice", "password")
 
         # Insert the bad account data.
