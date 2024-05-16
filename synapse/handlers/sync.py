@@ -289,6 +289,7 @@ class SyncResult:
 class E2eeSyncResult:
     """
     Attributes:
+        next_batch: Token for the next sync
         to_device: List of direct messages for the device.
         device_lists: List of user_ids whose devices have changed
         device_one_time_keys_count: Dict of algorithm to count for one time keys
