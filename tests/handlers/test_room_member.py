@@ -275,6 +275,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
+            by=0.5,
         )
 
         # Try to join as Chris on the original worker. Should get denied because Alice
@@ -287,6 +288,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
+            by=0.5,
         )
 
 
