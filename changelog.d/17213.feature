@@ -1,0 +1,1 @@
+Support MSC3916 by adding unstable media endpoints to `_matrix/client` (#17213).
