@@ -1232,6 +1232,31 @@ federation_domain_whitelist:
   - syd.example.com
 ```
 ---
+### `federation_whitelist_endpoint_enabled`
+
+Enables an endpoint for fetching the federation whitelist config.
+
+The request method and path is `GET /_synapse/client/v1/config/federation_whitelist`, and the
+response format is:
+
+```json
+{
+    "whitelist_enabled": true,  // Whether the federation whitelist is being enforced
+    "whitelist": [  // Which server names are allowed by the whitelist
+        "example.com"
+    ]
+}
+```
+
+If `whitelist_enabled` is `false` then the server is permitted to federate with all others.
+
+The endpoint requires authentication.
+
+Example configuration:
+```yaml
+federation_whitelist_endpoint_enabled: true
+```
+---
 ### `federation_metrics_domains`
 
 Report prometheus metrics on the age of PDUs being sent to and received from
@@ -2591,6 +2616,11 @@ Possible values for this option are:
 * "trusted_private_chat": an invitation is required to join this room and the invitee is
   assigned a power level of 100 upon joining the room.
 
+Each preset will set up a room in the same manner as if it were provided as the `preset` parameter when
+calling the
+[`POST /_matrix/client/v3/createRoom`](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom)
+Client-Server API endpoint.
+
 If a value of "private_chat" or "trusted_private_chat" is used then
 `auto_join_mxid_localpart` must also be configured.
 
@@ -3528,6 +3558,15 @@ Has the following sub-options:
    users. This allows the CAS SSO flow to be limited to sign in only, rather than
    automatically registering users that have a valid SSO login but do not have
    a pre-registered account. Defaults to true.
+* `allow_numeric_ids`: set to 'true' allow numeric user IDs (default false).
+   This allows CAS SSO flow to provide user IDs composed of numbers only.
+   These identifiers will be prefixed by the letter "u" by default.
+   The prefix can be configured using the "numeric_ids_prefix" option.
+   Be careful to choose the prefix correctly to avoid any possible conflicts
+   (e.g. user 1234 becomes u1234 when a user u1234 already exists).
+* `numeric_ids_prefix`: the prefix you wish to add in front of a numeric user ID
+   when the "allow_numeric_ids" option is set to "true".
+   By default, the prefix is the letter "u" and only alphanumeric characters are allowed.
 
    *Added in Synapse 1.93.0.*
 
@@ -3542,6 +3581,8 @@ cas_config:
     userGroup: "staff"
     department: None
   enable_registration: true
+  allow_numeric_ids: true
+  numeric_ids_prefix: "numericuser"
 ```
 ---
 ### `sso`

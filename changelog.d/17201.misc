@@ -1,0 +1,1 @@
+Organize the sync cache key parameter outside of the sync config (separate concerns).

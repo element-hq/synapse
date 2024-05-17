@@ -40,6 +40,7 @@ from synapse.handlers.sync import (
     KnockedSyncResult,
     SyncConfig,
     SyncResult,
+    SyncVersion,
 )
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
@@ -47,6 +48,7 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
 from synapse.types import JsonDict, Requester, StreamToken
 from synapse.util import json_decoder
+from synapse.util.caches.lrucache import LruCache
 
 from ._base import client_patterns, set_timeline_upper_limit
 
@@ -109,6 +111,11 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+
+        self._json_filter_cache: LruCache[str, bool] = LruCache(
+            max_size=1000,
+            cache_name="sync_valid_filter",
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
@@ -177,7 +184,13 @@ class SyncRestServlet(RestServlet):
                 filter_object = json_decoder.decode(filter_id)
             except Exception:
                 raise SynapseError(400, "Invalid filter JSON", errcode=Codes.NOT_JSON)
-            self.filtering.check_valid_filter(filter_object)
+
+            # We cache the validation, as this can get quite expensive if people use
+            # a literal json blob as a query param.
+            if not self._json_filter_cache.get(filter_id):
+                self.filtering.check_valid_filter(filter_object)
+                self._json_filter_cache[filter_id] = True
+
             set_timeline_upper_limit(
                 filter_object, self.hs.config.server.filter_timeline_limit
             )
@@ -197,7 +210,6 @@ class SyncRestServlet(RestServlet):
             user=user,
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
-            request_key=request_key,
             device_id=device_id,
         )
 
@@ -220,6 +232,8 @@ class SyncRestServlet(RestServlet):
             sync_result = await self.sync_handler.wait_for_sync_for_user(
                 requester,
                 sync_config,
+                SyncVersion.SYNC_V2,
+                request_key,
                 since_token=since_token,
                 timeout=timeout,
                 full_state=full_state,
