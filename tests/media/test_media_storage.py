@@ -46,11 +46,11 @@ from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
 from synapse.media.storage_provider import FileStorageProviderBackend
+from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.rest import admin
-from synapse.rest.client import login
-from synapse.rest.media.thumbnail_resource import ThumbnailResource
+from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias
 from synapse.util import Clock
@@ -233,6 +233,7 @@ class _TestImage:
     ],
 )
 class MediaRepoTests(unittest.HomeserverTestCase):
+    servlets = [media.register_servlets]
     test_image: ClassVar[_TestImage]
     hijack_auth = True
     user_id = "@test:user"
@@ -289,6 +290,14 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         config = self.default_config()
         config["media_store_path"] = self.media_store_path
         config["max_image_pixels"] = 2000000
+        config["url_preview_enabled"] = True
+        config["max_spider_size"] = 9999999
+        config["url_preview_ip_range_blacklist"] = (
+            "192.168.1.1",
+            "1.0.0.0/8",
+            "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+            "2001:800::/21",
+        )
 
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
@@ -298,6 +307,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             "config": {"directory": self.storage_path},
         }
         config["media_storage_providers"] = [provider_config]
+        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
 
         hs = self.setup_test_homeserver(config=config, federation_http_client=client)
 
@@ -502,7 +512,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=scale"
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{self.media_id}{params}",
+            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -530,7 +540,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{self.media_id}{params}",
+            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -566,12 +576,11 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=" + method
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
+            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
         self.pump()
-
         headers = {
             b"Content-Length": [b"%d" % (len(self.test_image.data))],
             b"Content-Type": [self.test_image.content_type],
@@ -580,7 +589,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             (self.test_image.data, (len(self.test_image.data), headers))
         )
         self.pump()
-
         if expected_found:
             self.assertEqual(channel.code, 200)
 
@@ -603,7 +611,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/media/r0/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
@@ -613,7 +621,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_NOT_FOUND",
-                    "error": "Not found '/_matrix/media/r0/thumbnail/example.com/12345'",
+                    "error": "Not found '/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/example.com/12345'",
                 },
             )
 
@@ -625,12 +633,15 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
-        thumbnail_resouce = ThumbnailResource(
+        thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
+        # thumbnail_resouce = ThumbnailResource(
+        #     self.hs, media_repo, media_repo.media_storage
+        # )
 
         self.assertIsNotNone(
-            thumbnail_resouce._select_thumbnail(
+            thumbnail_provider._select_thumbnail(
                 desired_width=desired_size,
                 desired_height=desired_size,
                 desired_method=method,
