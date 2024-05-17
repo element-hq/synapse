@@ -195,9 +195,10 @@ class UnstableThumbnailResource(RestServlet):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if hs.config.experimental.msc3916_authenticated_media_enabled:
         media_repo = hs.get_media_repository()
-        UnstablePreviewURLServlet(hs, media_repo, media_repo.media_storage).register(
-            http_server
-        )
+        if hs.config.media.url_preview_enabled:
+            UnstablePreviewURLServlet(
+                hs, media_repo, media_repo.media_storage
+            ).register(http_server)
         UnstableMediaConfigResource(hs).register(http_server)
         UnstableThumbnailResource(hs, media_repo, media_repo.media_storage).register(
             http_server

@@ -66,14 +66,6 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
     ) -> HomeServer:
         config = self.default_config()
-        config["url_preview_enabled"] = True
-        config["max_spider_size"] = 9999999
-        config["url_preview_ip_range_blacklist"] = (
-            "192.168.1.1",
-            "1.0.0.0/8",
-            "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
-            "2001:800::/21",
-        )
 
         self.storage_path = self.mktemp()
         self.media_store_path = self.mktemp()
@@ -168,10 +160,10 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
 
 
 class UnstableURLPreviewTests(unittest.HomeserverTestCase):
-    servlets = [media.register_servlets]
     if not lxml:
         skip = "url preview feature requires lxml"
 
+    servlets = [media.register_servlets]
     hijack_auth = True
     user_id = "@test:user"
     end_content = (
@@ -1581,14 +1573,6 @@ class UnstableMediaConfigTest(unittest.HomeserverTestCase):
     ) -> HomeServer:
         config = self.default_config()
         config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
-        config["url_preview_enabled"] = True
-        config["max_spider_size"] = 9999999
-        config["url_preview_ip_range_blacklist"] = (
-            "192.168.1.1",
-            "1.0.0.0/8",
-            "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
-            "2001:800::/21",
-        )
 
         self.storage_path = self.mktemp()
         self.media_store_path = self.mktemp()

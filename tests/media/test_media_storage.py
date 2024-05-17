@@ -290,14 +290,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         config = self.default_config()
         config["media_store_path"] = self.media_store_path
         config["max_image_pixels"] = 2000000
-        config["url_preview_enabled"] = True
-        config["max_spider_size"] = 9999999
-        config["url_preview_ip_range_blacklist"] = (
-            "192.168.1.1",
-            "1.0.0.0/8",
-            "3fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
-            "2001:800::/21",
-        )
 
         provider_config = {
             "module": "synapse.media.storage_provider.FileStorageProviderBackend",
