@@ -211,7 +211,7 @@ class FederationClient(FederationBase):
             query_type,
             args,
             retry_on_dns_fail=retry_on_dns_fail,
-            ignore_backoff=ignore_backoff,
+            ignore_backoff=False,
         )
 
     async def query_client_keys(
