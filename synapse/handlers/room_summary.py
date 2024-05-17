@@ -185,8 +185,12 @@ class RoomSummaryHandler:
 
         # First of all, check that the room is accessible locally.
         # OR accessible through federation.
-        local_room = await self._store.is_host_joined(room_id, self._server_name)
-        if local_room and not await self._is_local_room_accessible(requested_room_id, requester):
+        local_room = await self._store.is_host_joined(
+            requested_room_id, self._server_name
+        )
+        if local_room and not await self._is_local_room_accessible(
+            requested_room_id, requester
+        ):
             raise UnstableSpecAuthError(
                 403,
                 "User %s not in room %s, and room previews are disabled"
@@ -195,15 +199,14 @@ class RoomSummaryHandler:
             )
 
         if not local_room:
-            (
-                room_entry,
-                children_room_entries,
-                inaccessible_children,
-            ) = await self._summarize_remote_room_hierarchy(
+            room_hierarchy = await self._summarize_remote_room_hierarchy(
                 _RoomQueueEntry(requested_room_id, ()),
                 False,
             )
-            if not room_entry or not await self._is_remote_room_accessible(requester, requested_room_id, room_entry.room):
+            root_room_entry = room_hierarchy[0]
+            if not root_room_entry or not await self._is_remote_room_accessible(
+                requester, requested_room_id, root_room_entry.room
+            ):
                 raise UnstableSpecAuthError(
                     403,
                     "User %s not in room %s, and room previews are disabled"
