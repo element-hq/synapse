@@ -637,13 +637,13 @@ class HomeserverTestCase(TestCase):
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: Type[_ExcType]
+        self, d: Awaitable[Any], exc: Type[_ExcType], by: float = 0.0
     ) -> _TypedFailure[_ExcType]:
         """
         Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump()
+        self.pump(by)
         return self.failureResultOf(deferred, exc)
 
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:
