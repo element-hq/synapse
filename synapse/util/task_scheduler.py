@@ -395,25 +395,25 @@ class TaskScheduler:
         function = self._actions[task.action]
 
         def _occasional_report(
-            task_log_context: LoggingContext, start_time: int
+            task_log_context: LoggingContext, start_time: float
         ) -> None:
             """
             Helper to log a 'Task continuing' line every so often.
             """
 
-            current_time = int(self._clock.time())
+            current_time = self._clock.time()
             calling_context = set_current_context(task_log_context)
             try:
                 usage = task_log_context.get_resource_usage()
                 TaskScheduler._log_task_usage(
-                    "continuing", task, usage, (current_time - start_time) * 0.001
+                    "continuing", task, usage, current_time - start_time
                 )
             finally:
                 set_current_context(calling_context)
 
         async def wrapper() -> None:
             with nested_logging_context(task.id) as log_context:
-                start_time = int(self._clock.time())
+                start_time = self._clock.time()
                 occasional_status_call = self._clock.looping_call(
                     _occasional_report,
                     TaskScheduler.OCCASIONAL_REPORT_INTERVAL_MS,
@@ -441,10 +441,10 @@ class TaskScheduler:
                 )
                 self._running_tasks.remove(task.id)
 
-                current_time = int(self._clock.time())
+                current_time = self._clock.time()
                 usage = log_context.get_resource_usage()
                 TaskScheduler._log_task_usage(
-                    status.value, task, usage, (current_time - start_time) * 0.001
+                    status.value, task, usage, current_time - start_time
                 )
                 occasional_status_call.stop()
 
