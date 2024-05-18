@@ -763,6 +763,9 @@ class Notifier:
 
         return result
 
+    async def wait_for_stream_position(self, stream_token: StreamToken) -> None:
+        pass
+
     async def _get_room_ids(
         self, user: UserID, explicit_room_id: Optional[str]
     ) -> Tuple[StrCollection, bool]:
