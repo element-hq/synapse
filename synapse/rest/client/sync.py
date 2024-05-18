@@ -210,7 +210,6 @@ class SyncRestServlet(RestServlet):
             user=user,
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
-            request_key=request_key,
             device_id=device_id,
         )
 
@@ -234,6 +233,7 @@ class SyncRestServlet(RestServlet):
                 requester,
                 sync_config,
                 SyncVersion.SYNC_V2,
+                request_key,
                 since_token=since_token,
                 timeout=timeout,
                 full_state=full_state,
