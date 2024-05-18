@@ -777,7 +777,11 @@ class Notifier:
             if now - start > 10_000:
                 return False
 
-            logger.info("Waiting for current token to reach %s", stream_token)
+            logger.info(
+                "Waiting for current token to reach %s; currently at %s",
+                stream_token,
+                current_token,
+            )
 
             # TODO: be better
             await self.clock.sleep(0.5)
