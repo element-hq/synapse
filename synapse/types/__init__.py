@@ -1040,6 +1040,12 @@ class StreamToken:
         """
 
         for _, key in StreamKeyType.__members__.items():
+            if key == StreamKeyType.TYPING:
+                # Typing stream is allowed to "reset", and so comparisons don't
+                # really make sense as is.
+                # TODO: Figure out a better way of tracking resets.
+                continue
+
             self_value = self.get_field(key)
             other_value = other_token.get_field(key)
 
