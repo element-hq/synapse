@@ -45,7 +45,7 @@ from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
-from synapse.types import JsonDict, Requester, StreamToken
+from synapse.types import JsonDict, Requester, RoomStreamToken, StreamToken
 from synapse.util import json_decoder
 
 from ._base import client_patterns, set_timeline_upper_limit
@@ -238,8 +238,51 @@ class SyncRestServlet(RestServlet):
             time_now, sync_result, requester, filter_collection
         )
 
+        if (
+            since_token is not None
+            and sync_result.next_batch is not None
+            and self._sync_token_went_backwards(
+                since_token.room_key, sync_result.next_batch.room_key
+            )
+        ):
+            since_str = await since_token.to_string(self.store)
+            next_str = await sync_result.next_batch.to_string(self.store)
+            logger.warning(
+                "sync token went backwards! from %s to %s", since_str, next_str
+            )
+
         logger.debug("Event formatting complete")
         return 200, response_content
+
+    def _sync_token_went_backwards(
+        self, since: RoomStreamToken, next: RoomStreamToken
+    ) -> bool:
+        """
+        Returns true if and only if the given token went backwards.
+        """
+        if next.stream < since.stream:
+            return True
+
+        if since.instance_map:
+            for instance, pos in since.instance_map.items():
+                if (
+                    next.instance_map
+                    and next.instance_map.get(instance, next.stream) < pos
+                ):
+                    return True
+                elif next.stream < pos:
+                    return True
+
+        if next.instance_map:
+            for instance, pos in next.instance_map.items():
+                if since.instance_map and pos < since.instance_map.get(
+                    instance, since.stream
+                ):
+                    return True
+                elif pos < since.stream:
+                    return True
+
+        return False
 
     @trace_with_opname("sync.encode_response")
     async def encode_response(
