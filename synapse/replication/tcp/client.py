@@ -114,11 +114,12 @@ class ReplicationDataHandler:
         """
         all_room_ids: Set[str] = set()
         if stream_name == DeviceListsStream.NAME:
-            prev_token = self.store.get_device_stream_token()
-            all_room_ids = await self.store.get_all_device_list_changes(
-                prev_token, token
-            )
-            self.store.device_lists_in_rooms_have_changed(all_room_ids, token)
+            if any(row.entity.startswith("@") and not row.is_signature for row in rows):
+                prev_token = self.store.get_device_stream_token()
+                all_room_ids = await self.store.get_all_device_list_changes(
+                    prev_token, token
+                )
+                self.store.device_lists_in_rooms_have_changed(all_room_ids, token)
 
         self.store.process_replication_rows(stream_name, instance_name, token, rows)
         # NOTE: this must be called after process_replication_rows to ensure any
