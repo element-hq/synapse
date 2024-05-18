@@ -367,7 +367,7 @@ class TaskScheduler:
 
         logger.info(
             "Task %s: %.3fsec (%.3fsec, %.3fsec) (%.3fsec/%.3fsec/%d)"
-            " [%d dbevts] %r",
+            " [%d dbevts] %r, %r",
             state,
             active_time,
             usage.ru_utime,
@@ -376,6 +376,7 @@ class TaskScheduler:
             usage.db_txn_duration_sec,
             int(usage.db_txn_count),
             usage.evt_db_fetch_count,
+            task.resource_id,
             task.params,
         )
 
