@@ -432,6 +432,9 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # no active writes in progress.
         self._max_position_of_local_instance = self._max_seen_allocated_stream_id
 
+        # This goes and fills out the above state from the database.
+        self._load_current_ids(db_conn, tables)
+
         self._sequence_gen = PostgresSequenceGenerator(sequence_name)
 
         # We check that the table and sequence haven't diverged.
@@ -443,9 +446,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 stream_name=stream_name,
                 positive=positive,
             )
-
-        # This goes and fills out the above state from the database.
-        self._load_current_ids(db_conn, tables)
 
         self._max_seen_allocated_stream_id = max(
             self._current_positions.values(), default=1
