@@ -23,13 +23,11 @@ import logging
 import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
-from typing_extensions import Annotated
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
 from synapse.api.filtering import FilterCollection
 from synapse.api.presence import UserPresenceState
-from synapse.rest.client.models import SlidingSyncBody
 from synapse.events.utils import (
     SerializeEventConfig,
     format_event_for_client_v2_without_room_id,
@@ -56,7 +54,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
-from synapse.rest.models import RequestBodyModel
+from synapse.rest.client.models import SlidingSyncBody
 from synapse.types import JsonDict, Requester, StreamToken
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache

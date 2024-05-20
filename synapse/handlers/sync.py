@@ -1938,7 +1938,7 @@ class SyncHandler:
         """
         user_id = sync_config.user.to_string()
 
-        # Note: we get the users room list *before* we get the current token, this
+        # Note: we get the users room list *before* we get the `now_token`, this
         # avoids checking back in history if rooms are joined after the token is fetched.
         token_before_rooms = self.event_sources.get_current_token()
         mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
@@ -1950,10 +1950,10 @@ class SyncHandler:
         now_token = self.event_sources.get_current_token()
         log_kv({"now_token": now_token})
 
-        # Since we fetched the users room list before the token, there's a small window
-        # during which membership events may have been persisted, so we fetch these now
-        # and modify the joined room list for any changes between the get_rooms_for_user
-        # call and the get_current_token call.
+        # Since we fetched the users room list before calculating the `now_token` (see
+        # above), there's a small window during which membership events may have been
+        # persisted, so we fetch these now and modify the joined room list for any
+        # changes between the get_rooms_for_user call and the get_current_token call.
         membership_change_events = []
         if since_token:
             membership_change_events = await self.store.get_membership_changes_for_user(
@@ -1963,16 +1963,17 @@ class SyncHandler:
                 self.rooms_to_exclude_globally,
             )
 
-            mem_last_change_by_room_id: Dict[str, EventBase] = {}
+            last_membership_change_by_room_id: Dict[str, EventBase] = {}
             for event in membership_change_events:
-                mem_last_change_by_room_id[event.room_id] = event
+                last_membership_change_by_room_id[event.room_id] = event
 
             # For the latest membership event in each room found, add/remove the room ID
             # from the joined room list accordingly. In this case we only care if the
             # latest change is JOIN.
 
-            for room_id, event in mem_last_change_by_room_id.items():
+            for room_id, event in last_membership_change_by_room_id.items():
                 assert event.internal_metadata.stream_ordering
+                # Skip any events that TODO
                 if (
                     event.internal_metadata.stream_ordering
                     < token_before_rooms.room_key.stream
