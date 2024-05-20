@@ -23,15 +23,16 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use anyhow::{Context, Error};
+use chrono_tz::Tz;
 use lazy_static::lazy_static;
 use log::warn;
 use pyo3::prelude::*;
 use regex::Regex;
 
 use super::{
-    utils::{get_glob_matcher, get_localpart_from_id, GlobMatchType},
+    utils::{day_and_time_with_timezone, get_glob_matcher, get_localpart_from_id, GlobMatchType},
     Action, Condition, EventPropertyIsCondition, FilteredPushRules, KnownCondition,
-    SimpleJsonValue,
+    SimpleJsonValue, TimeAndDayIntervals,
 };
 use crate::push::{EventMatchPatternType, JsonValue};
 
@@ -105,6 +106,9 @@ pub struct PushRuleEvaluator {
     /// If MSC3931 (room version feature flags) is enabled. Usually controlled by the same
     /// flag as MSC1767 (extensible events core).
     msc3931_enabled: bool,
+
+    /// If MSC4141 (time based notification filtering push rule condition) is enabled
+    msc4141_time_and_day: bool,
 }
 
 #[pymethods]
@@ -122,6 +126,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled,
         room_version_feature_flags,
         msc3931_enabled,
+        msc4141_time_and_day,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
@@ -133,6 +138,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled: bool,
         room_version_feature_flags: Vec<String>,
         msc3931_enabled: bool,
+        msc4141_time_and_day: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
             Some(JsonValue::Value(SimpleJsonValue::Str(s))) => s.clone().into_owned(),
@@ -150,6 +156,7 @@ impl PushRuleEvaluator {
             related_event_match_enabled,
             room_version_feature_flags,
             msc3931_enabled,
+            msc4141_time_and_day,
         })
     }
 
@@ -384,6 +391,13 @@ impl PushRuleEvaluator {
                         && self.room_version_feature_flags.contains(&flag)
                 }
             }
+            KnownCondition::TimeAndDay(time_and_day) => {
+                if !self.msc4141_time_and_day {
+                    false
+                } else {
+                    self.match_time_and_day(time_and_day.timezone, &time_and_day.intervals)?
+                }
+            }
         };
 
         Ok(result)
@@ -507,6 +521,27 @@ impl PushRuleEvaluator {
 
         Ok(matches)
     }
+
+    /// Match the current server time - adjusted with user timezone or default UTC -
+    /// against the intervals using Any/OR.
+    fn match_time_and_day(
+        &self,
+        timezone: Option<Tz>,
+        intervals: &[TimeAndDayIntervals],
+    ) -> Result<bool, Error> {
+        // Evaluate today and current time with timezone
+        let (today, current_time) = day_and_time_with_timezone(timezone);
+
+        let matches = intervals.iter().any(|interval| {
+            interval.day_of_week.contains(&today)
+                && (interval.time_of_day.is_none()
+                    || interval.time_of_day.as_ref().map_or(true, |time_interval| {
+                        time_interval.contains(current_time) || time_interval.is_empty()
+                    }))
+        });
+
+        Ok(matches)
+    }
 }
 
 #[test]
@@ -525,6 +560,7 @@ fn push_rule_evaluator() {
         BTreeMap::new(),
         true,
         vec![],
+        true,
         true,
     )
     .unwrap();
@@ -554,6 +590,7 @@ fn test_requires_room_version_supports_condition() {
         BTreeMap::new(),
         false,
         flags,
+        true,
         true,
     )
     .unwrap();
@@ -586,5 +623,68 @@ fn test_requires_room_version_supports_condition() {
         None,
         None,
     );
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_time_and_day_condition() {
+    use crate::push::{PushRule, PushRules, TimeAndDayCondition};
+
+    let mut flattened_keys = BTreeMap::new();
+    flattened_keys.insert(
+        "content.body".to_string(),
+        JsonValue::Value(SimpleJsonValue::Str(Cow::Borrowed("foo bar bob hello"))),
+    );
+    let evaluator = PushRuleEvaluator::py_new(
+        flattened_keys,
+        false,
+        10,
+        Some(0),
+        BTreeMap::new(),
+        BTreeMap::new(),
+        true,
+        vec![],
+        true,
+        true,
+    )
+    .unwrap();
+
+    // smoke test: notify is working with other conditions
+    let result = evaluator.run(
+        &FilteredPushRules::default(),
+        Some("@bob:example.org"),
+        None,
+    );
+    assert_eq!(result.len(), 3);
+
+    // time and day condition in push rule
+    let custom_rule = PushRule {
+        rule_id: Cow::from(".m.rule.master"),
+        priority_class: 5, // override
+        conditions: Cow::from(vec![Condition::Known(KnownCondition::TimeAndDay(
+            TimeAndDayCondition {
+                timezone: None,
+                intervals: vec![TimeAndDayIntervals {
+                    // for testing, to avoid flakiness, make all days/times as dnd
+                    // the logic for time_of_day is tested in a unit test
+                    // see test_time_interval_contains
+                    time_of_day: None,
+                    day_of_week: vec![0, 1, 2, 3, 4, 5, 6],
+                }],
+            },
+        ))]),
+        // for testing, make this notify. Since DoNotNotify is filtered out.
+        actions: Cow::from(vec![Action::Notify]),
+        default: true,
+        default_enabled: true,
+    };
+    let rules = PushRules::new(vec![custom_rule]);
+    let result = evaluator.run(
+        &FilteredPushRules::py_new(rules, BTreeMap::new(), true, false, true, false),
+        None,
+        None,
+    );
+
+    // dnd time, we made it Notify
     assert_eq!(result.len(), 1);
 }

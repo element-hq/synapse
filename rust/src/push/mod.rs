@@ -62,6 +62,8 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use anyhow::{Context, Error};
+use chrono::NaiveTime;
+use chrono_tz::Tz;
 use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -361,6 +363,8 @@ pub enum KnownCondition {
     RoomVersionSupports {
         feature: Cow<'static, str>,
     },
+    #[serde(rename = "org.matrix.msc4141.time_and_day")]
+    TimeAndDay(TimeAndDayCondition),
 }
 
 impl IntoPy<PyObject> for Condition {
@@ -436,6 +440,52 @@ pub struct RelatedEventMatchTypeCondition {
     pub rel_type: Cow<'static, str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_fallbacks: Option<bool>,
+}
+
+/// The body of [`KnownCondition::TimeAndDay`].
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeAndDayCondition {
+    /// Timezone to use for the server.
+    pub timezone: Option<Tz>,
+    /// Time periods in which the rule should match.
+    pub intervals: Vec<TimeAndDayIntervals>,
+}
+
+/// Defines the intervals of `TimeAndDayCondition`
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeAndDayIntervals {
+    /// Optional Struct of NaiveTime representing start and end times of the day
+    pub time_of_day: Option<TimeInterval>,
+    /// 0 = Sunday, 1 = Monday, ..., 6 = Saturday
+    pub day_of_week: Vec<u32>,
+}
+
+/// Defines the time_of_day of `TimeAndDayIntervals`
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimeInterval {
+    start_time: NaiveTime,
+    end_time: NaiveTime,
+}
+
+/// Implementation for `TimeInterval`
+impl TimeInterval {
+    /// Creates a new TimeInterval from passed start and end times strings
+    pub fn new(start: &str, end: &str) -> Self {
+        TimeInterval {
+            start_time: start.parse::<NaiveTime>().expect("Invalid start time."),
+            end_time: end.parse::<NaiveTime>().expect("Invalid end time."),
+        }
+    }
+    /// Checks if the provided time is within the interval.
+    pub fn contains(&self, time: NaiveTime) -> bool {
+        time >= self.start_time && time <= self.end_time
+    }
+
+    /// Checks if the interval is empty.
+    /// Considering if the two ends are equal or start is after end.
+    pub fn is_empty(&self) -> bool {
+        self.start_time >= self.end_time
+    }
 }
 
 /// The collection of push rules for a user.
@@ -776,4 +826,15 @@ fn test_custom_action() {
 
     let new_json = serde_json::to_string(&action).unwrap();
     assert_eq!(json, new_json);
+}
+
+#[test]
+fn test_time_interval_contains() {
+    let interval = TimeInterval::new("08:00", "12:00");
+
+    let contains = interval.contains("09:00".parse::<NaiveTime>().unwrap());
+    assert!(contains);
+
+    let not_contains = interval.contains("20:00".parse::<NaiveTime>().unwrap());
+    assert!(!not_contains);
 }
