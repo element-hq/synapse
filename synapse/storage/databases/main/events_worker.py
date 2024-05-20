@@ -238,7 +238,6 @@ class EventsWorkerStore(SQLBaseStore):
                 "stream_ordering",
                 is_writer=hs.get_instance_name() in hs.config.worker.writers.events,
                 extra_tables=[
-                    ("ex_outlier_stream", "event_stream_ordering"),
                     ("current_state_delta_stream", "stream_id"),
                     ("ex_outlier_stream", "event_stream_ordering"),
                 ],
