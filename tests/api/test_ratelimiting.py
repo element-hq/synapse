@@ -116,8 +116,9 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         # Should raise
         with self.assertRaises(LimitExceededError) as context:
             self.get_success_or_raise(
-                limiter.ratelimit(None, key="test_id", _time_now_s=5)
+                limiter.ratelimit(None, key="test_id", _time_now_s=5), by=0.5
             )
+
         self.assertEqual(context.exception.retry_after_ms, 5000)
 
         # Shouldn't raise
@@ -192,7 +193,7 @@ class TestRatelimiter(unittest.HomeserverTestCase):
         # Second attempt, 1s later, will fail
         with self.assertRaises(LimitExceededError) as context:
             self.get_success_or_raise(
-                limiter.ratelimit(None, key=("test_id",), _time_now_s=1)
+                limiter.ratelimit(None, key=("test_id",), _time_now_s=1), by=0.5
             )
         self.assertEqual(context.exception.retry_after_ms, 9000)
 

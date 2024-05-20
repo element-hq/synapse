@@ -483,6 +483,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 event.room_version,
             ),
             exc=LimitExceededError,
+            by=0.5,
         )
 
     def _build_and_send_join_event(
