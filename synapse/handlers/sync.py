@@ -289,6 +289,7 @@ class SyncResult:
 class E2eeSyncResult:
     """
     Attributes:
+        next_batch: Token for the next sync
         to_device: List of direct messages for the device.
         device_lists: List of user_ids whose devices have changed
         device_one_time_keys_count: Dict of algorithm to count for one time keys
@@ -569,7 +570,7 @@ class SyncHandler:
         sync_version: Literal[SyncVersion.E2EE_SYNC],
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
-    ) -> SyncResult: ...
+    ) -> E2eeSyncResult: ...
 
     @overload
     async def current_sync_for_user(
@@ -587,7 +588,9 @@ class SyncHandler:
         since_token: Optional[StreamToken] = None,
         full_state: bool = False,
     ) -> Union[SyncResult, E2eeSyncResult]:
-        """Generates the response body of a sync result, represented as a `SyncResult`/`E2eeSyncResult`.
+        """
+        Generates the response body of a sync result, represented as a
+        `SyncResult`/`E2eeSyncResult`.
 
         This is a wrapper around `generate_sync_result` which starts an open tracing
         span to track the sync. See `generate_sync_result` for the next part of your
@@ -1844,9 +1847,11 @@ class SyncHandler:
         """
 
         user_id = sync_config.user.to_string()
-        # TODO: Should we exclude app services here? There could be an argument to allow
-        # them since the appservice doesn't have to make a massive initial sync.
-        # (related to https://github.com/matrix-org/matrix-doc/issues/1144)
+        app_service = self.store.get_app_service_by_user_id(user_id)
+        if app_service:
+            # We no longer support AS users using /sync directly.
+            # See https://github.com/matrix-org/matrix-doc/issues/1144
+            raise NotImplementedError()
 
         sync_result_builder = await self.get_sync_result_builder(
             sync_config,
@@ -1862,15 +1867,27 @@ class SyncHandler:
         device_lists = DeviceListUpdates()
         include_device_list_updates = bool(since_token and since_token.device_list_key)
         if include_device_list_updates:
+            # Note that _generate_sync_entry_for_rooms sets sync_result_builder.joined, which
+            # is used in calculate_user_changes below.
+            (
+                newly_joined_rooms,
+                newly_left_rooms,
+            ) = await self._generate_sync_entry_for_rooms(sync_result_builder)
+
+            # This uses the sync_result_builder.joined which is set in
+            # `_generate_sync_entry_for_rooms`, if that didn't find any joined
+            # rooms for some reason it is a no-op.
+            (
+                newly_joined_or_invited_or_knocked_users,
+                newly_left_users,
+            ) = sync_result_builder.calculate_user_changes()
+
             device_lists = await self._generate_sync_entry_for_device_list(
                 sync_result_builder,
-                # TODO: Do we need to worry about these? All of this info is
-                # normally calculated when we `_generate_sync_entry_for_rooms()` but we
-                # probably don't want to do all of that work for this endpoint.
-                newly_joined_rooms=frozenset(),
-                newly_joined_or_invited_or_knocked_users=frozenset(),
-                newly_left_rooms=frozenset(),
-                newly_left_users=frozenset(),
+                newly_joined_rooms=newly_joined_rooms,
+                newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
+                newly_left_rooms=newly_left_rooms,
+                newly_left_users=newly_left_users,
             )
 
         # 3. Calculate `device_one_time_keys_count` and `device_unused_fallback_key_types`
@@ -1921,17 +1938,17 @@ class SyncHandler:
         """
         user_id = sync_config.user.to_string()
 
+        # Note: we get the users room list *before* we get the current token, this
+        # avoids checking back in history if rooms are joined after the token is fetched.
+        token_before_rooms = self.event_sources.get_current_token()
+        mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
+
         # NB: The `now_token` gets changed by some of the `generate_sync_*` methods,
         # this is due to some of the underlying streams not supporting the ability
         # to query up to a given point.
         # Always use the `now_token` in `SyncResultBuilder`
         now_token = self.event_sources.get_current_token()
         log_kv({"now_token": now_token})
-
-        # Note: we get the users room list *before* we get the current token, this
-        # avoids checking back in history if rooms are joined after the token is fetched.
-        token_before_rooms = self.event_sources.get_current_token()
-        mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
 
         # Since we fetched the users room list before the token, there's a small window
         # during which membership events may have been persisted, so we fetch these now
@@ -2234,23 +2251,19 @@ class SyncHandler:
             )
 
             if push_rules_changed:
-                global_account_data = {
-                    AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                        sync_config.user
-                    ),
-                    **global_account_data,
-                }
+                global_account_data = dict(global_account_data)
+                global_account_data[AccountDataTypes.PUSH_RULES] = (
+                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
+                )
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
-            global_account_data = {
-                AccountDataTypes.PUSH_RULES: await self._push_rules_handler.push_rules_for_user(
-                    sync_config.user
-                ),
-                **all_global_account_data,
-            }
+            global_account_data = dict(all_global_account_data)
+            global_account_data[AccountDataTypes.PUSH_RULES] = (
+                await self._push_rules_handler.push_rules_for_user(sync_config.user)
+            )
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(

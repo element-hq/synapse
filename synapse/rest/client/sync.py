@@ -59,6 +59,7 @@ from synapse.logging.opentracing import trace_with_opname
 from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict, Requester, StreamToken
 from synapse.util import json_decoder
+from synapse.util.caches.lrucache import LruCache
 
 from ._base import client_patterns, set_timeline_upper_limit
 
@@ -121,6 +122,11 @@ class SyncRestServlet(RestServlet):
         self._event_serializer = hs.get_event_client_serializer()
         self._msc2654_enabled = hs.config.experimental.msc2654_enabled
         self._msc3773_enabled = hs.config.experimental.msc3773_enabled
+
+        self._json_filter_cache: LruCache[str, bool] = LruCache(
+            max_size=1000,
+            cache_name="sync_valid_filter",
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         # This will always be set by the time Twisted calls us.
@@ -189,7 +195,13 @@ class SyncRestServlet(RestServlet):
                 filter_object = json_decoder.decode(filter_id)
             except Exception:
                 raise SynapseError(400, "Invalid filter JSON", errcode=Codes.NOT_JSON)
-            self.filtering.check_valid_filter(filter_object)
+
+            # We cache the validation, as this can get quite expensive if people use
+            # a literal json blob as a query param.
+            if not self._json_filter_cache.get(filter_id):
+                self.filtering.check_valid_filter(filter_object)
+                self._json_filter_cache[filter_id] = True
+
             set_timeline_upper_limit(
                 filter_object, self.hs.config.server.filter_timeline_limit
             )
@@ -614,10 +626,40 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.hs = hs
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        self.filtering = hs.get_filtering()
         self.sync_handler = hs.get_sync_handler()
+
+        # Filtering only matters for the `device_lists` because it requires a bunch of
+        # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
+        # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
+        self.only_member_events_filter_collection = FilterCollection(
+            self.hs,
+            {
+                "room": {
+                    # We only care about membership events for the `device_lists`.
+                    # Membership will tell us whether a user has joined/left a room and
+                    # if there are new devices to encrypt for.
+                    "timeline": {
+                        "types": ["m.room.member"],
+                    },
+                    "state": {
+                        "types": ["m.room.member"],
+                    },
+                },
+                # We don't want any extra account_data generated because it's not
+                # returned by this endpoint
+                "account_data": {
+                    "not_types": ["*"],
+                },
+                # We don't want any extra presence data generated because it's not
+                # returned by this endpoint
+                "presence": {
+                    "not_types": ["*"],
+                },
+            },
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
@@ -629,9 +671,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
         sync_config = SyncConfig(
             user=user,
-            # Filtering doesn't apply to this endpoint so just use a default to fill in
-            # the SyncConfig
-            filter_collection=self.filtering.DEFAULT_FILTER_COLLECTION,
+            filter_collection=self.only_member_events_filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
         )

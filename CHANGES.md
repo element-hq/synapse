@@ -1,3 +1,68 @@
+Synapse 1.107.0 (2024-05-14)
+============================
+
+No significant changes since 1.107.0rc1.
+
+
+# Synapse 1.107.0rc1 (2024-05-07)
+
+### Features
+
+- Add preliminary support for [MSC3823: Account Suspension](https://github.com/matrix-org/matrix-spec-proposals/pull/3823). ([\#17051](https://github.com/element-hq/synapse/issues/17051))
+- Declare support for [Matrix v1.10](https://matrix.org/blog/2024/03/22/matrix-v1.10-release/). Contributed by @clokep. ([\#17082](https://github.com/element-hq/synapse/issues/17082))
+- Add support for [MSC4115: membership metadata on events](https://github.com/matrix-org/matrix-spec-proposals/pull/4115). ([\#17104](https://github.com/element-hq/synapse/issues/17104), [\#17137](https://github.com/element-hq/synapse/issues/17137))
+
+### Bugfixes
+
+- Fixed search feature of Element Android on homesevers using SQLite by returning search terms as search highlights. ([\#17000](https://github.com/element-hq/synapse/issues/17000))
+- Fixes a bug introduced in v1.52.0 where the `destination` query parameter for the  [Destination Rooms Admin API](https://element-hq.github.io/synapse/v1.105/usage/administration/admin_api/federation.html#destination-rooms) failed to actually filter returned rooms. ([\#17077](https://github.com/element-hq/synapse/issues/17077))
+- For MSC3266 room summaries, support queries at the recommended endpoint of `/_matrix/client/unstable/im.nheko.summary/summary/{roomIdOrAlias}`. The existing endpoint of `/_matrix/client/unstable/im.nheko.summary/rooms/{roomIdOrAlias}/summary` is deprecated. ([\#17078](https://github.com/element-hq/synapse/issues/17078))
+- Apply user email & picture during OIDC registration if present & selected. ([\#17120](https://github.com/element-hq/synapse/issues/17120))
+- Improve error message for cross signing reset with [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) enabled. ([\#17121](https://github.com/element-hq/synapse/issues/17121))
+- Fix a bug which meant that to-device messages received over federation could be dropped when the server was under load or networking problems caused problems between Synapse processes or the database. ([\#17127](https://github.com/element-hq/synapse/issues/17127))
+- Fix bug where `StreamChangeCache` would not respect configured cache factors. ([\#17152](https://github.com/element-hq/synapse/issues/17152))
+
+### Updates to the Docker image
+
+- Correct licensing metadata on Docker image. ([\#17141](https://github.com/element-hq/synapse/issues/17141))
+
+### Improved Documentation
+
+- Update the `event_cache_size` and `global_factor` configuration options' documentation. ([\#17071](https://github.com/element-hq/synapse/issues/17071))
+- Remove broken sphinx docs. ([\#17073](https://github.com/element-hq/synapse/issues/17073), [\#17148](https://github.com/element-hq/synapse/issues/17148))
+- Add RuntimeDirectory to example matrix-synapse.service systemd unit. ([\#17084](https://github.com/element-hq/synapse/issues/17084))
+- Fix various small typos throughout the docs. ([\#17114](https://github.com/element-hq/synapse/issues/17114))
+- Update enable_notifs configuration documentation. ([\#17116](https://github.com/element-hq/synapse/issues/17116))
+- Update the Upgrade Notes with the latest minimum supported Rust version of 1.66.0. Contributed by @jahway603. ([\#17140](https://github.com/element-hq/synapse/issues/17140))
+
+### Internal Changes
+
+- Enable [MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266) by default in the Synapse Complement image. ([\#17105](https://github.com/element-hq/synapse/issues/17105))
+- Add optimisation to `StreamChangeCache.get_entities_changed(..)`. ([\#17130](https://github.com/element-hq/synapse/issues/17130))
+
+
+
+### Updates to locked dependencies
+
+* Bump furo from 2024.1.29 to 2024.4.27. ([\#17133](https://github.com/element-hq/synapse/issues/17133))
+* Bump idna from 3.6 to 3.7. ([\#17136](https://github.com/element-hq/synapse/issues/17136))
+* Bump jsonschema from 4.21.1 to 4.22.0. ([\#17157](https://github.com/element-hq/synapse/issues/17157))
+* Bump lxml from 5.1.0 to 5.2.1. ([\#17158](https://github.com/element-hq/synapse/issues/17158))
+* Bump phonenumbers from 8.13.29 to 8.13.35. ([\#17106](https://github.com/element-hq/synapse/issues/17106))
+- Bump pillow from 10.2.0 to 10.3.0. ([\#17146](https://github.com/element-hq/synapse/issues/17146))
+* Bump pydantic from 2.6.4 to 2.7.0. ([\#17107](https://github.com/element-hq/synapse/issues/17107))
+* Bump pydantic from 2.7.0 to 2.7.1. ([\#17160](https://github.com/element-hq/synapse/issues/17160))
+* Bump pyicu from 2.12 to 2.13. ([\#17109](https://github.com/element-hq/synapse/issues/17109))
+* Bump serde from 1.0.197 to 1.0.198. ([\#17111](https://github.com/element-hq/synapse/issues/17111))
+* Bump serde from 1.0.198 to 1.0.199. ([\#17132](https://github.com/element-hq/synapse/issues/17132))
+* Bump serde from 1.0.199 to 1.0.200. ([\#17161](https://github.com/element-hq/synapse/issues/17161))
+* Bump serde_json from 1.0.115 to 1.0.116. ([\#17112](https://github.com/element-hq/synapse/issues/17112))
+- Update `tornado` Python dependency from 6.2 to 6.4. ([\#17131](https://github.com/element-hq/synapse/issues/17131))
+* Bump twisted from 23.10.0 to 24.3.0. ([\#17135](https://github.com/element-hq/synapse/issues/17135))
+* Bump types-bleach from 6.1.0.1 to 6.1.0.20240331. ([\#17110](https://github.com/element-hq/synapse/issues/17110))
+* Bump types-pillow from 10.2.0.20240415 to 10.2.0.20240423. ([\#17159](https://github.com/element-hq/synapse/issues/17159))
+* Bump types-setuptools from 69.0.0.20240125 to 69.5.0.20240423. ([\#17134](https://github.com/element-hq/synapse/issues/17134))
+
 # Synapse 1.106.0 (2024-04-30)
 
 No significant changes since 1.106.0rc1.
