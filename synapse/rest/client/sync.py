@@ -628,14 +628,12 @@ class SlidingSyncE2eeRestServlet(RestServlet):
             self.hs,
             {
                 "room": {
-                    # We don't want any extra timeline data generated because it's not
-                    # returned by this endpoint
-                    "timeline": {
-                        "not_rooms": ["*"],
-                    },
                     # We only care about membership events for the `device_lists`.
                     # Membership will tell us whether a user has joined/left a room and
                     # if there are new devices to encrypt for.
+                    "timeline": {
+                        "types": ["m.room.member"],
+                    },
                     "state": {
                         "types": ["m.room.member"],
                     },
@@ -644,13 +642,11 @@ class SlidingSyncE2eeRestServlet(RestServlet):
                 # returned by this endpoint
                 "account_data": {
                     "not_types": ["*"],
-                    "limit": 1,
                 },
                 # We don't want any extra presence data generated because it's not
                 # returned by this endpoint
                 "presence": {
                     "not_types": ["*"],
-                    "limit": 1,
                 },
             },
         )
