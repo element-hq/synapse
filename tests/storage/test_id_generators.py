@@ -31,6 +31,11 @@ from synapse.storage.database import (
 from synapse.storage.engines import IncorrectDatabaseSetup
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import MultiWriterIdGenerator, StreamIdGenerator
+from synapse.storage.util.sequence import (
+    LocalSequenceGenerator,
+    PostgresSequenceGenerator,
+    SequenceGenerator,
+)
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -182,8 +187,15 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
 
         self.get_success(self.db_pool.runInteraction("_setup_db", self._setup_db))
 
+        if USE_POSTGRES_FOR_TESTS:
+            self.seq_gen: SequenceGenerator = PostgresSequenceGenerator("foobar_seq")
+        else:
+            self.seq_gen = LocalSequenceGenerator(lambda _: 0)
+
     def _setup_db(self, txn: LoggingTransaction) -> None:
-        txn.execute("CREATE SEQUENCE foobar_seq")
+        if USE_POSTGRES_FOR_TESTS:
+            txn.execute("CREATE SEQUENCE foobar_seq")
+
         txn.execute(
             """
             CREATE TABLE foobar (
@@ -218,16 +230,21 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
 
         def _insert(txn: LoggingTransaction) -> None:
             for _ in range(number):
+                next_val = self.seq_gen.get_next_id_txn(txn)
                 txn.execute(
-                    "INSERT INTO foobar VALUES (nextval('foobar_seq'), ?)",
-                    (instance_name,),
+                    "INSERT INTO foobar (stream_id, instance_name) VALUES (?, ?)",
+                    (
+                        next_val,
+                        instance_name,
+                    ),
                 )
+
                 txn.execute(
                     """
-                    INSERT INTO stream_positions VALUES ('test_stream', ?,  lastval())
-                    ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = lastval()
+                    INSERT INTO stream_positions VALUES ('test_stream', ?,  ?)
+                    ON CONFLICT (stream_name, instance_name) DO UPDATE SET stream_id = ?
                     """,
-                    (instance_name,),
+                    (instance_name, next_val, next_val),
                 )
 
         self.get_success(self.db_pool.runInteraction("_insert_rows", _insert))
