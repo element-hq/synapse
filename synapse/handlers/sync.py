@@ -1847,9 +1847,11 @@ class SyncHandler:
         """
 
         user_id = sync_config.user.to_string()
-        # TODO: Should we exclude app services here? There could be an argument to allow
-        # them since the appservice doesn't have to make a massive initial sync.
-        # (related to https://github.com/matrix-org/matrix-doc/issues/1144)
+        app_service = self.store.get_app_service_by_user_id(user_id)
+        if app_service:
+            # We no longer support AS users using /sync directly.
+            # See https://github.com/matrix-org/matrix-doc/issues/1144
+            raise NotImplementedError()
 
         sync_result_builder = await self.get_sync_result_builder(
             sync_config,
