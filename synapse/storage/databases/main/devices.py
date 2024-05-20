@@ -2131,7 +2131,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         sql = """
             UPDATE device_lists_changes_in_room
             SET converted_to_destinations = true
-            WHERE stream_id > ? AND user_id = ? and device_id = ? AND room_id = ?;
+            WHERE stream_id > ? AND user_id = ? AND device_id = ?
+                AND room_id = ? AND NOT converted_to_destinations
         """
 
         def mark_redundant_device_lists_pokes_txn(txn: LoggingTransaction) -> None:
