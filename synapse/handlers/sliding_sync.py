@@ -205,8 +205,8 @@ class SlidingSyncHandler:
         to_token: StreamToken = None,
     ) -> AbstractSet[str]:
         """
-        Fetch room IDs that the user has not left since the given `from_token`
-        or newly_left rooms since the `from_token` and <= `to_token`.
+        Fetch room IDs that the user has not left or newly_left rooms < `from_token` and
+        <= `to_token`.
         """
         user_id = user.to_string()
 
@@ -225,15 +225,29 @@ class SlidingSyncHandler:
             room_for_user.stream_ordering for room_for_user in room_for_user_list
         )
 
+        # Our working list of rooms that can show up in the sync response
         sync_room_id_set = {
             room_for_user.room_id for room_for_user in room_for_user_list
         }
 
+        # If our `to_token` is already ahead of the latest room membership for the user,
+        # we can just straight up return the room list (nothing has changed)
+        if max_stream_ordering_from_room_list < to_token.room_key.stream:
+            return sync_room_id_set
+
         # We assume the `from_token` is before the `to_token`
-        assert from_token.room_key.stream < to_token.room_key.stream
+        assert (
+            from_token is None or from_token.room_key.stream < to_token.room_key.stream
+        ), f"{from_token.room_key.stream if from_token else None} < {to_token.room_key.stream}"
+
         # We assume the `from_token`/`to_token` is before the `max_stream_ordering_from_room_list`
-        assert from_token.room_key.stream < max_stream_ordering_from_room_list
-        assert to_token.room_key.stream < max_stream_ordering_from_room_list
+        assert (
+            from_token is None
+            or from_token.room_key.stream < max_stream_ordering_from_room_list
+        ), f"{from_token.room_key.stream if from_token else None} < {max_stream_ordering_from_room_list}"
+        assert (
+            to_token.room_key.stream < max_stream_ordering_from_room_list
+        ), f"{to_token.room_key.stream} < {max_stream_ordering_from_room_list}"
 
         # Since we fetched the users room list at some point in time after the to/from
         # tokens, we need to revert some membership changes to match the point in time
@@ -244,7 +258,8 @@ class SlidingSyncHandler:
         # - 2b) Add back rooms that the user left after the `to_token`
         membership_change_events = await self.store.get_membership_changes_for_user(
             user_id,
-            from_key=from_token.room_key,
+            # Start from the `from_token` if given, otherwise from the `to_token`
+            from_key=from_token.room_key if from_token else to_token.room_key,
             to_key=RoomStreamToken(stream=max_stream_ordering_from_room_list),
             excluded_rooms=self.rooms_to_exclude_globally,
         )
