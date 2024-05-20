@@ -616,10 +616,44 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
+        self.hs = hs
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
-        self.filtering = hs.get_filtering()
         self.sync_handler = hs.get_sync_handler()
+
+        # Filtering only matters for the `device_lists` because it requires a bunch of
+        # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
+        # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
+        self.only_member_events_filter_collection = FilterCollection(
+            self.hs,
+            {
+                "room": {
+                    # We don't want any extra timeline data generated because it's not
+                    # returned by this endpoint
+                    "timeline": {
+                        "not_rooms": ["*"],
+                    },
+                    # We only care about membership events for the `device_lists`.
+                    # Membership will tell us whether a user has joined/left a room and
+                    # if there are new devices to encrypt for.
+                    "state": {
+                        "types": ["m.room.member"],
+                    },
+                },
+                # We don't want any extra account_data generated because it's not
+                # returned by this endpoint
+                "account_data": {
+                    "not_types": ["*"],
+                    "limit": 1,
+                },
+                # We don't want any extra presence data generated because it's not
+                # returned by this endpoint
+                "presence": {
+                    "not_types": ["*"],
+                    "limit": 1,
+                },
+            },
+        )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
@@ -631,9 +665,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
         sync_config = SyncConfig(
             user=user,
-            # Filtering doesn't apply to this endpoint so just use a default to fill in
-            # the SyncConfig
-            filter_collection=self.filtering.DEFAULT_FILTER_COLLECTION,
+            filter_collection=self.only_member_events_filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
         )

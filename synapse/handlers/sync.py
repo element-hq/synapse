@@ -1865,15 +1865,27 @@ class SyncHandler:
         device_lists = DeviceListUpdates()
         include_device_list_updates = bool(since_token and since_token.device_list_key)
         if include_device_list_updates:
+            # Note that _generate_sync_entry_for_rooms sets sync_result_builder.joined, which
+            # is used in calculate_user_changes below.
+            (
+                newly_joined_rooms,
+                newly_left_rooms,
+            ) = await self._generate_sync_entry_for_rooms(sync_result_builder)
+
+            # This uses the sync_result_builder.joined which is set in
+            # `_generate_sync_entry_for_rooms`, if that didn't find any joined
+            # rooms for some reason it is a no-op.
+            (
+                newly_joined_or_invited_or_knocked_users,
+                newly_left_users,
+            ) = sync_result_builder.calculate_user_changes()
+
             device_lists = await self._generate_sync_entry_for_device_list(
                 sync_result_builder,
-                # TODO: Do we need to worry about these? All of this info is
-                # normally calculated when we `_generate_sync_entry_for_rooms()` but we
-                # probably don't want to do all of that work for this endpoint.
-                newly_joined_rooms=frozenset(),
-                newly_joined_or_invited_or_knocked_users=frozenset(),
-                newly_left_rooms=frozenset(),
-                newly_left_users=frozenset(),
+                newly_joined_rooms=newly_joined_rooms,
+                newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
+                newly_left_rooms=newly_left_rooms,
+                newly_left_users=newly_left_users,
             )
 
         # 3. Calculate `device_one_time_keys_count` and `device_unused_fallback_key_types`
