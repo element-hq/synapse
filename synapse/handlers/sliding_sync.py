@@ -25,6 +25,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     user: UserID
     device_id: str
 
+    # Pydantic config
     class Config:
         # By default, ignore fields that we don't recognise.
         extra = Extra.ignore
@@ -186,7 +187,7 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
-        room_id_list = await self.get_current_room_ids_for_user(
+        room_id_list = await self.get_sync_room_ids_for_user(
             sync_config.user,
             from_token=from_token,
             to_token=to_token,
@@ -198,15 +199,17 @@ class SlidingSyncHandler:
 
         # TODO: Calculate Membership changes between the last sync and the current sync.
 
-    async def get_current_room_ids_for_user(
+    async def get_sync_room_ids_for_user(
         self,
         user: UserID,
         from_token: Optional[StreamToken] = None,
         to_token: StreamToken = None,
     ) -> AbstractSet[str]:
         """
-        Fetch room IDs that the user has not left or newly_left rooms < `from_token` and
-        <= `to_token`.
+        Fetch room IDs that should be listed for this user in the sync response.
+
+        We're looking for rooms that the user has not left or newly_left rooms that are
+        > `from_token` and <= `to_token`.
         """
         user_id = user.to_string()
 
@@ -230,9 +233,10 @@ class SlidingSyncHandler:
             room_for_user.room_id for room_for_user in room_for_user_list
         }
 
-        # If our `to_token` is already ahead of the latest room membership for the user,
-        # we can just straight up return the room list (nothing has changed)
-        if max_stream_ordering_from_room_list < to_token.room_key.stream:
+        # If our `to_token` is already the same or ahead of the latest room membership
+        # for the user, we can just straight up return the room list (nothing has
+        # changed)
+        if max_stream_ordering_from_room_list <= to_token.room_key.stream:
             return sync_room_id_set
 
         # We assume the `from_token` is before the `to_token`

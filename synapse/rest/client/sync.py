@@ -777,6 +777,10 @@ class SlidingSyncRestServlet(RestServlet):
         sync_config = SlidingSyncConfig(
             user=user,
             device_id=device_id,
+            # FIXME: Currently, we're just manually copying the fields from the
+            # `SlidingSyncBody` into the config. How can we gurantee into the future
+            # that we don't forget any? I would like something more structured like
+            # `copy_attributes(from=body, to=config)`
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
