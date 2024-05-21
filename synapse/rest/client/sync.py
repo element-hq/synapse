@@ -20,7 +20,6 @@
 #
 import itertools
 import logging
-import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
