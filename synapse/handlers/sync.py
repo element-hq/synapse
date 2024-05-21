@@ -1845,7 +1845,6 @@ class SyncHandler:
         At the end, we transfer data from the `sync_result_builder` to a new `E2eeSyncResult`
         instance to signify that the sync calculation is complete.
         """
-
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -1869,6 +1868,11 @@ class SyncHandler:
         if include_device_list_updates:
             # Note that _generate_sync_entry_for_rooms sets sync_result_builder.joined, which
             # is used in calculate_user_changes below.
+            #
+            # TODO: Running `_generate_sync_entry_for_rooms()` is a lot of work just to
+            # figure out the membership changes/derived info needed for
+            # `_generate_sync_entry_for_device_list()`. In the future, we should try to
+            # refactor this away.
             (
                 newly_joined_rooms,
                 newly_left_rooms,
