@@ -7714,6 +7714,32 @@ Set a size to change the default.</li>
     min_batch_size: 10
     default_batch_size: 50
 </code></pre>
+<hr />
+<h2 id="auto-accept-invites"><a class="header" href="#auto-accept-invites">Auto Accept Invites</a></h2>
+<p>Configuration settings related to automatically accepting invites.</p>
+<hr />
+<h3 id="auto_accept_invites"><a class="header" href="#auto_accept_invites"><code>auto_accept_invites</code></a></h3>
+<p>Automatically accepting invites controls whether users are presented with an invite request or if they
+are instead automatically joined to a room when receiving an invite. Set the <code>enabled</code> sub-option to true to
+enable auto-accepting invites. Defaults to false.
+This setting has the following sub-options:</p>
+<ul>
+<li><code>enabled</code>: Whether to run the auto-accept invites logic. Defaults to false.</li>
+<li><code>only_for_direct_messages</code>: Whether invites should be automatically accepted for all room types, or only
+for direct messages. Defaults to false.</li>
+<li><code>only_from_local_users</code>: Whether to only automatically accept invites from users on this homeserver. Defaults to false.</li>
+<li><code>worker_to_run_on</code>: Which worker to run this module on. This must match the &quot;worker_name&quot;.</li>
+</ul>
+<p>NOTE: Care should be taken not to enable this setting if the <code>synapse_auto_accept_invite</code> module is enabled and installed.
+The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join
+events could be generated from a single invite.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">auto_accept_invites:
+    enabled: true
+    only_for_direct_messages: true
+    only_from_local_users: true
+    worker_to_run_on: &quot;worker_1&quot;
+</code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="homeserver-sample-configuration-file"><a class="header" href="#homeserver-sample-configuration-file">Homeserver Sample Configuration File</a></h1>
 <p>Below is a sample homeserver configuration file. The homeserver configuration file 
 can be tweaked to change the behaviour of your homeserver. A restart of the server is 
