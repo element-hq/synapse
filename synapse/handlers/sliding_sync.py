@@ -352,12 +352,20 @@ class SlidingSyncHandler:
         for (
             last_membership_change_after_to_token
         ) in last_membership_change_by_room_id_after_to_token.values():
-            last_membership_change_in_from_to_range = (
-                last_membership_change_by_room_id_in_from_to_range.get(event.room_id)
-            )
+            # We want to find the first membership change after the `to_token` then step
+            # backward before the `to_token` to know the membership in the from/to
+            # range.
             first_membership_change_after_to_token = (
-                first_membership_change_by_room_id_after_to_token.get(event.room_id)
+                first_membership_change_by_room_id_after_to_token.get(event.room_id, {})
             )
+            # TODO: Can we rely on `unsigned`? We seem to do this elsewhere in
+            # `calculate_user_changes()`
+            prev_content = first_membership_change_after_to_token.get(
+                "unsigned", {}
+            ).get("prev_content", {})
+            prev_membership = prev_content.get("membership", None)
+
+            logger.info("prev_membership %s", prev_membership)
 
             # 2a) Add back rooms that the user left after the `to_token`
             #
@@ -368,34 +376,19 @@ class SlidingSyncHandler:
             # `to_token`.
             if (
                 last_membership_change_after_to_token.membership == Membership.LEAVE
-                and (
-                    # If the first/last event are the same, we can gurantee the user
-                    # didn't join/leave multiple times after the `to_token` (meaning
-                    # they were in the room before).
-                    first_membership_change_after_to_token.event_id
-                    == last_membership_change_after_to_token.event_id
-                    or (
-                        # Or if the first/last event are different, then we need to make
-                        # sure that the first event after the `to_token` is NOT a leave
-                        # event (meaning they were in the room before).
-                        first_membership_change_after_to_token.event_id
-                        != last_membership_change_after_to_token.event_id
-                        and first_membership_change_after_to_token.membership
-                        != Membership.LEAVE
-                    )
-                )
+                and prev_membership != None
+                and prev_membership != Membership.LEAVE
             ):
                 sync_room_id_set.add(last_membership_change_after_to_token.room_id)
             # 2b) Remove rooms that the user joined (hasn't left) after the `to_token`
+            #
+            # If the last membership event after the `to_token` is a "join" event, then
+            # the room was added to the `get_rooms_for_local_user_where_membership_is()`
+            # results. We should remove these rooms as long as the user wasn't part of
+            # the room before the `to_token`.
             elif (
                 last_membership_change_after_to_token.membership != Membership.LEAVE
-                # We don't want to remove the the room if the user was still joined
-                # before the `to_token`.
-                and (
-                    last_membership_change_in_from_to_range is None
-                    or last_membership_change_in_from_to_range.membership
-                    == Membership.LEAVE
-                )
+                and (prev_membership == None or prev_membership == Membership.LEAVE)
             ):
                 sync_room_id_set.discard(last_membership_change_after_to_token.room_id)
 
