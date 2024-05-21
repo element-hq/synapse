@@ -4829,7 +4829,7 @@ the same whitelist.</p>
 <hr />
 <h3 id="federation_whitelist_endpoint_enabled"><a class="header" href="#federation_whitelist_endpoint_enabled"><code>federation_whitelist_endpoint_enabled</code></a></h3>
 <p>Enables an endpoint for fetching the federation whitelist config.</p>
-<p>The request method and path is <code>GET /_synapse/client/config/federation_whitelist</code>, and the
+<p>The request method and path is <code>GET /_synapse/client/v1/config/federation_whitelist</code>, and the
 response format is:</p>
 <pre><code class="language-json">{
     &quot;whitelist_enabled&quot;: true,  // Whether the federation whitelist is being enforced
@@ -11519,6 +11519,8 @@ information.</p>
 ^/_matrix/federation/v1/make_leave/
 ^/_matrix/federation/(v1|v2)/send_join/
 ^/_matrix/federation/(v1|v2)/send_leave/
+^/_matrix/federation/v1/make_knock/
+^/_matrix/federation/v1/send_knock/
 ^/_matrix/federation/(v1|v2)/invite/
 ^/_matrix/federation/v1/event_auth/
 ^/_matrix/federation/v1/timestamp_to_event/
