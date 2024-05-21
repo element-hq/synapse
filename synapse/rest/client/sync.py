@@ -612,7 +612,9 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         }
     """
 
-    PATTERNS = (re.compile("^/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee$"),)
+    PATTERNS = client_patterns(
+        "/org.matrix.msc3575/sync/e2ee$", releases=[], v1=False, unstable=True
+    )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
