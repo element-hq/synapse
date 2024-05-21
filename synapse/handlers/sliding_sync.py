@@ -305,20 +305,20 @@ class SlidingSyncHandler:
                 sync_room_id_set.add(event.room_id)
 
         # 2)
+        # TODO: Verify this logic is correct
         for event in last_membership_change_by_room_id_after_to_token.values():
             # 2a) Add back rooms that the user left after the `to_token`
             if event.membership == Membership.LEAVE:
                 sync_room_id_set.add(event.room_id)
-            # 2b) Remove rooms that the user joined after the `to_token`
-            elif event.membership != Membership.LEAVE and (
-                # Make sure the user wasn't joined before the `to_token` at some point in time
-                last_membership_change_by_room_id_in_from_to_range.get(event.room_id)
-                is None
-                # Or at-least the last membership change in the from/to range was a leave event
-                or last_membership_change_by_room_id_in_from_to_range.get(
+            # 2b) Remove rooms that the user joined (hasn't left) after the `to_token`
+            elif (
+                event.membership != Membership.LEAVE
+                # We don't want to remove the the room if the user was still joined
+                # before the `to_token`.
+                and last_membership_change_by_room_id_in_from_to_range.get(
                     event.room_id
-                ).membership
-                == Membership.LEAVE
+                )
+                is None
             ):
                 sync_room_id_set.discard(event.room_id)
 
