@@ -20,7 +20,7 @@
 
 ### Internal Changes
 
-- Add note to reflect that [MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886) is closed but will support will remain for some time. ([\#17151](https://github.com/element-hq/synapse/issues/17151))
+- Add note to reflect that [MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886) is closed but will remain supported for some time. ([\#17151](https://github.com/element-hq/synapse/issues/17151))
 - Update dependency PyO3 to 0.21. ([\#17162](https://github.com/element-hq/synapse/issues/17162))
 - Fixes linter errors found in PR #17147. ([\#17166](https://github.com/element-hq/synapse/issues/17166))
 - Bump black from 24.2.0 to 24.4.2. ([\#17170](https://github.com/element-hq/synapse/issues/17170))
