@@ -13,7 +13,7 @@
 
 ### Improved Documentation
 
-- Document [`/v1/make_knock`](https://spec.matrix.org/v1.10/server-server-api/#get_matrixfederationv1make_knockroomiduserid) and [`/v1/send_knock/](https://spec.matrix.org/v1.10/server-server-api/#put_matrixfederationv1send_knockroomideventid) federation endpoints as worker-compatible. ([\#17058](https://github.com/element-hq/synapse/issues/17058))
+- Document [`/v1/make_knock`](https://spec.matrix.org/v1.10/server-server-api/#get_matrixfederationv1make_knockroomiduserid) and [`/v1/send_knock/`](https://spec.matrix.org/v1.10/server-server-api/#put_matrixfederationv1send_knockroomideventid) federation endpoints as worker-compatible. ([\#17058](https://github.com/element-hq/synapse/issues/17058))
 - Update User Admin API with note about prefixing OIDC external_id providers. ([\#17139](https://github.com/element-hq/synapse/issues/17139))
 - Clarify the state of the created room when using the `autocreate_auto_join_room_preset` config option. ([\#17150](https://github.com/element-hq/synapse/issues/17150))
 - Update the Admin FAQ with the current libjemalloc version for latest Debian stable. Additionally update the name of the "push_rules" stream in the Workers documentation. ([\#17171](https://github.com/element-hq/synapse/issues/17171))
