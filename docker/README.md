@@ -243,3 +243,26 @@ healthcheck:
 Jemalloc is embedded in the image and will be used instead of the default allocator.
 You can read about jemalloc by reading the Synapse
 [Admin FAQ](https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html#help-synapse-is-slow-and-eats-all-my-ramcpu).
+
+
+## Modules
+
+Synapse supports loading additional modules, using the
+[`modules`](https://element-hq.github.io/synapse/latest/modules/index.html)
+config. Synapse will look for these modules `/modules`.
+
+To install a package, simply run:
+
+```
+pip install --target <module_directory> <package>
+```
+
+Where `<module_directory>` is the directory mounted to `/modules`, and
+`<package>` is either the package name or a path to the package. See
+`pip install` for more details.
+
+**Note**: Packages already installed as part of Synapse cannot be overridden by
+different versions of the package in `/modules`, e.g. if the Synapse version
+uses Twisted 24.3.0 then installing Twisted 23.10.0 in `/modules` won't have any
+effect. This can cause issues if the required version of a package is different
+between Synapse and the module being installed.

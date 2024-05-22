@@ -269,6 +269,15 @@ running with 'migrate_config'. See the README for more details.
 
         args += ["--config-path", config_path]
 
+    # Add the `/modules` directly to python search path, which allows users to
+    # add custom modules.
+    #
+    # We want to add the directory *last* so that nothing can overwrite the
+    # existing package versions. Therefore we load the current path and append
+    # `/modules` to that
+    path = ":".join(sys.path)
+    environ["PYTHONPATH"] = f"{path}:/modules"
+
     log("Starting synapse with args " + " ".join(args))
 
     args = [sys.executable] + args
