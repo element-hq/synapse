@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, AbstractSet, Dict, List, Optional
+from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Tuple
 
 import attr
 
@@ -42,6 +42,15 @@ class SlidingSyncConfig(SlidingSyncBody):
         allow_mutation = False
         # Allow custom types like `UserID` to be used in the model
         arbitrary_types_allowed = True
+
+
+class OperationType:
+    """Represents the operation types in a Sliding Sync window."""
+
+    SYNC: Final = "SYNC"
+    INSERT: Final = "INSERT"
+    DELETE: Final = "DELETE"
+    INVALIDATE: Final = "INVALIDATE"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -113,8 +122,31 @@ class SlidingSyncResult:
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
-        # TODO
-        pass
+        """
+        Attributes:
+            count: The total number of entries in the list. Always present if this list
+                is.
+            ops: The sliding list operations to perform.
+        """
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class Operation:
+            """
+            Attributes:
+                op: The operation type to perform.
+                range: Which index positions are affected by this operation. These are
+                    both inclusive.
+                room_ids: Which room IDs are affected by this operation. These IDs match
+                    up to the positions in the `range`, so the last room ID in this list
+                    matches the 9th index. The room data is held in a separate object.
+            """
+
+            op: OperationType
+            range: Tuple[int, int]
+            room_ids: List[str]
+
+        count: int
+        ops: List[Operation]
 
     next_pos: str
     lists: Dict[str, SlidingWindowList]
