@@ -351,7 +351,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self,
     ) -> None:
         """
-        TODO
+        Join and leave multiple times shouldn't affect rooms from showing up. It just
+        matters that we were joined or newly_left in the from/to range. But we're also
+        testing that joining and leaving after the `to_token` doesn't mess with the
+        results.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -390,7 +393,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self,
     ) -> None:
         """
-        TODO
+        Join and leave multiple times before the from/to range shouldn't affect rooms
+        from showing up. It just matters that we were joined or newly_left in the
+        from/to range. But we're also testing that joining and leaving after the
+        `to_token` doesn't mess with the results.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -423,11 +429,13 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Room should show up because we were joined before the from/to range
         self.assertEqual(room_id_results, {room_id1})
 
-    def test_TODO(
+    def test_invite_before_range_and_join_leave_after_to_token(
         self,
     ) -> None:
         """
-        TODO
+        Make it look like we joined after the token range but we were invited before the
+        from/to range so the room should still show up. See condition "2a)" comments in
+        the `get_sync_room_ids_for_user()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
