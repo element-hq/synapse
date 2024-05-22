@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import itertools
 import os
 import shutil
 import tempfile
@@ -153,68 +154,54 @@ class _TestImage:
     is_inline: bool = True
 
 
-@parameterized_class(
-    ("test_image",),
-    [
-        # small png
-        (
-            _TestImage(
-                SMALL_PNG,
-                b"image/png",
-                b".png",
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d4948445200000020000000200806"
-                    b"000000737a7af40000001a49444154789cedc101010000008220"
-                    b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
-                    b"44ae426082"
-                ),
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d4948445200000001000000010806"
-                    b"0000001f15c4890000000d49444154789c636060606000000005"
-                    b"0001a5f645400000000049454e44ae426082"
-                ),
-            ),
-        ),
-        # small png with transparency.
-        (
-            _TestImage(
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d49484452000000010000000101000"
-                    b"00000376ef9240000000274524e5300010194fdae0000000a4944"
-                    b"4154789c636800000082008177cd72b60000000049454e44ae426"
-                    b"082"
-                ),
-                b"image/png",
-                b".png",
-                # Note that we don't check the output since it varies across
-                # different versions of Pillow.
-            ),
-        ),
-        # small lossless webp
-        (
-            _TestImage(
-                unhexlify(
-                    b"524946461a000000574542505650384c0d0000002f0000001007"
-                    b"1011118888fe0700"
-                ),
-                b"image/webp",
-                b".webp",
-            ),
-        ),
-        # an empty file
-        (
-            _TestImage(
-                b"",
-                b"image/gif",
-                b".gif",
-                expected_found=False,
-                unable_to_thumbnail=True,
-            ),
-        ),
-        # An SVG.
-        (
-            _TestImage(
-                b"""<?xml version="1.0"?>
+small_png = _TestImage(
+    SMALL_PNG,
+    b"image/png",
+    b".png",
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000020000000200806"
+        b"000000737a7af40000001a49444154789cedc101010000008220"
+        b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
+        b"44ae426082"
+    ),
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000001000000010806"
+        b"0000001f15c4890000000d49444154789c636060606000000005"
+        b"0001a5f645400000000049454e44ae426082"
+    ),
+)
+
+small_png_with_transparency = _TestImage(
+    unhexlify(
+        b"89504e470d0a1a0a0000000d49484452000000010000000101000"
+        b"00000376ef9240000000274524e5300010194fdae0000000a4944"
+        b"4154789c636800000082008177cd72b60000000049454e44ae426"
+        b"082"
+    ),
+    b"image/png",
+    b".png",
+    # Note that we don't check the output since it varies across
+    # different versions of Pillow.
+)
+
+small_lossless_webp = _TestImage(
+    unhexlify(
+        b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
+    ),
+    b"image/webp",
+    b".webp",
+)
+
+empty_file = _TestImage(
+    b"",
+    b"image/gif",
+    b".gif",
+    expected_found=False,
+    unable_to_thumbnail=True,
+)
+
+SVG = _TestImage(
+    b"""<?xml version="1.0"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 
@@ -223,20 +210,32 @@ class _TestImage:
   <circle cx="100" cy="100" r="50" stroke="black"
     stroke-width="5" fill="red" />
 </svg>""",
-                b"image/svg",
-                b".svg",
-                expected_found=False,
-                unable_to_thumbnail=True,
-                is_inline=False,
-            ),
-        ),
-    ],
+    b"image/svg",
+    b".svg",
+    expected_found=False,
+    unable_to_thumbnail=True,
+    is_inline=False,
 )
+test_images = [
+    small_png,
+    small_png_with_transparency,
+    small_lossless_webp,
+    empty_file,
+    SVG,
+]
+urls = [
+    "_matrix/media/r0/thumbnail",
+    "_matrix/client/unstable/org.matrix.msc3916/media/thumbnail",
+]
+
+
+@parameterized_class(("test_image", "url"), itertools.product(test_images, urls))
 class MediaRepoTests(unittest.HomeserverTestCase):
     servlets = [media.register_servlets]
     test_image: ClassVar[_TestImage]
     hijack_auth = True
     user_id = "@test:user"
+    url: ClassVar[str]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.fetches: List[
@@ -504,7 +503,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=scale"
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
+            f"/{self.url}/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -532,7 +531,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
+            f"/{self.url}/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -568,7 +567,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=" + method
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{self.media_id}{params}",
+            f"/{self.url}/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -603,7 +602,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": f"Cannot find any thumbnails for the requested media ('/{self.url}/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
@@ -613,7 +612,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_NOT_FOUND",
-                    "error": "Not found '/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/example.com/12345'",
+                    "error": f"Not found '/{self.url}/example.com/12345'",
                 },
             )
 
@@ -628,9 +627,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
-        # thumbnail_resouce = ThumbnailResource(
-        #     self.hs, media_repo, media_repo.media_storage
-        # )
 
         self.assertIsNotNone(
             thumbnail_provider._select_thumbnail(
