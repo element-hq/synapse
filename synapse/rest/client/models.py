@@ -242,7 +242,9 @@ class SlidingSyncBody(RequestBodyModel):
             tags: Optional[List[StrictStr]]
             not_tags: Optional[List[StrictStr]]
 
-        ranges: Optional[List[Tuple[StrictInt, StrictInt]]]
+        ranges: Optional[
+            List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
+        ]
         sort: Optional[List[StrictStr]]
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False

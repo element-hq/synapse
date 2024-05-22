@@ -148,7 +148,7 @@ class SlidingSyncResult:
         count: int
         ops: List[Operation]
 
-    next_pos: str
+    next_pos: StreamToken
     lists: Dict[str, SlidingWindowList]
     rooms: List[RoomResult]
     extensions: JsonMapping
@@ -176,7 +176,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         from_token: Optional[StreamToken] = None,
         timeout: int = 0,
-    ):
+    ) -> SlidingSyncResult:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
@@ -220,7 +220,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         from_token: Optional[StreamToken] = None,
         to_token: StreamToken = None,
-    ):
+    ) -> SlidingSyncResult:
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -228,17 +228,47 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
-        room_id_list = await self.get_sync_room_ids_for_user(
+        # Get all of the room IDs that the user should be able to see in the sync
+        # response
+        room_id_set = await self.get_sync_room_ids_for_user(
             sync_config.user,
             from_token=from_token,
             to_token=to_token,
         )
 
-        logger.info("Sliding sync rooms for user %s: %s", user_id, room_id_list)
+        logger.info("Sliding sync rooms for user %s: %s", user_id, room_id_set)
+
+        # Assemble sliding window lists
+        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        for list_key, list_config in sync_config.lists.items():
+            # TODO: Apply filters
+            filtered_room_ids = room_id_set
+            # TODO: Apply sorts
+            sorted_room_ids = sorted(filtered_room_ids)
+
+            ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+            for range in list_config.ranges:
+                ops.append(
+                    {
+                        "op": OperationType.SYNC,
+                        "range": range,
+                        "room_ids": sorted_room_ids[range[0] : range[1]],
+                    }
+                )
+
+            lists[list_key] = SlidingSyncResult.SlidingWindowList(
+                count=len(sorted_room_ids),
+                ops=ops,
+            )
 
         # TODO: sync_config.room_subscriptions
 
-        # TODO: Calculate Membership changes between the last sync and the current sync.
+        return SlidingSyncResult(
+            next_pos=to_token,
+            lists=lists,
+            rooms=[],
+            extensions={},
+        )
 
     async def get_sync_room_ids_for_user(
         self,

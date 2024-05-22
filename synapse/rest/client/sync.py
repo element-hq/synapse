@@ -808,6 +808,8 @@ class SlidingSyncRestServlet(RestServlet):
             timeout,
         )
 
+        logger.info("sliding_sync_results: %s", sliding_sync_results)
+
         return 200, {"foo": "bar"}
 
 
