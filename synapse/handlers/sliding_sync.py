@@ -192,7 +192,7 @@ class SlidingSyncHandler:
 
         if timeout == 0 or from_token is None:
             now_token = self.event_sources.get_current_token()
-            return await self.current_sync_for_user(
+            result = await self.current_sync_for_user(
                 sync_config,
                 from_token=from_token,
                 to_token=now_token,
@@ -214,6 +214,8 @@ class SlidingSyncHandler:
                 current_sync_callback,
                 from_token=from_token,
             )
+
+        return result
 
     async def current_sync_for_user(
         self,
@@ -249,11 +251,11 @@ class SlidingSyncHandler:
             ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
             for range in list_config.ranges:
                 ops.append(
-                    {
-                        "op": OperationType.SYNC,
-                        "range": range,
-                        "room_ids": sorted_room_ids[range[0] : range[1]],
-                    }
+                    SlidingSyncResult.SlidingWindowList.Operation(
+                        op=OperationType.SYNC,
+                        range=range,
+                        room_ids=sorted_room_ids[range[0] : range[1]],
+                    )
                 )
 
             lists[list_key] = SlidingSyncResult.SlidingWindowList(
@@ -426,7 +428,7 @@ class SlidingSyncHandler:
             # `to_token`.
             if (
                 last_membership_change_after_to_token.membership == Membership.LEAVE
-                and prev_membership != None
+                and prev_membership is not None
                 and prev_membership != Membership.LEAVE
             ):
                 sync_room_id_set.add(room_id)
@@ -438,7 +440,7 @@ class SlidingSyncHandler:
             # the room before the `to_token`.
             elif (
                 last_membership_change_after_to_token.membership != Membership.LEAVE
-                and (prev_membership == None or prev_membership == Membership.LEAVE)
+                and (prev_membership is None or prev_membership == Membership.LEAVE)
             ):
                 sync_room_id_set.discard(room_id)
 

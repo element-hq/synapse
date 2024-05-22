@@ -33,7 +33,7 @@ from synapse.events.utils import (
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
-from synapse.handlers.sliding_sync import SlidingSyncConfig
+from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
@@ -810,7 +810,44 @@ class SlidingSyncRestServlet(RestServlet):
 
         logger.info("sliding_sync_results: %s", sliding_sync_results)
 
-        return 200, {"foo": "bar"}
+        response_content = await self.encode_response(sliding_sync_results)
+
+        return 200, response_content
+
+    # TODO: Is there a better way to encode things?
+    async def encode_response(
+        self,
+        sliding_sync_result: SlidingSyncResult,
+    ) -> JsonDict:
+        response: JsonDict = defaultdict(dict)
+
+        response["next_pos"] = await sliding_sync_result.next_pos.to_string(self.store)
+        response["lists"] = self.encode_lists(sliding_sync_result.lists)
+        response["rooms"] = {}  # TODO: sliding_sync_result.rooms
+        response["extensions"] = {}  # TODO: sliding_sync_result.extensions
+
+        return response
+
+    def encode_lists(
+        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+    ) -> JsonDict:
+        def encode_operation(
+            operation: SlidingSyncResult.SlidingWindowList.Operation,
+        ) -> JsonDict:
+            return {
+                "op": operation.op,
+                "range": operation.range,
+                "room_ids": operation.room_ids,
+            }
+
+        serialized_lists = {}
+        for list_key, list_result in lists.items():
+            serialized_lists[list_key] = {
+                "count": list_result.count,
+                "ops": [encode_operation(op) for op in list_result.ops],
+            }
+
+        return serialized_lists
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
