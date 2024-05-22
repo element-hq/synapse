@@ -294,7 +294,7 @@ class SlidingSyncHandler:
         logger.info(
             "membership_change_events: %s",
             [
-                f"{event.internal_metadata.stream_ordering}: {event.membership} ({event.event_id}: {event.type}, {event.state_key})"
+                f"{event.internal_metadata.stream_ordering}: {event.membership}"
                 for event in membership_change_events
             ],
         )
@@ -335,8 +335,6 @@ class SlidingSyncHandler:
                     max_stream_ordering_from_room_list,
                 )
 
-        logger.info("before fix-up: sync_room_id_set %s", sync_room_id_set)
-
         # 1)
         for event in last_membership_change_by_room_id_in_from_to_range.values():
             # 1) Add back newly left rooms (> `from_token` and <= `to_token`). We
@@ -344,23 +342,6 @@ class SlidingSyncHandler:
             # is their own leave event
             if event.membership == Membership.LEAVE:
                 sync_room_id_set.add(event.room_id)
-
-        logger.info("after 1: sync_room_id_set %s", sync_room_id_set)
-
-        logger.info(
-            "check unsigned2 %s",
-            [
-                f"{x.event_id}->{x.unsigned}"
-                for x in first_membership_change_by_room_id_after_to_token.values()
-            ],
-        )
-        logger.info(
-            "check unsigned3 %s",
-            [
-                f"{x.event_id}->{x.unsigned}"
-                for x in last_membership_change_by_room_id_after_to_token.values()
-            ],
-        )
 
         # 2)
         # TODO: Verify this logic is correct
@@ -373,22 +354,10 @@ class SlidingSyncHandler:
             first_membership_change_after_to_token = (
                 first_membership_change_by_room_id_after_to_token.get(event.room_id, {})
             )
-            logger.info(
-                "aweffaewwfeaewf %s",
-                first_membership_change_after_to_token.get("unsigned"),
-            )
-            # TODO: Figure out why unsigned.prev_content isn't on the events
             prev_content = first_membership_change_after_to_token.unsigned.get(
                 "prev_content", {}
             )
             prev_membership = prev_content.get("membership", None)
-
-            logger.info(
-                "first_membership_change_after_to_token %s",
-                first_membership_change_after_to_token,
-            )
-            logger.info("prev_content %s", prev_content)
-            logger.info("prev_membership %s", prev_membership)
 
             # 2a) Add back rooms that the user left after the `to_token`
             #

@@ -805,8 +805,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        logger.info("check unsigned %s", [f"{x.event_id}->{x.unsigned}" for x in ret])
-
         return ret
 
     async def get_recent_events_for_room(
