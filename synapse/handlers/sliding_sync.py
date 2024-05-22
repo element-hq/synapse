@@ -288,22 +288,13 @@ class SlidingSyncHandler:
             excluded_rooms=self.rooms_to_exclude_globally,
         )
 
-        logger.info(
-            f"> from_token={from_token.room_key.stream} <= to_token={to_token.room_key.stream}, max_stream_ordering_from_room_list={max_stream_ordering_from_room_list}"
-        )
-        logger.info(
-            "membership_change_events: %s",
-            [
-                f"{event.internal_metadata.stream_ordering}: {event.membership}"
-                for event in membership_change_events
-            ],
-        )
-
         # Assemble a list of the last membership events in some given ranges. Someone
         # could have left and joined multiple times during the given range but we only
         # care about end-result so we grab the last one.
         last_membership_change_by_room_id_in_from_to_range: Dict[str, EventBase] = {}
         last_membership_change_by_room_id_after_to_token: Dict[str, EventBase] = {}
+        # We also need the first membership event after the `to_token` so we can step
+        # backward to the previous membership that would apply to the from/to range.
         first_membership_change_by_room_id_after_to_token: Dict[str, EventBase] = {}
         for event in membership_change_events:
             assert event.internal_metadata.stream_ordering
@@ -336,23 +327,25 @@ class SlidingSyncHandler:
                 )
 
         # 1)
-        for event in last_membership_change_by_room_id_in_from_to_range.values():
-            # 1) Add back newly left rooms (> `from_token` and <= `to_token`). We
+        for (
+            last_membership_change_in_from_to_range
+        ) in last_membership_change_by_room_id_in_from_to_range.values():
+            # 1) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
             if event.membership == Membership.LEAVE:
-                sync_room_id_set.add(event.room_id)
+                sync_room_id_set.add(last_membership_change_in_from_to_range.room_id)
 
         # 2)
-        # TODO: Verify this logic is correct
         for (
             last_membership_change_after_to_token
         ) in last_membership_change_by_room_id_after_to_token.values():
             # We want to find the first membership change after the `to_token` then step
-            # backward before the `to_token` to know the membership in the from/to
-            # range.
+            # backward to know the membership in the from/to range.
             first_membership_change_after_to_token = (
-                first_membership_change_by_room_id_after_to_token.get(event.room_id, {})
+                first_membership_change_by_room_id_after_to_token.get(
+                    last_membership_change_after_to_token.room_id
+                )
             )
             prev_content = first_membership_change_after_to_token.unsigned.get(
                 "prev_content", {}
@@ -375,7 +368,7 @@ class SlidingSyncHandler:
             # 2b) Remove rooms that the user joined (hasn't left) after the `to_token`
             #
             # If the last membership event after the `to_token` is a "join" event, then
-            # the room was added to the `get_rooms_for_local_user_where_membership_is()`
+            # the room was included in the `get_rooms_for_local_user_where_membership_is()`
             # results. We should remove these rooms as long as the user wasn't part of
             # the room before the `to_token`.
             elif (
