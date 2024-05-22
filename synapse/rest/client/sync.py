@@ -638,14 +638,26 @@ class SlidingSyncE2eeRestServlet(RestServlet):
                     "state": {
                         "types": ["m.room.member"],
                     },
+                    # We don't want any extra account_data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "account_data": {
+                        "not_types": ["*"],
+                    },
+                    # We don't want any extra ephemeral data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "ephemeral": {
+                        "not_types": ["*"],
+                    },
                 },
                 # We don't want any extra account_data generated because it's not
-                # returned by this endpoint
+                # returned by this endpoint. (This is just here for good measure)
                 "account_data": {
                     "not_types": ["*"],
                 },
                 # We don't want any extra presence data generated because it's not
-                # returned by this endpoint
+                # returned by this endpoint. (This is just here for good measure)
                 "presence": {
                     "not_types": ["*"],
                 },
