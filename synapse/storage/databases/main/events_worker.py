@@ -707,12 +707,22 @@ class EventsWorkerStore(SQLBaseStore):
 
             events.append(event)
 
+            logger.info(
+                "Returning event %s with unsigned %s", event.event_id, event.unsigned
+            )
+
             if get_prev_content:
                 if "replaces_state" in event.unsigned:
                     prev = await self.get_event(
                         event.unsigned["replaces_state"],
                         get_prev_content=False,
                         allow_none=True,
+                    )
+                    logger.info(
+                        "(from %s) Looking for prev=%s and found %s",
+                        event.event_id,
+                        event.unsigned["replaces_state"],
+                        prev,
                     )
                     if prev:
                         event.unsigned = dict(event.unsigned)
