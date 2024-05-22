@@ -43,12 +43,9 @@ from tests.unittest import HomeserverTestCase, override_config
         ),
     ],
 )
-class SendToDeviceTestCaseBase(HomeserverTestCase):
+class SendToDeviceTestCase(HomeserverTestCase):
     """
     Test `/sendToDevice` will deliver messages across to people receiving them over `/sync`.
-
-    In order to run the tests, inherit from this base-class with `HomeserverTestCase`, e.g.
-    `class SendToDeviceTestCase(SendToDeviceTestCase, HomeserverTestCase)`
     """
 
     servlets = [
@@ -60,8 +57,13 @@ class SendToDeviceTestCaseBase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = self.experimental_features
+        config["experimental_features"] = self.experimental_features  # type: ignore[attr-defined]
         return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # This pointless re-assignment avoids `# type: ignore[attr-defined]` problems
+        # throughout the test cases
+        self.sync_endpoint: str = self.sync_endpoint
 
     def test_user_to_user(self) -> None:
         """A to-device message from one user to another should get delivered"""
