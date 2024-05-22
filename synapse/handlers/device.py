@@ -906,6 +906,13 @@ class DeviceHandler(DeviceWorkerHandler):
                         context=opentracing_context,
                     )
 
+                    await self.store.mark_redundant_device_lists_pokes(
+                        user_id=user_id,
+                        device_id=device_id,
+                        room_id=room_id,
+                        converted_upto_stream_id=stream_id,
+                    )
+
                     # Notify replication that we've updated the device list stream.
                     self.notifier.notify_replication()
 

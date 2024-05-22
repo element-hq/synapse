@@ -2161,6 +2161,30 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 },
             )
 
+    async def mark_redundant_device_lists_pokes(
+        self,
+        user_id: str,
+        device_id: str,
+        room_id: str,
+        converted_upto_stream_id: int,
+    ) -> None:
+        """If we've calculated the outbound pokes for a given room/device list
+        update, mark any subsequent changes as already converted"""
+
+        sql = """
+            UPDATE device_lists_changes_in_room
+            SET converted_to_destinations = true
+            WHERE stream_id > ? AND user_id = ? AND device_id = ?
+                AND room_id = ? AND NOT converted_to_destinations
+        """
+
+        def mark_redundant_device_lists_pokes_txn(txn: LoggingTransaction) -> None:
+            txn.execute(sql, (converted_upto_stream_id, user_id, device_id, room_id))
+
+        return await self.db_pool.runInteraction(
+            "mark_redundant_device_lists_pokes", mark_redundant_device_lists_pokes_txn
+        )
+
     def _add_device_outbound_room_poke_txn(
         self,
         txn: LoggingTransaction,
