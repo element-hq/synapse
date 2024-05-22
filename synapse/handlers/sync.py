@@ -1845,7 +1845,6 @@ class SyncHandler:
         At the end, we transfer data from the `sync_result_builder` to a new `E2eeSyncResult`
         instance to signify that the sync calculation is complete.
         """
-
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -1869,6 +1868,11 @@ class SyncHandler:
         if include_device_list_updates:
             # Note that _generate_sync_entry_for_rooms sets sync_result_builder.joined, which
             # is used in calculate_user_changes below.
+            #
+            # TODO: Running `_generate_sync_entry_for_rooms()` is a lot of work just to
+            # figure out the membership changes/derived info needed for
+            # `_generate_sync_entry_for_device_list()`. In the future, we should try to
+            # refactor this away.
             (
                 newly_joined_rooms,
                 newly_left_rooms,
@@ -2110,38 +2114,14 @@ class SyncHandler:
 
         # Step 1a, check for changes in devices of users we share a room
         # with
-        #
-        # We do this in two different ways depending on what we have cached.
-        # If we already have a list of all the user that have changed since
-        # the last sync then it's likely more efficient to compare the rooms
-        # they're in with the rooms the syncing user is in.
-        #
-        # If we don't have that info cached then we get all the users that
-        # share a room with our user and check if those users have changed.
-        cache_result = self.store.get_cached_device_list_changes(
-            since_token.device_list_key
-        )
-        if cache_result.hit:
-            changed_users = cache_result.entities
-
-            result = await self.store.get_rooms_for_users(changed_users)
-
-            for changed_user_id, entries in result.items():
-                # Check if the changed user shares any rooms with the user,
-                # or if the changed user is the syncing user (as we always
-                # want to include device list updates of their own devices).
-                if user_id == changed_user_id or any(
-                    rid in joined_room_ids for rid in entries
-                ):
-                    users_that_have_changed.add(changed_user_id)
-        else:
-            users_that_have_changed = (
-                await self._device_handler.get_device_changes_in_shared_rooms(
-                    user_id,
-                    joined_room_ids,
-                    from_token=since_token,
-                )
+        users_that_have_changed = (
+            await self._device_handler.get_device_changes_in_shared_rooms(
+                user_id,
+                joined_room_ids,
+                from_token=since_token,
+                now_token=sync_result_builder.now_token,
             )
+        )
 
         # Step 1b, check for newly joined rooms
         for room_id in newly_joined_rooms:

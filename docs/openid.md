@@ -525,6 +525,8 @@ oidc_providers:
   (`Options > Security > ID Token signature algorithm` and `Options > Security >
   Access Token signature algorithm`)
 - Scopes: OpenID, Email and Profile
+- Force claims into `id_token`
+  (`Options > Advanced > Force claims to be returned in ID Token`)
 - Allowed redirection addresses for login (`Options > Basic > Allowed
   redirection addresses for login` ) :
   `[synapse public baseurl]/_synapse/client/oidc/callback`

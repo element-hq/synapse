@@ -170,6 +170,7 @@ class RestHelper:
         targ: Optional[str] = None,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
+        extra_data: Optional[dict] = None,
     ) -> JsonDict:
         return self.change_membership(
             room=room,
@@ -178,6 +179,7 @@ class RestHelper:
             tok=tok,
             membership=Membership.INVITE,
             expect_code=expect_code,
+            extra_data=extra_data,
         )
 
     def join(

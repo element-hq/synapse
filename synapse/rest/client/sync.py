@@ -20,7 +20,6 @@
 #
 import itertools
 import logging
-import re
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
@@ -620,7 +619,9 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         }
     """
 
-    PATTERNS = (re.compile("^/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee$"),)
+    PATTERNS = client_patterns(
+        "/org.matrix.msc3575/sync/e2ee$", releases=[], v1=False, unstable=True
+    )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -645,14 +646,26 @@ class SlidingSyncE2eeRestServlet(RestServlet):
                     "state": {
                         "types": ["m.room.member"],
                     },
+                    # We don't want any extra account_data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "account_data": {
+                        "not_types": ["*"],
+                    },
+                    # We don't want any extra ephemeral data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "ephemeral": {
+                        "not_types": ["*"],
+                    },
                 },
                 # We don't want any extra account_data generated because it's not
-                # returned by this endpoint
+                # returned by this endpoint. (This is just here for good measure)
                 "account_data": {
                     "not_types": ["*"],
                 },
                 # We don't want any extra presence data generated because it's not
-                # returned by this endpoint
+                # returned by this endpoint. (This is just here for good measure)
                 "presence": {
                     "not_types": ["*"],
                 },
