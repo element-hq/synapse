@@ -31,3 +31,10 @@ CREATE SEQUENCE IF NOT EXISTS e2e_cross_signing_keys_sequence;
 SELECT setval('e2e_cross_signing_keys_sequence', (
     SELECT COALESCE(MAX(stream_id), 1) FROM e2e_cross_signing_keys
 ));
+
+
+CREATE SEQUENCE IF NOT EXISTS push_rules_stream_sequence;
+
+SELECT setval('push_rules_stream_sequence', (
+    SELECT COALESCE(MAX(stream_id), 1) FROM push_rules_stream
+));
