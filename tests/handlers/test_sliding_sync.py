@@ -446,11 +446,12 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # leave and can still re-join.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
 
+        # Invited to the room before the token
         self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
-        # Leave and Join the room multiple times after we already have our tokens
+        # Join and leave the room after we already have our tokens
         self.helper.join(room_id1, user1_id, tok=user1_tok)
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
@@ -464,3 +465,65 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Room should show up because we were invited before the from/to range
         self.assertEqual(room_id_results, {room_id1})
+
+    def test_multiple_rooms_are_not_confused(
+        self,
+    ) -> None:
+        """
+        Test that multiple rooms are not confused as we fixup the list. This test is
+        spawning from a real world bug in the code where I was accidentally using
+        `event.room_id` in one of the fix-up loops but the `event` being referenced was
+        actually from a different loop.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+
+        # Invited and left the room before the token
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        # Invited to room2
+        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        before_room3_token = self.event_sources.get_current_token()
+
+        # Invited and left room3 during the from/to range
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.invite(room_id3, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.leave(room_id3, user1_id, tok=user1_tok)
+
+        after_room3_token = self.event_sources.get_current_token()
+
+        # Join and leave the room after we already have our tokens
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        # Leave room2
+        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        # Leave room3
+        self.helper.leave(room_id3, user1_id, tok=user1_tok)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_room3_token,
+                to_token=after_room3_token,
+            )
+        )
+
+        self.assertEqual(
+            room_id_results,
+            {
+                # `room_id1` shouldn't show up because we left before the from/to range
+                #
+                # Room should show up because we were invited before the from/to range
+                room_id2,
+                # Room should show up because it was newly_left during the from/to range
+                room_id3,
+            },
+        )

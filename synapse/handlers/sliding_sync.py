@@ -397,11 +397,17 @@ class SlidingSyncHandler:
         for (
             last_membership_change_in_from_to_range
         ) in last_membership_change_by_room_id_in_from_to_range.values():
+            room_id = last_membership_change_in_from_to_range.room_id
+
             # 1) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
             if event.membership == Membership.LEAVE:
-                sync_room_id_set.add(last_membership_change_in_from_to_range.room_id)
+                sync_room_id_set.add(
+                    # TODO: Change this back to `room_id`
+                    # room_id
+                    event.room_id
+                )
 
         # 2)
         for (
@@ -411,8 +417,10 @@ class SlidingSyncHandler:
 
             # We want to find the first membership change after the `to_token` then step
             # backward to know the membership in the from/to range.
-            first_membership_change_after_to_token = (
-                first_membership_change_by_room_id_after_to_token.get(room_id)
+            first_membership_change_after_to_token = first_membership_change_by_room_id_after_to_token.get(
+                # TODO: Change this back to `room_id`
+                # room_id
+                event.room_id
             )
             prev_content = first_membership_change_after_to_token.unsigned.get(
                 "prev_content", {}
