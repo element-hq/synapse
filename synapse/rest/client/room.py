@@ -1109,6 +1109,20 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
+        requester_suspended = await self._store.get_user_suspended_status(
+            requester.user.to_string()
+        )
+
+        if requester_suspended:
+            event = await self._store.get_event(event_id, allow_none=True)
+            if event:
+                if event.sender != requester.user.to_string():
+                    raise SynapseError(
+                        403,
+                        "Only events created by the requester may be redacted while account is suspended.",
+                        Codes.USER_ACCOUNT_SUSPENDED,
+                    )
+
         # Ensure the redacts property in the content matches the one provided in
         # the URL.
         room_version = await self._store.get_room_version(room_id)
