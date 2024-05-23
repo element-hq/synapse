@@ -244,6 +244,9 @@ class SlidingSyncHandler:
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         for list_key, list_config in sync_config.lists.items():
             # TODO: Apply filters
+            #
+            # TODO: Exclude partially stated rooms unless the `required_state` has
+            # `["m.room.member", "$LAZY"]`
             filtered_room_ids = room_id_set
             # TODO: Apply sorts
             sorted_room_ids = sorted(filtered_room_ids)
