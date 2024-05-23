@@ -1,4 +1,5 @@
 import logging
+from enum import Enum
 from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Tuple
 
 import attr
@@ -32,7 +33,7 @@ MEMBERSHIP_TO_DISPLAY_IN_SYNC = (
 
 class SlidingSyncConfig(SlidingSyncBody):
     user: UserID
-    device_id: str
+    device_id: Optional[str]
 
     # Pydantic config
     class Config:
@@ -44,7 +45,7 @@ class SlidingSyncConfig(SlidingSyncBody):
         arbitrary_types_allowed = True
 
 
-class OperationType:
+class OperationType(Enum):
     """Represents the operation types in a Sliding Sync window."""
 
     SYNC: Final = "SYNC"
@@ -209,7 +210,7 @@ class SlidingSyncHandler:
                 )
 
             result = await self.notifier.wait_for_events(
-                sync_config.user,
+                sync_config.user.to_string(),
                 timeout,
                 current_sync_callback,
                 from_token=from_token,
@@ -220,8 +221,8 @@ class SlidingSyncHandler:
     async def current_sync_for_user(
         self,
         sync_config: SlidingSyncConfig,
+        to_token: StreamToken,
         from_token: Optional[StreamToken] = None,
-        to_token: StreamToken = None,
     ) -> SlidingSyncResult:
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
@@ -242,29 +243,31 @@ class SlidingSyncHandler:
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
-        for list_key, list_config in sync_config.lists.items():
-            # TODO: Apply filters
-            #
-            # TODO: Exclude partially stated rooms unless the `required_state` has
-            # `["m.room.member", "$LAZY"]`
-            filtered_room_ids = room_id_set
-            # TODO: Apply sorts
-            sorted_room_ids = sorted(filtered_room_ids)
+        if sync_config.lists:
+            for list_key, list_config in sync_config.lists.items():
+                # TODO: Apply filters
+                #
+                # TODO: Exclude partially stated rooms unless the `required_state` has
+                # `["m.room.member", "$LAZY"]`
+                filtered_room_ids = room_id_set
+                # TODO: Apply sorts
+                sorted_room_ids = sorted(filtered_room_ids)
 
-            ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
-            for range in list_config.ranges:
-                ops.append(
-                    SlidingSyncResult.SlidingWindowList.Operation(
-                        op=OperationType.SYNC,
-                        range=range,
-                        room_ids=sorted_room_ids[range[0] : range[1]],
-                    )
+                ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+                if list_config.ranges:
+                    for range in list_config.ranges:
+                        ops.append(
+                            SlidingSyncResult.SlidingWindowList.Operation(
+                                op=OperationType.SYNC,
+                                range=range,
+                                room_ids=sorted_room_ids[range[0] : range[1]],
+                            )
+                        )
+
+                lists[list_key] = SlidingSyncResult.SlidingWindowList(
+                    count=len(sorted_room_ids),
+                    ops=ops,
                 )
-
-            lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                count=len(sorted_room_ids),
-                ops=ops,
-            )
 
         # TODO: sync_config.room_subscriptions
 
@@ -278,8 +281,8 @@ class SlidingSyncHandler:
     async def get_sync_room_ids_for_user(
         self,
         user: UserID,
+        to_token: StreamToken,
         from_token: Optional[StreamToken] = None,
-        to_token: StreamToken = None,
     ) -> AbstractSet[str]:
         """
         Fetch room IDs that should be listed for this user in the sync response.
@@ -368,7 +371,11 @@ class SlidingSyncHandler:
             assert event.internal_metadata.stream_ordering
 
             if (
-                event.internal_metadata.stream_ordering > from_token.room_key.stream
+                (
+                    from_token is None
+                    or event.internal_metadata.stream_ordering
+                    > from_token.room_key.stream
+                )
                 and event.internal_metadata.stream_ordering <= to_token.room_key.stream
             ):
                 last_membership_change_by_room_id_in_from_to_range[event.room_id] = (
@@ -390,7 +397,7 @@ class SlidingSyncHandler:
                     + " (%d > x <= %d) or (%d > x <= %d). We shouldn't be fetching extra membership"
                     + " events that aren't used.",
                     event.internal_metadata.stream_ordering,
-                    from_token.room_key.stream,
+                    from_token.room_key.stream if from_token else None,
                     to_token.room_key.stream,
                     to_token.room_key.stream,
                     max_stream_ordering_from_room_list,
@@ -418,6 +425,13 @@ class SlidingSyncHandler:
             # backward to know the membership in the from/to range.
             first_membership_change_after_to_token = (
                 first_membership_change_by_room_id_after_to_token.get(room_id)
+            )
+            assert first_membership_change_after_to_token is not None, (
+                "If there was a `last_membership_change_after_to_token` that we're iterating over, "
+                + "then there should be corresponding a first change. For example, even if there "
+                + "is only one event after the `to_token`, the first and last event will be same event. "
+                + "This is probably a mistake in assembling the `last_membership_change_by_room_id_after_to_token`"
+                + "/`first_membership_change_by_room_id_after_to_token` dicts above."
             )
             prev_content = first_membership_change_after_to_token.unsigned.get(
                 "prev_content", {}

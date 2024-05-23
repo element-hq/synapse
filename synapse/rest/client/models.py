@@ -274,6 +274,9 @@ class SlidingSyncBody(RequestBodyModel):
     extensions: Optional[Dict[StrictStr, Extension]]
 
     @validator("lists")
-    def lists_length_check(cls, v):
-        assert len(v) <= 100, f"Max lists: 100 but saw {len(v)}"
-        return v
+    def lists_length_check(
+        cls, value: Optional[Dict[str, SlidingSyncList]]
+    ) -> Optional[Dict[str, SlidingSyncList]]:
+        if value is not None:
+            assert len(value) <= 100, f"Max lists: 100 but saw {len(value)}"
+        return value

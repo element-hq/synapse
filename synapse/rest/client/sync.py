@@ -822,7 +822,9 @@ class SlidingSyncRestServlet(RestServlet):
         response: JsonDict = defaultdict(dict)
 
         response["next_pos"] = await sliding_sync_result.next_pos.to_string(self.store)
-        response["lists"] = self.encode_lists(sliding_sync_result.lists)
+        serialized_lists = self.encode_lists(sliding_sync_result.lists)
+        if serialized_lists:
+            response["lists"] = serialized_lists
         response["rooms"] = {}  # TODO: sliding_sync_result.rooms
         response["extensions"] = {}  # TODO: sliding_sync_result.extensions
 
