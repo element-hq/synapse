@@ -837,7 +837,7 @@ class SlidingSyncRestServlet(RestServlet):
             operation: SlidingSyncResult.SlidingWindowList.Operation,
         ) -> JsonDict:
             return {
-                "op": operation.op,
+                "op": operation.op.value,
                 "range": operation.range,
                 "room_ids": operation.room_ids,
             }
