@@ -60,6 +60,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
+        config["experimental_features"] = self.experimental_features
         return config
 
     def test_user_to_user(self) -> None:
