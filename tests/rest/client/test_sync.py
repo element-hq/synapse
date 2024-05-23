@@ -700,7 +700,13 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device list (`device_lists`) changes."""
+    """
+    Tests regarding device list (`device_lists`) changes.
+
+    Attributes:
+        sync_endpoint (str): The endpoint under test to use for syncing.
+        experimental_features (JsonDict): The experimental features homeserver config to use.
+    """
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -907,7 +913,13 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device one time keys (`device_one_time_keys_count`) changes."""
+    """
+    Tests regarding device one time keys (`device_one_time_keys_count`) changes.
+
+    Attributes:
+        sync_endpoint (str): The endpoint under test to use for syncing.
+        experimental_features (JsonDict): The experimental features homeserver config to use.
+    """
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -1013,7 +1025,13 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device one time keys (`device_unused_fallback_key_types`) changes."""
+    """
+    Tests regarding device one time keys (`device_unused_fallback_key_types`) changes.
+
+    Attributes:
+        sync_endpoint (str): The endpoint under test to use for syncing.
+        experimental_features (JsonDict): The experimental features homeserver config to use.
+    """
 
     servlets = [
         synapse.rest.admin.register_servlets,

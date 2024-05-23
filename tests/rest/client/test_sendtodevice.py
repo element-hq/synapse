@@ -46,6 +46,10 @@ from tests.unittest import HomeserverTestCase, override_config
 class SendToDeviceTestCase(HomeserverTestCase):
     """
     Test `/sendToDevice` will deliver messages across to people receiving them over `/sync`.
+
+    Attributes:
+        sync_endpoint (str): The endpoint under test to use for syncing.
+        experimental_features (JsonDict): The experimental features homeserver config to use.
     """
 
     servlets = [
