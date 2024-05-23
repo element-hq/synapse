@@ -20,14 +20,10 @@
 #
 from parameterized import parameterized_class
 
-from twisted.test.proto_helpers import MemoryReactor
-
 from synapse.api.constants import EduTypes
 from synapse.rest import admin
 from synapse.rest.client import login, sendtodevice, sync
-from synapse.server import HomeServer
 from synapse.types import JsonDict
-from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase, override_config
 
@@ -48,9 +44,12 @@ class SendToDeviceTestCase(HomeserverTestCase):
     Test `/sendToDevice` will deliver messages across to people receiving them over `/sync`.
 
     Attributes:
-        sync_endpoint (str): The endpoint under test to use for syncing.
-        experimental_features (JsonDict): The experimental features homeserver config to use.
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
     """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
 
     servlets = [
         admin.register_servlets,
@@ -61,13 +60,7 @@ class SendToDeviceTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = self.experimental_features  # type: ignore[attr-defined]
         return config
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # This pointless re-assignment avoids `# type: ignore[attr-defined]` problems
-        # throughout the test cases
-        self.sync_endpoint: str = self.sync_endpoint
 
     def test_user_to_user(self) -> None:
         """A to-device message from one user to another should get delivered"""
