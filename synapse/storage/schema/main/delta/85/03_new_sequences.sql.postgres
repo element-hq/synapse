@@ -1,0 +1,27 @@
+--
+-- This file is licensed under the Affero General Public License (AGPL) version 3.
+--
+-- Copyright (C) 2024 New Vector, Ltd
+--
+-- This program is free software: you can redistribute it and/or modify
+-- it under the terms of the GNU Affero General Public License as
+-- published by the Free Software Foundation, either version 3 of the
+-- License, or (at your option) any later version.
+--
+-- See the GNU Affero General Public License for more details:
+-- <https://www.gnu.org/licenses/agpl-3.0.html>.
+
+CREATE SEQUENCE IF NOT EXISTS device_lists_sequence;
+
+-- We need to take the max across all the device lists tables as they share the
+-- ID generator
+SELECT setval('device_lists_sequence', (
+    SELECT GREATEST(
+        (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_stream),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM user_signature_stream),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_outbound_pokes),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_changes_in_room),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_remote_pending),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_changes_converted_stream_position)
+    )
+));
