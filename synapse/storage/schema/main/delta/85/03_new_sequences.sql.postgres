@@ -25,3 +25,9 @@ SELECT setval('device_lists_sequence', (
         (SELECT COALESCE(MAX(stream_id), 1) FROM device_lists_changes_converted_stream_position)
     )
 ));
+
+CREATE SEQUENCE IF NOT EXISTS e2e_cross_signing_keys_sequence;
+
+SELECT setval('e2e_cross_signing_keys_sequence', (
+    SELECT COALESCE(MAX(stream_id), 1) FROM e2e_cross_signing_keys
+));
