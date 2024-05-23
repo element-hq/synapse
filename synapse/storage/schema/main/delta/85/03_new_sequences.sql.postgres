@@ -38,3 +38,15 @@ CREATE SEQUENCE IF NOT EXISTS push_rules_stream_sequence;
 SELECT setval('push_rules_stream_sequence', (
     SELECT COALESCE(MAX(stream_id), 1) FROM push_rules_stream
 ));
+
+
+CREATE SEQUENCE IF NOT EXISTS pushers_sequence;
+
+-- We need to take the max across all the pusher tables as they share the
+-- ID generator
+SELECT setval('pushers_sequence', (
+    SELECT GREATEST(
+        (SELECT COALESCE(MAX(id), 1) FROM pushers),
+        (SELECT COALESCE(MAX(stream_id), 1) FROM deleted_pushers)
+    )
+));
