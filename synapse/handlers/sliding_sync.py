@@ -402,7 +402,7 @@ class SlidingSyncHandler:
             # 1) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
-            if event.membership == Membership.LEAVE:
+            if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
                 sync_room_id_set.add(room_id)
 
         # 2)
