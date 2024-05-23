@@ -160,7 +160,11 @@ class SlidingSyncBody(RequestBodyModel):
             required_state: List[Tuple[StrictStr, StrictStr]]
 
         required_state: List[Tuple[StrictStr, StrictStr]]
-        timeline_limit: conint(le=1000, strict=True)
+        # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
+        if TYPE_CHECKING:
+            timeline_limit: int
+        else:
+            timeline_limit: conint(le=1000, strict=True)  # type: ignore[valid-type]
         include_old_rooms: Optional[IncludeOldRooms]
 
     class SlidingSyncList(CommonRoomParameters):
@@ -242,9 +246,11 @@ class SlidingSyncBody(RequestBodyModel):
             tags: Optional[List[StrictStr]]
             not_tags: Optional[List[StrictStr]]
 
-        ranges: Optional[
-            List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
-        ]
+        # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
+        if TYPE_CHECKING:
+            ranges: Optional[List[Tuple[int, int]]]
+        else:
+            ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]]  # type: ignore[valid-type]
         sort: Optional[List[StrictStr]]
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
@@ -259,7 +265,11 @@ class SlidingSyncBody(RequestBodyModel):
         lists: Optional[List[StrictStr]]
         rooms: Optional[List[StrictStr]]
 
-    lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]]
+    # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
+    if TYPE_CHECKING:
+        lists: Optional[Dict[str, SlidingSyncList]]
+    else:
+        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]]  # type: ignore[valid-type]
     room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]]
     extensions: Optional[Dict[StrictStr, Extension]]
 
