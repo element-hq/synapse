@@ -700,7 +700,16 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device list (`device_lists`) changes."""
+    """
+    Tests regarding device list (`device_lists`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -712,13 +721,8 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = self.experimental_features  # type: ignore[attr-defined]
+        config["experimental_features"] = self.experimental_features
         return config
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # This pointless re-assignment avoids `# type: ignore[attr-defined]` problems
-        # throughout the test cases
-        self.sync_endpoint: str = self.sync_endpoint
 
     def test_receiving_local_device_list_changes(self) -> None:
         """Tests that a local users that share a room receive each other's device list
@@ -907,7 +911,16 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device one time keys (`device_one_time_keys_count`) changes."""
+    """
+    Tests regarding device one time keys (`device_one_time_keys_count`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -918,14 +931,10 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = self.experimental_features  # type: ignore[attr-defined]
+        config["experimental_features"] = self.experimental_features
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # This pointless re-assignment avoids `# type: ignore[attr-defined]` problems
-        # throughout the test cases
-        self.sync_endpoint: str = self.sync_endpoint
-
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
     def test_no_device_one_time_keys(self) -> None:
@@ -1013,7 +1022,16 @@ class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
     ],
 )
 class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
-    """Tests regarding device one time keys (`device_unused_fallback_key_types`) changes."""
+    """
+    Tests regarding device one time keys (`device_unused_fallback_key_types`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -1024,14 +1042,10 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
-        config["experimental_features"] = self.experimental_features  # type: ignore[attr-defined]
+        config["experimental_features"] = self.experimental_features
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        # This pointless re-assignment avoids `# type: ignore[attr-defined]` problems
-        # throughout the test cases
-        self.sync_endpoint: str = self.sync_endpoint
-
         self.store = self.hs.get_datastores().main
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
 
