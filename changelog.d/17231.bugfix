@@ -1,0 +1,1 @@
+Fixed presence results not returning offline users on initial sync. Contributed by @Michael-Hollister.

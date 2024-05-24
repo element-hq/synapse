@@ -916,7 +916,7 @@ def _test_sending_local_online_presence_to_local_user(
     presence_updates, sync_token = sync_presence(
         test_case, test_case.presence_receiver_id
     )
-    test_case.assertEqual(len(presence_updates), 1)
+    test_case.assertEqual(len(presence_updates), 2)
 
     presence_update: UserPresenceState = presence_updates[0]
     test_case.assertEqual(presence_update.user_id, test_case.presence_sender_id)
