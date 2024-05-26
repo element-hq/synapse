@@ -38,7 +38,7 @@ fn reset_logging_config() {
 
 /// The entry point for defining the Python module.
 #[pymodule]
-fn synapse_rust(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_rust_file_digest, m)?)?;
     m.add_function(wrap_pyfunction!(reset_logging_config, m)?)?;

@@ -67,6 +67,23 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
         self.assertEqual(channel.json_body["errcode"], "M_NOT_JSON")
 
+    def test_failed_edu_causes_500(self) -> None:
+        """If the EDU handler fails, /send should return a 500."""
+
+        async def failing_handler(_origin: str, _content: JsonDict) -> None:
+            raise Exception("bleh")
+
+        self.hs.get_federation_registry().register_edu_handler(
+            "FAIL_EDU_TYPE", failing_handler
+        )
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
+        )
+        self.assertEqual(500, channel.code, channel.result)
+
 
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:

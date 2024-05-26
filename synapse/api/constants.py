@@ -234,6 +234,13 @@ class EventContentFields:
     TO_DEVICE_MSGID: Final = "org.matrix.msgid"
 
 
+class EventUnsignedContentFields:
+    """Fields found inside the 'unsigned' data on events"""
+
+    # Requesting user's membership, per MSC4115
+    MSC4115_MEMBERSHIP: Final = "io.element.msc4115.membership"
+
+
 class RoomTypes:
     """Understood values of the room_type field of m.room.create events."""
 

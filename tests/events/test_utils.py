@@ -32,6 +32,7 @@ from synapse.events.utils import (
     PowerLevelsContent,
     SerializeEventConfig,
     _split_field,
+    clone_event,
     copy_and_fixup_power_levels_contents,
     maybe_upsert_event_field,
     prune_event,
@@ -609,6 +610,29 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
             },
             room_version=msc3389_room_ver,
         )
+
+
+class CloneEventTestCase(stdlib_unittest.TestCase):
+    def test_unsigned_is_copied(self) -> None:
+        original = make_event_from_dict(
+            {
+                "type": "A",
+                "event_id": "$test:domain",
+                "unsigned": {"a": 1, "b": 2},
+            },
+            RoomVersions.V1,
+            {"txn_id": "txn"},
+        )
+        original.internal_metadata.stream_ordering = 1234
+        self.assertEqual(original.internal_metadata.stream_ordering, 1234)
+
+        cloned = clone_event(original)
+        cloned.unsigned["b"] = 3
+
+        self.assertEqual(original.unsigned, {"a": 1, "b": 2})
+        self.assertEqual(cloned.unsigned, {"a": 1, "b": 3})
+        self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
+        self.assertEqual(cloned.internal_metadata.txn_id, "txn")
 
 
 class SerializeEventTestCase(stdlib_unittest.TestCase):

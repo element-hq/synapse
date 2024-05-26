@@ -117,6 +117,14 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.106.0
+
+## Minimum supported Rust version
+The minimum supported Rust version has been increased from v1.65.0 to v1.66.0.
+Users building from source will need to ensure their `rustc` version is up to
+date.
+
+
 # Upgrading to v1.100.0
 
 ## Minimum supported Rust version

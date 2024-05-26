@@ -169,6 +169,7 @@ class UsernameMappingSession:
     # attributes returned by the ID mapper
     display_name: Optional[str]
     emails: StrCollection
+    avatar_url: Optional[str]
 
     # An optional dictionary of extra attributes to be provided to the client in the
     # login response.
@@ -183,6 +184,7 @@ class UsernameMappingSession:
     # choices made by the user
     chosen_localpart: Optional[str] = None
     use_display_name: bool = True
+    use_avatar: bool = True
     emails_to_use: StrCollection = ()
     terms_accepted_version: Optional[str] = None
 
@@ -660,6 +662,9 @@ class SsoHandler:
             remote_user_id=remote_user_id,
             display_name=attributes.display_name,
             emails=attributes.emails,
+            avatar_url=attributes.picture,
+            # Default to using all mapped emails. Will be overwritten in handle_submit_username_request.
+            emails_to_use=attributes.emails,
             client_redirect_url=client_redirect_url,
             expiry_time_ms=now + self._MAPPING_SESSION_VALIDITY_PERIOD_MS,
             extra_login_attributes=extra_login_attributes,
@@ -812,7 +817,7 @@ class SsoHandler:
                 server_name = profile["avatar_url"].split("/")[-2]
                 media_id = profile["avatar_url"].split("/")[-1]
                 if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)
+                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
                     if media is not None and upload_name == media.upload_name:
                         logger.info("skipping saving the user avatar")
                         return True
@@ -966,6 +971,7 @@ class SsoHandler:
         session_id: str,
         localpart: str,
         use_display_name: bool,
+        use_avatar: bool,
         emails_to_use: Iterable[str],
     ) -> None:
         """Handle a request to the username-picker 'submit' endpoint
@@ -988,6 +994,7 @@ class SsoHandler:
         # update the session with the user's choices
         session.chosen_localpart = localpart
         session.use_display_name = use_display_name
+        session.use_avatar = use_avatar
 
         emails_from_idp = set(session.emails)
         filtered_emails: Set[str] = set()
@@ -1067,6 +1074,9 @@ class SsoHandler:
 
         if session.use_display_name:
             attributes.display_name = session.display_name
+
+        if session.use_avatar:
+            attributes.picture = session.avatar_url
 
         # the following will raise a 400 error if the username has been taken in the
         # meantime.
