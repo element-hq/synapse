@@ -439,3 +439,7 @@ class ExperimentalConfig(Config):
         self.msc4115_membership_on_events = experimental.get(
             "msc4115_membership_on_events", False
         )
+
+        self.msc3916_authenticated_media_enabled = experimental.get(
+            "msc3916_authenticated_media_enabled", False
+        )
