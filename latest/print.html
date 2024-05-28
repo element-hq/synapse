@@ -1842,7 +1842,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.107.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.108.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -4827,6 +4827,23 @@ the same whitelist.</p>
   - syd.example.com
 </code></pre>
 <hr />
+<h3 id="federation_whitelist_endpoint_enabled"><a class="header" href="#federation_whitelist_endpoint_enabled"><code>federation_whitelist_endpoint_enabled</code></a></h3>
+<p>Enables an endpoint for fetching the federation whitelist config.</p>
+<p>The request method and path is <code>GET /_synapse/client/v1/config/federation_whitelist</code>, and the
+response format is:</p>
+<pre><code class="language-json">{
+    &quot;whitelist_enabled&quot;: true,  // Whether the federation whitelist is being enforced
+    &quot;whitelist&quot;: [  // Which server names are allowed by the whitelist
+        &quot;example.com&quot;
+    ]
+}
+</code></pre>
+<p>If <code>whitelist_enabled</code> is <code>false</code> then the server is permitted to federate with all others.</p>
+<p>The endpoint requires authentication.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">federation_whitelist_endpoint_enabled: true
+</code></pre>
+<hr />
 <h3 id="federation_metrics_domains"><a class="header" href="#federation_metrics_domains"><code>federation_metrics_domains</code></a></h3>
 <p>Report prometheus metrics on the age of PDUs being sent to and received from
 the given domains. This can be used to give an idea of &quot;delay&quot; on inbound
@@ -5934,6 +5951,10 @@ federated servers if <code>autocreate_auto_join_rooms_federated</code> is true (
 <li>&quot;trusted_private_chat&quot;: an invitation is required to join this room and the invitee is
 assigned a power level of 100 upon joining the room.</li>
 </ul>
+<p>Each preset will set up a room in the same manner as if it were provided as the <code>preset</code> parameter when
+calling the
+<a href="https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom"><code>POST /_matrix/client/v3/createRoom</code></a>
+Client-Server API endpoint.</p>
 <p>If a value of &quot;private_chat&quot; or &quot;trusted_private_chat&quot; is used then
 <code>auto_join_mxid_localpart</code> must also be configured.</p>
 <p>Defaults to &quot;public_chat&quot;.</p>
@@ -6802,6 +6823,19 @@ All of the listed attributes must match for the login to be permitted.</p>
 users. This allows the CAS SSO flow to be limited to sign in only, rather than
 automatically registering users that have a valid SSO login but do not have
 a pre-registered account. Defaults to true.</p>
+</li>
+<li>
+<p><code>allow_numeric_ids</code>: set to 'true' allow numeric user IDs (default false).
+This allows CAS SSO flow to provide user IDs composed of numbers only.
+These identifiers will be prefixed by the letter &quot;u&quot; by default.
+The prefix can be configured using the &quot;numeric_ids_prefix&quot; option.
+Be careful to choose the prefix correctly to avoid any possible conflicts
+(e.g. user 1234 becomes u1234 when a user u1234 already exists).</p>
+</li>
+<li>
+<p><code>numeric_ids_prefix</code>: the prefix you wish to add in front of a numeric user ID
+when the &quot;allow_numeric_ids&quot; option is set to &quot;true&quot;.
+By default, the prefix is the letter &quot;u&quot; and only alphanumeric characters are allowed.</p>
 <p><em>Added in Synapse 1.93.0.</em></p>
 </li>
 </ul>
@@ -6815,6 +6849,8 @@ a pre-registered account. Defaults to true.</p>
     userGroup: &quot;staff&quot;
     department: None
   enable_registration: true
+  allow_numeric_ids: true
+  numeric_ids_prefix: &quot;numericuser&quot;
 </code></pre>
 <hr />
 <h3 id="sso"><a class="header" href="#sso"><code>sso</code></a></h3>
@@ -11483,6 +11519,8 @@ information.</p>
 ^/_matrix/federation/v1/make_leave/
 ^/_matrix/federation/(v1|v2)/send_join/
 ^/_matrix/federation/(v1|v2)/send_leave/
+^/_matrix/federation/v1/make_knock/
+^/_matrix/federation/v1/send_knock/
 ^/_matrix/federation/(v1|v2)/invite/
 ^/_matrix/federation/v1/event_auth/
 ^/_matrix/federation/v1/timestamp_to_event/
@@ -11784,7 +11822,7 @@ the stream writer for the <code>presence</code> stream:</p>
 </code></pre>
 <h5 id="the-push_rules-stream"><a class="header" href="#the-push_rules-stream">The <code>push_rules</code> stream</a></h5>
 <p>The following endpoints should be routed directly to the worker configured as
-the stream writer for the <code>push</code> stream:</p>
+the stream writer for the <code>push_rules</code> stream:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 </code></pre>
 <h4 id="restrict-outbound-federation-traffic-to-a-specific-set-of-workers"><a class="header" href="#restrict-outbound-federation-traffic-to-a-specific-set-of-workers">Restrict outbound federation traffic to a specific set of workers</a></h4>
@@ -14333,8 +14371,8 @@ provider for SSO (Single sign-on). More details are in the configuration manual 
 sections <a href="admin_api/../usage/configuration/config_documentation.html#sso">sso</a> and <a href="admin_api/../usage/configuration/config_documentation.html#oidc_providers">oidc_providers</a>.</p>
 <ul>
 <li><code>auth_provider</code> - <strong>string</strong>, required. The unique, internal ID of the external identity provider.
-The same as <code>idp_id</code> from the homeserver configuration. Note that no error is raised if the
-provided value is not in the homeserver configuration.</li>
+The same as <code>idp_id</code> from the homeserver configuration. If using OIDC, this value should be prefixed
+with <code>oidc-</code>. Note that no error is raised if the provided value is not in the homeserver configuration.</li>
 <li><code>external_id</code> - <strong>string</strong>, required. An identifier for the user in the external identity provider.
 When the user logs in to the identity provider, this must be the unique ID that they map to.</li>
 </ul>
@@ -16494,9 +16532,9 @@ starting value.</p>
 improvement in overall memory use, and especially in terms of giving back
 RAM to the OS. To use it, the library must simply be put in the
 LD_PRELOAD environment variable when launching Synapse. On Debian, this
-can be done by installing the <code>libjemalloc1</code> package and adding this
+can be done by installing the <code>libjemalloc2</code> package and adding this
 line to <code>/etc/default/matrix-synapse</code>:</p>
-<pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.1
+<pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 </code></pre>
 <p>This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.</p>

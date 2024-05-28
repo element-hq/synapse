@@ -1207,6 +1207,23 @@ the same whitelist.</p>
   - syd.example.com
 </code></pre>
 <hr />
+<h3 id="federation_whitelist_endpoint_enabled"><a class="header" href="#federation_whitelist_endpoint_enabled"><code>federation_whitelist_endpoint_enabled</code></a></h3>
+<p>Enables an endpoint for fetching the federation whitelist config.</p>
+<p>The request method and path is <code>GET /_synapse/client/v1/config/federation_whitelist</code>, and the
+response format is:</p>
+<pre><code class="language-json">{
+    &quot;whitelist_enabled&quot;: true,  // Whether the federation whitelist is being enforced
+    &quot;whitelist&quot;: [  // Which server names are allowed by the whitelist
+        &quot;example.com&quot;
+    ]
+}
+</code></pre>
+<p>If <code>whitelist_enabled</code> is <code>false</code> then the server is permitted to federate with all others.</p>
+<p>The endpoint requires authentication.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">federation_whitelist_endpoint_enabled: true
+</code></pre>
+<hr />
 <h3 id="federation_metrics_domains"><a class="header" href="#federation_metrics_domains"><code>federation_metrics_domains</code></a></h3>
 <p>Report prometheus metrics on the age of PDUs being sent to and received from
 the given domains. This can be used to give an idea of &quot;delay&quot; on inbound
@@ -2314,6 +2331,10 @@ federated servers if <code>autocreate_auto_join_rooms_federated</code> is true (
 <li>&quot;trusted_private_chat&quot;: an invitation is required to join this room and the invitee is
 assigned a power level of 100 upon joining the room.</li>
 </ul>
+<p>Each preset will set up a room in the same manner as if it were provided as the <code>preset</code> parameter when
+calling the
+<a href="https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom"><code>POST /_matrix/client/v3/createRoom</code></a>
+Client-Server API endpoint.</p>
 <p>If a value of &quot;private_chat&quot; or &quot;trusted_private_chat&quot; is used then
 <code>auto_join_mxid_localpart</code> must also be configured.</p>
 <p>Defaults to &quot;public_chat&quot;.</p>
@@ -3182,6 +3203,19 @@ All of the listed attributes must match for the login to be permitted.</p>
 users. This allows the CAS SSO flow to be limited to sign in only, rather than
 automatically registering users that have a valid SSO login but do not have
 a pre-registered account. Defaults to true.</p>
+</li>
+<li>
+<p><code>allow_numeric_ids</code>: set to 'true' allow numeric user IDs (default false).
+This allows CAS SSO flow to provide user IDs composed of numbers only.
+These identifiers will be prefixed by the letter &quot;u&quot; by default.
+The prefix can be configured using the &quot;numeric_ids_prefix&quot; option.
+Be careful to choose the prefix correctly to avoid any possible conflicts
+(e.g. user 1234 becomes u1234 when a user u1234 already exists).</p>
+</li>
+<li>
+<p><code>numeric_ids_prefix</code>: the prefix you wish to add in front of a numeric user ID
+when the &quot;allow_numeric_ids&quot; option is set to &quot;true&quot;.
+By default, the prefix is the letter &quot;u&quot; and only alphanumeric characters are allowed.</p>
 <p><em>Added in Synapse 1.93.0.</em></p>
 </li>
 </ul>
@@ -3195,6 +3229,8 @@ a pre-registered account. Defaults to true.</p>
     userGroup: &quot;staff&quot;
     department: None
   enable_registration: true
+  allow_numeric_ids: true
+  numeric_ids_prefix: &quot;numericuser&quot;
 </code></pre>
 <hr />
 <h3 id="sso"><a class="header" href="#sso"><code>sso</code></a></h3>
