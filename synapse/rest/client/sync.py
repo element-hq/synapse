@@ -745,15 +745,121 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
 class SlidingSyncRestServlet(RestServlet):
     """
-    API endpoint for MSC3575 Sliding Sync `/sync`. TODO
+    API endpoint for MSC3575 Sliding Sync `/sync`. Allows for clients to request a
+    subset (sliding window) of rooms, state, and timeline events (just what they need)
+    in order to bootstrap quickly and subscribe to only what the client cares about.
+    Because the client can specify what it cares about, we can respond quickly and skip
+    all of the work we would normally have to do with a sync v2 response.
 
-    GET parameters::
+    Request query parameters:
         timeout: How long to wait for new events in milliseconds.
         pos: Stream position token when asking for incremental deltas.
 
+    Request body::
+        {
+            // Sliding Window API
+            "lists": {
+                "foo-list": {
+                    "ranges": [ [0, 99] ],
+                    "sort": [ "by_notification_level", "by_recency", "by_name" ],
+                    "required_state": [
+                        ["m.room.join_rules", ""],
+                        ["m.room.history_visibility", ""],
+                        ["m.space.child", "*"]
+                    ],
+                    "timeline_limit": 10,
+                    "filters": {
+                        "is_dm": true
+                    },
+                    "bump_event_types": [ "m.room.message", "m.room.encrypted" ],
+                }
+            },
+            // Room Subscriptions API
+            "room_subscriptions": {
+                "!sub1:bar": {
+                    "required_state": [ ["*","*"] ],
+                    "timeline_limit": 10,
+                    "include_old_rooms": {
+                        "timeline_limit": 1,
+                        "required_state": [ ["m.room.tombstone", ""], ["m.room.create", ""] ],
+                    }
+                }
+            },
+            // Extensions API
+            "extensions": {}
+        }
+
     Response JSON::
         {
-            TODO
+            "next_pos": "s58_224_0_13_10_1_1_16_0_1",
+            "lists": {
+                "foo-list": {
+                    "count": 1337,
+                    "ops": [{
+                        "op": "SYNC",
+                        "range": [0, 99],
+                        "room_ids": [
+                            "!foo:bar",
+                            // ... 99 more room IDs
+                        ]
+                    }]
+                }
+            },
+            // Aggregated rooms from lists and room subscriptions
+            "rooms": {
+                // Room from room subscription
+                "!sub1:bar": {
+                    "name": "Alice and Bob",
+                    "avatar": "mxc://...",
+                    "initial": true,
+                    "required_state": [
+                        {"sender":"@alice:example.com","type":"m.room.create", "state_key":"", "content":{"creator":"@alice:example.com"}},
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.room.member", "state_key":"@alice:example.com", "content":{"membership":"join"}}
+                    ],
+                    "timeline": [
+                        {"sender":"@alice:example.com","type":"m.room.create", "state_key":"", "content":{"creator":"@alice:example.com"}},
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.room.member", "state_key":"@alice:example.com", "content":{"membership":"join"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}},
+                    ],
+                    "prev_batch": "t111_222_333",
+                    "joined_count": 41,
+                    "invited_count": 1,
+                    "notification_count": 1,
+                    "highlight_count": 0
+                },
+                // rooms from list
+                "!foo:bar": {
+                    "name": "The calculated room name",
+                    "avatar": "mxc://...",
+                    "initial": true,
+                    "required_state": [
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!foo:example.com", "content":{"via":["example.com"]}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!bar:example.com", "content":{"via":["example.com"]}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!baz:example.com", "content":{"via":["example.com"]}}
+                    ],
+                    "timeline": [
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"C"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"D"}},
+                    ],
+                    "prev_batch": "t111_222_333",
+                    "joined_count": 4,
+                    "invited_count": 0,
+                    "notification_count": 54,
+                    "highlight_count": 3
+                },
+                 // ... 99 more items
+            },
+            "extensions": {}
         }
     """
 
@@ -807,8 +913,6 @@ class SlidingSyncRestServlet(RestServlet):
             from_token,
             timeout,
         )
-
-        logger.info("sliding_sync_results: %s", sliding_sync_results)
 
         response_content = await self.encode_response(sliding_sync_results)
 
