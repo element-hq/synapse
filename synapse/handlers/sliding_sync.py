@@ -32,6 +32,11 @@ MEMBERSHIP_TO_DISPLAY_IN_SYNC = (
 
 
 class SlidingSyncConfig(SlidingSyncBody):
+    """
+    Inherit from `SlidingSyncBody` since we need all of the same fields and add a few
+    extra fields that we need in the handler
+    """
+
     user: UserID
     device_id: Optional[str]
 
@@ -46,7 +51,20 @@ class SlidingSyncConfig(SlidingSyncBody):
 
 
 class OperationType(Enum):
-    """Represents the operation types in a Sliding Sync window."""
+    """
+    Represents the operation types in a Sliding Sync window.
+
+    Attributes:
+        SYNC: Sets a range of entries. Clients SHOULD discard what they previous knew about
+            entries in this range.
+        INSERT: Sets a single entry. If the position is not empty then clients MUST move
+            entries to the left or the right depending on where the closest empty space is.
+        DELETE: Remove a single entry. Often comes before an INSERT to allow entries to move
+            places.
+        INVALIDATE: Remove a range of entries. Clients MAY persist the invalidated range for
+            offline support, but they should be treated as empty when additional operations
+            which concern indexes in the range arrive from the server.
+    """
 
     SYNC: Final = "SYNC"
     INSERT: Final = "INSERT"
@@ -57,17 +75,18 @@ class OperationType(Enum):
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class SlidingSyncResult:
     """
+    The Sliding Sync result to be serialized to JSON for a response.
+
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
         rooms: Room subscription API. A map of room ID to room subscription to room results.
-        extensions: TODO
+        extensions: Extensions API. A map of extension key to extension results.
     """
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class RoomResult:
         """
-
         Attributes:
             name: Room name or calculated room name.
             avatar: Room avatar
@@ -224,6 +243,10 @@ class SlidingSyncHandler:
         to_token: StreamToken,
         from_token: Optional[StreamToken] = None,
     ) -> SlidingSyncResult:
+        """
+        Generates the response body of a Sliding Sync result, represented as a
+        `SlidingSyncResult`.
+        """
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -238,8 +261,6 @@ class SlidingSyncHandler:
             from_token=from_token,
             to_token=to_token,
         )
-
-        logger.info("Sliding sync rooms for user %s: %s", user_id, room_id_set)
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
@@ -269,11 +290,10 @@ class SlidingSyncHandler:
                     ops=ops,
                 )
 
-        # TODO: sync_config.room_subscriptions
-
         return SlidingSyncResult(
             next_pos=to_token,
             lists=lists,
+            # TODO: Gather room data for rooms in lists and `sync_config.room_subscriptions`
             rooms=[],
             extensions={},
         )
@@ -392,6 +412,10 @@ class SlidingSyncHandler:
                     event.room_id, event
                 )
             else:
+                # We don't expect this to happen since we should only be fetching
+                # `membership_change_events` that fall in the given ranges above. It
+                # doesn't hurt anything to ignore an event we don't need but may
+                # indicate a bug in the logic above.
                 raise AssertionError(
                     "Membership event with stream_ordering=%s should fall in the given ranges above"
                     + " (%d > x <= %d) or (%d > x <= %d). We shouldn't be fetching extra membership"
