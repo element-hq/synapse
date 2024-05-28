@@ -1977,7 +1977,9 @@ class SyncHandler:
 
             for room_id, event in last_membership_change_by_room_id.items():
                 assert event.internal_metadata.stream_ordering
-                # Skip any events that TODO
+                # As a shortcut, skip any events that happened before we got our
+                # `get_rooms_for_user()` snapshot (any changes are already represented
+                # in that list).
                 if (
                     event.internal_metadata.stream_ordering
                     < token_before_rooms.room_key.stream
