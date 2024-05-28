@@ -128,7 +128,7 @@ class SlidingSyncBody(RequestBodyModel):
             permalink or by refreshing a webapp currently viewing a specific room. The
             sliding window API alone is insufficient for this use case because there's
             no way to say "please track this room explicitly".
-        extensions: TODO
+        extensions: Extensions API. A map of extension key to extension config.
     """
 
     class CommonRoomParameters(RequestBodyModel):
