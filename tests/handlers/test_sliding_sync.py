@@ -12,7 +12,10 @@ from tests.unittest import HomeserverTestCase
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
-    """Tests Sliding Sync handler `get_sync_room_ids_for_user`."""
+    """
+    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it returns
+    the correct list of rooms IDs.
+    """
 
     servlets = [
         admin.register_servlets,
@@ -192,7 +195,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
     def test_no_joins_after_to_token(self) -> None:
         """
-        Rooms we join after the `to_token` should not show up. See condition "2b)"
+        Rooms we join after the `to_token` should *not* show up. See condition "2b)"
         comments in the `get_sync_room_ids_for_user()` method.
         """
         user1_id = self.register_user("user1", "pass")

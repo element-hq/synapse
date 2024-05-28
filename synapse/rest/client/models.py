@@ -117,6 +117,8 @@ class MsisdnRequestTokenBody(ThreepidRequestTokenBody):
 
 class SlidingSyncBody(RequestBodyModel):
     """
+    Sliding Sync API request body.
+
     Attributes:
         lists: Sliding window API. A map of list key to list information
             (:class:`SlidingSyncList`). Max lists: 100. The list keys should be
