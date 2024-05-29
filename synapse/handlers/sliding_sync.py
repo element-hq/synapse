@@ -509,7 +509,10 @@ class SlidingSyncHandler:
         filtered_room_id_set = set(room_id_set)
 
         # Filter for Direct-Message (DM) rooms
-        if filters.is_dm:
+        if filters.is_dm is not None:
+            # We're using global account data (`m.direct`) instead of checking for
+            # `is_direct` on the membership event because that only appears for the
+            # initee membership event. Account data is set by the client though.
             dm_map = await self.store.get_global_account_data_by_type_for_user(
                 user_id, AccountDataTypes.DIRECT
             )
@@ -518,13 +521,18 @@ class SlidingSyncHandler:
             dm_room_id_set = set()
             if dm_map:
                 for room_ids in dm_map.values():
-                    from typing_extensions import reveal_type
+                    # Account data should be a list of room IDs. Ignore anything else
+                    if isinstance(room_ids, list):
+                        for room_id in room_ids:
+                            if isinstance(room_id, str):
+                                dm_room_id_set.add(room_id)
 
-                    logger.warn("type(room_ids): %s", type(room_ids))
-                    reveal_type(room_ids)
-                    dm_room_id_set.update(room_ids)
-
-            filtered_room_id_set = filtered_room_id_set.intersection(dm_room_id_set)
+            if filters.is_dm:
+                # Only DM rooms please
+                filtered_room_id_set = filtered_room_id_set.intersection(dm_room_id_set)
+            else:
+                # Only non-DM rooms please
+                filtered_room_id_set = filtered_room_id_set.difference(dm_room_id_set)
 
         if filters.spaces:
             raise NotImplementedError()

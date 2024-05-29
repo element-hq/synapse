@@ -167,7 +167,7 @@ class SlidingSyncBody(RequestBodyModel):
             timeline_limit: int
         else:
             timeline_limit: conint(le=1000, strict=True)  # type: ignore[valid-type]
-        include_old_rooms: Optional[IncludeOldRooms]
+        include_old_rooms: Optional[IncludeOldRooms] = None
 
     class SlidingSyncList(CommonRoomParameters):
         """
@@ -238,42 +238,42 @@ class SlidingSyncBody(RequestBodyModel):
         """
 
         class Filters(RequestBodyModel):
-            is_dm: Optional[StrictBool]
-            spaces: Optional[List[StrictStr]]
-            is_encrypted: Optional[StrictBool]
-            is_invite: Optional[StrictBool]
-            room_types: Optional[List[Union[StrictStr, None]]]
-            not_room_types: Optional[List[StrictStr]]
-            room_name_like: Optional[StrictStr]
-            tags: Optional[List[StrictStr]]
-            not_tags: Optional[List[StrictStr]]
+            is_dm: Optional[StrictBool] = None
+            spaces: Optional[List[StrictStr]] = None
+            is_encrypted: Optional[StrictBool] = None
+            is_invite: Optional[StrictBool] = None
+            room_types: Optional[List[Union[StrictStr, None]]] = None
+            not_room_types: Optional[List[StrictStr]] = None
+            room_name_like: Optional[StrictStr] = None
+            tags: Optional[List[StrictStr]] = None
+            not_tags: Optional[List[StrictStr]] = None
 
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
         if TYPE_CHECKING:
-            ranges: Optional[List[Tuple[int, int]]]
+            ranges: Optional[List[Tuple[int, int]]] = None
         else:
-            ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]]  # type: ignore[valid-type]
-        sort: Optional[List[StrictStr]]
+            ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
+        sort: Optional[List[StrictStr]] = None
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
-        filters: Optional[Filters]
-        bump_event_types: Optional[List[StrictStr]]
+        filters: Optional[Filters] = None
+        bump_event_types: Optional[List[StrictStr]] = None
 
     class RoomSubscription(CommonRoomParameters):
         pass
 
     class Extension(RequestBodyModel):
         enabled: Optional[StrictBool] = False
-        lists: Optional[List[StrictStr]]
-        rooms: Optional[List[StrictStr]]
+        lists: Optional[List[StrictStr]] = None
+        rooms: Optional[List[StrictStr]] = None
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
-        lists: Optional[Dict[str, SlidingSyncList]]
+        lists: Optional[Dict[str, SlidingSyncList]] = None
     else:
-        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]]  # type: ignore[valid-type]
-    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]]
-    extensions: Optional[Dict[StrictStr, Extension]]
+        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = None  # type: ignore[valid-type]
+    room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
+    extensions: Optional[Dict[StrictStr, Extension]] = None
 
     @validator("lists")
     def lists_length_check(
