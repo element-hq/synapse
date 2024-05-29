@@ -1,3 +1,56 @@
+# Synapse 1.108.0 (2024-05-28)
+
+No significant changes since 1.108.0rc1.
+
+
+
+
+# Synapse 1.108.0rc1 (2024-05-21)
+
+### Features
+
+- Add a feature that allows clients to query the configured federation whitelist. Disabled by default. ([\#16848](https://github.com/element-hq/synapse/issues/16848), [\#17199](https://github.com/element-hq/synapse/issues/17199))
+- Add the ability to allow numeric user IDs with a specific prefix when in the CAS flow. Contributed by Aurélien Grimpard. ([\#17098](https://github.com/element-hq/synapse/issues/17098))
+
+### Bugfixes
+
+- Fix bug where push rules would be empty in `/sync` for some accounts. Introduced in v1.93.0. ([\#17142](https://github.com/element-hq/synapse/issues/17142))
+- Add support for optional whitespace around the Federation API's `Authorization` header's parameter commas. ([\#17145](https://github.com/element-hq/synapse/issues/17145))
+- Fix bug where disabling room publication prevented public rooms being created on workers. ([\#17177](https://github.com/element-hq/synapse/issues/17177), [\#17184](https://github.com/element-hq/synapse/issues/17184))
+
+### Improved Documentation
+
+- Document [`/v1/make_knock`](https://spec.matrix.org/v1.10/server-server-api/#get_matrixfederationv1make_knockroomiduserid) and [`/v1/send_knock/`](https://spec.matrix.org/v1.10/server-server-api/#put_matrixfederationv1send_knockroomideventid) federation endpoints as worker-compatible. ([\#17058](https://github.com/element-hq/synapse/issues/17058))
+- Update User Admin API with note about prefixing OIDC external_id providers. ([\#17139](https://github.com/element-hq/synapse/issues/17139))
+- Clarify the state of the created room when using the `autocreate_auto_join_room_preset` config option. ([\#17150](https://github.com/element-hq/synapse/issues/17150))
+- Update the Admin FAQ with the current libjemalloc version for latest Debian stable. Additionally update the name of the "push_rules" stream in the Workers documentation. ([\#17171](https://github.com/element-hq/synapse/issues/17171))
+
+### Internal Changes
+
+- Add note to reflect that [MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886) is closed but will remain supported for some time. ([\#17151](https://github.com/element-hq/synapse/issues/17151))
+- Update dependency PyO3 to 0.21. ([\#17162](https://github.com/element-hq/synapse/issues/17162))
+- Fixes linter errors found in PR #17147. ([\#17166](https://github.com/element-hq/synapse/issues/17166))
+- Bump black from 24.2.0 to 24.4.2. ([\#17170](https://github.com/element-hq/synapse/issues/17170))
+- Cache literal sync filter validation for performance. ([\#17186](https://github.com/element-hq/synapse/issues/17186))
+- Improve performance by fixing a reactor pause. ([\#17192](https://github.com/element-hq/synapse/issues/17192))
+- Route `/make_knock` and `/send_knock` federation APIs to the federation reader worker in Complement test runs. ([\#17195](https://github.com/element-hq/synapse/issues/17195))
+- Prepare sync handler to be able to return different sync responses (`SyncVersion`). ([\#17200](https://github.com/element-hq/synapse/issues/17200))
+- Organize the sync cache key parameter outside of the sync config (separate concerns). ([\#17201](https://github.com/element-hq/synapse/issues/17201))
+- Refactor `SyncResultBuilder` assembly to its own function. ([\#17202](https://github.com/element-hq/synapse/issues/17202))
+- Rename to be obvious: `joined_rooms` -> `joined_room_ids`. ([\#17203](https://github.com/element-hq/synapse/issues/17203), [\#17208](https://github.com/element-hq/synapse/issues/17208))
+- Add a short pause when rate-limiting a request. ([\#17210](https://github.com/element-hq/synapse/issues/17210))
+
+
+
+### Updates to locked dependencies
+
+* Bump cryptography from 42.0.5 to 42.0.7. ([\#17180](https://github.com/element-hq/synapse/issues/17180))
+* Bump gitpython from 3.1.41 to 3.1.43. ([\#17181](https://github.com/element-hq/synapse/issues/17181))
+* Bump immutabledict from 4.1.0 to 4.2.0. ([\#17179](https://github.com/element-hq/synapse/issues/17179))
+* Bump sentry-sdk from 1.40.3 to 2.1.1. ([\#17178](https://github.com/element-hq/synapse/issues/17178))
+* Bump serde from 1.0.200 to 1.0.201. ([\#17183](https://github.com/element-hq/synapse/issues/17183))
+* Bump serde_json from 1.0.116 to 1.0.117. ([\#17182](https://github.com/element-hq/synapse/issues/17182))
+
 Synapse 1.107.0 (2024-05-14)
 ============================
 

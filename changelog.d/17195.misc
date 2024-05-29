@@ -1,1 +1,0 @@
-Route `/make_knock` and `/send_knock` federation APIs to the federation reader worker in Complement test runs.

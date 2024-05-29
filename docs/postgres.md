@@ -242,12 +242,11 @@ host    all         all             ::1/128     ident
 
 ### Fixing incorrect `COLLATE` or `CTYPE`
 
-Synapse will refuse to set up a new database if it has the wrong values of
-`COLLATE` and `CTYPE` set. Synapse will also refuse to start an existing database with incorrect values
-of `COLLATE` and `CTYPE` unless the config flag `allow_unsafe_locale`, found in the 
-`database` section of the config, is set to true. Using different locales can cause issues if the locale library is updated from
-underneath the database, or if a different version of the locale is used on any
-replicas.
+Synapse will refuse to start when using a database with incorrect values of
+`COLLATE` and `CTYPE` unless the config flag `allow_unsafe_locale`, found in the
+`database` section of the config, is set to true. Using different locales can
+cause issues if the locale library is updated from underneath the database, or
+if a different version of the locale is used on any replicas.
 
 If you have a database with an unsafe locale, the safest way to fix the issue is to dump the database and recreate it with
 the correct locale parameter (as shown above). It is also possible to change the

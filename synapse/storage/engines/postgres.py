@@ -142,6 +142,10 @@ class PostgresEngine(
         apply stricter checks on new databases versus existing database.
         """
 
+        allow_unsafe_locale = self.config.get("allow_unsafe_locale", False)
+        if allow_unsafe_locale:
+            return
+
         collation, ctype = self.get_db_locale(txn)
 
         errors = []
@@ -155,7 +159,9 @@ class PostgresEngine(
         if errors:
             raise IncorrectDatabaseSetup(
                 "Database is incorrectly configured:\n\n%s\n\n"
-                "See docs/postgres.md for more information." % ("\n".join(errors))
+                "See docs/postgres.md for more information. You can override this check by"
+                "setting 'allow_unsafe_locale' to true in the database config.",
+                "\n".join(errors),
             )
 
     def convert_param_style(self, sql: str) -> str:
