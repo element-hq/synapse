@@ -268,7 +268,7 @@ class SlidingSyncHandler:
             for list_key, list_config in sync_config.lists.items():
                 # Apply filters
                 filtered_room_ids = room_id_set
-                if list_config.filters:
+                if list_config.filters is not None:
                     filtered_room_ids = await self.filter_rooms(
                         sync_config.user, room_id_set, list_config.filters
                     )
