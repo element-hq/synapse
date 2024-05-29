@@ -158,10 +158,10 @@ class PostgresEngine(
 
         if errors:
             raise IncorrectDatabaseSetup(
-                "Database has incorrect ctype of %r. Should be 'C'\n"
+                "Database is incorrectly configured:\n\n%s\n\n"
                 "See docs/postgres.md for more information. You can override this check by"
                 "setting 'allow_unsafe_locale' to true in the database config.",
-                ctype,
+                "\n".join(errors),
             )
 
     def convert_param_style(self, sql: str) -> str:
