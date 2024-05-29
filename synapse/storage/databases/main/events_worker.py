@@ -194,8 +194,6 @@ class EventsWorkerStore(SQLBaseStore):
         self._stream_id_gen: AbstractStreamIdGenerator
         self._backfill_id_gen: AbstractStreamIdGenerator
 
-        # If we're using Postgres than we can use `MultiWriterIdGenerator`
-        # regardless of whether this process writes to the streams or not.
         self._stream_id_gen = MultiWriterIdGenerator(
             db_conn=db_conn,
             db=database,
