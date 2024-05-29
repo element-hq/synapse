@@ -1181,7 +1181,7 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
 
             results = list(txn)
             # (event_id, parent_id, rel_type) for each relation
-            relations_to_insert: List[Tuple[str, str, str]] = []
+            relations_to_insert: List[Tuple[str, str, str, str]] = []
             for event_id, event_json_raw in results:
                 try:
                     event_json = db_to_json(event_json_raw)
@@ -1214,7 +1214,8 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
                 if not isinstance(parent_id, str):
                     continue
 
-                relations_to_insert.append((event_id, parent_id, rel_type))
+                room_id = event_json["room_id"]
+                relations_to_insert.append((room_id, event_id, parent_id, rel_type))
 
             # Insert the missing data, note that we upsert here in case the event
             # has already been processed.
@@ -1223,18 +1224,27 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
                     txn=txn,
                     table="event_relations",
                     key_names=("event_id",),
-                    key_values=[(r[0],) for r in relations_to_insert],
+                    key_values=[(r[1],) for r in relations_to_insert],
                     value_names=("relates_to_id", "relation_type"),
-                    value_values=[r[1:] for r in relations_to_insert],
+                    value_values=[r[2:] for r in relations_to_insert],
                 )
 
                 # Iterate the parent IDs and invalidate caches.
-                cache_tuples = {(r[1],) for r in relations_to_insert}
                 self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
-                    txn, self.get_relations_for_event, cache_tuples  # type: ignore[attr-defined]
+                    txn,
+                    self.get_relations_for_event,  # type: ignore[attr-defined]
+                    {
+                        (
+                            r[0],  # room_id
+                            r[2],  # parent_id
+                        )
+                        for r in relations_to_insert
+                    },
                 )
                 self._invalidate_cache_and_stream_bulk(  # type: ignore[attr-defined]
-                    txn, self.get_thread_summary, cache_tuples  # type: ignore[attr-defined]
+                    txn,
+                    self.get_thread_summary,  # type: ignore[attr-defined]
+                    {(r[1],) for r in relations_to_insert},
                 )
 
             if results:

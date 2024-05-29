@@ -236,6 +236,13 @@ class DeviceMessageHandler:
         local_messages = {}
         remote_messages: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
         for user_id, by_device in messages.items():
+            if not UserID.is_valid(user_id):
+                logger.warning(
+                    "Ignoring attempt to send device message to invalid user: %r",
+                    user_id,
+                )
+                continue
+
             # add an opentracing log entry for each message
             for device_id, message_content in by_device.items():
                 log_kv(
