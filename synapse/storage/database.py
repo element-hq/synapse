@@ -2461,7 +2461,11 @@ class DatabasePool:
 
 
 def make_in_list_sql_clause(
-    database_engine: BaseDatabaseEngine, column: str, iterable: Collection[Any]
+    database_engine: BaseDatabaseEngine,
+    column: str,
+    iterable: Collection[Any],
+    *,
+    negative: bool = False,
 ) -> Tuple[str, list]:
     """Returns an SQL clause that checks the given column is in the iterable.
 
@@ -2474,6 +2478,7 @@ def make_in_list_sql_clause(
         database_engine
         column: Name of the column
         iterable: The values to check the column against.
+        negative: Whether we should check for inequality, i.e. `NOT IN`
 
     Returns:
         A tuple of SQL query and the args
@@ -2482,9 +2487,19 @@ def make_in_list_sql_clause(
     if database_engine.supports_using_any_list:
         # This should hopefully be faster, but also makes postgres query
         # stats easier to understand.
-        return "%s = ANY(?)" % (column,), [list(iterable)]
+        if not negative:
+            clause = f"{column} = ANY(?)"
+        else:
+            clause = f"{column} != ALL(?)"
+
+        return clause, [list(iterable)]
     else:
-        return "%s IN (%s)" % (column, ",".join("?" for _ in iterable)), list(iterable)
+        params = ",".join("?" for _ in iterable)
+        if not negative:
+            clause = f"{column} IN ({params})"
+        else:
+            clause = f"{column} NOT IN ({params})"
+        return clause, list(iterable)
 
 
 # These overloads ensure that `columns` and `iterable` values have the same length.

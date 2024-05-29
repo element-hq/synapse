@@ -58,13 +58,11 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
-from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
     IdGenerator,
     MultiWriterIdGenerator,
-    StreamIdGenerator,
 )
 from synapse.types import JsonDict, RetentionPolicy, StrCollection, ThirdPartyInstanceID
 from synapse.util import json_encoder
@@ -155,27 +153,17 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
         self._un_partial_stated_rooms_stream_id_gen: AbstractStreamIdGenerator
 
-        if isinstance(database.engine, PostgresEngine):
-            self._un_partial_stated_rooms_stream_id_gen = MultiWriterIdGenerator(
-                db_conn=db_conn,
-                db=database,
-                notifier=hs.get_replication_notifier(),
-                stream_name="un_partial_stated_room_stream",
-                instance_name=self._instance_name,
-                tables=[
-                    ("un_partial_stated_room_stream", "instance_name", "stream_id")
-                ],
-                sequence_name="un_partial_stated_room_stream_sequence",
-                # TODO(faster_joins, multiple writers) Support multiple writers.
-                writers=["master"],
-            )
-        else:
-            self._un_partial_stated_rooms_stream_id_gen = StreamIdGenerator(
-                db_conn,
-                hs.get_replication_notifier(),
-                "un_partial_stated_room_stream",
-                "stream_id",
-            )
+        self._un_partial_stated_rooms_stream_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="un_partial_stated_room_stream",
+            instance_name=self._instance_name,
+            tables=[("un_partial_stated_room_stream", "instance_name", "stream_id")],
+            sequence_name="un_partial_stated_room_stream_sequence",
+            # TODO(faster_joins, multiple writers) Support multiple writers.
+            writers=["master"],
+        )
 
     def process_replication_position(
         self, stream_name: str, instance_name: str, token: int
