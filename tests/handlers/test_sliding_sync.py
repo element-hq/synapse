@@ -559,7 +559,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
 
-    def create_dm_room(
+    def _create_dm_room(
         self,
         inviter_user_id: str,
         inviter_tok: str,
@@ -567,7 +567,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         invitee_tok: str,
     ) -> str:
         """
-        Create DM room as the "inviter" and invite the "invitee" user to the room. The
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the room. The
         "invitee" user also will join the room. The `m.direct` account data will be set
         for both users.
         """
@@ -624,7 +624,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         # Create a DM room
-        dm_room_id = self.create_dm_room(
+        dm_room_id = self._create_dm_room(
             inviter_user_id=user1_id,
             inviter_tok=user1_tok,
             invitee_user_id=user2_id,
@@ -665,7 +665,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         # Create a DM room
-        dm_room_id = self.create_dm_room(
+        dm_room_id = self._create_dm_room(
             inviter_user_id=user1_id,
             inviter_tok=user1_tok,
             invitee_user_id=user2_id,
