@@ -11,7 +11,7 @@ if TYPE_CHECKING or HAS_PYDANTIC_V2:
 else:
     from pydantic import Extra
 
-from synapse.api.constants import Membership
+from synapse.api.constants import AccountDataTypes, Membership
 from synapse.events import EventBase
 from synapse.rest.client.models import SlidingSyncBody
 from synapse.types import JsonMapping, Requester, RoomStreamToken, StreamToken, UserID
@@ -266,11 +266,12 @@ class SlidingSyncHandler:
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         if sync_config.lists:
             for list_key, list_config in sync_config.lists.items():
-                # TODO: Apply filters
-                #
-                # TODO: Exclude partially stated rooms unless the `required_state` has
-                # `["m.room.member", "$LAZY"]`
+                # Apply filters
                 filtered_room_ids = room_id_set
+                if list_config.filters:
+                    filtered_room_ids = await self.filter_rooms(
+                        sync_config.user, room_id_set, list_config.filters
+                    )
                 # TODO: Apply sorts
                 sorted_room_ids = sorted(filtered_room_ids)
 
@@ -488,3 +489,65 @@ class SlidingSyncHandler:
                 sync_room_id_set.discard(room_id)
 
         return sync_room_id_set
+
+    async def filter_rooms(
+        self,
+        user: UserID,
+        room_id_set: AbstractSet[str],
+        filters: SlidingSyncConfig.SlidingSyncList.Filters,
+    ) -> AbstractSet[str]:
+        """
+        Filter rooms based on the sync request.
+        """
+        user_id = user.to_string()
+
+        # TODO: Apply filters
+        #
+        # TODO: Exclude partially stated rooms unless the `required_state` has
+        # `["m.room.member", "$LAZY"]`
+
+        filtered_room_id_set = set(room_id_set)
+
+        # Filter for Direct-Message (DM) rooms
+        if filters.is_dm:
+            dm_map = await self.store.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.DIRECT
+            )
+            logger.warn("dm_map: %s", dm_map)
+            # Flatten out the map
+            dm_room_id_set = set()
+            if dm_map:
+                for room_ids in dm_map.values():
+                    from typing_extensions import reveal_type
+
+                    logger.warn("type(room_ids): %s", type(room_ids))
+                    reveal_type(room_ids)
+                    dm_room_id_set.update(room_ids)
+
+            filtered_room_id_set = filtered_room_id_set.intersection(dm_room_id_set)
+
+        if filters.spaces:
+            raise NotImplementedError()
+
+        if filters.is_encrypted:
+            raise NotImplementedError()
+
+        if filters.is_invite:
+            raise NotImplementedError()
+
+        if filters.room_types:
+            raise NotImplementedError()
+
+        if filters.not_room_types:
+            raise NotImplementedError()
+
+        if filters.room_name_like:
+            raise NotImplementedError()
+
+        if filters.tags:
+            raise NotImplementedError()
+
+        if filters.not_tags:
+            raise NotImplementedError()
+
+        return filtered_room_id_set

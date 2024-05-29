@@ -7,8 +7,14 @@ from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 
 from tests.unittest import HomeserverTestCase
+
+
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
@@ -530,3 +536,66 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 room_id3,
             },
         )
+
+
+class FilterRoomsTestCase(HomeserverTestCase):
+    """
+    Tests Sliding Sync handler `filter_rooms()` to make sure it includes/excludes rooms
+    correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        self.store = self.hs.get_datastores().main
+
+    def test_TODO(self) -> None:
+        """
+        Test TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room and send an invite to the other user
+        room_id = self.helper.create_room_as(
+            user2_id,
+            is_public=False,
+            tok=user2_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            extra_data={"is_direct": True},
+        )
+        # Accept the invite
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        filters = SlidingSyncConfig.SlidingSyncList.Filters(
+            is_dm=True,
+        )
+
+        filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id), {room_id}, filters
+            )
+        )
+
+        logger.warn("filtered_room_ids %s", filtered_room_ids)
+
+        self.assertEqual(filtered_room_ids, {room_id})
