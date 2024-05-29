@@ -242,7 +242,7 @@ host    all         all             ::1/128     ident
 
 ### Fixing incorrect `COLLATE` or `CTYPE`
 
-Synapse will also refuse to start when using a database with incorrect values of
+Synapse will refuse to start when using a database with incorrect values of
 `COLLATE` and `CTYPE` unless the config flag `allow_unsafe_locale`, found in the
 `database` section of the config, is set to true. Using different locales can
 cause issues if the locale library is updated from underneath the database, or
