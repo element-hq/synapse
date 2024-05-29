@@ -511,8 +511,9 @@ class SlidingSyncHandler:
         # Filter for Direct-Message (DM) rooms
         if filters.is_dm is not None:
             # We're using global account data (`m.direct`) instead of checking for
-            # `is_direct` on the membership event because that only appears for the
-            # initee membership event. Account data is set by the client though.
+            # `is_direct` on membership events because that property only appears for
+            # the invitee membership event (doesn't show up for the inviter). Account
+            # data is set by the client so it needs to be scrutinized.
             dm_map = await self.store.get_global_account_data_by_type_for_user(
                 user_id, AccountDataTypes.DIRECT
             )
