@@ -11,6 +11,8 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+-- Add `instance_name` columns to stream tables to allow them to be used with
+-- `MultiWriterIdGenerator`
 ALTER TABLE device_lists_stream ADD COLUMN instance_name TEXT;
 ALTER TABLE user_signature_stream ADD COLUMN instance_name TEXT;
 ALTER TABLE device_lists_outbound_pokes ADD COLUMN instance_name TEXT;
