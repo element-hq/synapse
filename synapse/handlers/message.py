@@ -496,13 +496,6 @@ class EventCreationHandler:
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
-        self.membership_types_to_include_profile_data_in = {
-            Membership.JOIN,
-            Membership.KNOCK,
-        }
-        if self.hs.config.server.include_profile_data_on_invite:
-            self.membership_types_to_include_profile_data_in.add(Membership.INVITE)
-
         self.send_event = ReplicationSendEventRestServlet.make_client(hs)
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
@@ -594,8 +587,6 @@ class EventCreationHandler:
         Creates an FrozenEvent object, filling out auth_events, prev_events,
         etc.
 
-        Adds display names to Join membership events.
-
         Args:
             requester
             event_dict: An entire event
@@ -671,29 +662,6 @@ class EventCreationHandler:
         )
 
         self.validator.validate_builder(builder)
-
-        if builder.type == EventTypes.Member:
-            membership = builder.content.get("membership", None)
-            target = UserID.from_string(builder.state_key)
-
-            if membership in self.membership_types_to_include_profile_data_in:
-                # If event doesn't include a display name, add one.
-                profile = self.profile_handler
-                content = builder.content
-
-                try:
-                    if "displayname" not in content:
-                        displayname = await profile.get_displayname(target)
-                        if displayname is not None:
-                            content["displayname"] = displayname
-                    if "avatar_url" not in content:
-                        avatar_url = await profile.get_avatar_url(target)
-                        if avatar_url is not None:
-                            content["avatar_url"] = avatar_url
-                except Exception as e:
-                    logger.info(
-                        "Failed to get profile information for %r: %s", target, e
-                    )
 
         is_exempt = await self._is_exempt_from_privacy_policy(builder, requester)
         if require_consent and not is_exempt:
