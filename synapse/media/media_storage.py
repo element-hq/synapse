@@ -141,6 +141,8 @@ class MediaStorage:
             with start_active_span("writing to main media repo"):
                 with open(fname, "wb") as f:
                     yield f, fname
+                    f.flush()
+                    f.close()
 
             with start_active_span("writing to other storage providers"):
                 spam_check = (
