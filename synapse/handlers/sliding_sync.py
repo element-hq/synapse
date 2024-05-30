@@ -11,7 +11,7 @@ if TYPE_CHECKING or HAS_PYDANTIC_V2:
 else:
     from pydantic import Extra
 
-from synapse.api.constants import AccountDataTypes, Membership
+from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.events import EventBase
 from synapse.rest.client.models import SlidingSyncBody
 from synapse.types import JsonMapping, Requester, RoomStreamToken, StreamToken, UserID
@@ -576,8 +576,23 @@ class SlidingSyncHandler:
                 space_child_room_ids
             )
 
-        if filters.is_encrypted:
-            raise NotImplementedError()
+        # Filter for encrypted rooms
+        if filters.is_encrypted is not None:
+            # Make a copy so we don't run into an error: `Set changed size during iteration`
+            for room_id in list(filtered_room_id_set):
+                # TODO: Is there a good method to look up all rooms at once? (N+1 query problem)
+                is_encrypted = (
+                    await self.storage_controllers.state.get_current_state_event(
+                        room_id, EventTypes.RoomEncryption, ""
+                    )
+                )
+
+                # If we're looking for encrypted rooms, filter out rooms that are not
+                # encrypted and vice versa
+                if (filters.is_encrypted and not is_encrypted) or (
+                    not filters.is_encrypted and is_encrypted
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.is_invite:
             raise NotImplementedError()
