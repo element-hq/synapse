@@ -1142,7 +1142,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
                 },
             )
 
-            return stop > max_stream_id
+            return stop >= max_stream_id
 
         finished = await self.db_pool.runInteraction(
             "_cleanup_device_federation_outbox",
