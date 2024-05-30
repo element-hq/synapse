@@ -200,7 +200,11 @@ class EventsWorkerStore(SQLBaseStore):
             notifier=hs.get_replication_notifier(),
             stream_name="events",
             instance_name=hs.get_instance_name(),
-            tables=[("events", "instance_name", "stream_ordering")],
+            tables=[
+                ("events", "instance_name", "stream_ordering"),
+                ("current_state_delta_stream", "instance_name", "stream_id"),
+                ("ex_outlier_stream", "instance_name", "event_stream_ordering"),
+            ],
             sequence_name="events_stream_seq",
             writers=hs.config.worker.writers.events,
         )
@@ -210,7 +214,10 @@ class EventsWorkerStore(SQLBaseStore):
             notifier=hs.get_replication_notifier(),
             stream_name="backfill",
             instance_name=hs.get_instance_name(),
-            tables=[("events", "instance_name", "stream_ordering")],
+            tables=[
+                ("events", "instance_name", "stream_ordering"),
+                ("ex_outlier_stream", "instance_name", "event_stream_ordering"),
+            ],
             sequence_name="events_backfill_stream_seq",
             positive=False,
             writers=hs.config.worker.writers.events,
