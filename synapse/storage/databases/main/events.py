@@ -1930,7 +1930,12 @@ class PersistEventsStore:
 
         # Any relation information for the related event must be cleared.
         self.store._invalidate_cache_and_stream(
-            txn, self.store.get_relations_for_event, (redacted_relates_to,)
+            txn,
+            self.store.get_relations_for_event,
+            (
+                room_id,
+                redacted_relates_to,
+            ),
         )
         if rel_type == RelationTypes.REFERENCE:
             self.store._invalidate_cache_and_stream(

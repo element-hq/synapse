@@ -650,7 +650,7 @@ class MediaRepository:
 
         file_info = FileInfo(server_name=server_name, file_id=file_id)
 
-        with self.media_storage.store_into_file(file_info) as (f, fname, finish):
+        async with self.media_storage.store_into_file(file_info) as (f, fname):
             try:
                 length, headers = await self.client.download_media(
                     server_name,
@@ -692,8 +692,6 @@ class MediaRepository:
                     "Failed to fetch remote media %s/%s", server_name, media_id
                 )
                 raise SynapseError(502, "Failed to fetch remote media")
-
-            await finish()
 
             if b"Content-Type" in headers:
                 media_type = headers[b"Content-Type"][0].decode("ascii")
@@ -1045,16 +1043,16 @@ class MediaRepository:
                     ),
                 )
 
-                with self.media_storage.store_into_file(file_info) as (
-                    f,
-                    fname,
-                    finish,
-                ):
+                async with self.media_storage.store_into_file(file_info) as (f, fname):
                     try:
                         await self.media_storage.write_to_file(t_byte_source, f)
-                        await finish()
                     finally:
                         t_byte_source.close()
+
+                    # We flush and close the file to ensure that the bytes have
+                    # been written before getting the size.
+                    f.flush()
+                    f.close()
 
                     t_len = os.path.getsize(fname)
 
