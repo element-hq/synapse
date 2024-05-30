@@ -106,12 +106,12 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         self.event_auth_handler = hs.get_event_auth_handler()
         self._worker_lock_handler = hs.get_worker_locks_handler()
 
-        self.membership_types_to_include_profile_data_in = {
+        self._membership_types_to_include_profile_data_in = {
             Membership.JOIN,
             Membership.KNOCK,
         }
         if self.hs.config.server.include_profile_data_on_invite:
-            self.membership_types_to_include_profile_data_in.add(Membership.INVITE)
+            self._membership_types_to_include_profile_data_in.add(Membership.INVITE)
 
         self.member_linearizer: Linearizer = Linearizer(name="member")
         self.member_as_limiter = Linearizer(max_count=10, name="member_as_limiter")
@@ -835,7 +835,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # Add profile data for joins etc, if no per-room profile.
         if (
             effective_membership_state
-            in self.membership_types_to_include_profile_data_in
+            in self._membership_types_to_include_profile_data_in
         ):
             # If event doesn't include a display name, add one.
             profile = self.profile_handler
