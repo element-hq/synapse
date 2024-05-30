@@ -238,6 +238,53 @@ class SlidingSyncBody(RequestBodyModel):
         """
 
         class Filters(RequestBodyModel):
+            """
+            All fields are applied with AND operators, hence if `is_dm: True` and
+            `is_encrypted: True` then only Encrypted DM rooms will be returned. The absence
+            of fields implies no filter on that criteria: it does NOT imply `False`.
+            These fields may be expanded through use of extensions.
+
+            Attributes:
+                is_dm: Flag which only returns rooms present (or not) in the DM section
+                    of account data. If unset, both DM rooms and non-DM rooms are returned.
+                    If False, only non-DM rooms are returned. If True, only DM rooms are
+                    returned.
+                spaces: Filter the room based on the space they belong to according to
+                    `m.space.child` state events. If multiple spaces are present, a room can
+                    be part of any one of the listed spaces (OR'd). The server will inspect
+                    the `m.space.child` state events for the JOINED space room IDs given.
+                    Servers MUST NOT navigate subspaces. It is up to the client to give a
+                    complete list of spaces to navigate. Only rooms directly mentioned as
+                    `m.space.child` events in these spaces will be returned. Unknown spaces
+                    or spaces the user is not joined to will be ignored.
+                is_encrypted: Flag which only returns rooms which have an
+                    `m.room.encryption` state event. If unset, both encrypted and
+                    unencrypted rooms are returned. If `False`, only unencrypted rooms are
+                    returned. If `True`, only encrypted rooms are returned.
+                is_invite: Flag which only returns rooms the user is currently invited
+                    to. If unset, both invited and joined rooms are returned. If `False`, no
+                    invited rooms are returned. If `True`, only invited rooms are returned.
+                room_types: If specified, only rooms where the `m.room.create` event has
+                    a `type` matching one of the strings in this array will be returned. If
+                    this field is unset, all rooms are returned regardless of type. This can
+                    be used to get the initial set of spaces for an account. For rooms which
+                    do not have a room type, use `null`/`None` to include them.
+                not_room_types: Same as `room_types` but inverted. This can be used to
+                    filter out spaces from the room list. If a type is in both `room_types`
+                    and `not_room_types`, then `not_room_types` wins and they are not included
+                    in the result.
+                room_name_like: Filter the room name. Case-insensitive partial matching
+                    e.g 'foo' matches 'abFooab'. The term 'like' is inspired by SQL 'LIKE',
+                    and the text here is similar to '%foo%'.
+                tags: Filter the room based on its room tags. If multiple tags are
+                    present, a room can have any one of the listed tags (OR'd).
+                not_tags: Filter the room based on its room tags. Takes priority over
+                    `tags`. For example, a room with tags A and B with filters `tags: [A]`
+                    `not_tags: [B]` would NOT be included because `not_tags` takes priority over
+                    `tags`. This filter is useful if your rooms list does NOT include the
+                    list of favourite rooms again.
+            """
+
             is_dm: Optional[StrictBool] = None
             spaces: Optional[List[StrictStr]] = None
             is_encrypted: Optional[StrictBool] = None
