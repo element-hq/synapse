@@ -1049,6 +1049,11 @@ class MediaRepository:
                     finally:
                         t_byte_source.close()
 
+                    # We flush and close the file to ensure that the bytes have
+                    # been written before getting the size.
+                    f.flush()
+                    f.close()
+
                     t_len = os.path.getsize(fname)
 
                     # Write to database
