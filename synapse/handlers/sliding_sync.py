@@ -1,6 +1,6 @@
 import logging
 from enum import Enum
-from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Set, Tuple
 
 import attr
 
@@ -554,8 +554,8 @@ class SlidingSyncHandler:
                 if is_user_in_room:
                     joined_space_room_ids.add(space_room_id)
 
-            # Flatten the rooms in the spaces
-            space_child_room_ids = set()
+            # Flatten the child rooms in the spaces
+            space_child_room_ids: Set[str] = set()
             for space_room_id in joined_space_room_ids:
                 space_child_events = (
                     await self.room_summary_handler._get_space_child_events(

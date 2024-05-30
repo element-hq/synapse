@@ -1,5 +1,5 @@
-from typing import List, Optional
 import logging
+from typing import List, Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 
