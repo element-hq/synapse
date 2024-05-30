@@ -257,15 +257,15 @@ received via clients and federation, while still accepting updates from the
 *The "untracked" option was added in Synapse 1.96.0.*
 
 Enabling presence tracking can be resource intensive for the presence handler when server-side
-tracking of user activity is enabled. Below are some additional configuration options if you
-require additional performance:
+tracking of user activity is enabled. Below are some additional configuration options which may
+help improve the performance of the presence feature without outright disabling it:
 * `sync_presence_tracking` (Default enabled): Determines if the server tracks a user's presence
 activity when syncing. If disabled, the server will not automatically update the user's presence
 activity when the sync endpoint is called. Note that client applications can still update their
 presence by calling the respective presence endpoints.
 * `federation_presence_tracking` (Default enabled): Determines if the server will accept
 presence EDUs that only contain presence activity updates. If disabled, the server will drop
-processing EDUs that do not contain updates to the `status_msg`, `displayname`, and
+processing EDUs that do not contain updates to the `status_msg`, `displayname`, or
 `avatar_url` fields.
 
 ---
