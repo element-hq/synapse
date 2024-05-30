@@ -407,3 +407,24 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         self.assertFalse(
             self.get_success(self.store.did_forget(self.alice, self.room_id))
         )
+
+    def test_deduplicate_joins(self) -> None:
+        """
+        Test that calling /join multiple times does not store a new state group.
+        """
+
+        self.helper.join(self.room_id, user=self.bob, tok=self.bob_token)
+
+        sql = "SELECT COUNT(*) FROM state_groups WHERE room_id = ?"
+        rows = self.get_success(
+            self.store.db_pool.execute("test_deduplicate_joins", sql, self.room_id)
+        )
+        initial_count = rows[0][0]
+
+        self.helper.join(self.room_id, user=self.bob, tok=self.bob_token)
+        rows = self.get_success(
+            self.store.db_pool.execute("test_deduplicate_joins", sql, self.room_id)
+        )
+        new_count = rows[0][0]
+
+        self.assertEqual(initial_count, new_count)

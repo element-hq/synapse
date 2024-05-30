@@ -95,6 +95,10 @@ class DeltaState:
     to_insert: StateMap[str]
     no_longer_in_room: bool = False
 
+    def is_noop(self) -> bool:
+        """Whether this state delta is actually empty"""
+        return not self.to_delete and not self.to_insert and not self.no_longer_in_room
+
 
 class PersistEventsStore:
     """Contains all the functions for writing events to the database.
@@ -1016,6 +1020,9 @@ class PersistEventsStore:
         state_delta: DeltaState,
     ) -> None:
         """Update the current state stored in the datatabase for the given room"""
+
+        if state_delta.is_noop():
+            return
 
         async with self._stream_id_gen.get_next() as stream_ordering:
             await self.db_pool.runInteraction(

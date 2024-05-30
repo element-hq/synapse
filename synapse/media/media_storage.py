@@ -137,42 +137,37 @@ class MediaStorage:
         dirname = os.path.dirname(fname)
         os.makedirs(dirname, exist_ok=True)
 
-        main_media_repo_write_trace_scope = start_active_span(
-            "writing to main media repo"
-        )
-        main_media_repo_write_trace_scope.__enter__()
-
-        with main_media_repo_write_trace_scope:
-            try:
+        try:
+            with start_active_span("writing to main media repo"):
                 with open(fname, "wb") as f:
                     yield f, fname
 
-            except Exception as e:
-                try:
-                    os.remove(fname)
-                except Exception:
-                    pass
-
-                raise e from None
-
-        with start_active_span("writing to other storage providers"):
-            spam_check = (
-                await self._spam_checker_module_callbacks.check_media_file_for_spam(
-                    ReadableFileWrapper(self.clock, fname), file_info
+            with start_active_span("writing to other storage providers"):
+                spam_check = (
+                    await self._spam_checker_module_callbacks.check_media_file_for_spam(
+                        ReadableFileWrapper(self.clock, fname), file_info
+                    )
                 )
-            )
-            if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
-                logger.info("Blocking media due to spam checker")
-                # Note that we'll delete the stored media, due to the
-                # try/except below. The media also won't be stored in
-                # the DB.
-                # We currently ignore any additional field returned by
-                # the spam-check API.
-                raise SpamMediaException(errcode=spam_check[0])
+                if spam_check != self._spam_checker_module_callbacks.NOT_SPAM:
+                    logger.info("Blocking media due to spam checker")
+                    # Note that we'll delete the stored media, due to the
+                    # try/except below. The media also won't be stored in
+                    # the DB.
+                    # We currently ignore any additional field returned by
+                    # the spam-check API.
+                    raise SpamMediaException(errcode=spam_check[0])
 
-            for provider in self.storage_providers:
-                with start_active_span(str(provider)):
-                    await provider.store_file(path, file_info)
+                for provider in self.storage_providers:
+                    with start_active_span(str(provider)):
+                        await provider.store_file(path, file_info)
+
+        except Exception as e:
+            try:
+                os.remove(fname)
+            except Exception:
+                pass
+
+            raise e from None
 
     async def fetch_media(self, file_info: FileInfo) -> Optional[Responder]:
         """Attempts to fetch media described by file_info from the local cache
