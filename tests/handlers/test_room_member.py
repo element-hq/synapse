@@ -405,8 +405,8 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         )
 
     def test_deduplicate_joins(self) -> None:
-        """Test that calling /join multiple times returns the same event ID,
-        without storing a new state group
+        """
+        Test that calling /join multiple times does not store a new state group.
         """
 
         self.helper.join(self.room_id, user=self.bob, tok=self.bob_token)
