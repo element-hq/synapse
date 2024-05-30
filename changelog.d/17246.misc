@@ -1,0 +1,1 @@
+Fix errors in logs about closing incorrect logging contexts when media gets rejected by a module.
