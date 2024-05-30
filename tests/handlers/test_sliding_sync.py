@@ -724,7 +724,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
     def test_filter_space_rooms(self) -> None:
         """
-        Test filter for non-DM rooms
+        Test filter for rooms in spaces
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
