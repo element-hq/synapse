@@ -1,0 +1,1 @@
+Replaces all usages of `StreamIdGenerator` with `MultiWriterIdGenerator`.
