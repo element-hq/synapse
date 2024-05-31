@@ -477,9 +477,9 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         rows = []
         for room_id in changed_rooms:
-            serial = self._room_serials[room_id]
-            if last_id < serial <= current_id:
-                typing = self._room_typing[room_id]
+            serial = self._room_serials.get(room_id)
+            if serial and last_id < serial <= current_id:
+                typing = self._room_typing.get(room_id, set())
                 rows.append((serial, [room_id, list(typing)]))
         rows.sort()
 

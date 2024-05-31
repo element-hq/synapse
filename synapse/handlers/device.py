@@ -159,20 +159,32 @@ class DeviceWorkerHandler:
 
     @cancellable
     async def get_device_changes_in_shared_rooms(
-        self, user_id: str, room_ids: StrCollection, from_token: StreamToken
+        self,
+        user_id: str,
+        room_ids: StrCollection,
+        from_token: StreamToken,
+        now_token: Optional[StreamToken] = None,
     ) -> Set[str]:
         """Get the set of users whose devices have changed who share a room with
         the given user.
         """
+        now_device_lists_key = self.store.get_device_stream_token()
+        if now_token:
+            now_device_lists_key = now_token.device_list_key
+
         changed_users = await self.store.get_device_list_changes_in_rooms(
-            room_ids, from_token.device_list_key
+            room_ids,
+            from_token.device_list_key,
+            now_device_lists_key,
         )
 
         if changed_users is not None:
             # We also check if the given user has changed their device. If
             # they're in no rooms then the above query won't include them.
             changed = await self.store.get_users_whose_devices_changed(
-                from_token.device_list_key, [user_id]
+                from_token.device_list_key,
+                [user_id],
+                to_key=now_device_lists_key,
             )
             changed_users.update(changed)
             return changed_users
@@ -190,7 +202,9 @@ class DeviceWorkerHandler:
         tracked_users.add(user_id)
 
         changed = await self.store.get_users_whose_devices_changed(
-            from_token.device_list_key, tracked_users
+            from_token.device_list_key,
+            tracked_users,
+            to_key=now_device_lists_key,
         )
 
         return changed
@@ -890,6 +904,13 @@ class DeviceHandler(DeviceWorkerHandler):
                         room_id=room_id,
                         hosts=hosts,
                         context=opentracing_context,
+                    )
+
+                    await self.store.mark_redundant_device_lists_pokes(
+                        user_id=user_id,
+                        device_id=device_id,
+                        room_id=room_id,
+                        converted_upto_stream_id=stream_id,
                     )
 
                     # Notify replication that we've updated the device list stream.

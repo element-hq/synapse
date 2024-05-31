@@ -318,7 +318,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._invalidate_local_get_event_cache(redacts)  # type: ignore[attr-defined]
             # Caches which might leak edits must be invalidated for the event being
             # redacted.
-            self._attempt_to_invalidate_cache("get_relations_for_event", (redacts,))
+            self._attempt_to_invalidate_cache(
+                "get_relations_for_event",
+                (
+                    room_id,
+                    redacts,
+                ),
+            )
             self._attempt_to_invalidate_cache("get_applicable_edit", (redacts,))
             self._attempt_to_invalidate_cache("get_thread_id", (redacts,))
             self._attempt_to_invalidate_cache("get_thread_id_for_receipts", (redacts,))
@@ -345,7 +351,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             )
 
         if relates_to:
-            self._attempt_to_invalidate_cache("get_relations_for_event", (relates_to,))
+            self._attempt_to_invalidate_cache(
+                "get_relations_for_event",
+                (
+                    room_id,
+                    relates_to,
+                ),
+            )
             self._attempt_to_invalidate_cache("get_references_for_event", (relates_to,))
             self._attempt_to_invalidate_cache("get_applicable_edit", (relates_to,))
             self._attempt_to_invalidate_cache("get_thread_summary", (relates_to,))
@@ -380,9 +392,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_unread_event_push_actions_by_room_for_user", (room_id,)
         )
+        self._attempt_to_invalidate_cache("get_relations_for_event", (room_id,))
 
         self._attempt_to_invalidate_cache("_get_membership_from_event_id", None)
-        self._attempt_to_invalidate_cache("get_relations_for_event", None)
         self._attempt_to_invalidate_cache("get_applicable_edit", None)
         self._attempt_to_invalidate_cache("get_thread_id", None)
         self._attempt_to_invalidate_cache("get_thread_id_for_receipts", None)
