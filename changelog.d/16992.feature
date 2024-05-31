@@ -1,1 +1,1 @@
-Added presence update on change of profile information and config flags for selective presence tracking. Contributed by @Michael-Hollister.
+Added presence tracking of user profile updates and config flags for disabling user activity tracking. Contributed by @Michael-Hollister.
