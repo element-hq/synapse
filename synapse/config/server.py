@@ -390,13 +390,13 @@ class ServerConfig(Config):
         )
 
         # Disabling server-side presence tracking
-        self.sync_presence_tracking = presence_config.get(
-            "sync_presence_tracking", True
+        self.presence_local_activity_tracking = presence_config.get(
+            "local_activity_tracking", True
         )
 
         # Disabling federation presence tracking
-        self.federation_presence_tracking = presence_config.get(
-            "federation_presence_tracking", True
+        self.presence_remote_activity_tracking = presence_config.get(
+            "remote_activity_tracking", True
         )
 
         # Custom presence router module
