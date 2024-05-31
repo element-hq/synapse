@@ -273,8 +273,8 @@ EDUs from remote servers that are exclusively user activity updates. If disabled
 will reject processing these EDUs. However if a presence EDU contains profile updates to any of
 the `status_msg`, `displayname`, or `avatar_url` fields, then the server will accept the EDU.
 
-If the presence `enabled` field is set "untracked", then these options will both act as if set
-to false.
+If the presence `enabled` field is set to "untracked", then these options will both act as if
+set to false.
 
 ---
 ### `require_auth_for_profile_requests`
