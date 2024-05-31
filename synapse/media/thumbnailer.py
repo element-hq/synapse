@@ -359,9 +359,10 @@ class ThumbnailProvider:
         desired_method: str,
         desired_type: str,
         max_timeout_ms: int,
+        ip_address: str,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms
+            server_name, media_id, max_timeout_ms, ip_address
         )
         if not media_info:
             respond_404(request)
@@ -422,12 +423,13 @@ class ThumbnailProvider:
         method: str,
         m_type: str,
         max_timeout_ms: int,
+        ip_address: str,
     ) -> None:
         # TODO: Don't download the whole remote file
         # We should proxy the thumbnail from the remote server instead of
         # downloading the remote file and generating our own thumbnails.
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms
+            server_name, media_id, max_timeout_ms, ip_address
         )
         if not media_info:
             return
