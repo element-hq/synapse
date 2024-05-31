@@ -72,7 +72,7 @@ class ThumbnailResource(RestServlet):
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
-        
+
         set_cors_headers(request)
         set_corp_headers(request)
         width = parse_integer(request, "width", required=True)
