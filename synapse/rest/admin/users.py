@@ -732,6 +732,33 @@ class DeactivateAccountRestServlet(RestServlet):
         return HTTPStatus.OK, {"id_server_unbind_result": id_server_unbind_result}
 
 
+class SuspendAccountRestServlet(RestServlet):
+    PATTERNS = admin_patterns("/suspend/(?P<target_user_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.auth = hs.get_auth()
+        self.is_mine = hs.is_mine
+        self.store = hs.get_datastores().main
+
+    async def on_PUT(
+        self, request: SynapseRequest, target_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        await assert_user_is_admin(self.auth, requester)
+
+        if not self.is_mine(UserID.from_string(target_user_id)):
+            raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only suspend local users")
+
+        if not await self.store.get_user_by_id(target_user_id):
+            raise NotFoundError("User not found")
+
+        body = parse_json_object_from_request(request, allow_empty_body=True)
+        suspend = body.get("suspend", False)
+        await self.store.set_user_suspended_status(target_user_id, suspend)
+
+        return HTTPStatus.OK, {f"user_{target_user_id}_suspended": suspend}
+
+
 class AccountValidityRenewServlet(RestServlet):
     PATTERNS = admin_patterns("/account_validity/validity$")
 
