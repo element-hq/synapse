@@ -76,7 +76,6 @@ class ThumbnailResource(RestServlet):
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
-
         set_cors_headers(request)
         set_corp_headers(request)
         width = parse_integer(request, "width", required=True)
@@ -108,6 +107,7 @@ class ThumbnailResource(RestServlet):
                 respond_404(request)
                 return
 
+            ip_address = request.getClientAddress().host
             remote_resp_function = (
                 self._select_or_generate_remote_thumbnail
                 if self.dynamic_thumbnails
@@ -122,6 +122,7 @@ class ThumbnailResource(RestServlet):
                 method,
                 m_type,
                 max_timeout_ms,
+                ip_address,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
@@ -222,9 +223,10 @@ class ThumbnailResource(RestServlet):
         desired_method: str,
         desired_type: str,
         max_timeout_ms: int,
+        ip_address: str,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms
+            server_name, media_id, max_timeout_ms, ip_address
         )
         if not media_info:
             respond_404(request)
@@ -285,12 +287,13 @@ class ThumbnailResource(RestServlet):
         method: str,
         m_type: str,
         max_timeout_ms: int,
+        ip_address: str,
     ) -> None:
         # TODO: Don't download the whole remote file
         # We should proxy the thumbnail from the remote server instead of
         # downloading the remote file and generating our own thumbnails.
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms
+            server_name, media_id, max_timeout_ms, ip_address
         )
         if not media_info:
             return
