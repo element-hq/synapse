@@ -272,13 +272,6 @@ class ContentRepositoryConfig(Config):
                 remote_media_lifetime
             )
 
-        self.remote_media_download_leak_rate = self.parse_size(
-            config.get("remote_media_download_leak_rate", "58K")
-        )
-        self.remote_media_download_bucket_size = self.parse_size(
-            config.get("remote_media_download_bucket_size", "300M")
-        )
-
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
         assert data_dir_path is not None
         media_store = os.path.join(data_dir_path, "media_store")
