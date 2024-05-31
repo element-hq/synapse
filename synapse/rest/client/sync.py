@@ -567,5 +567,176 @@ class SyncRestServlet(RestServlet):
         return result
 
 
+class SlidingSyncE2eeRestServlet(RestServlet):
+    """
+    API endpoint for MSC3575 Sliding Sync `/sync/e2ee`. This is being introduced as part
+    of Sliding Sync but doesn't have any sliding window component. It's just a way to
+    get E2EE events without having to sit through a big initial sync (`/sync` v2). And
+    we can avoid encryption events being backed up by the main sync response.
+
+    Having To-Device messages split out to this sync endpoint also helps when clients
+    need to have 2 or more sync streams open at a time, e.g a push notification process
+    and a main process. This can cause the two processes to race to fetch the To-Device
+    events, resulting in the need for complex synchronisation rules to ensure the token
+    is correctly and atomically exchanged between processes.
+
+    GET parameters::
+        timeout(int): How long to wait for new events in milliseconds.
+        since(batch_token): Batch token when asking for incremental deltas.
+
+    Response JSON::
+        {
+            "next_batch": // batch token for the next /sync
+            "to_device": {
+                // list of to-device events
+                "events": [
+                    {
+                        "content: { "algorithm": "m.olm.v1.curve25519-aes-sha2", "ciphertext": { ... }, "org.matrix.msgid": "abcd", "session_id": "abcd" },
+                        "type": "m.room.encrypted",
+                        "sender": "@alice:example.com",
+                    }
+                    // ...
+                ]
+            },
+            "device_lists": {
+                "changed": ["@alice:example.com"],
+                "left": ["@bob:example.com"]
+            },
+            "device_one_time_keys_count": {
+                "signed_curve25519": 50
+            },
+            "device_unused_fallback_key_types": [
+                "signed_curve25519"
+            ]
+        }
+    """
+
+    PATTERNS = client_patterns(
+        "/org.matrix.msc3575/sync/e2ee$", releases=[], v1=False, unstable=True
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+        self.sync_handler = hs.get_sync_handler()
+
+        # Filtering only matters for the `device_lists` because it requires a bunch of
+        # derived information from rooms (see how `_generate_sync_entry_for_rooms()`
+        # prepares a bunch of data for `_generate_sync_entry_for_device_list()`).
+        self.only_member_events_filter_collection = FilterCollection(
+            self.hs,
+            {
+                "room": {
+                    # We only care about membership events for the `device_lists`.
+                    # Membership will tell us whether a user has joined/left a room and
+                    # if there are new devices to encrypt for.
+                    "timeline": {
+                        "types": ["m.room.member"],
+                    },
+                    "state": {
+                        "types": ["m.room.member"],
+                    },
+                    # We don't want any extra account_data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "account_data": {
+                        "not_types": ["*"],
+                    },
+                    # We don't want any extra ephemeral data generated because it's not
+                    # returned by this endpoint. This helps us avoid work in
+                    # `_generate_sync_entry_for_rooms()`
+                    "ephemeral": {
+                        "not_types": ["*"],
+                    },
+                },
+                # We don't want any extra account_data generated because it's not
+                # returned by this endpoint. (This is just here for good measure)
+                "account_data": {
+                    "not_types": ["*"],
+                },
+                # We don't want any extra presence data generated because it's not
+                # returned by this endpoint. (This is just here for good measure)
+                "presence": {
+                    "not_types": ["*"],
+                },
+            },
+        )
+
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        user = requester.user
+        device_id = requester.device_id
+
+        timeout = parse_integer(request, "timeout", default=0)
+        since = parse_string(request, "since")
+
+        sync_config = SyncConfig(
+            user=user,
+            filter_collection=self.only_member_events_filter_collection,
+            is_guest=requester.is_guest,
+            device_id=device_id,
+        )
+
+        since_token = None
+        if since is not None:
+            since_token = await StreamToken.from_string(self.store, since)
+
+        # Request cache key
+        request_key = (
+            SyncVersion.E2EE_SYNC,
+            user,
+            timeout,
+            since,
+        )
+
+        # Gather data for the response
+        sync_result = await self.sync_handler.wait_for_sync_for_user(
+            requester,
+            sync_config,
+            SyncVersion.E2EE_SYNC,
+            request_key,
+            since_token=since_token,
+            timeout=timeout,
+            full_state=False,
+        )
+
+        # The client may have disconnected by now; don't bother to serialize the
+        # response if so.
+        if request._disconnected:
+            logger.info("Client has disconnected; not serializing response.")
+            return 200, {}
+
+        response: JsonDict = defaultdict(dict)
+        response["next_batch"] = await sync_result.next_batch.to_string(self.store)
+
+        if sync_result.to_device:
+            response["to_device"] = {"events": sync_result.to_device}
+
+        if sync_result.device_lists.changed:
+            response["device_lists"]["changed"] = list(sync_result.device_lists.changed)
+        if sync_result.device_lists.left:
+            response["device_lists"]["left"] = list(sync_result.device_lists.left)
+
+        # We always include this because https://github.com/vector-im/element-android/issues/3725
+        # The spec isn't terribly clear on when this can be omitted and how a client would tell
+        # the difference between "no keys present" and "nothing changed" in terms of whole field
+        # absent / individual key type entry absent
+        # Corresponding synapse issue: https://github.com/matrix-org/synapse/issues/10456
+        response["device_one_time_keys_count"] = sync_result.device_one_time_keys_count
+
+        # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
+        # states that this field should always be included, as long as the server supports the feature.
+        response["device_unused_fallback_key_types"] = (
+            sync_result.device_unused_fallback_key_types
+        )
+
+        return 200, response
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc3575_enabled:
+        SlidingSyncE2eeRestServlet(hs).register(http_server)

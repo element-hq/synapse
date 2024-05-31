@@ -332,6 +332,9 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
+        # MSC3575 (Sliding Sync API endpoints)
+        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", False)
+
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
 
@@ -439,4 +442,8 @@ class ExperimentalConfig(Config):
 
         self.msc3823_account_suspension = experimental.get(
             "msc3823_account_suspension", False
+        )
+        
+        self.msc3916_authenticated_media_enabled = experimental.get(
+            "msc3916_authenticated_media_enabled", False
         )

@@ -1,0 +1,1 @@
+Fix bug where duplicate events could be sent down sync when using workers that are overloaded.

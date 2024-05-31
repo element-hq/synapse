@@ -1,0 +1,1 @@
+Change the `allow_unsafe_locale` config option to also apply when setting up new databases.
