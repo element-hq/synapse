@@ -201,7 +201,9 @@ class BasePresenceHandler(abc.ABC):
 
         self._presence_enabled = hs.config.server.presence_enabled
         self._track_presence = hs.config.server.track_presence
-        self._sync_presence_tracking = hs.config.server.sync_presence_tracking
+        self._presence_local_activity_tracking = (
+            hs.config.server.presence_local_activity_tracking
+        )
 
         self._federation = None
         if hs.should_send_federation():
@@ -585,7 +587,7 @@ class WorkerPresenceHandler(BasePresenceHandler):
         if (
             not affect_presence
             or not self._track_presence
-            or not self._sync_presence_tracking
+            or not self._presence_local_activity_tracking
         ):
             return _NullContextManager()
 
@@ -1152,7 +1154,7 @@ class PresenceHandler(BasePresenceHandler):
         if (
             not affect_presence
             or not self._track_presence
-            or not self._sync_presence_tracking
+            or not self._presence_local_activity_tracking
         ):
             return _NullContextManager()
 
