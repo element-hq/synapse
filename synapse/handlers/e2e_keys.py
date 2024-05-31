@@ -149,6 +149,11 @@ class E2eKeysHandler:
             remote_queries = {}
 
             for user_id, device_ids in device_keys_query.items():
+                if not UserID.is_valid(user_id):
+                    # Ignore invalid user IDs, which is the same behaviour as if
+                    # the user existed but had no keys.
+                    continue
+
                 # we use UserID.from_string to catch invalid user ids
                 if self.is_mine(UserID.from_string(user_id)):
                     local_query[user_id] = device_ids
