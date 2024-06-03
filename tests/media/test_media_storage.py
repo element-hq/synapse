@@ -944,7 +944,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             resp = MagicMock(spec=IResponse)
             resp.code = 200
             resp.length = 31457280
-            resp.headers = Headers({"Content-Type": "application/octet-stream"})
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
             resp.phrase = b"OK"
             return resp
 
@@ -1019,7 +1019,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             resp = MagicMock(spec=IResponse)
             resp.code = 200
             resp.length = 52428800
-            resp.headers = Headers({"Content-Type": "application/octet-stream"})
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
             resp.phrase = b"OK"
             return resp
 
@@ -1077,7 +1077,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             resp = MagicMock(spec=IResponse)
             resp.code = 200
             resp.length = UNKNOWN_LENGTH
-            resp.headers = Headers({"Content-Type": "application/octet-stream"})
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
             resp.phrase = b"OK"
             return resp
 
