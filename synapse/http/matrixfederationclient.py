@@ -1502,7 +1502,8 @@ class MatrixFederationHttpClient:
             raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
 
         try:
-            d = read_body_with_max_size(response, output_stream, expected_size)
+            # add a byte of headroom to max size as function errs at >=
+            d = read_body_with_max_size(response, output_stream, expected_size + 1)
             d.addTimeout(self.default_timeout_seconds, self.reactor)
             length = await make_deferred_yieldable(d)
         except BodyExceededMaxSize:
