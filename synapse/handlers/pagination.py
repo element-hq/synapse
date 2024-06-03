@@ -27,7 +27,6 @@ from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
 from synapse.events.utils import SerializeEventConfig
-from synapse.handlers.room import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -38,6 +37,8 @@ from synapse.types import (
     JsonMapping,
     Requester,
     ScheduledTask,
+    ShutdownRoomParams,
+    ShutdownRoomResponse,
     StreamKeyType,
     TaskStatus,
 )
