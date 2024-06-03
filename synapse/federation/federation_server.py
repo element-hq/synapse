@@ -674,7 +674,7 @@ class FederationServer(FederationBase):
         # This is in addition to the HS-level rate limiting applied by
         # BaseFederationServlet.
         # type-ignore: mypy doesn't seem able to deduce the type of the limiter(!?)
-        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(  # type: ignore[has-type]
+        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(
             requester=None,
             key=room_id,
             update=False,
@@ -717,7 +717,7 @@ class FederationServer(FederationBase):
             SynapseTags.SEND_JOIN_RESPONSE_IS_PARTIAL_STATE,
             caller_supports_partial_state,
         )
-        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(  # type: ignore[has-type]
+        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(
             requester=None,
             key=room_id,
             update=False,
