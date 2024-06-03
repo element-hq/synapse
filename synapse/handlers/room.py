@@ -40,7 +40,6 @@ from typing import (
 )
 
 import attr
-from typing_extensions import TypedDict
 
 import synapse.events.snapshot
 from synapse.api.constants import (
