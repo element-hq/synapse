@@ -323,7 +323,7 @@ class SlidingSyncHandler:
         room_for_user_list = await self.store.get_rooms_for_local_user_where_membership_is(
             user_id=user_id,
             # We want to fetch any kind of membership (joined and left rooms) in order
-            # to get the `stream_ordering` of the latest room membership event for the
+            # to get the `event_pos` of the latest room membership event for the
             # user.
             #
             # We will filter out the rooms that the user has left below (see
@@ -347,7 +347,7 @@ class SlidingSyncHandler:
         # Find the stream_ordering of the latest room membership event which will mark
         # the spot we queried up to.
         #
-        # TODO: With the new `GetRoomsForUserWithStreamOrdering` info, make a instance
+        # TODO: With the new `RoomsForUser.event_pos` info, make a instance
         # map to stream ordering and construct the new room key from that map,
         # `RoomStreamToken(stream=<min in that map>, instance_map=...)`
         max_stream_ordering_from_room_list = max(
