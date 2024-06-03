@@ -307,7 +307,7 @@ class SlidingSyncHandler:
     ) -> AbstractSet[str]:
         """
         Fetch room IDs that should be listed for this user in the sync response (the
-        full room list that will be sliced, filtered, sorted).
+        full room list that will be filtered, sorted, and sliced).
 
         We're looking for rooms that the user has not left (`invite`, `knock`, `join`,
         and `ban`) or newly_left rooms that are > `from_token` and <= `to_token`.
