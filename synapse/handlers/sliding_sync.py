@@ -261,8 +261,8 @@ class SlidingSyncHandler:
         # any to-device messages before that token (since we now know that the device
         # has received them). (see sync v2 for how to do this)
 
-        # If the we're working with a user-provided token, we need to make sure to wait
-        # for this worker to catch up with the token so we don't skip past any incoming
+        # If we're working with a user-provided token, we need to make sure to wait for
+        # this worker to catch up with the token so we don't skip past any incoming
         # events or future events if the user is nefariously, manually modifying the
         # token.
         if from_token is not None:
