@@ -43,7 +43,8 @@ logger = logging.getLogger(__name__)
 
 
 # Everything except `Membership.LEAVE` because we want everything that's *still*
-# relevant to the user.
+# relevant to the user. There are few more things to include in the sync response
+# (kicks, newly_left) but those are handled separately.
 MEMBERSHIP_TO_DISPLAY_IN_SYNC = (
     Membership.INVITE,
     Membership.JOIN,
