@@ -914,6 +914,12 @@ class SlidingSyncRestServlet(RestServlet):
             timeout,
         )
 
+        # The client may have disconnected by now; don't bother to serialize the
+        # response if so.
+        if request._disconnected:
+            logger.info("Client has disconnected; not serializing response.")
+            return 200, {}
+
         response_content = await self.encode_response(sliding_sync_results)
 
         return 200, response_content
