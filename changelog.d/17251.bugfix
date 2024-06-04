@@ -1,1 +1,0 @@
-Fix reporting of default tags to Sentry, such as worker name. Broke in v1.108.0.

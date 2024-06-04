@@ -1,1 +1,0 @@
-Ignore attempts to send to-device messages to bad users, to avoid log spam when we try to connect to the bad server.
