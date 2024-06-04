@@ -390,7 +390,7 @@ class SlidingSyncHandler:
         - `invite`, `join`, `knock`, `ban` membership events
         - Kicks (`leave` membership events where `sender` is different from the
           `user_id`/`state_key`)
-        - `newly_left` (rooms that were left during the given token range
+        - `newly_left` (rooms that were left during the given token range)
         - In order for bans/kicks to not show up in sync, you need to `/forget` those
           rooms. This doesn't modify the event itself though and only adds the
           `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
