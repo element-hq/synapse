@@ -1997,9 +1997,7 @@ class SyncHandler:
         if since_token:
             membership_change_events = await self.store.get_membership_changes_for_user(
                 user_id,
-                # TODO: We should make this change,
-                # https://github.com/element-hq/synapse/pull/17187#discussion_r1617871321
-                token_before_rooms.room_key,
+                since_token.room_key,
                 now_token.room_key,
                 self.rooms_to_exclude_globally,
             )
