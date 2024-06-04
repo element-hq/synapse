@@ -261,7 +261,9 @@ class SlidingSyncHandler:
         # has received them). (see sync v2 for how to do this)
 
         # If the we're working with a user-provided token, we need to make sure to wait
-        # for this worker to catch up with the token.
+        # for this worker to catch up with the token so we don't skip past any incoming
+        # events or future events if the user is nefariously, manually modifying the
+        # token.
         if from_token is not None:
             # We need to make sure this worker has caught up with the token. If
             # this returns false, it means we timed out waiting, and we should
@@ -394,8 +396,8 @@ class SlidingSyncHandler:
             # to get the `event_pos` of the latest room membership event for the
             # user.
             #
-            # We will filter out the rooms that the user has left below (see
-            # `MEMBERSHIP_TO_DISPLAY_IN_SYNC`)
+            # We will filter out the rooms that don't belong below (see
+            # `filter_membership_for_sync`)
             membership_list=Membership.LIST,
             excluded_rooms=self.rooms_to_exclude_globally,
         )
@@ -418,7 +420,7 @@ class SlidingSyncHandler:
         # Get the `RoomStreamToken` that represents the spot we queried up to when we got
         # our membership snapshot from `get_rooms_for_local_user_where_membership_is()`.
         #
-        # First we need to get the max stream_ordering of each event persister instance
+        # First, we need to get the max stream_ordering of each event persister instance
         # that we queried events from.
         instance_to_max_stream_ordering_map: Dict[str, int] = {}
         for room_for_user in room_for_user_list:
@@ -436,6 +438,7 @@ class SlidingSyncHandler:
 
         # Then assemble the `RoomStreamToken`
         membership_snapshot_token = RoomStreamToken(
+            # Minimum position in the `instance_map`
             stream=min(
                 stream_ordering
                 for stream_ordering in instance_to_max_stream_ordering_map.values()
@@ -454,7 +457,7 @@ class SlidingSyncHandler:
             to_token.room_key
         ), f"{from_token.room_key if from_token else None} < {to_token.room_key}"
 
-        # We assume the `from_token`/`to_token` is before the `max_stream_ordering_from_room_list`
+        # We assume the `from_token`/`to_token` is before the `membership_snapshot_token`
         assert from_token is None or from_token.room_key.is_before_or_eq(
             membership_snapshot_token
         ), f"{from_token.room_key if from_token else None} < {membership_snapshot_token}"
@@ -470,8 +473,8 @@ class SlidingSyncHandler:
         # - 2a) Remove rooms that the user joined after the `to_token`
         # - 2b) Add back rooms that the user left after the `to_token`
         #
-        # We're doing two separate lookups for membership changes. We could request
-        # everything for both fixups in one range, [`from_token.room_key`,
+        # Below, we're doing two separate lookups for membership changes. We could
+        # request everything for both fixups in one range, [`from_token.room_key`,
         # `membership_snapshot_token`), but we want to avoid raw `stream_ordering`
         # comparison without `instance_name` (which is flawed). We could refactor
         # `event.internal_metadata` to include `instance_name` but it might turn out a
@@ -577,14 +580,6 @@ class SlidingSyncHandler:
                 "prev_sender", None
             )
 
-            # Check if the last membership (membership that applies to our snapshot) was
-            # already included in our `sync_room_id_set`
-            was_last_membership_already_included = filter_membership_for_sync(
-                membership=last_membership_change_after_to_token.membership,
-                user_id=user_id,
-                sender=last_membership_change_after_to_token.sender,
-            )
-
             # Check if the previous membership (membership that applies to the from/to
             # range) should be included in our `sync_room_id_set`
             should_prev_membership_be_included = (
@@ -595,6 +590,14 @@ class SlidingSyncHandler:
                     user_id=user_id,
                     sender=prev_sender,
                 )
+            )
+
+            # Check if the last membership (membership that applies to our snapshot) was
+            # already included in our `sync_room_id_set`
+            was_last_membership_already_included = filter_membership_for_sync(
+                membership=last_membership_change_after_to_token.membership,
+                user_id=user_id,
+                sender=last_membership_change_after_to_token.sender,
             )
 
             # 2a) Add back rooms that the user left after the `to_token`
