@@ -1,1 +1,0 @@
-Add logging to tasks managed by the task scheduler, showing CPU and database usage.
