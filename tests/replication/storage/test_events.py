@@ -154,7 +154,10 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
                     USER_ID,
                     "invite",
                     event.event_id,
-                    event.internal_metadata.stream_ordering,
+                    PersistedEventPosition(
+                        self.hs.get_instance_name(),
+                        event.internal_metadata.stream_ordering,
+                    ),
                     RoomVersions.V1.identifier,
                 )
             ],
