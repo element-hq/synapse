@@ -384,13 +384,23 @@ class SlidingSyncHandler:
         Fetch room IDs that should be listed for this user in the sync response (the
         full room list that will be filtered, sorted, and sliced).
 
-        We're looking for rooms that the user has not left (`invite`, `knock`, `join`,
-        and `ban`), or kicks (`leave` where the `sender` is different from the
-        `state_key`), or newly_left rooms that are > `from_token` and <= `to_token`.
+        We're looking for rooms where the user has the following state in the token
+        range (> `from_token` and <= `to_token`):
+
+        - `invite`, `join`, `knock`, `ban` membership events
+        - Kicks (`leave` membership events where `sender` is different from the
+          `user_id`/`state_key`)
+        - `newly_left` (rooms that were left during the given token range
+        - In order for bans/kicks to not show up in sync, you need to `/forget` those
+          rooms. This doesn't modify the event itself though and only adds the
+          `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
+          to tell when a room was forgotten at the moment so we can't factor it into the
+          from/to range.
         """
         user_id = user.to_string()
 
         # First grab a current snapshot rooms for the user
+        # (also handles forgotten rooms)
         room_for_user_list = await self.store.get_rooms_for_local_user_where_membership_is(
             user_id=user_id,
             # We want to fetch any kind of membership (joined and left rooms) in order
