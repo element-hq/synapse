@@ -490,12 +490,12 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         txn.execute(sql, (user_id, *args))
         results = [
             RoomsForUser(
-                room_id,
-                sender,
-                membership,
-                event_id,
-                PersistedEventPosition(instance_name, stream_ordering),
-                room_version,
+                room_id=room_id,
+                sender=sender,
+                membership=membership,
+                event_id=event_id,
+                event_pos=PersistedEventPosition(instance_name, stream_ordering),
+                room_version_id=room_version,
             )
             for room_id, sender, membership, event_id, instance_name, stream_ordering, room_version in txn
         ]
