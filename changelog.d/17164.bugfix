@@ -1,1 +1,0 @@
-Fix deduplicating of membership events to not create unused state groups.
