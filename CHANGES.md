@@ -4,7 +4,7 @@
 
 - Add the ability to auto-accept invites on the behalf of users. See the [`auto_accept_invites`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#auto-accept-invites) config option for details. ([\#17147](https://github.com/element-hq/synapse/issues/17147))
 - Add experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync/e2ee` endpoint for to-device messages and device encryption info. ([\#17167](https://github.com/element-hq/synapse/issues/17167))
-- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/issues/3916) by adding unstable media endpoints to `/_matrix/client` (#17213). ([\#17213](https://github.com/element-hq/synapse/issues/17213))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/issues/3916) by adding unstable media endpoints to `/_matrix/client`. ([\#17213](https://github.com/element-hq/synapse/issues/17213))
 - Add logging to tasks managed by the task scheduler, showing CPU and database usage. ([\#17219](https://github.com/element-hq/synapse/issues/17219))
 
 ### Bugfixes
