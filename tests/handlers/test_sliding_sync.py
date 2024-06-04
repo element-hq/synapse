@@ -1,8 +1,27 @@
+#
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2024 New Vector, Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+# [This file includes modifications made by New Vector Limited]
+#
+#
 import logging
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
@@ -143,7 +162,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             b"{}",
             user1_tok,
         )
-        self.assertEqual(200, channel.code, channel.result)
+        self.assertEqual(channel.code, 200, channel.result)
 
         after_room_token = self.event_sources.get_current_token()
 
@@ -164,6 +183,128 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 knock_room_id,
             },
         )
+
+    def test_get_kicked_room(self) -> None:
+        """
+        Test that a room that the user was kicked from still shows up. When the user
+        comes back to their client, they should see that they were kicked.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Setup the kick room (user2 kicks user1 from the room)
+        kick_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        # Kick user1 from the room
+        self.helper.change_membership(
+            room=kick_room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            membership=Membership.LEAVE,
+            extra_data={
+                "reason": "Bad manners",
+            },
+        )
+
+        after_kick_token = self.event_sources.get_current_token()
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_kick_token,
+                to_token=after_kick_token,
+            )
+        )
+
+        # The kicked room should show up
+        self.assertEqual(room_id_results, {kick_room_id})
+
+    def test_forgotten_rooms(self) -> None:
+        """
+        Forgotten rooms do not show up even if we forget after the from/to range.
+
+        Ideally, we would be able to track when the `/forget` happens and apply it
+        accordingly in the token range but the forgotten flag is only an extra bool in
+        the `room_memberships` table.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Setup a normal room that we leave. This won't show up in the sync response
+        # because we left it before our token but is good to check anyway.
+        leave_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(leave_room_id, user1_id, tok=user1_tok)
+        self.helper.leave(leave_room_id, user1_id, tok=user1_tok)
+
+        # Setup the ban room (user2 bans user1 from the room)
+        ban_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(ban_room_id, user1_id, tok=user1_tok)
+        self.helper.ban(ban_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Setup the kick room (user2 kicks user1 from the room)
+        kick_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        # Kick user1 from the room
+        self.helper.change_membership(
+            room=kick_room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            membership=Membership.LEAVE,
+            extra_data={
+                "reason": "Bad manners",
+            },
+        )
+
+        before_room_forgets = self.event_sources.get_current_token()
+
+        # Forget the room after we already have our tokens. This doesn't change
+        # the membership event itself but will mark it internally in Synapse
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{leave_room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{ban_room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{kick_room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_room_forgets,
+                to_token=before_room_forgets,
+            )
+        )
+
+        # We shouldn't see the room because it was forgotten
+        self.assertEqual(room_id_results, set())
 
     def test_only_newly_left_rooms_show_up(self) -> None:
         """
@@ -228,7 +369,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined during the
-        from_token/to_token. See condition "2b)" comments in the
+        from_token/to_token. See condition "2a)" comments in the
         `get_sync_room_ids_for_user()` method.
         """
         user1_id = self.register_user("user1", "pass")
@@ -258,7 +399,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined before the `from_token`
-        so it should show up. See condition "2b)" comments in the
+        so it should show up. See condition "2a)" comments in the
         `get_sync_room_ids_for_user()` method.
         """
         user1_id = self.register_user("user1", "pass")
@@ -281,6 +422,54 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # We should still see the room because we were joined before the `from_token`
         self.assertEqual(room_id_results, {room_id1})
+
+    def test_kicked_before_range_and_left_after_to_token(self) -> None:
+        """
+        Room still shows up if we left the room but were kicked before the `from_token`
+        so it should show up. See condition "2a)" comments in the
+        `get_sync_room_ids_for_user()` method.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Setup the kick room (user2 kicks user1 from the room)
+        kick_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        # Kick user1 from the room
+        self.helper.change_membership(
+            room=kick_room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            membership=Membership.LEAVE,
+            extra_data={
+                "reason": "Bad manners",
+            },
+        )
+
+        after_kick_token = self.event_sources.get_current_token()
+
+        # Leave the room after we already have our tokens
+        #
+        # We have to join before we can leave (leave -> leave isn't a valid transition
+        # or at least it doesn't work in Synapse, 403 forbidden)
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        self.helper.leave(kick_room_id, user1_id, tok=user1_tok)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_kick_token,
+                to_token=after_kick_token,
+            )
+        )
+
+        # We shouldn't see the room because it was forgotten
+        self.assertEqual(room_id_results, {kick_room_id})
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -342,6 +531,40 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Join and leave the room after we already have our tokens
         self.helper.join(room_id1, user1_id, tok=user1_tok)
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_room1_token,
+                to_token=after_room1_token,
+            )
+        )
+
+        # Room shouldn't show up because it was left before the `from_token`
+        self.assertEqual(room_id_results, set())
+
+    def test_leave_before_range_and_join_after_to_token(self) -> None:
+        """
+        Old left room shouldn't show up. But we're also testing that joining after the
+        `to_token` doesn't mess with the results. See condition "2b)" comments in the
+        `get_sync_room_ids_for_user()` method.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # Join and leave the room before the from/to range
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Join the room after we already have our tokens
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
             self.sliding_sync_handler.get_sync_room_ids_for_user(
