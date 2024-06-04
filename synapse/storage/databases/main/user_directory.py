@@ -1303,8 +1303,10 @@ def _parse_words_with_icu(search_term: str) -> List[str]:
         if j < 0:
             break
 
-        result = search_term[i:j].strip()
-        results.append(result)
+        # We want to make sure that we split on `@` and `:` specifically, as
+        # they occur in user IDs.
+        for result in re.split(r"[@:]+", search_term[i:j]):
+            results.append(result.strip())
 
         i = j
 
