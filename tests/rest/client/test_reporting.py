@@ -165,7 +165,7 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         self._assert_status(200, data)
 
     def test_no_reason(self) -> None:
-        data = {}
+        data = {"not_reason": "for typechecking"}
         self._assert_status(400, data)
 
     def test_reason_nonstring(self) -> None:
