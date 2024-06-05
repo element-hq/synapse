@@ -303,7 +303,7 @@ async def respond_with_multipart_responder(
         if media_info.media_length is not None:
             request.setHeader(b"Content-Length", b"%d" % (media_info.media_length,))
         request.setHeader(
-            b"Content-Type", b"multipart/form-data; boundary=%s" % responder.boundary
+            b"Content-Type", b"multipart/mixed; boundary=%s" % responder.boundary
         )
 
         try:
