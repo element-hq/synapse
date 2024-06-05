@@ -392,7 +392,6 @@ class SlidingSyncHandler:
 
         # First grab a current snapshot rooms for the user
         # (also handles forgotten rooms)
-        token_before_rooms = self.event_sources.get_current_token()
         room_for_user_list = await self.store.get_rooms_for_local_user_where_membership_is(
             user_id=user_id,
             # We want to fetch any kind of membership (joined and left rooms) in order
@@ -451,26 +450,6 @@ class SlidingSyncHandler:
         # changed)
         if membership_snapshot_token.is_before_or_eq(to_token.room_key):
             return sync_room_id_set
-
-        # We assume the `from_token` is before or at-least equal to the `to_token`
-        assert from_token is None or from_token.room_key.is_before_or_eq(
-            to_token.room_key
-        ), f"{from_token.room_key if from_token else None} <= {to_token.room_key}"
-
-        # We assume the `from_token`/`to_token` is before `membership_snapshot_token` or
-        # at-least before the current stream positions at the time we queried for
-        # `membership_snapshot_token`. The closest we can get to the current stream
-        # positions at the time is `token_before_rooms`. Otherwise, we just need to
-        # give-up and throw an error.
-        best_effort_stream_positions_at_snapshot_time_token = (
-            membership_snapshot_token.copy_and_advance(token_before_rooms.room_key)
-        )
-        assert from_token is None or from_token.room_key.is_before_or_eq(
-            best_effort_stream_positions_at_snapshot_time_token
-        ), f"{from_token.room_key if from_token else None} <= {best_effort_stream_positions_at_snapshot_time_token}"
-        assert to_token.room_key.is_before_or_eq(
-            best_effort_stream_positions_at_snapshot_time_token
-        ), f"{to_token.room_key} <= {best_effort_stream_positions_at_snapshot_time_token}"
 
         # Since we fetched the users room list at some point in time after the from/to
         # tokens, we need to revert/rewind some membership changes to match the point in
