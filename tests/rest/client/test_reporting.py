@@ -158,7 +158,7 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         self.room_id = self.helper.create_room_as(
             self.other_user, tok=self.other_user_tok, is_public=True
         )
-        self.report_path = f"rooms/{self.room_id}/report"
+        self.report_path = f"/_matrix/client/unstable/org.matrix.msc4151/rooms/{self.room_id}/report"
 
     def test_reason_str_and_score_int(self) -> None:
         data = {"reason": "this makes me sad"}
@@ -182,9 +182,10 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "POST",
-            "rooms/!bloop:example.org/report",
+            "/_matrix/client/unstable/org.matrix.msc4151/rooms/!bloop:example.org/report",
             {"reason": "i am very sad"},
             access_token=self.other_user_tok,
+            shorthand=False,
         )
         self.assertEqual(404, channel.code, msg=channel.result["body"])
         self.assertEqual(
@@ -195,6 +196,10 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(
-            "POST", self.report_path, data, access_token=self.other_user_tok
+            "POST",
+            self.report_path,
+            data,
+            access_token=self.other_user_tok,
+            shorthand=False,
         )
         self.assertEqual(response_status, channel.code, msg=channel.result["body"])
