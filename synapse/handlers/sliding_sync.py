@@ -450,10 +450,7 @@ class SlidingSyncHandler:
         # Then assemble the `RoomStreamToken`
         membership_snapshot_token = RoomStreamToken(
             # Minimum position in the `instance_map`
-            stream=min(
-                stream_ordering
-                for stream_ordering in instance_to_max_stream_ordering_map.values()
-            ),
+            stream=min(instance_to_max_stream_ordering_map.values()),
             instance_map=immutabledict(instance_to_max_stream_ordering_map),
         )
 
