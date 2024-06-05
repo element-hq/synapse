@@ -154,6 +154,28 @@ class KeyUploadServlet(RestServlet):
             )
 
         time_now = self._clock.time_msec()
+
+        unstable_fallback_keys = body.pop("org.matrix.msc2732.fallback_keys", None)
+        fallback_keys = body.pop("fallback_keys", None)
+        if not unstable_fallback_keys:
+            fallback_keys = unstable_fallback_keys
+
+        if fallback_keys and isinstance(fallback_keys, dict):
+            log_kv(
+                {
+                    "message": "Updating fallback_keys for device.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            await self._store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
+        elif fallback_keys:
+            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
+        else:
+            log_kv(
+                {"message": "Did not update fallback_keys", "reason": "no keys given"}
+            )
+
         one_time_keys = body.pop("one_time_keys", None)
         if one_time_keys:
             log_kv(
