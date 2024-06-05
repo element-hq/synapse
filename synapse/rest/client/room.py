@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -36,6 +36,7 @@ from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import (
     AuthError,
     Codes,
+    InvalidAPICallError,
     InvalidClientCredentialsError,
     MissingClientTokenError,
     ShadowBanError,
@@ -64,7 +65,14 @@ from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.rest.client._base import client_patterns
 from synapse.rest.client.transactions import HttpTransactionCache
 from synapse.streams.config import PaginationConfig
-from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
+from synapse.types import (
+    JsonDict,
+    Requester,
+    StrCollection,
+    StreamToken,
+    ThirdPartyInstanceID,
+    UserID,
+)
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
 from synapse.util.stringutils import parse_and_validate_server_name, random_string
@@ -406,6 +414,261 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             room_id,
             event_type,
             txn_id,
+        )
+
+
+# TODO: Needs unit testing
+class RoomStateFutureRestServlet(RestServlet):
+    CATEGORY = "Future sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.futures_handler = hs.get_futures_handler()
+
+    def register(self, http_server: HttpServer) -> None:
+        # /org.matrix.msc4140/rooms/$roomid/state_future/$eventtype
+        no_state_key = r"/org\.matrix\.msc4140/rooms/(?P<room_id>[^/]*)/state_future/(?P<event_type>[^/]*)$"
+
+        # /org.matrix.msc4140/rooms/$roomid/state_future/$eventtype/$statekey
+        state_key = (
+            r"/org\.matrix\.msc4140/rooms/(?P<room_id>[^/]*)/state_future/"
+            "(?P<event_type>[^/]*)/(?P<state_key>[^/]*)"
+        )
+        http_server.register_paths(
+            "PUT",
+            client_patterns(state_key, releases=(), v1=False),
+            self.on_PUT,
+            self.__class__.__name__,
+        )
+        http_server.register_paths(
+            "PUT",
+            client_patterns(no_state_key, releases=(), v1=False),
+            self.on_PUT_no_state_key,
+            self.__class__.__name__,
+        )
+
+    def on_PUT_no_state_key(
+        self, request: SynapseRequest, room_id: str, event_type: str
+    ) -> Awaitable[Tuple[int, JsonDict]]:
+        return self.on_PUT(request, room_id, event_type, "")
+
+    async def on_PUT(
+        self,
+        request: SynapseRequest,
+        room_id: str,
+        event_type: str,
+        state_key: str,
+        txn_id: Optional[str] = None,
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+
+        if txn_id:
+            set_tag("txn_id", txn_id)
+
+        ret = await self.futures_handler.add_future(
+            requester,
+            room_id=room_id,
+            event_type=event_type,
+            state_key=state_key,
+            origin_server_ts=(
+                parse_integer(request, "ts") if requester.app_service else None
+            ),
+            content=parse_json_object_from_request(request),
+            timeout=parse_integer(request, "future_timeout"),
+            group_id=parse_string(request, "future_group_id"),
+        )
+
+        for k, v in ret.items():
+            set_tag(k, v)
+        return 200, ret
+
+
+# TODO: Needs unit testing
+class RoomSendFutureRestServlet(TransactionRestServlet):
+    CATEGORY = "Future sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        self.auth = hs.get_auth()
+        self.futures_handler = hs.get_futures_handler()
+
+    def register(self, http_server: HttpServer) -> None:
+        # /org.matrix.msc4140/rooms/$roomid/send_future/$event_type[/$txn_id]
+        PATTERNS = r"/org\.matrix\.msc4140/rooms/(?P<room_id>[^/]*)/send_future/(?P<event_type>[^/]*)"
+        register_txn_path(self, PATTERNS, http_server, releases=(), v1=False)
+
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        room_id: str,
+        event_type: str,
+    ) -> Tuple[int, JsonDict]:
+        ret = await self.futures_handler.add_future(
+            requester,
+            room_id=room_id,
+            event_type=event_type,
+            state_key=None,
+            origin_server_ts=(
+                parse_integer(request, "ts") if requester.app_service else None
+            ),
+            content=parse_json_object_from_request(request),
+            timeout=parse_integer(request, "future_timeout"),
+            group_id=parse_string(request, "future_group_id"),
+        )
+
+        for k, v in ret.items():
+            set_tag(k, v)
+        return 200, ret
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        room_id: str,
+        event_type: str,
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        return await self._do(request, requester, room_id, event_type)
+
+    async def on_PUT(
+        self, request: SynapseRequest, room_id: str, event_type: str, txn_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        set_tag("txn_id", txn_id)
+
+        return await self.txns.fetch_or_execute_request(
+            request,
+            requester,
+            self._do,
+            request,
+            requester,
+            room_id,
+            event_type,
+        )
+
+
+# TODO: Remove in favour of the Room{Send,State}FutureRestServlets. Otherwise, this needs unit testing
+class RoomFutureRestServlet(TransactionRestServlet):
+    CATEGORY = "Future sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
+        self.auth = hs.get_auth()
+        self.futures_handler = hs.get_futures_handler()
+
+    def register(self, http_server: HttpServer) -> None:
+        # NOTE: Difference from MSC = remove /send part of path, to avoid ambiguity with regular event sending
+        # /org.matrix.msc4140/rooms/$roomid/future[/$txn_id]
+        PATTERNS = r"/org\.matrix\.msc4140/rooms/(?P<room_id>[^/]*)/future"
+        register_txn_path(self, PATTERNS, http_server, releases=(), v1=False)
+
+    async def _do(
+        self,
+        request: SynapseRequest,
+        requester: Requester,
+        room_id: str,
+    ) -> Tuple[int, JsonDict]:
+        body = parse_json_object_from_request(request)
+
+        try:
+            timeout = int(body["timeout"])
+        except KeyError:
+            raise SynapseError(400, "'timeout' is missing", Codes.MISSING_PARAM)
+        except Exception:
+            raise SynapseError(400, "'timeout' is not an integer", Codes.INVALID_PARAM)
+
+        try:
+            timeout_item: JsonDict = {
+                str(k): v for k, v in body["send_on_timeout"].items()
+            }
+        except KeyError:
+            raise SynapseError(400, "'send_on_timeout' is missing", Codes.MISSING_PARAM)
+        except Exception:
+            raise InvalidAPICallError("'send_on_timeout' is not valid JSON")
+
+        try:
+            send_on_action: Dict[str, JsonDict] = {
+                str(action_name): {str(k): v for k, v in action_item.items()}
+                for action_name, action_item in body.get("send_on_action", {}).items()
+            }
+        except Exception:
+            raise InvalidAPICallError(
+                "'send_on_action' is not a JSON mapping of action names to event content"
+            )
+
+        # TODO: Should action events be able to have a different ts value than the timeout event?
+        origin_server_ts = (
+            parse_integer(request, "ts") if requester.app_service else None
+        )
+
+        # TODO: send_now. But first validate send_on_timeout & send_on_action
+
+        send_on_timeout_resp = await self.futures_handler.add_future(
+            requester,
+            room_id=room_id,
+            event_type=str(timeout_item["type"]),
+            state_key=(
+                str(timeout_item["state_key"]) if "state_key" in timeout_item else None
+            ),
+            origin_server_ts=origin_server_ts,
+            content=timeout_item["content"],
+            timeout=timeout,
+            group_id=None,
+            is_custom_endpoint=True,
+        )
+        group_id = str(send_on_timeout_resp.pop("future_group_id"))
+        ret = {"send_on_timeout": send_on_timeout_resp}
+
+        if send_on_action:
+            send_on_action_resp: Dict[str, Dict[str, JsonDict]] = {}
+            for action_name, action_item in send_on_action.items():
+                action_item_resp = await self.futures_handler.add_future(
+                    requester,
+                    room_id=room_id,
+                    event_type=str(action_item["type"]),
+                    state_key=(
+                        str(action_item["state_key"])
+                        if "state_key" in action_item
+                        else None
+                    ),
+                    origin_server_ts=origin_server_ts,
+                    content=action_item["content"],
+                    timeout=None,
+                    group_id=group_id,
+                    is_custom_endpoint=True,
+                )
+                try:
+                    del action_item_resp["future_group_id"]
+                except KeyError:
+                    pass
+                send_on_action_resp[action_name] = action_item_resp
+
+            ret["send_on_action"] = send_on_action_resp
+
+        return 200, ret
+
+    async def on_POST(
+        self,
+        request: SynapseRequest,
+        room_id: str,
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        return await self._do(request, requester, room_id)
+
+    async def on_PUT(
+        self, request: SynapseRequest, room_id: str, txn_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        set_tag("txn_id", txn_id)
+
+        return await self.txns.fetch_or_execute_request(
+            request,
+            requester,
+            self._do,
+            request,
+            requester,
+            room_id,
         )
 
 
@@ -1344,6 +1607,9 @@ def register_txn_path(
     servlet: RestServlet,
     regex_string: str,
     http_server: HttpServer,
+    releases: StrCollection = ("r0", "v3"),
+    unstable: bool = True,
+    v1: bool = True,
 ) -> None:
     """Registers a transaction-based path.
 
@@ -1362,13 +1628,13 @@ def register_txn_path(
         raise RuntimeError("on_POST and on_PUT must exist when using register_txn_path")
     http_server.register_paths(
         "POST",
-        client_patterns(regex_string + "$", v1=True),
+        client_patterns(regex_string + "$", releases, unstable, v1),
         on_POST,
         servlet.__class__.__name__,
     )
     http_server.register_paths(
         "PUT",
-        client_patterns(regex_string + "/(?P<txn_id>[^/]*)$", v1=True),
+        client_patterns(regex_string + "/(?P<txn_id>[^/]*)$", releases, unstable, v1),
         on_PUT,
         servlet.__class__.__name__,
     )
@@ -1503,12 +1769,14 @@ class RoomSummaryRestServlet(ResolveRoomIdMixin, RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RoomStateEventRestServlet(hs).register(http_server)
+    RoomStateFutureRestServlet(hs).register(http_server)
     RoomMemberListRestServlet(hs).register(http_server)
     JoinedRoomMemberListRestServlet(hs).register(http_server)
     RoomMessageListRestServlet(hs).register(http_server)
     JoinRoomAliasServlet(hs).register(http_server)
     RoomMembershipRestServlet(hs).register(http_server)
     RoomSendEventRestServlet(hs).register(http_server)
+    RoomSendFutureRestServlet(hs).register(http_server)
     PublicRoomListRestServlet(hs).register(http_server)
     RoomStateRestServlet(hs).register(http_server)
     RoomRedactEventRestServlet(hs).register(http_server)
@@ -1523,6 +1791,7 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SearchRestServlet(hs).register(http_server)
     RoomCreateRestServlet(hs).register(http_server)
     TimestampLookupRestServlet(hs).register(http_server)
+    RoomFutureRestServlet(hs).register(http_server)
 
     # Some servlets only get registered for the main process.
     if hs.config.worker.worker_app is None:

@@ -441,6 +441,24 @@ class ExperimentalConfig(Config):
             "msc3916_authenticated_media_enabled", False
         )
 
+        # MSC4140: Delayed events (Futures)
+        # The maximum allowed delay for timeout futures.
+        try:
+            self.msc4140_max_future_timeout_duration = int(
+                experimental["msc4140_max_future_timeout_duration"]
+            )
+            if self.msc4140_max_future_timeout_duration < 0:
+                raise ValueError
+        except ValueError:
+            raise ConfigError(
+                "Timeout duration must be a positive integer",
+                ("experimental", "msc4140_max_future_timeout_duration"),
+            )
+        except KeyError:
+            self.msc4140_max_future_timeout_duration = (
+                10 * 365 * 24 * 60 * 60 * 1000
+            )  # 10 years
+
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
 

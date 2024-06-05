@@ -1662,6 +1662,19 @@ rc_registration_token_validity:
   burst_count: 6
 ```
 ---
+### `rc_future_token_validity`
+
+This option checks the validity of future tokens that ratelimits requests based on
+the client's IP address.
+Defaults to `per_second: 0.1`, `burst_count: 5`.
+
+Example configuration:
+```yaml
+rc_future_token_validity:
+  per_second: 0.3
+  burst_count: 6
+```
+---
 ### `rc_login`
 
 This option specifies several limits for login:

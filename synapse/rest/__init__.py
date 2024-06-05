@@ -34,6 +34,7 @@ from synapse.rest.client import (
     directory,
     events,
     filter,
+    futures,
     initial_sync,
     keys,
     knock,
@@ -103,6 +104,7 @@ class ClientRestResource(JsonResource):
         events.register_servlets(hs, client_resource)
 
         room.register_servlets(hs, client_resource)
+        futures.register_servlets(hs, client_resource)
         login.register_servlets(hs, client_resource)
         profile.register_servlets(hs, client_resource)
         presence.register_servlets(hs, client_resource)
