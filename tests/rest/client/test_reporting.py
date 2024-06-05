@@ -158,7 +158,9 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         self.room_id = self.helper.create_room_as(
             self.other_user, tok=self.other_user_tok, is_public=True
         )
-        self.report_path = f"/_matrix/client/unstable/org.matrix.msc4151/rooms/{self.room_id}/report"
+        self.report_path = (
+            f"/_matrix/client/unstable/org.matrix.msc4151/rooms/{self.room_id}/report"
+        )
 
     def test_reason_str_and_score_int(self) -> None:
         data = {"reason": "this makes me sad"}
