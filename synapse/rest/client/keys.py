@@ -105,6 +105,8 @@ class KeyUploadServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.device_handler = hs.get_device_handler()
+        self._clock = hs.get_clock()
+        self._store = hs.get_datastores().main
 
         if hs.config.worker.worker_app is None:
             # if main process
@@ -151,10 +153,31 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        result = await self.key_uploader(
-            user_id=user_id, device_id=device_id, keys=body
-        )
-        return 200, result
+        time_now = self._clock.time_msec()
+        one_time_keys = body.pop("one_time_keys", None)
+        if one_time_keys:
+            log_kv(
+                {
+                    "message": "Updating one_time_keys for device.",
+                    "user_id": user_id,
+                    "device_id": device_id,
+                }
+            )
+            await self.e2e_keys_handler._upload_one_time_keys_for_user(
+                user_id, device_id, time_now, one_time_keys
+            )
+        else:
+            log_kv(
+                {"message": "Did not update one_time_keys", "reason": "no keys given"}
+            )
+
+        if body:
+            await self.key_uploader(user_id=user_id, device_id=device_id, keys=body)
+
+        result = await self._store.count_e2e_one_time_keys(user_id, device_id)
+
+        set_tag("one_time_key_counts", str(result))
+        return 200, {"one_time_key_counts": result}
 
 
 class KeyQueryServlet(RestServlet):
