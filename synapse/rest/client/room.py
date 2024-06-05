@@ -292,6 +292,9 @@ class RoomStateEventRestServlet(RestServlet):
         try:
             if event_type == EventTypes.Member:
                 membership = content.get("membership", None)
+                if not isinstance(membership, str):
+                    raise SynapseError(400, "Invalid membership (must be a string)")
+
                 event_id, _ = await self.room_member_handler.update_membership(
                     requester,
                     target=UserID.from_string(state_key),
