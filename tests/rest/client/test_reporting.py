@@ -139,3 +139,62 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
             "POST", self.report_path, data, access_token=self.other_user_tok
         )
         self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+
+class ReportRoomTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.room_id = self.helper.create_room_as(
+            self.other_user, tok=self.other_user_tok, is_public=True
+        )
+        self.report_path = f"rooms/{self.room_id}/report"
+
+    def test_reason_str_and_score_int(self) -> None:
+        data = {"reason": "this makes me sad"}
+        self._assert_status(200, data)
+
+    def test_no_reason(self) -> None:
+        data = {}
+        self._assert_status(400, data)
+
+    def test_reason_nonstring(self) -> None:
+        data = {"reason": 42}
+        self._assert_status(400, data)
+
+    def test_reason_null(self) -> None:
+        data = {"reason": None}
+        self._assert_status(400, data)
+
+    def test_cannot_report_nonexistent_room(self) -> None:
+        """
+        Tests that we don't accept event reports for rooms which do not exist.
+        """
+        channel = self.make_request(
+            "POST",
+            "rooms/!bloop:example.org/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+        )
+        self.assertEqual(404, channel.code, msg=channel.result["body"])
+        self.assertEqual(
+            "Room does not exist",
+            channel.json_body["error"],
+            msg=channel.result["body"],
+        )
+
+    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+        channel = self.make_request(
+            "POST", self.report_path, data, access_token=self.other_user_tok
+        )
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
