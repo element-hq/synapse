@@ -57,7 +57,7 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
         # Everything except `Membership.LEAVE` because we want everything that's *still*
         # relevant to the user. There are few more things to include in the sync response
         # (newly_left) but those are handled separately.
-        membership in (Membership.LIST - Membership.LEAVE)
+        membership in (Membership.LIST - {Membership.LEAVE})
         # Include kicks
         or (membership == Membership.LEAVE and sender != user_id)
     )
