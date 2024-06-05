@@ -466,7 +466,7 @@ class SlidingSyncHandler:
         # `event.internal_metadata` to include `instance_name` but it might turn out a
         # little difficult and a bigger, broader Synapse change than we want to make.
 
-        # 2) -----------------------------------------------------
+        # 1) -----------------------------------------------------
 
         # 1) Fetch membership changes that fall in the range from `to_token` up to
         # `membership_snapshot_token`
