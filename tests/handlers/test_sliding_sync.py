@@ -800,7 +800,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
 class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it works when
+    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it works with
     sharded event stream_writers enabled
     """
 
@@ -882,15 +882,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
             {"worker_name": "worker3"},
         )
 
-        # TODO: Debug remove
-        for instance_name in ["worker1", "worker2", "worker3"]:
-            instance_id = self.get_success(
-                self.store.get_id_for_instance(instance_name)
-            )
-            logger.info(
-                "instance_name: %s -> instance_id: %s", instance_name, instance_id
-            )
-
         # Specially crafted room IDs that get persisted on different workers.
         #
         # Sharded to worker1
@@ -899,8 +890,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         room_id2 = "!bar:test"
         # Sharded to worker3
         room_id3 = "!quux:test"
-
-        before_room_token = self.event_sources.get_current_token()
 
         # Create rooms on the different workers.
         self._create_room(room_id1, user2_id, user2_tok)
@@ -929,10 +918,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(pos3.instance_name, "worker3")
 
         before_stuck_activity_token = self.event_sources.get_current_token()
-
-        # TODO: asdf
-        # self.helper.join(room_id2, user1_id, tok=user1_tok)
-        # self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         # We now gut wrench into the events stream `MultiWriterIdGenerator` on worker2 to
         # mimic it getting stuck persisting an event. This ensures that when we send an
@@ -1001,14 +986,11 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
             stuck_activity_token.room_key.get_stream_pos_for_instance("worker3"),
         )
 
-        # TODO: asdf
-        # self.helper.leave(room_id2, user1_id, tok=user1_tok)
-        # self.helper.join(room_id2, user1_id, tok=user1_tok)
-
         # We finish the fake persisting an event we started above and advance worker2's
         # event stream position (unstuck worker2).
         self.get_success(actx.__aexit__(None, None, None))
 
+        # The function under test
         room_id_results = self.get_success(
             self.sliding_sync_handler.get_sync_room_ids_for_user(
                 UserID.from_string(user1_id),
