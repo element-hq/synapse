@@ -85,7 +85,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # test with a text file
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{self.hs.hostname}/{content_uri.media_id}",
+            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
         )
         self.pump()
         self.assertEqual(200, channel.code)
@@ -126,7 +126,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # test with an image file
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{self.hs.hostname}/{content_uri.media_id}",
+            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
         )
         self.pump()
         self.assertEqual(200, channel.code)
@@ -168,7 +168,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         )
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{self.hs.hostname}/{content_uri.media_id}",
+            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
         )
         self.pump()
         self.assertEqual(404, channel.code)
@@ -227,7 +227,7 @@ class FederationUnstableMediaEndpointCompatibilityTest(
     def test_incompatible_storage_provider_fails_to_load_endpoint(self) -> None:
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{self.hs.hostname}/xyz",
+            "/_matrix/federation/unstable/org.matrix.msc3916/media/download/xyz",
         )
         self.pump()
         self.assertEqual(404, channel.code)

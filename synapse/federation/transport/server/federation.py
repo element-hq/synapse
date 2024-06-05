@@ -797,7 +797,7 @@ class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
     item. This endpoint only returns local media.
     """
 
-    PATH = "/media/download/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)"
+    PATH = "/media/download/(?P<media_id>[^/]*)"
     PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc3916"
     RATELIMIT = True
 
@@ -816,7 +816,6 @@ class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
         origin: Optional[str],
         content: Literal[None],
         request: SynapseRequest,
-        server_name: str,
         media_id: str,
     ) -> None:
         max_timeout_ms = parse_integer(
