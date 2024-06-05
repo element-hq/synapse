@@ -1061,6 +1061,45 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
             {alice: ProfileInfo(display_name=None, avatar_url=MXC_DUMMY)},
         )
 
+    def test_search_punctuation(self) -> None:
+        """Test that you can search for a user that includes punctuation"""
+
+        searching_user = self.register_user("searcher", "password")
+        searching_user_tok = self.login("searcher", "password")
+
+        room_id = self.helper.create_room_as(
+            searching_user,
+            room_version=RoomVersions.V1.identifier,
+            tok=searching_user_tok,
+        )
+
+        # We want to test searching for users of the form e.g. "user-1", with
+        # various punctuation. We also test both where the prefix is numeric and
+        # alphanumeric, as e.g. postgres tokenises "user-1" as "user" and "-1".
+        i = 1
+        for char in ["-", ".", "_"]:
+            for use_numeric in [False, True]:
+                if use_numeric:
+                    prefix1 = f"{i}"
+                    prefix2 = f"{i+1}"
+                else:
+                    prefix1 = f"a{i}"
+                    prefix2 = f"a{i+1}"
+
+                local_user_1 = self.register_user(f"user{char}{prefix1}", "password")
+                local_user_2 = self.register_user(f"user{char}{prefix2}", "password")
+
+                self._add_user_to_room(room_id, RoomVersions.V1, local_user_1)
+                self._add_user_to_room(room_id, RoomVersions.V1, local_user_2)
+
+                results = self.get_success(
+                    self.handler.search_users(searching_user, local_user_1, 20)
+                )["results"]
+                received_user_id_ordering = [result["user_id"] for result in results]
+                self.assertSequenceEqual(received_user_id_ordering[:1], [local_user_1])
+
+                i += 2
+
 
 class TestUserDirSearchDisabled(unittest.HomeserverTestCase):
     servlets = [

@@ -218,3 +218,13 @@ class RatelimitConfig(Config):
             "rc_media_create",
             defaults={"per_second": 10, "burst_count": 50},
         )
+
+        self.remote_media_downloads = RatelimitSettings(
+            key="rc_remote_media_downloads",
+            per_second=self.parse_size(
+                config.get("remote_media_download_per_second", "87K")
+            ),
+            burst_count=self.parse_size(
+                config.get("remote_media_download_burst_count", "500M")
+            ),
+        )
