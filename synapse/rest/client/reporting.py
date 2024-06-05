@@ -98,7 +98,10 @@ class ReportEventRestServlet(RestServlet):
 class ReportRoomRestServlet(RestServlet):
     # https://github.com/matrix-org/matrix-spec-proposals/pull/4151
     PATTERNS = client_patterns(
-        "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$", releases=[], v1=False, unstable=True
+        "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$",
+        releases=[],
+        v1=False,
+        unstable=True,
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -126,9 +129,7 @@ class ReportRoomRestServlet(RestServlet):
 
         room = await self.store.get_room(room_id)
         if room is None:
-            raise NotFoundError(
-                "Room does not exist"
-            )
+            raise NotFoundError("Room does not exist")
 
         await self.store.add_room_report(
             room_id=room_id,
