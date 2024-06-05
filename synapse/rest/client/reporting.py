@@ -120,7 +120,8 @@ class ReportRoomRestServlet(RestServlet):
         body = parse_json_object_from_request(request)
 
         # `reason` is required - do not default to empty string
-        if not isinstance(body.get("reason"), str):
+        reason = body.get("reason")
+        if not isinstance(reason, str) or reason is None:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Param 'reason' must be a string",
@@ -134,7 +135,7 @@ class ReportRoomRestServlet(RestServlet):
         await self.store.add_room_report(
             room_id=room_id,
             user_id=user_id,
-            reason=body.get("reason"),
+            reason=reason,
             content=body,
             received_ts=self.clock.time_msec(),
         )
