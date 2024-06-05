@@ -48,7 +48,7 @@ import attr
 from immutabledict import immutabledict
 from signedjson.key import decode_verify_key_bytes
 from signedjson.types import VerifyKey
-from typing_extensions import TypedDict
+from typing_extensions import Self, TypedDict
 from unpaddedbase64 import decode_base64
 from zope.interface import Interface
 
@@ -514,6 +514,27 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
         # If we don't have an entry for the instance we can assume that it was
         # at `self.stream`.
         return self.instance_map.get(instance_name, self.stream)
+
+    def is_before_or_eq(self, other_token: Self) -> bool:
+        """Wether this token is before the other token, i.e. every constituent
+        part is before the other.
+
+        Essentially it is `self <= other`.
+
+        Note: if `self.is_before_or_eq(other_token) is False` then that does not
+        imply that the reverse is True.
+        """
+        if self.stream > other_token.stream:
+            return False
+
+        instances = self.instance_map.keys() | other_token.instance_map.keys()
+        for instance in instances:
+            if self.instance_map.get(
+                instance, self.stream
+            ) > other_token.instance_map.get(instance, other_token.stream):
+                return False
+
+        return True
 
 
 @attr.s(frozen=True, slots=True, order=False)
@@ -1008,6 +1029,41 @@ class StreamToken:
         """Returns the stream ID for the given key."""
         return getattr(self, key.value)
 
+    def is_before_or_eq(self, other_token: "StreamToken") -> bool:
+        """Wether this token is before the other token, i.e. every constituent
+        part is before the other.
+
+        Essentially it is `self <= other`.
+
+        Note: if `self.is_before_or_eq(other_token) is False` then that does not
+        imply that the reverse is True.
+        """
+
+        for _, key in StreamKeyType.__members__.items():
+            if key == StreamKeyType.TYPING:
+                # Typing stream is allowed to "reset", and so comparisons don't
+                # really make sense as is.
+                # TODO: Figure out a better way of tracking resets.
+                continue
+
+            self_value = self.get_field(key)
+            other_value = other_token.get_field(key)
+
+            if isinstance(self_value, RoomStreamToken):
+                assert isinstance(other_value, RoomStreamToken)
+                if not self_value.is_before_or_eq(other_value):
+                    return False
+            elif isinstance(self_value, MultiWriterStreamToken):
+                assert isinstance(other_value, MultiWriterStreamToken)
+                if not self_value.is_before_or_eq(other_value):
+                    return False
+            else:
+                assert isinstance(other_value, int)
+                if self_value > other_value:
+                    return False
+
+        return True
+
 
 StreamToken.START = StreamToken(
     RoomStreamToken(stream=0), 0, 0, MultiWriterStreamToken(stream=0), 0, 0, 0, 0, 0, 0
@@ -1156,6 +1212,7 @@ class UserInfo:
         user_type:  User type (None for normal user, 'support' and 'bot' other options).
         approved: If the user has been "approved" to register on the server.
         locked: Whether the user's account has been locked
+        suspended: Whether the user's account is currently suspended
     """
 
     user_id: UserID
@@ -1171,6 +1228,7 @@ class UserInfo:
     is_shadow_banned: bool
     approved: bool
     locked: bool
+    suspended: bool
 
 
 class UserProfile(TypedDict):
@@ -1221,3 +1279,60 @@ class ScheduledTask:
     result: Optional[JsonMapping]
     # Optional error that should be assigned a value when the status is FAILED
     error: Optional[str]
+
+
+class ShutdownRoomParams(TypedDict):
+    """
+    Attributes:
+        requester_user_id:
+            User who requested the action. Will be recorded as putting the room on the
+            blocking list.
+        new_room_user_id:
+            If set, a new room will be created with this user ID
+            as the creator and admin, and all users in the old room will be
+            moved into that room. If not set, no new room will be created
+            and the users will just be removed from the old room.
+        new_room_name:
+            A string representing the name of the room that new users will
+            be invited to. Defaults to `Content Violation Notification`
+        message:
+            A string containing the first message that will be sent as
+            `new_room_user_id` in the new room. Ideally this will clearly
+            convey why the original room was shut down.
+            Defaults to `Sharing illegal content on this server is not
+            permitted and rooms in violation will be blocked.`
+        block:
+            If set to `true`, this room will be added to a blocking list,
+            preventing future attempts to join the room. Defaults to `false`.
+        purge:
+            If set to `true`, purge the given room from the database.
+        force_purge:
+            If set to `true`, the room will be purged from database
+            even if there are still users joined to the room.
+    """
+
+    requester_user_id: Optional[str]
+    new_room_user_id: Optional[str]
+    new_room_name: Optional[str]
+    message: Optional[str]
+    block: bool
+    purge: bool
+    force_purge: bool
+
+
+class ShutdownRoomResponse(TypedDict):
+    """
+    Attributes:
+        kicked_users: An array of users (`user_id`) that were kicked.
+        failed_to_kick_users:
+            An array of users (`user_id`) that that were not kicked.
+        local_aliases:
+            An array of strings representing the local aliases that were
+            migrated from the old room to the new.
+        new_room_id: A string representing the room ID of the new room.
+    """
+
+    kicked_users: List[str]
+    failed_to_kick_users: List[str]
+    local_aliases: List[str]
+    new_room_id: Optional[str]

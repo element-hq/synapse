@@ -1232,6 +1232,31 @@ federation_domain_whitelist:
   - syd.example.com
 ```
 ---
+### `federation_whitelist_endpoint_enabled`
+
+Enables an endpoint for fetching the federation whitelist config.
+
+The request method and path is `GET /_synapse/client/v1/config/federation_whitelist`, and the
+response format is:
+
+```json
+{
+    "whitelist_enabled": true,  // Whether the federation whitelist is being enforced
+    "whitelist": [  // Which server names are allowed by the whitelist
+        "example.com"
+    ]
+}
+```
+
+If `whitelist_enabled` is `false` then the server is permitted to federate with all others.
+
+The endpoint requires authentication.
+
+Example configuration:
+```yaml
+federation_whitelist_endpoint_enabled: true
+```
+---
 ### `federation_metrics_domains`
 
 Report prometheus metrics on the age of PDUs being sent to and received from
@@ -1921,6 +1946,24 @@ Example configuration:
 max_image_pixels: 35M
 ```
 ---
+### `remote_media_download_burst_count`
+
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+
+Example configuration:
+```yaml
+remote_media_download_burst_count: 200M
+```
+---
+### `remote_media_download_per_second`
+
+Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads - this configuration option determines the rate at which the "bucket" (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has "drained" from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`.
+
+Example configuration:
+```yaml
+remote_media_download_per_second: 40K
+```
+---
 ### `prevent_media_downloads_from`
 
 A list of domains to never download media from. Media from these
@@ -2590,6 +2633,11 @@ Possible values for this option are:
 * "private_chat": an invitation is required to join these rooms.
 * "trusted_private_chat": an invitation is required to join this room and the invitee is
   assigned a power level of 100 upon joining the room.
+
+Each preset will set up a room in the same manner as if it were provided as the `preset` parameter when
+calling the
+[`POST /_matrix/client/v3/createRoom`](https://spec.matrix.org/latest/client-server-api/#post_matrixclientv3createroom)
+Client-Server API endpoint.
 
 If a value of "private_chat" or "trusted_private_chat" is used then
 `auto_join_mxid_localpart` must also be configured.
@@ -3528,6 +3576,15 @@ Has the following sub-options:
    users. This allows the CAS SSO flow to be limited to sign in only, rather than
    automatically registering users that have a valid SSO login but do not have
    a pre-registered account. Defaults to true.
+* `allow_numeric_ids`: set to 'true' allow numeric user IDs (default false).
+   This allows CAS SSO flow to provide user IDs composed of numbers only.
+   These identifiers will be prefixed by the letter "u" by default.
+   The prefix can be configured using the "numeric_ids_prefix" option.
+   Be careful to choose the prefix correctly to avoid any possible conflicts
+   (e.g. user 1234 becomes u1234 when a user u1234 already exists).
+* `numeric_ids_prefix`: the prefix you wish to add in front of a numeric user ID
+   when the "allow_numeric_ids" option is set to "true".
+   By default, the prefix is the letter "u" and only alphanumeric characters are allowed.
 
    *Added in Synapse 1.93.0.*
 
@@ -3542,6 +3599,8 @@ cas_config:
     userGroup: "staff"
     department: None
   enable_registration: true
+  allow_numeric_ids: true
+  numeric_ids_prefix: "numericuser"
 ```
 ---
 ### `sso`
@@ -4553,4 +4612,33 @@ background_updates:
     sleep_duration_ms: 300
     min_batch_size: 10
     default_batch_size: 50
+```
+---
+## Auto Accept Invites
+Configuration settings related to automatically accepting invites.
+
+---
+### `auto_accept_invites`
+
+Automatically accepting invites controls whether users are presented with an invite request or if they
+are instead automatically joined to a room when receiving an invite. Set the `enabled` sub-option to true to
+enable auto-accepting invites. Defaults to false.
+This setting has the following sub-options:
+* `enabled`: Whether to run the auto-accept invites logic. Defaults to false.
+* `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
+   for direct messages. Defaults to false.
+* `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
+* `worker_to_run_on`: Which worker to run this module on. This must match the "worker_name".
+
+NOTE: Care should be taken not to enable this setting if the `synapse_auto_accept_invite` module is enabled and installed.
+The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join
+events could be generated from a single invite.
+
+Example configuration:
+```yaml
+auto_accept_invites:
+    enabled: true
+    only_for_direct_messages: true
+    only_from_local_users: true
+    worker_to_run_on: "worker_1"
 ```

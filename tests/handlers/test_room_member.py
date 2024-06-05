@@ -70,6 +70,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                 action=Membership.JOIN,
             ),
             LimitExceededError,
+            by=0.5,
         )
 
     @override_config({"rc_joins_per_room": {"per_second": 0, "burst_count": 2}})
@@ -206,6 +207,7 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
                     remote_room_hosts=[self.OTHER_SERVER_NAME],
                 ),
                 LimitExceededError,
+                by=0.5,
             )
 
     # TODO: test that remote joins to a room are rate limited.
@@ -273,6 +275,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
+            by=0.5,
         )
 
         # Try to join as Chris on the original worker. Should get denied because Alice
@@ -285,6 +288,7 @@ class TestReplicatedJoinsLimitedByPerRoomRateLimiter(BaseMultiWorkerStreamTestCa
                 action=Membership.JOIN,
             ),
             LimitExceededError,
+            by=0.5,
         )
 
 
@@ -403,3 +407,24 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         self.assertFalse(
             self.get_success(self.store.did_forget(self.alice, self.room_id))
         )
+
+    def test_deduplicate_joins(self) -> None:
+        """
+        Test that calling /join multiple times does not store a new state group.
+        """
+
+        self.helper.join(self.room_id, user=self.bob, tok=self.bob_token)
+
+        sql = "SELECT COUNT(*) FROM state_groups WHERE room_id = ?"
+        rows = self.get_success(
+            self.store.db_pool.execute("test_deduplicate_joins", sql, self.room_id)
+        )
+        initial_count = rows[0][0]
+
+        self.helper.join(self.room_id, user=self.bob, tok=self.bob_token)
+        rows = self.get_success(
+            self.store.db_pool.execute("test_deduplicate_joins", sql, self.room_id)
+        )
+        new_count = rows[0][0]
+
+        self.assertEqual(initial_count, new_count)

@@ -32,7 +32,7 @@ from twisted.web.resource import Resource
 from synapse.api.constants import EduTypes
 from synapse.api.errors import AuthError
 from synapse.federation.transport.server import TransportLayerServer
-from synapse.handlers.typing import TypingWriterHandler
+from synapse.handlers.typing import FORGET_TIMEOUT, TypingWriterHandler
 from synapse.http.federation.matrix_federation_agent import MatrixFederationAgent
 from synapse.server import HomeServer
 from synapse.types import JsonDict, Requester, StreamKeyType, UserID, create_requester
@@ -501,3 +501,54 @@ class TypingNotificationsTestCase(unittest.HomeserverTestCase):
                 }
             ],
         )
+
+    def test_prune_typing_replication(self) -> None:
+        """Regression test for `get_all_typing_updates` breaking when we prune
+        old updates
+        """
+        self.room_members = [U_APPLE, U_BANANA]
+
+        instance_name = self.hs.get_instance_name()
+
+        self.get_success(
+            self.handler.started_typing(
+                target_user=U_APPLE,
+                requester=create_requester(U_APPLE),
+                room_id=ROOM_ID,
+                timeout=10000,
+            )
+        )
+
+        rows, _, _ = self.get_success(
+            self.handler.get_all_typing_updates(
+                instance_name=instance_name,
+                last_id=0,
+                current_id=self.handler.get_current_token(),
+                limit=100,
+            )
+        )
+        self.assertEqual(rows, [(1, [ROOM_ID, [U_APPLE.to_string()]])])
+
+        self.reactor.advance(20000)
+
+        rows, _, _ = self.get_success(
+            self.handler.get_all_typing_updates(
+                instance_name=instance_name,
+                last_id=1,
+                current_id=self.handler.get_current_token(),
+                limit=100,
+            )
+        )
+        self.assertEqual(rows, [(2, [ROOM_ID, []])])
+
+        self.reactor.advance(FORGET_TIMEOUT)
+
+        rows, _, _ = self.get_success(
+            self.handler.get_all_typing_updates(
+                instance_name=instance_name,
+                last_id=1,
+                current_id=self.handler.get_current_token(),
+                limit=100,
+            )
+        )
+        self.assertEqual(rows, [])

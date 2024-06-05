@@ -50,16 +50,15 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
-    StreamIdGenerator,
 )
 from synapse.types import JsonDict
 from synapse.util import json_encoder
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -89,35 +88,23 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             expiry_ms=30 * 60 * 1000,
         )
 
-        if isinstance(database.engine, PostgresEngine):
-            self._can_write_to_device = (
-                self._instance_name in hs.config.worker.writers.to_device
-            )
+        self._can_write_to_device = (
+            self._instance_name in hs.config.worker.writers.to_device
+        )
 
-            self._to_device_msg_id_gen: AbstractStreamIdGenerator = (
-                MultiWriterIdGenerator(
-                    db_conn=db_conn,
-                    db=database,
-                    notifier=hs.get_replication_notifier(),
-                    stream_name="to_device",
-                    instance_name=self._instance_name,
-                    tables=[
-                        ("device_inbox", "instance_name", "stream_id"),
-                        ("device_federation_outbox", "instance_name", "stream_id"),
-                    ],
-                    sequence_name="device_inbox_sequence",
-                    writers=hs.config.worker.writers.to_device,
-                )
-            )
-        else:
-            self._can_write_to_device = True
-            self._to_device_msg_id_gen = StreamIdGenerator(
-                db_conn,
-                hs.get_replication_notifier(),
-                "device_inbox",
-                "stream_id",
-                extra_tables=[("device_federation_outbox", "stream_id")],
-            )
+        self._to_device_msg_id_gen: AbstractStreamIdGenerator = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="to_device",
+            instance_name=self._instance_name,
+            tables=[
+                ("device_inbox", "instance_name", "stream_id"),
+                ("device_federation_outbox", "instance_name", "stream_id"),
+            ],
+            sequence_name="device_inbox_sequence",
+            writers=hs.config.worker.writers.to_device,
+        )
 
         max_device_inbox_id = self._to_device_msg_id_gen.get_current_token()
         device_inbox_prefill, min_device_inbox_id = self.db_pool.get_cache_dict(
@@ -978,6 +965,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
     DEVICE_INBOX_STREAM_ID = "device_inbox_stream_drop"
     REMOVE_DEAD_DEVICES_FROM_INBOX = "remove_dead_devices_from_device_inbox"
+    CLEANUP_DEVICE_FEDERATION_OUTBOX = "cleanup_device_federation_outbox"
 
     def __init__(
         self,
@@ -1001,6 +989,11 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
         self.db_pool.updates.register_background_update_handler(
             self.REMOVE_DEAD_DEVICES_FROM_INBOX,
             self._remove_dead_devices_from_device_inbox,
+        )
+
+        self.db_pool.updates.register_background_update_handler(
+            self.CLEANUP_DEVICE_FEDERATION_OUTBOX,
+            self._cleanup_device_federation_outbox,
         )
 
     async def _background_drop_index_device_inbox(
@@ -1090,6 +1083,75 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
         if finished:
             await self.db_pool.updates._end_background_update(
                 self.REMOVE_DEAD_DEVICES_FROM_INBOX,
+            )
+
+        return batch_size
+
+    async def _cleanup_device_federation_outbox(
+        self,
+        progress: JsonDict,
+        batch_size: int,
+    ) -> int:
+        def _cleanup_device_federation_outbox_txn(
+            txn: LoggingTransaction,
+        ) -> bool:
+            if "max_stream_id" in progress:
+                max_stream_id = progress["max_stream_id"]
+            else:
+                txn.execute("SELECT max(stream_id) FROM device_federation_outbox")
+                res = cast(Tuple[Optional[int]], txn.fetchone())
+                if res[0] is None:
+                    # this can only happen if the `device_inbox` table is empty, in which
+                    # case we have no work to do.
+                    return True
+                else:
+                    max_stream_id = res[0]
+
+            start = progress.get("stream_id", 0)
+            stop = start + batch_size
+
+            sql = """
+                SELECT destination FROM device_federation_outbox
+                WHERE ? < stream_id AND stream_id <= ?
+            """
+
+            txn.execute(sql, (start, stop))
+
+            destinations = {d for d, in txn}
+            to_remove = set()
+            for d in destinations:
+                try:
+                    parse_and_validate_server_name(d)
+                except ValueError:
+                    to_remove.add(d)
+
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="device_federation_outbox",
+                column="destination",
+                values=to_remove,
+                keyvalues={},
+            )
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                self.CLEANUP_DEVICE_FEDERATION_OUTBOX,
+                {
+                    "stream_id": stop,
+                    "max_stream_id": max_stream_id,
+                },
+            )
+
+            return stop >= max_stream_id
+
+        finished = await self.db_pool.runInteraction(
+            "_cleanup_device_federation_outbox",
+            _cleanup_device_federation_outbox_txn,
+        )
+
+        if finished:
+            await self.db_pool.updates._end_background_update(
+                self.CLEANUP_DEVICE_FEDERATION_OUTBOX,
             )
 
         return batch_size

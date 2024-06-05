@@ -57,10 +57,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.end_to_end_keys import EndToEndKeyWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.types import Cursor
-from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
-    StreamIdGenerator,
-)
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -70,10 +67,7 @@ from synapse.types import (
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.lrucache import LruCache
-from synapse.util.caches.stream_change_cache import (
-    AllEntitiesChangedResult,
-    StreamChangeCache,
-)
+from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.cancellation import cancellable
 from synapse.util.iterutils import batch_iter
 from synapse.util.stringutils import shortstr
@@ -102,19 +96,21 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker
         # class below that is used on the main process.
-        self._device_list_id_gen = StreamIdGenerator(
-            db_conn,
-            hs.get_replication_notifier(),
-            "device_lists_stream",
-            "stream_id",
-            extra_tables=[
-                ("user_signature_stream", "stream_id"),
-                ("device_lists_outbound_pokes", "stream_id"),
-                ("device_lists_changes_in_room", "stream_id"),
-                ("device_lists_remote_pending", "stream_id"),
-                ("device_lists_changes_converted_stream_position", "stream_id"),
+        self._device_list_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="device_lists_stream",
+            instance_name=self._instance_name,
+            tables=[
+                ("device_lists_stream", "instance_name", "stream_id"),
+                ("user_signature_stream", "instance_name", "stream_id"),
+                ("device_lists_outbound_pokes", "instance_name", "stream_id"),
+                ("device_lists_changes_in_room", "instance_name", "stream_id"),
+                ("device_lists_remote_pending", "instance_name", "stream_id"),
             ],
-            is_writer=hs.config.worker.worker_app is None,
+            sequence_name="device_lists_sequence",
+            writers=["master"],
         )
 
         device_list_max = self._device_list_id_gen.get_current_token()
@@ -130,6 +126,20 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             "DeviceListStreamChangeCache",
             min_device_list_id,
             prefilled_cache=device_list_prefill,
+        )
+
+        device_list_room_prefill, min_device_list_room_id = self.db_pool.get_cache_dict(
+            db_conn,
+            "device_lists_changes_in_room",
+            entity_column="room_id",
+            stream_column="stream_id",
+            max_value=device_list_max,
+            limit=10000,
+        )
+        self._device_list_room_stream_cache = StreamChangeCache(
+            "DeviceListRoomStreamChangeCache",
+            min_device_list_room_id,
+            prefilled_cache=device_list_room_prefill,
         )
 
         (
@@ -208,6 +218,13 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 self._device_list_federation_stream_cache.entity_has_changed(
                     row.entity, token
                 )
+
+    def device_lists_in_rooms_have_changed(
+        self, room_ids: StrCollection, token: int
+    ) -> None:
+        "Record that device lists have changed in rooms"
+        for room_id in room_ids:
+            self._device_list_room_stream_cache.entity_has_changed(room_id, token)
 
     def get_device_stream_token(self) -> int:
         return self._device_list_id_gen.get_current_token()
@@ -744,6 +761,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 "stream_id": stream_id,
                 "from_user_id": from_user_id,
                 "user_ids": json_encoder.encode(user_ids),
+                "instance_name": self._instance_name,
             },
         )
 
@@ -831,16 +849,6 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             ),
         )
         return {device[0]: db_to_json(device[1]) for device in devices}
-
-    def get_cached_device_list_changes(
-        self,
-        from_key: int,
-    ) -> AllEntitiesChangedResult:
-        """Get set of users whose devices have changed since `from_key`, or None
-        if that information is not in our cache.
-        """
-
-        return self._device_list_stream_cache.get_all_entities_changed(from_key)
 
     @cancellable
     async def get_all_devices_changed(
@@ -1457,7 +1465,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
 
     @cancellable
     async def get_device_list_changes_in_rooms(
-        self, room_ids: Collection[str], from_id: int
+        self, room_ids: Collection[str], from_id: int, to_id: int
     ) -> Optional[Set[str]]:
         """Return the set of users whose devices have changed in the given rooms
         since the given stream ID.
@@ -1473,9 +1481,15 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         if min_stream_id > from_id:
             return None
 
+        changed_room_ids = self._device_list_room_stream_cache.get_entities_changed(
+            room_ids, from_id
+        )
+        if not changed_room_ids:
+            return set()
+
         sql = """
             SELECT DISTINCT user_id FROM device_lists_changes_in_room
-            WHERE {clause} AND stream_id >= ?
+            WHERE {clause} AND stream_id > ? AND stream_id <= ?
         """
 
         def _get_device_list_changes_in_rooms_txn(
@@ -1487,11 +1501,12 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             return {user_id for user_id, in txn}
 
         changes = set()
-        for chunk in batch_iter(room_ids, 1000):
+        for chunk in batch_iter(changed_room_ids, 1000):
             clause, args = make_in_list_sql_clause(
                 self.database_engine, "room_id", chunk
             )
             args.append(from_id)
+            args.append(to_id)
 
             changes |= await self.db_pool.runInteraction(
                 "get_device_list_changes_in_rooms",
@@ -1501,6 +1516,34 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             )
 
         return changes
+
+    async def get_all_device_list_changes(self, from_id: int, to_id: int) -> Set[str]:
+        """Return the set of rooms where devices have changed since the given
+        stream ID.
+
+        Will raise an exception if the given stream ID is too old.
+        """
+
+        min_stream_id = await self._get_min_device_lists_changes_in_room()
+
+        if min_stream_id > from_id:
+            raise Exception("stream ID is too old")
+
+        sql = """
+            SELECT DISTINCT room_id FROM device_lists_changes_in_room
+            WHERE stream_id > ? AND stream_id <= ?
+        """
+
+        def _get_all_device_list_changes_txn(
+            txn: LoggingTransaction,
+        ) -> Set[str]:
+            txn.execute(sql, (from_id, to_id))
+            return {room_id for room_id, in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_all_device_list_changes",
+            _get_all_device_list_changes_txn,
+        )
 
     async def get_device_list_changes_in_room(
         self, room_id: str, min_stream_id: int
@@ -1538,6 +1581,8 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
         hs: "HomeServer",
     ):
         super().__init__(database, db_conn, hs)
+
+        self._instance_name = hs.get_instance_name()
 
         self.db_pool.updates.register_background_index_update(
             "device_lists_stream_idx",
@@ -1651,6 +1696,7 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
                     "device_lists_outbound_pokes",
                     {
                         "stream_id": stream_id,
+                        "instance_name": self._instance_name,
                         "destination": destination,
                         "user_id": user_id,
                         "device_id": device_id,
@@ -1687,10 +1733,6 @@ class DeviceBackgroundUpdateStore(SQLBaseStore):
 
 
 class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
-    # Because we have write access, this will be a StreamIdGenerator
-    # (see DeviceWorkerStore.__init__)
-    _device_list_id_gen: AbstractStreamIdGenerator
-
     def __init__(
         self,
         database: DatabasePool,
@@ -1962,8 +2004,8 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
     async def add_device_change_to_streams(
         self,
         user_id: str,
-        device_ids: Collection[str],
-        room_ids: Collection[str],
+        device_ids: StrCollection,
+        room_ids: StrCollection,
     ) -> Optional[int]:
         """Persist that a user's devices have been updated, and which hosts
         (if any) should be poked.
@@ -2049,9 +2091,9 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         self.db_pool.simple_insert_many_txn(
             txn,
             table="device_lists_stream",
-            keys=("stream_id", "user_id", "device_id"),
+            keys=("instance_name", "stream_id", "user_id", "device_id"),
             values=[
-                (stream_id, user_id, device_id)
+                (self._instance_name, stream_id, user_id, device_id)
                 for stream_id, device_id in zip(stream_ids, device_ids)
             ],
         )
@@ -2081,6 +2123,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         values = [
             (
                 destination,
+                self._instance_name,
                 next(stream_id_iterator),
                 user_id,
                 device_id,
@@ -2096,6 +2139,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             table="device_lists_outbound_pokes",
             keys=(
                 "destination",
+                "instance_name",
                 "stream_id",
                 "user_id",
                 "device_id",
@@ -2114,16 +2158,40 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 device_id,
                 {
                     stream_id: destination
-                    for (destination, stream_id, _, _, _, _, _) in values
+                    for (destination, _, stream_id, _, _, _, _, _) in values
                 },
             )
+
+    async def mark_redundant_device_lists_pokes(
+        self,
+        user_id: str,
+        device_id: str,
+        room_id: str,
+        converted_upto_stream_id: int,
+    ) -> None:
+        """If we've calculated the outbound pokes for a given room/device list
+        update, mark any subsequent changes as already converted"""
+
+        sql = """
+            UPDATE device_lists_changes_in_room
+            SET converted_to_destinations = true
+            WHERE stream_id > ? AND user_id = ? AND device_id = ?
+                AND room_id = ? AND NOT converted_to_destinations
+        """
+
+        def mark_redundant_device_lists_pokes_txn(txn: LoggingTransaction) -> None:
+            txn.execute(sql, (converted_upto_stream_id, user_id, device_id, room_id))
+
+        return await self.db_pool.runInteraction(
+            "mark_redundant_device_lists_pokes", mark_redundant_device_lists_pokes_txn
+        )
 
     def _add_device_outbound_room_poke_txn(
         self,
         txn: LoggingTransaction,
         user_id: str,
-        device_ids: Iterable[str],
-        room_ids: Collection[str],
+        device_ids: StrCollection,
+        room_ids: StrCollection,
         stream_ids: List[int],
         context: Dict[str, str],
     ) -> None:
@@ -2143,6 +2211,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 "device_id",
                 "room_id",
                 "stream_id",
+                "instance_name",
                 "converted_to_destinations",
                 "opentracing_context",
             ),
@@ -2152,6 +2221,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                     device_id,
                     room_id,
                     stream_id,
+                    self._instance_name,
                     # We only need to calculate outbound pokes for local users
                     not self.hs.is_mine_id(user_id),
                     encoded_context,
@@ -2159,6 +2229,10 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 for room_id in room_ids
                 for device_id, stream_id in zip(device_ids, stream_ids)
             ],
+        )
+
+        txn.call_after(
+            self.device_lists_in_rooms_have_changed, room_ids, max(stream_ids)
         )
 
     async def get_uncoverted_outbound_room_pokes(
@@ -2267,7 +2341,10 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                     "user_id": user_id,
                     "device_id": device_id,
                 },
-                values={"stream_id": stream_id},
+                values={
+                    "stream_id": stream_id,
+                    "instance_name": self._instance_name,
+                },
                 desc="add_remote_device_list_to_pending",
             )
 

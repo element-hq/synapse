@@ -316,6 +316,10 @@ class Ratelimiter:
         )
 
         if not allowed:
+            # We pause for a bit here to stop clients from "tight-looping" on
+            # retrying their request.
+            await self.clock.sleep(0.5)
+
             raise LimitExceededError(
                 limiter_name=self._limiter_name,
                 retry_after_ms=int(1000 * (time_allowed - time_now_s)),

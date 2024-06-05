@@ -1,1 +1,0 @@
-For MSC3266 room summaries, support queries at the recommended endpoint of `/_matrix/client/unstable/im.nheko.summary/summary/{roomIdOrAlias}`. The existing endpoint of `/_matrix/client/unstable/im.nheko.summary/rooms/{roomIdOrAlias}/summary` is deprecated.

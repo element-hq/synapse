@@ -68,6 +68,7 @@ from synapse.config._base import format_config_error
 from synapse.config.homeserver import HomeServerConfig
 from synapse.config.server import ListenerConfig, ManholeConfig, TCPListenerConfig
 from synapse.crypto import context_factory
+from synapse.events.auto_accept_invites import InviteAutoAccepter
 from synapse.events.presence_router import load_legacy_presence_router
 from synapse.handlers.auth import load_legacy_password_auth_providers
 from synapse.http.site import SynapseSite
@@ -582,6 +583,11 @@ async def start(hs: "HomeServer") -> None:
         m = module(config, module_api)
         logger.info("Loaded module %s", m)
 
+    if hs.config.auto_accept_invites.enabled:
+        # Start the local auto_accept_invites module.
+        m = InviteAutoAccepter(hs.config.auto_accept_invites, module_api)
+        logger.info("Loaded local module %s", m)
+
     load_legacy_spam_checkers(hs)
     load_legacy_third_party_event_rules(hs)
     load_legacy_presence_router(hs)
@@ -675,17 +681,17 @@ def setup_sentry(hs: "HomeServer") -> None:
     )
 
     # We set some default tags that give some context to this instance
-    with sentry_sdk.configure_scope() as scope:
-        scope.set_tag("matrix_server_name", hs.config.server.server_name)
+    global_scope = sentry_sdk.Scope.get_global_scope()
+    global_scope.set_tag("matrix_server_name", hs.config.server.server_name)
 
-        app = (
-            hs.config.worker.worker_app
-            if hs.config.worker.worker_app
-            else "synapse.app.homeserver"
-        )
-        name = hs.get_instance_name()
-        scope.set_tag("worker_app", app)
-        scope.set_tag("worker_name", name)
+    app = (
+        hs.config.worker.worker_app
+        if hs.config.worker.worker_app
+        else "synapse.app.homeserver"
+    )
+    name = hs.get_instance_name()
+    global_scope.set_tag("worker_app", app)
+    global_scope.set_tag("worker_name", name)
 
 
 def setup_sdnotify(hs: "HomeServer") -> None:
