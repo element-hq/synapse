@@ -95,5 +95,52 @@ class ReportEventRestServlet(RestServlet):
         return 200, {}
 
 
+class ReportRoomRestServlet(RestServlet):
+    # https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    PATTERNS = client_patterns(
+        "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$", releases=[], v1=False, unstable=True
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
+        self.store = hs.get_datastores().main
+
+    async def on_POST(
+        self, request: SynapseRequest, room_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user_id = requester.user.to_string()
+
+        body = parse_json_object_from_request(request)
+
+        # `reason` is required - do not default to empty string
+        if not isinstance(body.get("reason"), str):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "Param 'reason' must be a string",
+                Codes.BAD_JSON,
+            )
+
+        room = await self.store.get_room(room_id)
+        if room is None:
+            raise NotFoundError(
+                "Room does not exist"
+            )
+
+        await self.store.add_room_report(
+            room_id=room_id,
+            user_id=user_id,
+            reason=body.get("reason"),
+            content=body,
+            received_ts=self.clock.time_msec(),
+        )
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
+    ReportRoomRestServlet(hs).register(http_server)
