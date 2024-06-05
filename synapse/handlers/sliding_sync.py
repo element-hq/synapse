@@ -42,17 +42,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Everything except `Membership.LEAVE` because we want everything that's *still*
-# relevant to the user. There are few more things to include in the sync response
-# (kicks, newly_left) but those are handled separately.
-MEMBERSHIP_TO_DISPLAY_IN_SYNC = (
-    Membership.INVITE,
-    Membership.JOIN,
-    Membership.KNOCK,
-    Membership.BAN,
-)
-
-
 def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
@@ -65,7 +54,10 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
     """
 
     return (
-        membership in MEMBERSHIP_TO_DISPLAY_IN_SYNC
+        # Everything except `Membership.LEAVE` because we want everything that's *still*
+        # relevant to the user. There are few more things to include in the sync response
+        # (newly_left) but those are handled separately.
+        membership in (Membership.LIST - Membership.LEAVE)
         # Include kicks
         or (membership == Membership.LEAVE and sender != user_id)
     )
