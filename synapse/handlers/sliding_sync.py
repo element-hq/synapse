@@ -508,8 +508,6 @@ class SlidingSyncHandler:
         # backward to the previous membership that would apply to the from/to range.
         first_membership_change_by_room_id_after_to_token: Dict[str, EventBase] = {}
         for event in membership_change_events_after_to_token:
-            assert event.internal_metadata.stream_ordering
-
             last_membership_change_by_room_id_after_to_token[event.room_id] = event
             # Only set if we haven't already set it
             first_membership_change_by_room_id_after_to_token.setdefault(
@@ -617,7 +615,6 @@ class SlidingSyncHandler:
         # care about end-result so we grab the last one.
         last_membership_change_by_room_id_in_from_to_range: Dict[str, EventBase] = {}
         for event in membership_change_events_in_from_to_range:
-            assert event.internal_metadata.stream_ordering
             last_membership_change_by_room_id_in_from_to_range[event.room_id] = event
 
         # 2) Fixup
