@@ -5442,6 +5442,18 @@ See <a href="usage/configuration/../../reverse_proxy.html">here</a> for more on 
 <pre><code class="language-yaml">max_image_pixels: 35M
 </code></pre>
 <hr />
+<h3 id="remote_media_download_burst_count"><a class="header" href="#remote_media_download_burst_count"><code>remote_media_download_burst_count</code></a></h3>
+<p>Remote media downloads are ratelimited using a <a href="https://en.wikipedia.org/wiki/Leaky_bucket">leaky bucket algorithm</a>, where a given &quot;bucket&quot; is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also <code>remote_media_download_per_second</code> which determines the rate at which the &quot;bucket&quot; is emptied and thus has available space to authorize new requests.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">remote_media_download_burst_count: 200M
+</code></pre>
+<hr />
+<h3 id="remote_media_download_per_second"><a class="header" href="#remote_media_download_per_second"><code>remote_media_download_per_second</code></a></h3>
+<p>Works in conjunction with <code>remote_media_download_burst_count</code> to ratelimit remote media downloads - this configuration option determines the rate at which the &quot;bucket&quot; (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has &quot;drained&quot; from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also <code>remote_media_download_burst_count</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">remote_media_download_per_second: 40K
+</code></pre>
+<hr />
 <h3 id="prevent_media_downloads_from"><a class="header" href="#prevent_media_downloads_from"><code>prevent_media_downloads_from</code></a></h3>
 <p>A list of domains to never download media from. Media from these
 domains that is already downloaded will not be deleted, but will be
