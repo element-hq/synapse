@@ -1246,3 +1246,68 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(falsy_filtered_room_ids, {room_id})
+
+    def test_filter_encrypted_rooms(self) -> None:
+        """
+        Test `filter.is_encrypted` for encrypted rooms
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        # Create an encrypted room
+        encrypted_room_id = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        self.helper.send_state(
+            encrypted_room_id,
+            EventTypes.RoomEncryption,
+            {"algorithm": "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        # TODO: Better way to avoid the circular import? (see
+        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
+        from synapse.handlers.sliding_sync import SlidingSyncConfig
+
+        # Try with `is_encrypted=True`
+        # -----------------------------
+        truthy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
+            is_encrypted=True,
+        )
+
+        # Filter the rooms
+        truthy_filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {room_id, encrypted_room_id},
+                truthy_filters,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_ids, {encrypted_room_id})
+
+        # Try with `is_encrypted=False`
+        # -----------------------------
+        falsy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
+            is_encrypted=False,
+        )
+
+        # Filter the rooms
+        falsy_filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {room_id, encrypted_room_id},
+                falsy_filters,
+            )
+        )
+
+        self.assertEqual(falsy_filtered_room_ids, {room_id})
