@@ -547,6 +547,47 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Room should still show up because it's newly_left during the from/to range
         self.assertEqual(room_id_results, {room_id1})
 
+    def test_no_from_token(self) -> None:
+        """
+        Test that if we don't provide a `from_token`, we get all the rooms that we we're
+        joined to up to the `to_token`.
+
+        Providing `from_token` only really has the effect that it adds `newly_left`
+        rooms to the response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+
+        # Join room1
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join and leave the room2 before the `to_token`
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Join the room2 after we already have our tokens
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_room1_token,
+            )
+        )
+
+        # Only rooms we were joined to before the `to_token` should show up
+        self.assertEqual(room_id_results, {room_id1})
+
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
         Old left room shouldn't show up. But we're also testing that joining and leaving
