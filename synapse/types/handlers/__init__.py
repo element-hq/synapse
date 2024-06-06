@@ -115,7 +115,7 @@ class OperationType(Enum):
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class SlidingSyncResponse:
+class SlidingSyncResult:
     """
     The Sliding Sync result to be serialized to JSON for a response.
 
@@ -223,9 +223,9 @@ class SlidingSyncResponse:
         return bool(self.lists or self.rooms or self.extensions)
 
     @staticmethod
-    def empty(next_pos: StreamToken) -> "SlidingSyncResponse":
+    def empty(next_pos: StreamToken) -> "SlidingSyncResult":
         "Return a new empty result"
-        return SlidingSyncResponse(
+        return SlidingSyncResult(
             next_pos=next_pos,
             lists={},
             rooms={},

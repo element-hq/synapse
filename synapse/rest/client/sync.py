@@ -33,7 +33,7 @@ from synapse.events.utils import (
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
-from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResponse
+from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
@@ -927,7 +927,7 @@ class SlidingSyncRestServlet(RestServlet):
     # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
-        sliding_sync_result: SlidingSyncResponse,
+        sliding_sync_result: SlidingSyncResult,
     ) -> JsonDict:
         response: JsonDict = defaultdict(dict)
 
@@ -941,10 +941,10 @@ class SlidingSyncRestServlet(RestServlet):
         return response
 
     def encode_lists(
-        self, lists: Dict[str, SlidingSyncResponse.SlidingWindowList]
+        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
         def encode_operation(
-            operation: SlidingSyncResponse.SlidingWindowList.Operation,
+            operation: SlidingSyncResult.SlidingWindowList.Operation,
         ) -> JsonDict:
             return {
                 "op": operation.op.value,

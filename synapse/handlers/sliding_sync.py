@@ -25,7 +25,7 @@ from immutabledict import immutabledict
 from synapse.api.constants import Membership
 from synapse.events import EventBase
 from synapse.types import Requester, RoomStreamToken, StreamToken, UserID
-from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResponse
+from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -68,7 +68,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         from_token: Optional[StreamToken] = None,
         timeout_ms: int = 0,
-    ) -> SlidingSyncResponse:
+    ) -> SlidingSyncResult:
         """Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
@@ -95,7 +95,7 @@ class SlidingSyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SlidingSyncResponse.empty(from_token)
+                return SlidingSyncResult.empty(from_token)
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
@@ -118,7 +118,7 @@ class SlidingSyncHandler:
             # Otherwise, we wait for something to happen and report it to the user.
             async def current_sync_callback(
                 before_token: StreamToken, after_token: StreamToken
-            ) -> SlidingSyncResponse:
+            ) -> SlidingSyncResult:
                 return await self.current_sync_for_user(
                     sync_config,
                     from_token=from_token,
@@ -139,10 +139,10 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         to_token: StreamToken,
         from_token: Optional[StreamToken] = None,
-    ) -> SlidingSyncResponse:
+    ) -> SlidingSyncResult:
         """
         Generates the response body of a Sliding Sync result, represented as a
-        `SlidingSyncResponse`.
+        `SlidingSyncResult`.
         """
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
@@ -160,7 +160,7 @@ class SlidingSyncHandler:
         )
 
         # Assemble sliding window lists
-        lists: Dict[str, SlidingSyncResponse.SlidingWindowList] = {}
+        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         if sync_config.lists:
             for list_key, list_config in sync_config.lists.items():
                 # TODO: Apply filters
@@ -171,23 +171,23 @@ class SlidingSyncHandler:
                 # TODO: Apply sorts
                 sorted_room_ids = sorted(filtered_room_ids)
 
-                ops: List[SlidingSyncResponse.SlidingWindowList.Operation] = []
+                ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
                         ops.append(
-                            SlidingSyncResponse.SlidingWindowList.Operation(
+                            SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
                                 room_ids=sorted_room_ids[range[0] : range[1]],
                             )
                         )
 
-                lists[list_key] = SlidingSyncResponse.SlidingWindowList(
+                lists[list_key] = SlidingSyncResult.SlidingWindowList(
                     count=len(sorted_room_ids),
                     ops=ops,
                 )
 
-        return SlidingSyncResponse(
+        return SlidingSyncResult(
             next_pos=to_token,
             lists=lists,
             # TODO: Gather room data for rooms in lists and `sync_config.room_subscriptions`
