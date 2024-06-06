@@ -606,6 +606,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         order_by: str,
         reverse_order: bool,
         search_term: Optional[str],
+        filter_public_rooms: Optional[bool],
+        filter_empty_rooms: Optional[bool],
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Function to retrieve a paginated list of rooms as json.
 
@@ -617,30 +619,49 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             search_term: a string to filter room names,
                 canonical alias and room ids by.
                 Room ID must match exactly. Canonical alias must match a substring of the local part.
+            filter_public_rooms: Optional flag to filter public and non-public rooms. If true, public rooms are queried.
+                    if false, public rooms are excluded from the query. When it is
+                    none (the default), both public rooms and none-public-rooms are queried.
+            filter_empty_rooms: Optional flag to filter empty and non-empty rooms.
+                    A room is empty if joined_members is zero.
+                    If true, empty rooms are queried.
+                    if false, empty rooms are excluded from the query. When it is
+                    none (the default), both empty rooms and none-empty rooms are queried.
         Returns:
             A list of room dicts and an integer representing the total number of
             rooms that exist given this query
         """
         # Filter room names by a string
-        where_statement = ""
-        search_pattern: List[object] = []
+        filter_ = []
+        where_args = []
         if search_term:
-            where_statement = """
-                WHERE LOWER(state.name) LIKE ?
-                OR LOWER(state.canonical_alias) LIKE ?
-                OR state.room_id = ?
-            """
+            filter_ = [
+                "LOWER(state.name) LIKE ? OR "
+                "LOWER(state.canonical_alias) LIKE ? OR "
+                "state.room_id = ?"
+            ]
 
             # Our postgres db driver converts ? -> %s in SQL strings as that's the
             # placeholder for postgres.
             # HOWEVER, if you put a % into your SQL then everything goes wibbly.
             # To get around this, we're going to surround search_term with %'s
             # before giving it to the database in python instead
-            search_pattern = [
-                "%" + search_term.lower() + "%",
-                "#%" + search_term.lower() + "%:%",
+            where_args = [
+                f"%{search_term.lower()}%",
+                f"#%{search_term.lower()}%:%",
                 search_term,
             ]
+        if filter_public_rooms is not None:
+            filter_arg = "1" if filter_public_rooms else "0"
+            filter_.append(f"rooms.is_public = {filter_arg}")
+
+        if filter_empty_rooms is not None:
+            if filter_empty_rooms:
+                filter_.append("curr.joined_members = 0")
+            else:
+                filter_.append("curr.joined_members <> 0")
+
+        where_clause = "WHERE " + " AND ".join(filter_) if len(filter_) > 0 else ""
 
         # Set ordering
         if RoomSortOrder(order_by) == RoomSortOrder.SIZE:
@@ -717,7 +738,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             LIMIT ?
             OFFSET ?
         """.format(
-            where=where_statement,
+            where=where_clause,
             order_by=order_by_column,
             direction="ASC" if order_by_asc else "DESC",
         )
@@ -726,10 +747,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         count_sql = """
             SELECT count(*) FROM (
               SELECT room_id FROM room_stats_state state
+              INNER JOIN room_stats_current curr USING (room_id)
+              INNER JOIN rooms USING (room_id)
               {where}
             ) AS get_room_ids
         """.format(
-            where=where_statement,
+            where=where_clause,
         )
 
         def _get_rooms_paginate_txn(
@@ -737,7 +760,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         ) -> Tuple[List[Dict[str, Any]], int]:
             # Add the search term into the WHERE clause
             # and execute the data query
-            txn.execute(info_sql, search_pattern + [limit, start])
+            txn.execute(info_sql, where_args + [limit, start])
 
             # Refactor room query data into a structured dictionary
             rooms = []
@@ -767,7 +790,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             # Execute the count query
 
             # Add the search term into the WHERE clause if present
-            txn.execute(count_sql, search_pattern)
+            txn.execute(count_sql, where_args)
 
             room_count = cast(Tuple[int], txn.fetchone())
             return rooms, room_count[0]

@@ -36,6 +36,8 @@ The following query parameters are available:
   - the room's name,
   - the local part of the room's canonical alias, or
   - the complete (local and server part) room's id (case sensitive).
+* `filter_public_rooms` - Flag to filter public and non-public rooms.
+* `filter_empty_rooms` - Flag to filter empty and non-empty rooms. A room is empty if joined_members is zero.
 
   Defaults to no filtering.
 
