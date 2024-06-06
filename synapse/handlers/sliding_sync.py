@@ -19,7 +19,7 @@
 #
 import logging
 from enum import Enum
-from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, AbstractSet, Dict, Final, List, Optional, Set, Tuple
 
 import attr
 from immutabledict import immutabledict
@@ -226,9 +226,12 @@ class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
         self.auth_blocking = hs.get_auth_blocking()
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
+        self.room_summary_handler = hs.get_room_summary_handler()
+
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
 
     async def wait_for_sync_for_user(
@@ -624,7 +627,9 @@ class SlidingSyncHandler:
         """
         user_id = user.to_string()
 
-        # TODO: Apply filters
+        # TODO: Re-order filters so that the easiest, most likely to eliminate rooms,
+        # are first. This way when people use multiple filters, we can eliminate rooms
+        # and do less work for the subsequent filters.
         #
         # TODO: Exclude partially stated rooms unless the `required_state` has
         # `["m.room.member", "$LAZY"]`
@@ -658,8 +663,42 @@ class SlidingSyncHandler:
                 # Only non-DM rooms please
                 filtered_room_id_set = filtered_room_id_set.difference(dm_room_id_set)
 
+        # Filter the room based on the space they belong to according to `m.space.child`
+        # state events. If multiple spaces are present, a room can be part of any one of
+        # the listed spaces (OR'd).
         if filters.spaces:
-            raise NotImplementedError()
+            # Only use spaces that we're joined to to avoid leaking private space
+            # information that the user is not part of. We could probably allow
+            # public spaces here but the spec says "joined" only.
+            joined_space_room_ids = set()
+            for space_room_id in set(filters.spaces):
+                # TODO: Is there a good method to look up all space rooms at once? (N+1 query problem)
+                is_user_in_room = await self.store.check_local_user_in_room(
+                    user_id=user.to_string(), room_id=space_room_id
+                )
+
+                if is_user_in_room:
+                    joined_space_room_ids.add(space_room_id)
+
+            # Flatten the child rooms in the spaces
+            space_child_room_ids: Set[str] = set()
+            for space_room_id in joined_space_room_ids:
+                space_child_events = (
+                    await self.room_summary_handler._get_space_child_events(
+                        space_room_id
+                    )
+                )
+                space_child_room_ids.update(
+                    event.state_key for event in space_child_events
+                )
+                # TODO: The spec says that if the child room has a `m.room.tombstone`
+                # event, we should recursively navigate until we find the latest room
+                # and include those IDs (although this point is under scrutiny).
+
+            # Only rooms in the spaces please
+            filtered_room_id_set = filtered_room_id_set.intersection(
+                space_child_room_ids
+            )
 
         if filters.is_encrypted:
             raise NotImplementedError()

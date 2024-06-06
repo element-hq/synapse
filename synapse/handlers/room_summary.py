@@ -452,11 +452,15 @@ class RoomSummaryHandler:
             return _RoomEntry(room_id, room_entry)
 
         # Otherwise, look for child rooms/spaces.
-        child_events = await self._get_child_events(room_id)
+        space_child_events = await self._get_space_child_events(room_id)
+        # Sort the results for stability.
+        space_child_events = sorted(
+            space_child_events, key=_child_events_comparison_key
+        )
 
         if suggested_only:
             # we only care about suggested children
-            child_events = filter(_is_suggested_child_event, child_events)
+            space_child_events = filter(_is_suggested_child_event, space_child_events)
 
         stripped_events: List[JsonDict] = [
             {
@@ -466,7 +470,7 @@ class RoomSummaryHandler:
                 "sender": e.sender,
                 "origin_server_ts": e.origin_server_ts,
             }
-            for e in child_events
+            for e in space_child_events
         ]
         return _RoomEntry(room_id, room_entry, stripped_events)
 
@@ -763,9 +767,9 @@ class RoomSummaryHandler:
 
         return room_entry
 
-    async def _get_child_events(self, room_id: str) -> Iterable[EventBase]:
+    async def _get_space_child_events(self, room_id: str) -> Iterable[EventBase]:
         """
-        Get the child events for a given room.
+        Get the space child events for a given room.
 
         The returned results are sorted for stability.
 
@@ -791,7 +795,9 @@ class RoomSummaryHandler:
 
         # filter out any events without a "via" (which implies it has been redacted),
         # and order to ensure we return stable results.
-        return sorted(filter(_has_valid_via, events), key=_child_events_comparison_key)
+        filtered_events = filter(_has_valid_via, events)
+
+        return filtered_events
 
     async def get_room_summary(
         self,
