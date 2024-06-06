@@ -588,6 +588,67 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # Only rooms we were joined to before the `to_token` should show up
         self.assertEqual(room_id_results, {room_id1})
 
+    def test_from_token_ahead_of_to_token(self) -> None:
+        """
+        Test when the provided `from_token` comes after the `to_token`. We should
+        basically expect the same result as having no `from_token`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id4 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+
+        # Join room1 before `before_room_token`
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join and leave the room2 before `before_room_token`
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+
+        # Note: These are purposely swapped. The `from_token` should come after
+        # the `to_token` in this test
+        to_token = self.event_sources.get_current_token()
+
+        # Join room2 after `before_room_token`
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # --------
+
+        # Join room3 after `before_room_token`
+        self.helper.join(room_id3, user1_id, tok=user1_tok)
+
+        # Join and leave the room4 after `before_room_token`
+        self.helper.join(room_id4, user1_id, tok=user1_tok)
+        self.helper.leave(room_id4, user1_id, tok=user1_tok)
+
+        # Note: These are purposely swapped. The `from_token` should come after the
+        # `to_token` in this test
+        from_token = self.event_sources.get_current_token()
+
+        # Join the room4 after we already have our tokens
+        self.helper.join(room_id4, user1_id, tok=user1_tok)
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+
+        # Only rooms we were joined to before the `to_token` should show up
+        #
+        # There won't be any newly_left rooms because the `from_token` is ahead of the
+        # `to_token` and that range will give no membership changes to check.
+        self.assertEqual(room_id_results, {room_id1})
+
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
         Old left room shouldn't show up. But we're also testing that joining and leaving
