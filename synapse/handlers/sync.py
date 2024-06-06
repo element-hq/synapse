@@ -545,6 +545,7 @@ class SyncHandler:
                         )
                     )
 
+                cache_context.should_cache = False
                 return SyncResult.empty(
                     since_token, one_time_keys_count, unused_fallback_key_types
                 )
