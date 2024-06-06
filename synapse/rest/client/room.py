@@ -1119,7 +1119,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
                 if event.sender != requester.user.to_string():
                     raise SynapseError(
                         403,
-                        "Only events created by the requester may be redacted while account is suspended.",
+                        "You can only redact your own events while account is suspended.",
                         Codes.USER_ACCOUNT_SUSPENDED,
                     )
 

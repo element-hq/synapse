@@ -27,11 +27,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
+from synapse._pydantic_compat import HAS_PYDANTIC_V2
 from synapse.api.constants import Direction, UserTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
     assert_params_in_dict,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_enum,
     parse_integer,
@@ -46,12 +48,19 @@ from synapse.rest.admin._base import (
     assert_user_is_admin,
 )
 from synapse.rest.client._base import client_patterns
+from synapse.rest.models import RequestBodyModel
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+if TYPE_CHECKING or HAS_PYDANTIC_V2:
+    from pydantic.v1 import StrictBool
+else:
+    from pydantic import StrictBool
+
 
 logger = logging.getLogger(__name__)
 
@@ -740,6 +749,9 @@ class SuspendAccountRestServlet(RestServlet):
         self.is_mine = hs.is_mine
         self.store = hs.get_datastores().main
 
+    class PutBody(RequestBodyModel):
+        suspend: StrictBool
+
     async def on_PUT(
         self, request: SynapseRequest, target_user_id: str
     ) -> Tuple[int, JsonDict]:
@@ -752,8 +764,8 @@ class SuspendAccountRestServlet(RestServlet):
         if not await self.store.get_user_by_id(target_user_id):
             raise NotFoundError("User not found")
 
-        body = parse_json_object_from_request(request, allow_empty_body=True)
-        suspend = body.get("suspend", False)
+        body = parse_and_validate_json_object_from_request(request, self.PutBody)
+        suspend = body.suspend
         await self.store.set_user_suspended_status(target_user_id, suspend)
 
         return HTTPStatus.OK, {f"user_{target_user_id}_suspended": suspend}
