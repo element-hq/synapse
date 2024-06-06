@@ -285,7 +285,11 @@ class SyncResult:
         )
 
     @staticmethod
-    def empty(next_batch: StreamToken) -> "SyncResult":
+    def empty(
+        next_batch: StreamToken,
+        device_one_time_keys_count: JsonMapping,
+        device_unused_fallback_key_types: List[str],
+    ) -> "SyncResult":
         "Return a new empty result"
         return SyncResult(
             next_batch=next_batch,
@@ -297,8 +301,8 @@ class SyncResult:
             archived=[],
             to_device=[],
             device_lists=DeviceListUpdates(),
-            device_one_time_keys_count={},
-            device_unused_fallback_key_types=[],
+            device_one_time_keys_count=device_one_time_keys_count,
+            device_unused_fallback_key_types=device_unused_fallback_key_types,
         )
 
 
@@ -523,7 +527,27 @@ class SyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SyncResult.empty(since_token)
+                device_id = sync_config.device_id
+                one_time_keys_count: JsonMapping = {}
+                unused_fallback_key_types: List[str] = []
+                if device_id:
+                    user_id = sync_config.user.to_string()
+                    # TODO: We should have a way to let clients differentiate between the states of:
+                    #   * no change in OTK count since the provided since token
+                    #   * the server has zero OTKs left for this device
+                    #  Spec issue: https://github.com/matrix-org/matrix-doc/issues/3298
+                    one_time_keys_count = await self.store.count_e2e_one_time_keys(
+                        user_id, device_id
+                    )
+                    unused_fallback_key_types = list(
+                        await self.store.get_e2e_unused_fallback_key_types(
+                            user_id, device_id
+                        )
+                    )
+
+                return SyncResult.empty(
+                    since_token, one_time_keys_count, unused_fallback_key_types
+                )
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
