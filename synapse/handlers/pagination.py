@@ -37,11 +37,10 @@ from synapse.types import (
     JsonMapping,
     Requester,
     ScheduledTask,
-    ShutdownRoomParams,
-    ShutdownRoomResponse,
     StreamKeyType,
     TaskStatus,
 )
+from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
 from synapse.visibility import filter_events_for_client

@@ -33,7 +33,7 @@ from synapse.events.utils import (
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
-from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
+from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResponse
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
@@ -53,8 +53,8 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
-from synapse.rest.client.models import SlidingSyncBody
 from synapse.types import JsonDict, Requester, StreamToken
+from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
 
@@ -927,7 +927,7 @@ class SlidingSyncRestServlet(RestServlet):
     # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
-        sliding_sync_result: SlidingSyncResult,
+        sliding_sync_result: SlidingSyncResponse,
     ) -> JsonDict:
         response: JsonDict = defaultdict(dict)
 
@@ -941,10 +941,10 @@ class SlidingSyncRestServlet(RestServlet):
         return response
 
     def encode_lists(
-        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+        self, lists: Dict[str, SlidingSyncResponse.SlidingWindowList]
     ) -> JsonDict:
         def encode_operation(
-            operation: SlidingSyncResult.SlidingWindowList.Operation,
+            operation: SlidingSyncResponse.SlidingWindowList.Operation,
         ) -> JsonDict:
             return {
                 "op": operation.op.value,
