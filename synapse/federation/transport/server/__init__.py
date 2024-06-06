@@ -331,10 +331,10 @@ def register_servlets(
                     signature = inspect.signature(provider.backend.fetch)
                     if "federation" not in signature.parameters:
                         logger.warning(
-                            "Federation `/download` enpoint will not be enabled as your storage "
-                            "provider is not compatible with this endpoint."
+                            f"Federation media `/download` endpoint will not be enabled as storage provider {provider.backend} is not compatible with this endpoint."
                         )
                         load_download_endpoint = False
+                        break
 
                 if not load_download_endpoint:
                     continue
