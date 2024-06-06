@@ -53,14 +53,13 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
         sender: The person who sent the membership event
     """
 
-    return (
-        # Everything except `Membership.LEAVE` because we want everything that's *still*
-        # relevant to the user. There are few more things to include in the sync response
-        # (newly_left) but those are handled separately.
-        membership in (Membership.LIST - {Membership.LEAVE})
-        # Include kicks
-        or (membership == Membership.LEAVE and sender != user_id)
-    )
+    # Everything except `Membership.LEAVE` because we want everything that's *still*
+    # relevant to the user. There are few more things to include in the sync response
+    # (newly_left) but those are handled separately.
+    #
+    # This logic includes kicks (leave events where the sender is not the same user) and
+    # can be read as "anything that isn't a leave or a leave with a different sender".
+    return membership != Membership.LEAVE or sender != user_id
 
 
 class SlidingSyncConfig(SlidingSyncBody):
