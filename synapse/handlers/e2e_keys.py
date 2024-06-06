@@ -45,7 +45,10 @@ from synapse.types import (
 from synapse.util import json_decoder
 from synapse.util.async_helpers import Linearizer, concurrently_execute
 from synapse.util.cancellation import cancellable
-from synapse.util.retryutils import NotRetryingDestination
+from synapse.util.retryutils import (
+    NotRetryingDestination,
+    filter_destinations_by_retry_limiter,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -268,10 +271,8 @@ class E2eKeysHandler:
                 "%d destinations to query devices for", len(remote_queries_not_in_cache)
             )
 
-            async def _query(
-                destination_queries: Tuple[str, Dict[str, Iterable[str]]]
-            ) -> None:
-                destination, queries = destination_queries
+            async def _query(destination: str) -> None:
+                queries = remote_queries_not_in_cache[destination]
                 return await self._query_devices_for_destination(
                     results,
                     cross_signing_keys,
@@ -281,9 +282,20 @@ class E2eKeysHandler:
                     timeout,
                 )
 
+            # Only try and fetch keys for destinations that are not marked as
+            # down.
+            filtered_destinations = await filter_destinations_by_retry_limiter(
+                remote_queries_not_in_cache.keys(),
+                self.clock,
+                self.store,
+                # Let's give an arbitrary grace period for those hosts that are
+                # only recently down
+                retry_due_within_ms=60 * 1000,
+            )
+
             await concurrently_execute(
                 _query,
-                remote_queries_not_in_cache.items(),
+                filtered_destinations,
                 10,
                 delay_cancellation=True,
             )
