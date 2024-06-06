@@ -325,12 +325,6 @@ class E2eKeysHandler:
             timeout: The timeout for remote HTTP requests.
         """
 
-        retry_timings = await self.store.get_destination_retry_timings(destination)
-        now = self.clock.time_msec()
-        if retry_timings and retry_timings.failure_ts < now - 30 * 24 * 60 * 60 * 1000:
-            # Don't bother querying stuff more than 30 days down
-            return
-
         # We first consider whether we wish to update the device list cache with
         # the users device list. We want to track a user's devices when the
         # authenticated user shares a room with the queried user and the query
