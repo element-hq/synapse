@@ -797,7 +797,9 @@ class E2eKeysHandler:
         device_keys = keys.get("device_keys", None)
         if device_keys:
             await self.device_key_uploader(
-                user_id, device_id, {"device_keys": device_keys}
+                user_id=user_id,
+                device_id=device_id,
+                keys={"device_keys": device_keys},
             )
 
         one_time_keys = keys.get("one_time_keys", None)
