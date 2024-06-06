@@ -653,7 +653,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             ]
         if filter_public_rooms is not None:
             filter_arg = "1" if filter_public_rooms else "0"
-            filter_.append(f"rooms.is_public = {filter_arg}")
+            filter_.append(f"rooms.is_public = '{filter_arg}'")
 
         if filter_empty_rooms is not None:
             if filter_empty_rooms:
