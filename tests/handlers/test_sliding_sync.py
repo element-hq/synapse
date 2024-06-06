@@ -1191,7 +1191,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
     def test_filter_dm_rooms(self) -> None:
         """
-        Test filter for DM rooms
+        Test `filter.is_dm` for DM rooms
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1232,7 +1232,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
     def test_filter_non_dm_rooms(self) -> None:
         """
-        Test filter for non-DM rooms
+        Test `filter.is_dm` for non-DM rooms
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
