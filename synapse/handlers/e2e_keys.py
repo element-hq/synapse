@@ -842,7 +842,7 @@ class E2eKeysHandler:
 
     @tag_args
     async def upload_device_keys_for_user(
-        self, user_id: str, device_id: str, device_keys: JsonDict
+        self, user_id: str, device_id: str, keys: JsonDict
     ) -> None:
         """
         Args:
@@ -856,6 +856,7 @@ class E2eKeysHandler:
 
         time_now = self.clock.time_msec()
 
+        device_keys = keys["device_keys"]
         logger.info(
             "Updating device_keys for device %r for user %s at %d",
             device_id,
