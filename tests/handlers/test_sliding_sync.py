@@ -1217,56 +1217,32 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
         from synapse.handlers.sliding_sync import SlidingSyncConfig
 
-        filters = SlidingSyncConfig.SlidingSyncList.Filters(
+        # Try with `is_dm=True`
+        # -----------------------------
+        truthy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
             is_dm=True,
         )
 
-        # Try filtering the rooms
-        filtered_room_ids = self.get_success(
+        # Filter the rooms
+        truthy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, filters
+                UserID.from_string(user1_id), {room_id, dm_room_id}, truthy_filters
             )
         )
 
-        self.assertEqual(filtered_room_ids, {dm_room_id})
+        self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
 
-    def test_filter_non_dm_rooms(self) -> None:
-        """
-        Test `filter.is_dm` for non-DM rooms
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        # Create a normal room
-        room_id = self.helper.create_room_as(
-            user1_id,
-            is_public=False,
-            tok=user1_tok,
-        )
-
-        # Create a DM room
-        dm_room_id = self._create_dm_room(
-            inviter_user_id=user1_id,
-            inviter_tok=user1_tok,
-            invitee_user_id=user2_id,
-            invitee_tok=user2_tok,
-        )
-
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
-
-        filters = SlidingSyncConfig.SlidingSyncList.Filters(
+        # Try with `is_dm=False`
+        # -----------------------------
+        falsy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
             is_dm=False,
         )
 
-        # Try filtering the rooms
-        filtered_room_ids = self.get_success(
+        # Filter the rooms
+        falsy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, filters
+                UserID.from_string(user1_id), {room_id, dm_room_id}, falsy_filters
             )
         )
 
-        self.assertEqual(filtered_room_ids, {room_id})
+        self.assertEqual(falsy_filtered_room_ids, {room_id})
