@@ -36,7 +36,6 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
-from synapse.replication.http.devices import ReplicationUploadKeysForUserRestServlet
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.util.cancellation import cancellable
@@ -108,13 +107,6 @@ class KeyUploadServlet(RestServlet):
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
 
-        if hs.config.worker.worker_app is None:
-            # if main process
-            self.key_uploader = self.e2e_keys_handler.upload_keys_for_user
-        else:
-            # then a worker
-            self.key_uploader = ReplicationUploadKeysForUserRestServlet.make_client(hs)
-
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
     ) -> Tuple[int, JsonDict]:
@@ -153,53 +145,11 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        time_now = self._clock.time_msec()
+        result = await self.e2e_keys_handler.upload_keys_for_user(
+            user_id=user_id, device_id=device_id, keys=body
+        )
 
-        unstable_fallback_keys = body.pop("org.matrix.msc2732.fallback_keys", None)
-        fallback_keys = body.pop("fallback_keys", None)
-        if not unstable_fallback_keys:
-            fallback_keys = unstable_fallback_keys
-
-        if fallback_keys and isinstance(fallback_keys, dict):
-            log_kv(
-                {
-                    "message": "Updating fallback_keys for device.",
-                    "user_id": user_id,
-                    "device_id": device_id,
-                }
-            )
-            await self._store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
-        elif fallback_keys:
-            log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
-        else:
-            log_kv(
-                {"message": "Did not update fallback_keys", "reason": "no keys given"}
-            )
-
-        one_time_keys = body.pop("one_time_keys", None)
-        if one_time_keys:
-            log_kv(
-                {
-                    "message": "Updating one_time_keys for device.",
-                    "user_id": user_id,
-                    "device_id": device_id,
-                }
-            )
-            await self.e2e_keys_handler._upload_one_time_keys_for_user(
-                user_id, device_id, time_now, one_time_keys
-            )
-        else:
-            log_kv(
-                {"message": "Did not update one_time_keys", "reason": "no keys given"}
-            )
-
-        if body:
-            await self.key_uploader(user_id=user_id, device_id=device_id, keys=body)
-
-        result = await self._store.count_e2e_one_time_keys(user_id, device_id)
-
-        set_tag("one_time_key_counts", str(result))
-        return 200, {"one_time_key_counts": result}
+        return 200, result
 
 
 class KeyQueryServlet(RestServlet):
