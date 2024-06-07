@@ -1477,7 +1477,6 @@ class RoomContextHandler:
                 user.to_string(),
                 events,
                 is_peeking=is_peeking,
-                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
         event = await self.store.get_event(

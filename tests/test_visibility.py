@@ -336,7 +336,6 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
                 self.hs.get_storage_controllers(),
                 "@joiner:test",
                 events_to_filter,
-                msc4115_membership_on_events=True,
             )
         )
         resident_filtered_events = self.get_success(
@@ -344,7 +343,6 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
                 self.hs.get_storage_controllers(),
                 "@resident:test",
                 events_to_filter,
-                msc4115_membership_on_events=True,
             )
         )
 
@@ -441,7 +439,6 @@ class FilterEventsOutOfBandEventsForClientTestCase(
                 self.hs.get_storage_controllers(),
                 "@user:test",
                 [invite_event, reject_event],
-                msc4115_membership_on_events=True,
             )
         )
         self.assertEqual(
@@ -463,7 +460,6 @@ class FilterEventsOutOfBandEventsForClientTestCase(
                     self.hs.get_storage_controllers(),
                     "@other:test",
                     [invite_event, reject_event],
-                    msc4115_membership_on_events=True,
                 )
             ),
             [],
