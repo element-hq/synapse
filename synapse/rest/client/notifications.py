@@ -56,7 +56,10 @@ class NotificationsServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
-        from_token = parse_string(request, "from", required=False)
+        # While this is intended to be "string" to clients, the 'from' token
+        # is actually based on a numeric ID. So it must parse to as an int.
+        from_token = parse_integer(request, "from", required=False)
+
         limit = parse_integer(request, "limit", default=50)
         only = parse_string(request, "only", required=False)
 
