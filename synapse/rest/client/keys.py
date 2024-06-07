@@ -382,44 +382,35 @@ class SigningKeyUploadServlet(RestServlet):
             master_key_updatable_without_uia,
         ) = await self.e2e_keys_handler.check_cross_signing_setup(user_id)
 
-        # Before MSC3967 we required UIA both when setting up cross signing for the
-        # first time and when resetting the device signing key. With MSC3967 we only
-        # require UIA when resetting cross-signing, and not when setting up the first
-        # time. Because there is no UIA in MSC3861, for now we throw an error if the
-        # user tries to reset the device signing key when MSC3861 is enabled, but allow
-        # first-time setup.
-        if self.hs.config.experimental.msc3861.enabled:
-            # The auth service has to explicitly mark the master key as replaceable
-            # without UIA to reset the device signing key with MSC3861.
-            if is_cross_signing_setup and not master_key_updatable_without_uia:
-                config = self.hs.config.experimental.msc3861
-                if config.account_management_url is not None:
-                    url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
-                else:
-                    url = config.issuer
+        # Resending exactly the same keys should just 200 OK without doing a UIA prompt.
+        keys_are_different = await self.e2e_keys_handler.has_different_keys(
+            user_id, body
+        )
+        if not keys_are_different:
+            return 200, {}
 
-                raise SynapseError(
-                    HTTPStatus.NOT_IMPLEMENTED,
-                    "To reset your end-to-end encryption cross-signing identity, "
-                    f"you first need to approve it at {url} and then try again.",
-                    Codes.UNRECOGNIZED,
-                )
-            # But first-time setup is fine
+        # The keys are different; is x-signing set up? If no, then this is first-time
+        # setup, and that is allowed without UIA, per MSC3967.
+        # If yes, then we need to authenticate the change.
+        if is_cross_signing_setup:
+            # With MSC3861, UIA is not possible. Instead, the auth service has to
+            # explicitly mark the master key as replaceable.
+            if self.hs.config.experimental.msc3861.enabled:
+                if not master_key_updatable_without_uia:
+                    config = self.hs.config.experimental.msc3861
+                    if config.account_management_url is not None:
+                        url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
+                    else:
+                        url = config.issuer
 
-        elif self.hs.config.experimental.msc3967_enabled:
-            # MSC3967 allows this endpoint to 200 OK for idempotency. Resending exactly the same
-            # keys should just 200 OK without doing a UIA prompt.
-            keys_are_different = await self.e2e_keys_handler.has_different_keys(
-                user_id, body
-            )
-            if not keys_are_different:
-                # FIXME: we do not fallthrough to upload_signing_keys_for_user because confusingly
-                # if we do, we 500 as it looks like it tries to INSERT the same key twice, causing a
-                # unique key constraint violation. This sounds like a bug?
-                return 200, {}
-            # the keys are different, is x-signing set up? If no, then the keys don't exist which is
-            # why they are different. If yes, then we need to UIA to change them.
-            if is_cross_signing_setup:
+                    raise SynapseError(
+                        HTTPStatus.NOT_IMPLEMENTED,
+                        "To reset your end-to-end encryption cross-signing identity, "
+                        f"you first need to approve it at {url} and then try again.",
+                        Codes.UNRECOGNIZED,
+                    )
+            else:
+                # Without MSC3861, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
                     request,
@@ -428,18 +419,6 @@ class SigningKeyUploadServlet(RestServlet):
                     # Do not allow skipping of UIA auth.
                     can_skip_ui_auth=False,
                 )
-            # Otherwise we don't require UIA since we are setting up cross signing for first time
-        else:
-            # Previous behaviour is to always require UIA but allow it to be skipped
-            await self.auth_handler.validate_user_via_ui_auth(
-                requester,
-                request,
-                body,
-                "add a device signing key to your account",
-                # Allow skipping of UI auth since this is frequently called directly
-                # after login and it is silly to ask users to re-auth immediately.
-                can_skip_ui_auth=True,
-            )
 
         result = await self.e2e_keys_handler.upload_signing_keys_for_user(user_id, body)
         return 200, result
