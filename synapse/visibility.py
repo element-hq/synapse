@@ -186,7 +186,7 @@ async def filter_events_for_client(
         # Copy the event before updating the unsigned data: this shouldn't be persisted
         # to the cache!
         cloned = clone_event(filtered)
-        cloned.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP] = user_membership
+        cloned.unsigned[EventUnsignedContentFields.MEMBERSHIP] = user_membership
 
         return cloned
 

@@ -357,7 +357,7 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         self.assertEqual(
             ["join", "join", "leave"],
             [
-                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
                 for e in joiner_filtered_events
             ],
         )
@@ -379,7 +379,7 @@ class FilterEventsForClientTestCase(HomeserverTestCase):
         self.assertEqual(
             ["join", "join", "join", "join", "join"],
             [
-                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
                 for e in resident_filtered_events
             ],
         )
@@ -451,7 +451,7 @@ class FilterEventsOutOfBandEventsForClientTestCase(
         self.assertEqual(
             ["invite", "leave"],
             [
-                e.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP]
+                e.unsigned[EventUnsignedContentFields.MEMBERSHIP]
                 for e in filtered_events
             ],
         )
