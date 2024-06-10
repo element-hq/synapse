@@ -254,8 +254,15 @@ class PersistEventsStore:
     async def calculate_chain_cover_index_for_events(
         self, room_id: str, events: Collection[EventBase]
     ) -> Dict[str, NewEventChainLinks]:
+        # Filter to state events, and ensure there are no duplicates.
+        state_events = []
+        seen_events = set()
+        for event in events:
+            if not event.is_state() or event.event_id in seen_events:
+                continue
 
-        state_events = [event for event in events if event.is_state()]
+            state_events.append(event)
+            seen_events.add(event.event_id)
 
         if not state_events:
             return {}
@@ -288,6 +295,22 @@ class PersistEventsStore:
         )
         if row is None:
             return {}
+
+        # Filter out already persisted events.
+        rows = self.db_pool.simple_select_many_txn(
+            txn,
+            table="events",
+            column="event_id",
+            iterable=[e.event_id for e in state_events],
+            keyvalues={},
+            retcols=("event_id",),
+        )
+        already_persisted_events = {event_id for event_id, in rows}
+        state_events = [
+            event
+            for event in state_events
+            if event.event_id in already_persisted_events
+        ]
 
         if not state_events:
             return {}
