@@ -502,7 +502,7 @@ class SlidingSyncHandler:
             dm_map = await self.store.get_global_account_data_by_type_for_user(
                 user_id, AccountDataTypes.DIRECT
             )
-            logger.warn("dm_map: %s", dm_map)
+
             # Flatten out the map
             dm_room_id_set = set()
             if dm_map:
