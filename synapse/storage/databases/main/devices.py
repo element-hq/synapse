@@ -110,7 +110,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 ("device_lists_remote_pending", "instance_name", "stream_id"),
                 (
                     "device_lists_changes_converted_stream_position",
-                    "instance_name" "stream_id",
+                    "instance_name",
+                    "stream_id",
                 ),
             ],
             sequence_name="device_lists_sequence",
