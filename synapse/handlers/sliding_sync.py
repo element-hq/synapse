@@ -238,9 +238,19 @@ class SlidingSyncHandler:
         from_token: Optional[StreamToken] = None,
         timeout_ms: int = 0,
     ) -> SlidingSyncResult:
-        """Get the sync for a client if we have new data for it now. Otherwise
+        """
+        Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
+
+        Args:
+            requester: The user making the request
+            sync_config: Sync configuration
+            from_token: The point in the stream to sync from. Token of the end of the
+                previous batch. May be `None` if this is the initial sync request.
+            timeout_ms: The time in milliseconds to wait for new data to arrive. If 0,
+                we will immediately but there might not be any new data so we just return an
+                empty response.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -312,6 +322,14 @@ class SlidingSyncHandler:
         """
         Generates the response body of a Sliding Sync result, represented as a
         `SlidingSyncResult`.
+
+        We fetch data according to the token range (> `from_token` and <= `to_token`).
+
+        Args:
+            sync_config: Sync configuration
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from. Token of the end of the
+                previous batch. May be `None` if this is the initial sync request.
         """
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
@@ -387,6 +405,12 @@ class SlidingSyncHandler:
           `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
           to tell when a room was forgotten at the moment so we can't factor it into the
           from/to range.
+
+
+        Args:
+            user: User to fetch rooms for
+            to_token: The token to fetch rooms up to.
+            from_token: The point in the stream to sync from.
         """
         user_id = user.to_string()
 
