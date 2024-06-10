@@ -668,6 +668,7 @@ class SlidingSyncHandler:
             for room_id in list(filtered_room_id_set):
                 # TODO: Is there a good method to look up all rooms at once? (N+1 query problem)
                 is_encrypted = (
+                    # TODO: Get state at the `to_token` instead of the current state
                     await self.storage_controllers.state.get_current_state_event(
                         room_id, EventTypes.RoomEncryption, ""
                     )
