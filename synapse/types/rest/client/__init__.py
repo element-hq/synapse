@@ -43,7 +43,7 @@ else:
         validator,
     )
 
-from synapse.rest.models import RequestBodyModel
+from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 
 
