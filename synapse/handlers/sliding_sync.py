@@ -335,11 +335,8 @@ class SlidingSyncHandler:
                 # Apply filters
                 filtered_room_ids = room_id_set
                 if list_config.filters is not None:
-                    # TODO: To be absolutely correct, this could also take into account
-                    # from/to tokens but some of the streams don't support looking back
-                    # in time (like global account_data).
                     filtered_room_ids = await self.filter_rooms(
-                        sync_config.user, room_id_set, list_config.filters
+                        sync_config.user, room_id_set, list_config.filters, to_token
                     )
                 # TODO: Apply sorts
                 sorted_room_ids = sorted(filtered_room_ids)
@@ -618,9 +615,16 @@ class SlidingSyncHandler:
         user: UserID,
         room_id_set: AbstractSet[str],
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
+        to_token: StreamToken,
     ) -> AbstractSet[str]:
         """
         Filter rooms based on the sync request.
+
+        Args:
+            user: User to filter rooms for
+            room_id_set: Set of room IDs to filter down
+            filters: Filters to apply
+            to_token: We filter based on the state of the room at this token
         """
         user_id = user.to_string()
 

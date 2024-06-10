@@ -1140,6 +1140,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
 
     def _create_dm_room(
         self,
@@ -1213,6 +1214,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
             invitee_tok=user2_tok,
         )
 
+        after_rooms_token = self.event_sources.get_current_token()
+
         # TODO: Better way to avoid the circular import? (see
         # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
         from synapse.handlers.sliding_sync import SlidingSyncConfig
@@ -1225,6 +1228,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=True,
                 ),
+                after_rooms_token,
             )
         )
 
@@ -1238,6 +1242,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=False,
                 ),
+                after_rooms_token,
             )
         )
 
