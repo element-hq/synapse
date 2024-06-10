@@ -641,6 +641,9 @@ class SlidingSyncHandler:
             # `is_direct` on membership events because that property only appears for
             # the invitee membership event (doesn't show up for the inviter). Account
             # data is set by the client so it needs to be scrutinized.
+            #
+            # We're unable to take `to_token` into account for global account data since
+            # we only keep track of the latest account data for the user.
             dm_map = await self.store.get_global_account_data_by_type_for_user(
                 user_id, AccountDataTypes.DIRECT
             )
