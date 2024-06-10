@@ -35,6 +35,7 @@ from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.events import EventBase
 from synapse.rest.client.models import SlidingSyncBody
 from synapse.types import JsonMapping, Requester, RoomStreamToken, StreamToken, UserID
+from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -340,7 +341,7 @@ class SlidingSyncHandler:
                     # from/to tokens but some of the streams don't support looking back
                     # in time (like global account_data).
                     filtered_room_ids = await self.filter_rooms(
-                        sync_config.user, room_id_set, list_config.filters
+                        sync_config.user, room_id_set, list_config.filters, to_token
                     )
                 # TODO: Apply sorts
                 sorted_room_ids = sorted(filtered_room_ids)
@@ -619,9 +620,15 @@ class SlidingSyncHandler:
         user: UserID,
         room_id_set: AbstractSet[str],
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
+        to_token: StreamToken,
     ) -> AbstractSet[str]:
         """
         Filter rooms based on the sync request.
+
+        Args:
+            user:
+            room_id_set: The set of room IDs to filter down
+            filters: The filters to apply
         """
         user_id = user.to_string()
 
@@ -664,15 +671,18 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            # Make a copy so we don't run into an error: `Set changed size during iteration`
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
             for room_id in list(filtered_room_id_set):
                 # TODO: Is there a good method to look up all rooms at once? (N+1 query problem)
-                is_encrypted = (
-                    # TODO: Get state at the `to_token` instead of the current state
-                    await self.storage_controllers.state.get_current_state_event(
-                        room_id, EventTypes.RoomEncryption, ""
-                    )
+                state_at_to_token = await self.storage_controllers.state.get_state_at(
+                    room_id,
+                    to_token,
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.RoomEncryption, "")]
+                    ),
                 )
+                is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa
