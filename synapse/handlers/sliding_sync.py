@@ -626,9 +626,10 @@ class SlidingSyncHandler:
         Filter rooms based on the sync request.
 
         Args:
-            user:
-            room_id_set: The set of room IDs to filter down
-            filters: The filters to apply
+            user: User to filter rooms for
+            room_id_set: Set of room IDs to filter down
+            filters: Filters to apply
+            to_token: We filter based on the state of the room at this token
         """
         user_id = user.to_string()
 
