@@ -24,6 +24,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -1215,10 +1216,6 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         after_rooms_token = self.event_sources.get_current_token()
-
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
 
         # Try with `is_dm=True`
         truthy_filtered_room_ids = self.get_success(
