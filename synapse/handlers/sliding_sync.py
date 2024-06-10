@@ -530,7 +530,6 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in list(filtered_room_id_set):
-                # TODO: Is there a good method to look up all rooms at once? (N+1 query problem)
                 state_at_to_token = await self.storage_controllers.state.get_state_at(
                     room_id,
                     to_token,
