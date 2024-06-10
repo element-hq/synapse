@@ -606,8 +606,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         order_by: str,
         reverse_order: bool,
         search_term: Optional[str],
-        filter_public_rooms: Optional[bool],
-        filter_empty_rooms: Optional[bool],
+        public_rooms: Optional[bool],
+        empty_rooms: Optional[bool],
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Function to retrieve a paginated list of rooms as json.
 
@@ -619,10 +619,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             search_term: a string to filter room names,
                 canonical alias and room ids by.
                 Room ID must match exactly. Canonical alias must match a substring of the local part.
-            filter_public_rooms: Optional flag to filter public and non-public rooms. If true, public rooms are queried.
+            public_rooms: Optional flag to filter public and non-public rooms. If true, public rooms are queried.
                     if false, public rooms are excluded from the query. When it is
                     none (the default), both public rooms and none-public-rooms are queried.
-            filter_empty_rooms: Optional flag to filter empty and non-empty rooms.
+            empty_rooms: Optional flag to filter empty and non-empty rooms.
                     A room is empty if joined_members is zero.
                     If true, empty rooms are queried.
                     if false, empty rooms are excluded from the query. When it is
@@ -651,12 +651,12 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 f"#%{search_term.lower()}%:%",
                 search_term,
             ]
-        if filter_public_rooms is not None:
-            filter_arg = "1" if filter_public_rooms else "0"
+        if public_rooms is not None:
+            filter_arg = "1" if public_rooms else "0"
             filter_.append(f"rooms.is_public = '{filter_arg}'")
 
-        if filter_empty_rooms is not None:
-            if filter_empty_rooms:
+        if empty_rooms is not None:
+            if empty_rooms:
                 filter_.append("curr.joined_members = 0")
             else:
                 filter_.append("curr.joined_members <> 0")

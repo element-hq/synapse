@@ -1817,7 +1817,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         response = self.make_request(
             "GET",
-            "/_synapse/admin/v1/rooms?filter_public_rooms=true",
+            "/_synapse/admin/v1/rooms?public_rooms=true",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, response.code, msg=response.json_body)
@@ -1826,7 +1826,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         response = self.make_request(
             "GET",
-            "/_synapse/admin/v1/rooms?filter_public_rooms=false",
+            "/_synapse/admin/v1/rooms?public_rooms=false",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, response.code, msg=response.json_body)
@@ -1856,7 +1856,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         response = self.make_request(
             "GET",
-            "/_synapse/admin/v1/rooms?filter_empty_rooms=false",
+            "/_synapse/admin/v1/rooms?empty_rooms=false",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, response.code, msg=response.json_body)
@@ -1865,7 +1865,7 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         response = self.make_request(
             "GET",
-            "/_synapse/admin/v1/rooms?filter_empty_rooms=true",
+            "/_synapse/admin/v1/rooms?empty_rooms=true",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, response.code, msg=response.json_body)
