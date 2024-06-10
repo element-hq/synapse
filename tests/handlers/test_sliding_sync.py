@@ -1218,30 +1218,26 @@ class FilterRoomsTestCase(HomeserverTestCase):
         from synapse.handlers.sliding_sync import SlidingSyncConfig
 
         # Try with `is_dm=True`
-        # -----------------------------
-        truthy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=True,
-        )
-
-        # Filter the rooms
         truthy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, truthy_filters
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=True,
+                ),
             )
         )
 
         self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
 
         # Try with `is_dm=False`
-        # -----------------------------
-        falsy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=False,
-        )
-
-        # Filter the rooms
         falsy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, falsy_filters
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=False,
+                ),
             )
         )
 
