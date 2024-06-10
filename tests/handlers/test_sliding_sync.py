@@ -24,6 +24,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -1216,22 +1217,14 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         after_rooms_token = self.event_sources.get_current_token()
 
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
-
         # Try with `is_dm=True`
-        # -----------------------------
-        truthy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=True,
-        )
-
-        # Filter the rooms
         truthy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
                 {room_id, dm_room_id},
-                truthy_filters,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=True,
+                ),
                 after_rooms_token,
             )
         )
@@ -1239,17 +1232,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
 
         # Try with `is_dm=False`
-        # -----------------------------
-        falsy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=False,
-        )
-
-        # Filter the rooms
         falsy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
                 {room_id, dm_room_id},
-                falsy_filters,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=False,
+                ),
                 after_rooms_token,
             )
         )

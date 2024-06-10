@@ -24,14 +24,16 @@ import logging
 import os
 import shutil
 from typing import TYPE_CHECKING, Callable, Optional
+from uuid import uuid4
 
 from synapse.config._base import Config
 from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace_with_opname
 from synapse.util.async_helpers import maybe_awaitable
 
+from ..storage.databases.main.media_repository import LocalMedia
 from ._base import FileInfo, Responder
-from .media_storage import FileResponder
+from .media_storage import FileResponder, MultipartResponder
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +57,21 @@ class StorageProvider(metaclass=abc.ABCMeta):
         """
 
     @abc.abstractmethod
-    async def fetch(self, path: str, file_info: FileInfo) -> Optional[Responder]:
+    async def fetch(
+        self,
+        path: str,
+        file_info: FileInfo,
+        media_info: Optional[LocalMedia] = None,
+        federation: bool = False,
+    ) -> Optional[Responder]:
         """Attempt to fetch the file described by file_info and stream it
         into writer.
 
         Args:
             path: Relative path of file in local cache
             file_info: The metadata of the file.
+            media_info: metadata of the media item
+            federation: Whether the requested media is for a federation request
 
         Returns:
             Returns a Responder if the provider has the file, otherwise returns None.
@@ -124,7 +134,13 @@ class StorageProviderWrapper(StorageProvider):
             run_in_background(store)
 
     @trace_with_opname("StorageProviderWrapper.fetch")
-    async def fetch(self, path: str, file_info: FileInfo) -> Optional[Responder]:
+    async def fetch(
+        self,
+        path: str,
+        file_info: FileInfo,
+        media_info: Optional[LocalMedia] = None,
+        federation: bool = False,
+    ) -> Optional[Responder]:
         if file_info.url_cache:
             # Files in the URL preview cache definitely aren't stored here,
             # so avoid any potentially slow I/O or network access.
@@ -132,7 +148,9 @@ class StorageProviderWrapper(StorageProvider):
 
         # store_file is supposed to return an Awaitable, but guard
         # against improper implementations.
-        return await maybe_awaitable(self.backend.fetch(path, file_info))
+        return await maybe_awaitable(
+            self.backend.fetch(path, file_info, media_info, federation)
+        )
 
 
 class FileStorageProviderBackend(StorageProvider):
@@ -172,11 +190,23 @@ class FileStorageProviderBackend(StorageProvider):
             )
 
     @trace_with_opname("FileStorageProviderBackend.fetch")
-    async def fetch(self, path: str, file_info: FileInfo) -> Optional[Responder]:
+    async def fetch(
+        self,
+        path: str,
+        file_info: FileInfo,
+        media_info: Optional[LocalMedia] = None,
+        federation: bool = False,
+    ) -> Optional[Responder]:
         """See StorageProvider.fetch"""
 
         backup_fname = os.path.join(self.base_directory, path)
         if os.path.isfile(backup_fname):
+            if federation:
+                assert media_info is not None
+                boundary = uuid4().hex.encode("ascii")
+                return MultipartResponder(
+                    open(backup_fname, "rb"), media_info, boundary
+                )
             return FileResponder(open(backup_fname, "rb"))
 
         return None

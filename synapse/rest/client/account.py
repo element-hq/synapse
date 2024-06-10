@@ -56,14 +56,14 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.metrics import threepid_send_requests
 from synapse.push.mailer import Mailer
-from synapse.rest.client.models import (
+from synapse.types import JsonDict
+from synapse.types.rest import RequestBodyModel
+from synapse.types.rest.client import (
     AuthenticationData,
     ClientSecretStr,
     EmailRequestTokenBody,
     MsisdnRequestTokenBody,
 )
-from synapse.rest.models import RequestBodyModel
-from synapse.types import JsonDict
 from synapse.util.msisdn import phone_number_to_msisdn
 from synapse.util.stringutils import assert_valid_client_secret, random_string
 from synapse.util.threepids import check_3pid_allowed, validate_email

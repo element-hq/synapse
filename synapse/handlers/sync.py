@@ -2540,12 +2540,14 @@ class SyncHandler:
                     newly_left_rooms.append(room_id)
                 else:
                     if not old_state_ids:
-                        old_state_ids = await self._state_storage_controller.get_state_at(
-                            room_id,
-                            since_token,
-                            state_filter=StateFilter.from_types(
-                                [(EventTypes.Member, user_id)]
-                            ),
+                        old_state_ids = (
+                            await self._state_storage_controller.get_state_at(
+                                room_id,
+                                since_token,
+                                state_filter=StateFilter.from_types(
+                                    [(EventTypes.Member, user_id)]
+                                ),
+                            )
                         )
                         old_mem_ev_id = old_state_ids.get(
                             (EventTypes.Member, user_id), None
