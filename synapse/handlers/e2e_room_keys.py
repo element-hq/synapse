@@ -247,6 +247,12 @@ class E2eRoomKeysHandler:
                     if current_room_key:
                         if self._should_replace_room_key(current_room_key, room_key):
                             log_kv({"message": "Replacing room key."})
+                            logger.debug(
+                                "Replacing room key. room=%s session=%s user=%s",
+                                room_id,
+                                session_id,
+                                user_id,
+                            )
                             # updates are done one at a time in the DB, so send
                             # updates right away rather than batching them up,
                             # like we do with the inserts
@@ -256,6 +262,12 @@ class E2eRoomKeysHandler:
                             changed = True
                         else:
                             log_kv({"message": "Not replacing room_key."})
+                            logger.debug(
+                                "Not replacing room key. room=%s session=%s user=%s",
+                                room_id,
+                                session_id,
+                                user_id,
+                            )
                     else:
                         log_kv(
                             {
@@ -265,6 +277,12 @@ class E2eRoomKeysHandler:
                             }
                         )
                         log_kv({"message": "Replacing room key."})
+                        logger.debug(
+                            "Inserting new room key. room=%s session=%s user=%s",
+                            room_id,
+                            session_id,
+                            user_id,
+                        )
                         to_insert.append((room_id, session_id, room_key))
                         changed = True
 
