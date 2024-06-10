@@ -169,7 +169,7 @@ class SlidingSyncHandler:
                 # `["m.room.member", "$LAZY"]`
                 filtered_room_ids = room_id_set
                 # TODO: Apply sorts
-                sorted_room_ids = sorted(filtered_room_ids)
+                sorted_room_ids = await self.sort_rooms(filtered_room_ids, to_token)
 
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
@@ -439,3 +439,19 @@ class SlidingSyncHandler:
                 sync_room_id_set.add(room_id)
 
         return sync_room_id_set
+
+    async def sort_rooms(
+        self,
+        room_id_set: AbstractSet[str],
+        to_token: StreamToken,
+    ) -> List[str]:
+        """
+        Sort by recency of the last event in the room (stream_ordering). In order to get
+        a stable sort, we tie-break by room ID.
+
+        Args:
+            room_id_set: Set of room IDs to sort
+            to_token: We sort based on the events in the room at this token
+        """
+        # TODO: `get_last_event_in_room_before_stream_ordering()`
+        pass

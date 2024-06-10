@@ -175,20 +175,6 @@ class SlidingSyncBody(RequestBodyModel):
             ranges: Sliding window ranges. If this field is missing, no sliding window
                 is used and all rooms are returned in this list. Integers are
                 *inclusive*.
-            sort: How the list should be sorted on the server. The first value is
-                applied first, then tiebreaks are performed with each subsequent sort
-                listed.
-
-                    FIXME: Furthermore, it's not currently defined how servers should behave
-                    if they encounter a filter or sort operation they do not recognise. If
-                    the server rejects the request with an HTTP 400 then that will break
-                    backwards compatibility with new clients vs old servers. However, the
-                    client would be otherwise unaware that only some of the sort/filter
-                    operations have taken effect. We may need to include a "warnings"
-                    section to indicate which sort/filter operations are unrecognised,
-                    allowing for some form of graceful degradation of service.
-                    -- https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/sync-v3/proposals/3575-sync.md#filter-and-sort-extensions
-
             slow_get_all_rooms: Just get all rooms (for clients that don't want to deal with
                 sliding windows). When true, the `ranges` and `sort` fields are ignored.
             required_state: Required state for each room returned. An array of event
@@ -253,7 +239,6 @@ class SlidingSyncBody(RequestBodyModel):
             ranges: Optional[List[Tuple[int, int]]] = None
         else:
             ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
-        sort: Optional[List[StrictStr]] = None
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
         filters: Optional[Filters] = None

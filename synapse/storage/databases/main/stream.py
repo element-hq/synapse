@@ -914,11 +914,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         def get_last_event_in_room_before_stream_ordering_txn(
             txn: LoggingTransaction,
         ) -> Optional[str]:
-            # We need to handle the fact that the stream tokens can be vector
-            # clocks. We do this by getting all rows between the minimum and
-            # maximum stream ordering in the token, plus one row less than the
-            # minimum stream ordering. We then filter the results against the
-            # token and return the first row that matches.
+            # We need to handle the fact that the stream tokens can be vector clocks. We
+            # do this by getting all rows between the minimum and maximum stream
+            # ordering in the token, plus one row less than the minimum stream ordering
+            # (TODO: Why?). We then filter the results against the token and return the
+            # first row that matches.
+            min_stream = end_token.stream
+            max_stream = end_token.get_max_stream_pos()
 
             sql = """
                 SELECT * FROM (
@@ -926,7 +928,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     FROM events
                     LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
-                        AND ? < stream_ordering AND stream_ordering <= ?
+                        AND stream_ordering > ? AND stream_ordering <= ?
                         AND NOT outlier
                         AND rejections.event_id IS NULL
                     ORDER BY stream_ordering DESC
@@ -948,10 +950,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 sql,
                 (
                     room_id,
-                    end_token.stream,
-                    end_token.get_max_stream_pos(),
+                    min_stream,
+                    max_stream,
                     room_id,
-                    end_token.stream,
+                    min_stream,
                 ),
             )
 
