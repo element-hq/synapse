@@ -2,7 +2,7 @@
 
 ### Bugfixes
 
-- Fix bug where OTKs were not always included in `/sync` response when using workers. Introduced in v1.109.0rc1. ([\#17275](https://github.com/element-hq/synapse/issues/17275))
+- Fix bug where one-time-keys were not always included in `/sync` response when using workers. Introduced in v1.109.0rc1. ([\#17275](https://github.com/element-hq/synapse/issues/17275))
 - Fix bug where `/sync` could get stuck due to edge case in device lists handling. Introduced in v1.109.0rc1. ([\#17292](https://github.com/element-hq/synapse/issues/17292))
 
 
