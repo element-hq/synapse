@@ -928,7 +928,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     FROM events
                     LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
-                        AND stream_ordering > ? AND stream_ordering <= ?
+                        AND ? < stream_ordering AND stream_ordering <= ?
                         AND NOT outlier
                         AND rejections.event_id IS NULL
                     ORDER BY stream_ordering DESC
