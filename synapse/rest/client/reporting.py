@@ -149,4 +149,6 @@ class ReportRoomRestServlet(RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
-    ReportRoomRestServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc4151_enabled:
+        ReportRoomRestServlet(hs).register(http_server)
