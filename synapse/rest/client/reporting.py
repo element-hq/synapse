@@ -23,16 +23,27 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
+from synapse._pydantic_compat import HAS_PYDANTIC_V2
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet, parse_json_object_from_request
+from synapse.http.servlet import (
+    RestServlet,
+    parse_and_validate_json_object_from_request,
+    parse_json_object_from_request,
+)
 from synapse.http.site import SynapseRequest
+from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict
 
 from ._base import client_patterns
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+if TYPE_CHECKING or HAS_PYDANTIC_V2:
+    from pydantic.v1 import StrictStr
+else:
+    from pydantic import StrictStr
 
 logger = logging.getLogger(__name__)
 
@@ -111,22 +122,16 @@ class ReportRoomRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
+    class PostBody(RequestBodyModel):
+        reason: StrictStr
+
     async def on_POST(
         self, request: SynapseRequest, room_id: str
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
-        body = parse_json_object_from_request(request)
-
-        # `reason` is required - do not default to empty string
-        reason = body.get("reason")
-        if not isinstance(reason, str) or reason is None:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Param 'reason' must be a string",
-                Codes.BAD_JSON,
-            )
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
 
         room = await self.store.get_room(room_id)
         if room is None:
@@ -135,7 +140,7 @@ class ReportRoomRestServlet(RestServlet):
         await self.store.add_room_report(
             room_id=room_id,
             user_id=user_id,
-            reason=reason,
+            reason=body.reason,
             received_ts=self.clock.time_msec(),
         )
 
