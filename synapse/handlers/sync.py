@@ -285,7 +285,11 @@ class SyncResult:
         )
 
     @staticmethod
-    def empty(next_batch: StreamToken) -> "SyncResult":
+    def empty(
+        next_batch: StreamToken,
+        device_one_time_keys_count: JsonMapping,
+        device_unused_fallback_key_types: List[str],
+    ) -> "SyncResult":
         "Return a new empty result"
         return SyncResult(
             next_batch=next_batch,
@@ -297,8 +301,8 @@ class SyncResult:
             archived=[],
             to_device=[],
             device_lists=DeviceListUpdates(),
-            device_one_time_keys_count={},
-            device_unused_fallback_key_types=[],
+            device_one_time_keys_count=device_one_time_keys_count,
+            device_unused_fallback_key_types=device_unused_fallback_key_types,
         )
 
 
@@ -523,7 +527,28 @@ class SyncHandler:
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
-                return SyncResult.empty(since_token)
+                device_id = sync_config.device_id
+                one_time_keys_count: JsonMapping = {}
+                unused_fallback_key_types: List[str] = []
+                if device_id:
+                    user_id = sync_config.user.to_string()
+                    # TODO: We should have a way to let clients differentiate between the states of:
+                    #   * no change in OTK count since the provided since token
+                    #   * the server has zero OTKs left for this device
+                    #  Spec issue: https://github.com/matrix-org/matrix-doc/issues/3298
+                    one_time_keys_count = await self.store.count_e2e_one_time_keys(
+                        user_id, device_id
+                    )
+                    unused_fallback_key_types = list(
+                        await self.store.get_e2e_unused_fallback_key_types(
+                            user_id, device_id
+                        )
+                    )
+
+                cache_context.should_cache = False  # Don't cache empty responses
+                return SyncResult.empty(
+                    since_token, one_time_keys_count, unused_fallback_key_types
+                )
 
             # If we've spent significant time waiting to catch up, take it off
             # the timeout.
@@ -1977,7 +2002,7 @@ class SyncHandler:
         """
         user_id = sync_config.user.to_string()
 
-        # Note: we get the users room list *before* we get the current token, this
+        # Note: we get the users room list *before* we get the `now_token`, this
         # avoids checking back in history if rooms are joined after the token is fetched.
         token_before_rooms = self.event_sources.get_current_token()
         mutable_joined_room_ids = set(await self.store.get_rooms_for_user(user_id))
@@ -1989,10 +2014,10 @@ class SyncHandler:
         now_token = self.event_sources.get_current_token()
         log_kv({"now_token": now_token})
 
-        # Since we fetched the users room list before the token, there's a small window
-        # during which membership events may have been persisted, so we fetch these now
-        # and modify the joined room list for any changes between the get_rooms_for_user
-        # call and the get_current_token call.
+        # Since we fetched the users room list before calculating the `now_token` (see
+        # above), there's a small window during which membership events may have been
+        # persisted, so we fetch these now and modify the joined room list for any
+        # changes between the get_rooms_for_user call and the get_current_token call.
         membership_change_events = []
         if since_token:
             membership_change_events = await self.store.get_membership_changes_for_user(
@@ -2002,16 +2027,19 @@ class SyncHandler:
                 self.rooms_to_exclude_globally,
             )
 
-            mem_last_change_by_room_id: Dict[str, EventBase] = {}
+            last_membership_change_by_room_id: Dict[str, EventBase] = {}
             for event in membership_change_events:
-                mem_last_change_by_room_id[event.room_id] = event
+                last_membership_change_by_room_id[event.room_id] = event
 
             # For the latest membership event in each room found, add/remove the room ID
             # from the joined room list accordingly. In this case we only care if the
             # latest change is JOIN.
 
-            for room_id, event in mem_last_change_by_room_id.items():
+            for room_id, event in last_membership_change_by_room_id.items():
                 assert event.internal_metadata.stream_ordering
+                # As a shortcut, skip any events that happened before we got our
+                # `get_rooms_for_user()` snapshot (any changes are already represented
+                # in that list).
                 if (
                     event.internal_metadata.stream_ordering
                     < token_before_rooms.room_key.stream
