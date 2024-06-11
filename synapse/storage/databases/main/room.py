@@ -2422,7 +2422,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         room_id: str,
         user_id: str,
         reason: str,
-        content: JsonDict,
         received_ts: int,
     ) -> int:
         """Add a room report
@@ -2431,7 +2430,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             room_id: The room ID being reported.
             user_id: User who reports the room.
             reason: Description that the user specifies.
-            content: Report request body (reason).
             received_ts: Time when the user submitted the report (milliseconds).
         Returns:
             Id of the room report.
@@ -2445,7 +2443,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "room_id": room_id,
                 "user_id": user_id,
                 "reason": reason,
-                "content": json_encoder.encode(content),
             },
             desc="add_room_report",
         )

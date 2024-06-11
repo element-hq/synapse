@@ -136,7 +136,6 @@ class ReportRoomRestServlet(RestServlet):
             room_id=room_id,
             user_id=user_id,
             reason=reason,
-            content=body,
             received_ts=self.clock.time_msec(),
         )
 

@@ -16,6 +16,5 @@ CREATE TABLE room_reports (
     received_ts BIGINT NOT NULL,
     room_id TEXT NOT NULL,
     user_id TEXT NOT NULL,
-    reason TEXT NOT NULL,
-    content TEXT NOT NULL
+    reason TEXT NOT NULL
 );
