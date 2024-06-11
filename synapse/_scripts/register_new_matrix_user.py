@@ -173,11 +173,18 @@ def main() -> None:
         default=None,
         help="Local part of the new user. Will prompt if omitted.",
     )
-    parser.add_argument(
+    password_group = parser.add_mutually_exclusive_group()
+    password_group.add_argument(
         "-p",
         "--password",
         default=None,
-        help="New password for user. Will prompt if omitted.",
+        help="New password for user. Will prompt for a password if "
+        "this flag and `--password-file` are both omitted.",
+    )
+    password_group.add_argument(
+        "--password-file",
+        default=None,
+        help="File containing the new password for user. If set, will override `--password`.",
     )
     parser.add_argument(
         "-t",
@@ -247,6 +254,11 @@ def main() -> None:
             print(_NO_SHARED_SECRET_OPTS_ERROR, file=sys.stderr)
             sys.exit(1)
 
+    if args.password_file:
+        password = _read_file(args.password_file, "password-file").strip()
+    else:
+        password = args.password
+
     if args.server_url:
         server_url = args.server_url
     elif config is not None:
@@ -269,9 +281,7 @@ def main() -> None:
     if args.admin or args.no_admin:
         admin = args.admin
 
-    register_new_user(
-        args.user, args.password, server_url, secret, admin, args.user_type
-    )
+    register_new_user(args.user, password, server_url, secret, admin, args.user_type)
 
 
 def _read_file(file_path: Any, config_path: str) -> str:
