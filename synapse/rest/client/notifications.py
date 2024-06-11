@@ -32,8 +32,8 @@ from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 
-from ._base import client_patterns
 from ...api.errors import SynapseError
+from ._base import client_patterns
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -68,7 +68,7 @@ class NotificationsServlet(RestServlet):
                 # If it doesn't parse to an integer, then this cannot possibly be a valid
                 # pagination token, as we only hand out integers.
                 raise SynapseError(
-                    400, "Query parameter \"from\" contains unrecognised token"
+                    400, 'Query parameter "from" contains unrecognised token'
                 )
         else:
             from_token = None
