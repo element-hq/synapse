@@ -141,6 +141,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         self.persist(type="m.room.create", key="", creator=USER_ID)
         self.check("get_invited_rooms_for_local_user", [USER_ID_2], [])
         event = self.persist(type="m.room.member", key=USER_ID_2, membership="invite")
+        assert event.internal_metadata.instance_name is not None
         assert event.internal_metadata.stream_ordering is not None
 
         self.replicate()
@@ -155,7 +156,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
                     "invite",
                     event.event_id,
                     PersistedEventPosition(
-                        self.hs.get_instance_name(),
+                        event.internal_metadata.instance_name,
                         event.internal_metadata.stream_ordering,
                     ),
                     RoomVersions.V1.identifier,
@@ -232,11 +233,12 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         j2 = self.persist(
             type="m.room.member", sender=USER_ID_2, key=USER_ID_2, membership="join"
         )
+        assert j2.internal_metadata.instance_name is not None
         assert j2.internal_metadata.stream_ordering is not None
         self.replicate()
 
         expected_pos = PersistedEventPosition(
-            "master", j2.internal_metadata.stream_ordering
+            j2.internal_metadata.instance_name, j2.internal_metadata.stream_ordering
         )
         self.check(
             "get_rooms_for_user_with_stream_ordering",
@@ -288,6 +290,7 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
         msg, msgctx = self.build_event()
         self.get_success(self.persistance.persist_events([(j2, j2ctx), (msg, msgctx)]))
         self.replicate()
+        assert j2.internal_metadata.instance_name is not None
         assert j2.internal_metadata.stream_ordering is not None
 
         event_source = RoomEventSource(self.hs)
@@ -329,7 +332,8 @@ class EventsWorkerStoreTestCase(BaseWorkerStoreTestCase):
             # joined_rooms list.
             if membership_changes:
                 expected_pos = PersistedEventPosition(
-                    "master", j2.internal_metadata.stream_ordering
+                    j2.internal_metadata.instance_name,
+                    j2.internal_metadata.stream_ordering,
                 )
                 self.assertEqual(
                     joined_rooms,
