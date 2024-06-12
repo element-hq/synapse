@@ -1189,7 +1189,8 @@ class SortRoomsTestCase(HomeserverTestCase):
     )
     def test_activity_after_xxx(self, room1_membership: Membership) -> None:
         """
-        When someone is invited to a room, they shouldn't take anything into account after the invite.
+        When someone has left/been invited/knocked/been banned from a room, they
+        shouldn't take anything into account after that membership event.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")

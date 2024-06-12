@@ -526,8 +526,8 @@ class SlidingSyncHandler:
 
                 last_activity_in_room_map[room_id] = event_pos.stream
             else:
-                # Otherwise, if the user left/banned from the room, they shouldn't see
-                # past that point. (same for invites/knocks)
+                # Otherwise, if the user has left/been invited/knocked/been banned from
+                # a room, they shouldn't see anything past that point.
                 last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
 
         return sorted(
