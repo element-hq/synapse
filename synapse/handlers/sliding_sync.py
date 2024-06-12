@@ -208,7 +208,7 @@ class SlidingSyncHandler:
                                 range=range,
                                 room_ids=[
                                     room_id
-                                    for room_id, rooms_for_user in sorted_room_info.items()[
+                                    for room_id, _ in sorted_room_info[
                                         range[0] : range[1]
                                     ]
                                 ],

@@ -1187,7 +1187,7 @@ class SortRoomsTestCase(HomeserverTestCase):
             (Membership.BAN,),
         ]
     )
-    def test_activity_after_xxx(self, room1_membership: Membership) -> None:
+    def test_activity_after_xxx(self, room1_membership: str) -> None:
         """
         When someone has left/been invited/knocked/been banned from a room, they
         shouldn't take anything into account after that membership event.
