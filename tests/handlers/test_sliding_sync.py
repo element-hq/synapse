@@ -1113,3 +1113,138 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
                 room_id3,
             },
         )
+
+
+class SortRoomsTestCase(HomeserverTestCase):
+    """
+    Tests Sliding Sync handler `sort_rooms()` to make sure it sorts/orders rooms
+    correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def test_sort_activity_basic(self) -> None:
+        """
+        Rooms with newer activity are sorted first.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        sorted_room_info = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_id for room_id, _ in sorted_room_info],
+            [room_id2, room_id1],
+        )
+
+    # @parameterized.expand(
+    #     [
+    #         (Membership.INVITE,),
+    #         (Membership.KNOCK,),
+    #         (Membership.INVITE,),
+    #     ]
+    # )
+    def test_activity_after_invite(self) -> None:
+        """
+        When someone is invited to a room, they shouldn't take anything into account after the invite.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        before_rooms_token = self.event_sources.get_current_token()
+
+        # Create the rooms as user2 so we can have user1 with a clean slate to work from
+        # and join in whatever order we need for the tests.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+
+        # Here is the activity with user1 that will determine the sort of the rooms
+        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # Activity before the token but the user is only invited to this room so it
+        # shouldn't be taken into account
+        self.helper.send(room_id1, "activity in room1", tok=user2_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Activity after the token. Just make it in a different order than what we
+        # expect to make sure we're not taking the activity after the token into
+        # account.
+        self.helper.send(room_id1, "activity in room1", tok=user2_tok)
+        self.helper.send(room_id2, "activity in room2", tok=user2_tok)
+        self.helper.send(room_id3, "activity in room3", tok=user2_tok)
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_rooms_token,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Sort the rooms (what we're testing)
+        sorted_room_info = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_id for room_id, _ in sorted_room_info],
+            [room_id2, room_id1, room_id3],
+            "Corresponding map to disambiguate the opaque room IDs: "
+            + str(
+                {
+                    "room_id1": room_id1,
+                    "room_id2": room_id2,
+                    "room_id3": room_id3,
+                }
+            ),
+        )

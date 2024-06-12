@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, AbstractSet, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from immutabledict import immutabledict
 
@@ -197,7 +197,7 @@ class SlidingSyncHandler:
                 # `["m.room.member", "$LAZY"]`
                 filtered_room_map = sync_room_map
                 # TODO: Apply sorts
-                sorted_room_ids = await self.sort_rooms(filtered_room_map, to_token)
+                sorted_room_info = await self.sort_rooms(filtered_room_map, to_token)
 
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
@@ -206,12 +206,17 @@ class SlidingSyncHandler:
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=sorted_room_ids[range[0] : range[1]],
+                                room_ids=[
+                                    room_id
+                                    for room_id, rooms_for_user in sorted_room_info.items()[
+                                        range[0] : range[1]
+                                    ]
+                                ],
                             )
                         )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                    count=len(sorted_room_ids),
+                    count=len(sorted_room_info),
                     ops=ops,
                 )
 
@@ -485,15 +490,18 @@ class SlidingSyncHandler:
         self,
         sync_room_map: Dict[str, RoomsForUser],
         to_token: StreamToken,
-    ) -> List[str]:
+    ) -> List[Tuple[str, RoomsForUser]]:
         """
-        Sort by recency of the last event in the room (stream_ordering). In order to get
+        Sort by stream_ordering of the last event in the room. In order to get
         a stable sort, we tie-break by room ID.
 
         Args:
             sync_room_map: Dictionary of room IDs to sort along with membership
                 information in the room at the time of `to_token`.
             to_token: We sort based on the events in the room at this token (<= `to_token`)
+
+        Returns:
+            A sorted list of room IDs by stream_ordering along with membership information.
         """
 
         # Assemble a map of room ID to the `stream_ordering` of the last activity that the
@@ -523,7 +531,12 @@ class SlidingSyncHandler:
                 last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
 
         return sorted(
-            sync_room_map.keys(),
+            sync_room_map.items(),
             # Sort by the last activity (stream_ordering) in the room, tie-break on room_id
-            key=lambda room_id: (last_activity_in_room_map[room_id], room_id),
+            key=lambda room_info: (
+                last_activity_in_room_map[room_info[0]],
+                room_info[0],
+            ),
+            # We want descending order
+            reverse=True,
         )
