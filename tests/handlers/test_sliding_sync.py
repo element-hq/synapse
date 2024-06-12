@@ -1221,7 +1221,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         elif room1_membership == Membership.KNOCK:
             self.helper.knock(room_id1, user1_id, tok=user1_tok)
         elif room1_membership == Membership.BAN:
-            self.helper.ban(room_id1, user1_id, user2_id)
+            self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         # Activity before the token but the user is only invited to this room so it
