@@ -931,7 +931,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         AND rejections.event_id IS NULL
                     ORDER BY stream_ordering DESC
                 ) AS a
-                UNION
+                UNION ALL
                 SELECT * FROM (
                     SELECT instance_name, stream_ordering, topological_ordering, event_id
                     FROM events
