@@ -275,12 +275,6 @@ class SlidingSyncHandler:
             instance_map=immutabledict(instance_to_max_stream_ordering_map),
         )
 
-        # If our `to_token` is already the same or ahead of the latest room membership
-        # for the user, we can just straight-up return the room list (nothing has
-        # changed)
-        if membership_snapshot_token.is_before_or_eq(to_token.room_key):
-            return sync_room_id_set
-
         # Since we fetched the users room list at some point in time after the from/to
         # tokens, we need to revert/rewind some membership changes to match the point in
         # time of the `to_token`. In particular, we need to make these fixups:
@@ -300,14 +294,20 @@ class SlidingSyncHandler:
 
         # 1) Fetch membership changes that fall in the range from `to_token` up to
         # `membership_snapshot_token`
-        membership_change_events_after_to_token = (
-            await self.store.get_membership_changes_for_user(
-                user_id,
-                from_key=to_token.room_key,
-                to_key=membership_snapshot_token,
-                excluded_rooms=self.rooms_to_exclude_globally,
+        #
+        # If our `to_token` is already the same or ahead of the latest room membership
+        # for the user, we don't need to do any "2)" fix-ups and can just straight-up
+        # use the room list from the snapshot as a base (nothing has changed)
+        membership_change_events_after_to_token = []
+        if not membership_snapshot_token.is_before_or_eq(to_token.room_key):
+            membership_change_events_after_to_token = (
+                await self.store.get_membership_changes_for_user(
+                    user_id,
+                    from_key=to_token.room_key,
+                    to_key=membership_snapshot_token,
+                    excluded_rooms=self.rooms_to_exclude_globally,
+                )
             )
-        )
 
         # 1) Assemble a list of the last membership events in some given ranges. Someone
         # could have left and joined multiple times during the given range but we only
