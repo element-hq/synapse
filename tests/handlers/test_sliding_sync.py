@@ -20,6 +20,8 @@
 import logging
 from unittest.mock import patch
 
+from parameterized import parameterized
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, JoinRules, Membership
@@ -326,7 +328,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Leave during the from_token/to_token range (newly_left)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room2_token = self.event_sources.get_current_token()
 
@@ -1177,14 +1179,15 @@ class SortRoomsTestCase(HomeserverTestCase):
             [room_id2, room_id1],
         )
 
-    # @parameterized.expand(
-    #     [
-    #         (Membership.INVITE,),
-    #         (Membership.KNOCK,),
-    #         (Membership.INVITE,),
-    #     ]
-    # )
-    def test_activity_after_invite(self) -> None:
+    @parameterized.expand(
+        [
+            (Membership.LEAVE,),
+            (Membership.INVITE,),
+            (Membership.KNOCK,),
+            (Membership.BAN,),
+        ]
+    )
+    def test_activity_after_xxx(self, room1_membership: Membership) -> None:
         """
         When someone is invited to a room, they shouldn't take anything into account after the invite.
         """
@@ -1198,12 +1201,27 @@ class SortRoomsTestCase(HomeserverTestCase):
         # Create the rooms as user2 so we can have user1 with a clean slate to work from
         # and join in whatever order we need for the tests.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        if room1_membership == Membership.KNOCK:
+            self.helper.send_state(
+                room_id1,
+                EventTypes.JoinRules,
+                {"join_rule": JoinRules.KNOCK},
+                tok=user2_tok,
+            )
         room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
 
         # Here is the activity with user1 that will determine the sort of the rooms
         self.helper.join(room_id3, user1_id, tok=user1_tok)
-        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        if room1_membership == Membership.LEAVE:
+            self.helper.join(room_id1, user1_id, tok=user1_tok)
+            self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        elif room1_membership == Membership.INVITE:
+            self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        elif room1_membership == Membership.KNOCK:
+            self.helper.knock(room_id1, user1_id, tok=user1_tok)
+        elif room1_membership == Membership.BAN:
+            self.helper.ban(room_id1, user1_id, user2_id)
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         # Activity before the token but the user is only invited to this room so it
