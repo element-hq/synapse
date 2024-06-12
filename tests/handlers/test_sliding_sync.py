@@ -78,7 +78,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_get_newly_joined_room(self) -> None:
         """
@@ -102,7 +102,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id})
+        self.assertEqual(room_id_results.keys(), {room_id})
 
     def test_get_already_joined_room(self) -> None:
         """
@@ -123,7 +123,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id})
+        self.assertEqual(room_id_results.keys(), {room_id})
 
     def test_get_invited_banned_knocked_room(self) -> None:
         """
@@ -179,7 +179,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Ensure that the invited, ban, and knock rooms show up
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 invited_room_id,
                 ban_room_id,
@@ -225,7 +225,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # The kicked room should show up
-        self.assertEqual(room_id_results, {kick_room_id})
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
 
     def test_forgotten_rooms(self) -> None:
         """
@@ -307,7 +307,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_only_newly_left_rooms_show_up(self) -> None:
         """
@@ -339,7 +339,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only the newly_left room should show up
-        self.assertEqual(room_id_results, {room_id2})
+        self.assertEqual(room_id_results.keys(), {room_id2})
 
     def test_no_joins_after_to_token(self) -> None:
         """
@@ -367,7 +367,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
@@ -397,7 +397,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # We should still see the room because we were joined during the
         # from_token/to_token time period.
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
@@ -424,7 +424,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We should still see the room because we were joined before the `from_token`
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_kicked_before_range_and_left_after_to_token(self) -> None:
         """
@@ -472,7 +472,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results, {kick_room_id})
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -509,7 +509,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_newly_left_during_range_and_join_after_to_token(self) -> None:
         """
@@ -545,7 +545,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_no_from_token(self) -> None:
         """
@@ -586,7 +586,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -647,7 +647,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         #
         # There won't be any newly_left rooms because the `from_token` is ahead of the
         # `to_token` and that range will give no membership changes to check.
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -682,7 +682,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_leave_before_range_and_join_after_to_token(self) -> None:
         """
@@ -716,7 +716,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_join_leave_multiple_times_during_range_and_after_to_token(
         self,
@@ -758,7 +758,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because it was newly_left and joined during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_leave_multiple_times_before_range_and_after_to_token(
         self,
@@ -798,7 +798,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because we were joined before the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_invite_before_range_and_join_leave_after_to_token(
         self,
@@ -835,7 +835,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because we were invited before the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_multiple_rooms_are_not_confused(
         self,
@@ -888,7 +888,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 # `room_id1` shouldn't show up because we left before the from/to range
                 #
@@ -1099,7 +1099,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         )
 
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 room_id1,
                 # room_id2 shouldn't show up because we left before the from/to range
