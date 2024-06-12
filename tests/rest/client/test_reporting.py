@@ -150,8 +150,6 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.admin_user = self.register_user("admin", "pass", admin=True)
-        self.admin_user_tok = self.login("admin", "pass")
         self.other_user = self.register_user("user", "pass")
         self.other_user_tok = self.login("user", "pass")
 
