@@ -102,8 +102,8 @@ async def filter_events_for_client(
             also be called to check whether a user can see the state at a given point.
 
     Returns:
-        The filtered events. If `msc4115_membership_on_events` is true, the `unsigned`
-        data is annotated with the membership state of `user_id` at each event.
+        The filtered events. The `unsigned` data is annotated with the membership state
+        of `user_id` at each event.
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients.
