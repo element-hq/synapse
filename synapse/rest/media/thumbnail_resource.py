@@ -104,6 +104,7 @@ class ThumbnailResource(RestServlet):
                 respond_404(request)
                 return
 
+            ip_address = request.getClientAddress().host
             remote_resp_function = (
                 self.thumbnail_provider.select_or_generate_remote_thumbnail
                 if self.dynamic_thumbnails
@@ -118,5 +119,6 @@ class ThumbnailResource(RestServlet):
                 method,
                 m_type,
                 max_timeout_ms,
+                ip_address,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)

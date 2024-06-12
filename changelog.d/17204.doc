@@ -1,1 +1,0 @@
-Update OIDC documentation: by default Matrix doesn't query userinfo endpoint, then claims should be put on id_token.

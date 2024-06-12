@@ -1,1 +1,0 @@
-Log exceptions when failing to auto-join new user according to the `auto_join_rooms` option.

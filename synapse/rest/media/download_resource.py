@@ -97,6 +97,12 @@ class DownloadResource(RestServlet):
                 respond_404(request)
                 return
 
+            ip_address = request.getClientAddress().host
             await self.media_repo.get_remote_media(
-                request, server_name, media_id, file_name, max_timeout_ms
+                request,
+                server_name,
+                media_id,
+                file_name,
+                max_timeout_ms,
+                ip_address,
             )

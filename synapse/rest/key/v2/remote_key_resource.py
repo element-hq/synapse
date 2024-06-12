@@ -41,9 +41,9 @@ from synapse.http.servlet import (
     parse_and_validate_json_object_from_request,
     parse_integer,
 )
-from synapse.rest.models import RequestBodyModel
 from synapse.storage.keys import FetchKeyResultForRemote
 from synapse.types import JsonDict
+from synapse.types.rest import RequestBodyModel
 from synapse.util import json_decoder
 from synapse.util.async_helpers import yieldable_gather_results
 
