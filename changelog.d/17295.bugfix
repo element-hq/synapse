@@ -1,0 +1,1 @@
+Fix edge case in `/sync` returning the wrong the state when using sharded event persisters.
