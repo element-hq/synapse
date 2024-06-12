@@ -53,7 +53,7 @@ from synapse.rest.client import (
     register,
     relations,
     rendezvous,
-    report_event,
+    reporting,
     room,
     room_keys,
     room_upgrade_rest_servlet,
@@ -128,7 +128,7 @@ class ClientRestResource(JsonResource):
         tags.register_servlets(hs, client_resource)
         account_data.register_servlets(hs, client_resource)
         if is_main_process:
-            report_event.register_servlets(hs, client_resource)
+            reporting.register_servlets(hs, client_resource)
             openid.register_servlets(hs, client_resource)
         notifications.register_servlets(hs, client_resource)
         devices.register_servlets(hs, client_resource)
