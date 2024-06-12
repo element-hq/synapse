@@ -922,6 +922,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_stream = end_token.stream
             max_stream = end_token.get_max_stream_pos()
 
+            # We use `union all` because we don't need any of the deduplication logic
+            # (`union` is really a union + distinct). `UNION ALL`` does preserve the
+            # ordering of the operand queries but there is no actual gurantee that it
+            # has this behavior in all scenarios so we need the extra `ORDER BY` at the
+            # bottom.
+            #
+            # We're using the subquery syntax for SQLite compatibility.
             sql = """
                 SELECT * FROM (
                     SELECT instance_name, stream_ordering, topological_ordering, event_id
@@ -945,6 +952,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     ORDER BY stream_ordering DESC
                     LIMIT 1
                 ) AS b
+                ORDER BY stream_ordering DESC
             """
             txn.execute(
                 sql,
