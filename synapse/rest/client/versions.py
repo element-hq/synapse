@@ -149,6 +149,8 @@ class VersionsRestServlet(RestServlet):
                             is not None
                         )
                     ),
+                    # MSC4151: Report room API (Client-Server API)
+                    "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
                 },
             },
         )
