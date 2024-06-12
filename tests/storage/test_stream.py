@@ -449,7 +449,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
         # Assemble a token that encompasses event1 -> event4 on worker1
         end_token = RoomStreamToken(
-            stream=event_pos1.stream,
+            stream=event_pos2.stream,
             instance_map=immutabledict({"worker1": event_pos4.stream}),
         )
 
