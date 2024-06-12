@@ -22,7 +22,7 @@
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.rest.client import login, report_event, room
+from synapse.rest.client import login, reporting, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
@@ -35,7 +35,7 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
         synapse.rest.admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
-        report_event.register_servlets,
+        reporting.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -137,5 +137,94 @@ class ReportEventTestCase(unittest.HomeserverTestCase):
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(
             "POST", self.report_path, data, access_token=self.other_user_tok
+        )
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+
+class ReportRoomTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.room_id = self.helper.create_room_as(
+            self.other_user, tok=self.other_user_tok, is_public=True
+        )
+        self.report_path = (
+            f"/_matrix/client/unstable/org.matrix.msc4151/rooms/{self.room_id}/report"
+        )
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4151_enabled": True},
+        }
+    )
+    def test_reason_str(self) -> None:
+        data = {"reason": "this makes me sad"}
+        self._assert_status(200, data)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4151_enabled": True},
+        }
+    )
+    def test_no_reason(self) -> None:
+        data = {"not_reason": "for typechecking"}
+        self._assert_status(400, data)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4151_enabled": True},
+        }
+    )
+    def test_reason_nonstring(self) -> None:
+        data = {"reason": 42}
+        self._assert_status(400, data)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4151_enabled": True},
+        }
+    )
+    def test_reason_null(self) -> None:
+        data = {"reason": None}
+        self._assert_status(400, data)
+
+    @unittest.override_config(
+        {
+            "experimental_features": {"msc4151_enabled": True},
+        }
+    )
+    def test_cannot_report_nonexistent_room(self) -> None:
+        """
+        Tests that we don't accept event reports for rooms which do not exist.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4151/rooms/!bloop:example.org/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(404, channel.code, msg=channel.result["body"])
+        self.assertEqual(
+            "Room does not exist",
+            channel.json_body["error"],
+            msg=channel.result["body"],
+        )
+
+    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+        channel = self.make_request(
+            "POST",
+            self.report_path,
+            data,
+            access_token=self.other_user_tok,
+            shorthand=False,
         )
         self.assertEqual(response_status, channel.code, msg=channel.result["body"])
