@@ -454,4 +454,7 @@ class SlidingSyncHandler:
             to_token: We sort based on the events in the room at this token
         """
         # TODO: `get_last_event_in_room_before_stream_ordering()`
-        pass
+
+        # TODO: Handle when people are left/banned from the room and shouldn't see past that point
+
+        return list(room_id_set)

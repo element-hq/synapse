@@ -1047,7 +1047,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
 
         # Get a token while things are stuck after our activity
         stuck_activity_token = self.event_sources.get_current_token()
-        logger.info("stuck_activity_token %s", stuck_activity_token)
         # Let's make sure we're working with a token that has an `instance_map`
         self.assertNotEqual(len(stuck_activity_token.room_key.instance_map), 0)
 
@@ -1057,7 +1056,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_on_worker2_pos = self.get_success(
             self.store.get_position_for_event(join_on_worker2_response["event_id"])
         )
-        logger.info("join_on_worker2_pos %s", join_on_worker2_pos)
         # Ensure the join technially came after our token
         self.assertGreater(
             join_on_worker2_pos.stream,
@@ -1076,7 +1074,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_on_worker3_pos = self.get_success(
             self.store.get_position_for_event(join_on_worker3_response["event_id"])
         )
-        logger.info("join_on_worker3_pos %s", join_on_worker3_pos)
         # Ensure the join came after the min but still encapsulated by the token
         self.assertGreaterEqual(
             join_on_worker3_pos.stream,
