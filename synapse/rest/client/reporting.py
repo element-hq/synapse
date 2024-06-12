@@ -32,8 +32,8 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
+from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict
-from synapse.types.rest import RequestBodyModel
 
 from ._base import client_patterns
 
