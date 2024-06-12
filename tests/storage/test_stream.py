@@ -468,7 +468,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.assertEqual(
             last_event,
             event_response3["event_id"],
-            f"We expected {event_response3["event_id"]} but saw {last_event} which corresponds to"
+            f"We expected {event_response3['event_id']} but saw {last_event} which corresponds to "
             + str(
                 {
                     "event1": event_response1["event_id"],
@@ -526,7 +526,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.assertEqual(
             last_event,
             event_response2["event_id"],
-            f"We expected {event_response2["event_id"]} but saw {last_event} which corresponds to"
+            f"We expected {event_response2['event_id']} but saw {last_event} which corresponds to "
             + str(
                 {
                     "event1": event_response1["event_id"],

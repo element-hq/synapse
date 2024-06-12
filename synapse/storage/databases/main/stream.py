@@ -931,8 +931,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # ordering of the operand queries but there is no actual gurantee that it
             # has this behavior in all scenarios so we need the extra `ORDER BY` at the
             # bottom.
-            #
-            # We're using the subquery syntax for SQLite compatibility.
             sql = """
                 SELECT * FROM (
                     SELECT instance_name, stream_ordering, topological_ordering, event_id
