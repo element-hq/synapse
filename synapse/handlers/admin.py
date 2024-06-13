@@ -42,7 +42,6 @@ class AdminHandler:
         self._device_handler = hs.get_device_handler()
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
-        self._hs_config = hs.config
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
 
     async def get_whois(self, user: UserID) -> JsonMapping:
@@ -215,7 +214,6 @@ class AdminHandler:
                     self._storage_controllers,
                     user_id,
                     events,
-                    msc4115_membership_on_events=self._hs_config.experimental.msc4115_membership_on_events,
                 )
 
                 writer.write_events(room_id, events)
