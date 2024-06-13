@@ -1341,6 +1341,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         # Create the rooms as user2 so we can have user1 with a clean slate to work from
         # and join in whatever order we need for the tests.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # If we're testing knocks, set the room to knock
         if room1_membership == Membership.KNOCK:
             self.helper.send_state(
                 room_id1,
@@ -1352,6 +1353,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
 
         # Here is the activity with user1 that will determine the sort of the rooms
+        # (room2, room1, room3)
         self.helper.join(room_id3, user1_id, tok=user1_tok)
         if room1_membership == Membership.LEAVE:
             self.helper.join(room_id1, user1_id, tok=user1_tok)
@@ -1364,7 +1366,7 @@ class SortRoomsTestCase(HomeserverTestCase):
             self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
-        # Activity before the token but the user is only invited to this room so it
+        # Activity before the token but the user is only been xxx to this room so it
         # shouldn't be taken into account
         self.helper.send(room_id1, "activity in room1", tok=user2_tok)
 
