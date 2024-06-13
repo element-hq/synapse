@@ -1216,11 +1216,20 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         after_rooms_token = self.event_sources.get_current_token()
 
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
         # Try with `is_dm=True`
-        truthy_filtered_room_ids = self.get_success(
+        truthy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, dm_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=True,
                 ),
@@ -1228,13 +1237,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
+        self.assertEqual(truthy_filtered_room_map.keys(), {dm_room_id})
 
         # Try with `is_dm=False`
-        falsy_filtered_room_ids = self.get_success(
+        falsy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, dm_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=False,
                 ),
@@ -1242,7 +1251,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(falsy_filtered_room_ids, {room_id})
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
 
 class SortRoomsTestCase(HomeserverTestCase):
@@ -1287,6 +1296,7 @@ class SortRoomsTestCase(HomeserverTestCase):
 
         after_rooms_token = self.event_sources.get_current_token()
 
+        # Get the rooms the user should be syncing with
         sync_room_map = self.get_success(
             self.sliding_sync_handler.get_sync_room_ids_for_user(
                 UserID.from_string(user1_id),
@@ -1295,6 +1305,7 @@ class SortRoomsTestCase(HomeserverTestCase):
             )
         )
 
+        # Sort the rooms (what we're testing)
         sorted_room_info = self.get_success(
             self.sliding_sync_handler.sort_rooms(
                 sync_room_map=sync_room_map,
