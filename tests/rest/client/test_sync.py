@@ -27,6 +27,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
+    AccountDataTypes,
     EventContentFields,
     EventTypes,
     ReceiptTypes,
@@ -1226,9 +1227,58 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
         self.sync_endpoint = "/_matrix/client/unstable/org.matrix.msc3575/sync"
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+
+    def _create_dm_room(
+        self,
+        inviter_user_id: str,
+        inviter_tok: str,
+        invitee_user_id: str,
+        invitee_tok: str,
+    ) -> str:
+        """
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the
+        room. The "invitee" user also will join the room. The `m.direct` account data
+        will be set for both users.
+        """
+
+        # Create a room and send an invite the other user
+        room_id = self.helper.create_room_as(
+            inviter_user_id,
+            is_public=False,
+            tok=inviter_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=inviter_user_id,
+            targ=invitee_user_id,
+            tok=inviter_tok,
+            extra_data={"is_direct": True},
+        )
+        # Person that was invited joins the room
+        self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+
+        # Mimic the client setting the room as a direct message in the global account
+        # data
+        self.get_success(
+            self.store.add_account_data_for_user(
+                invitee_user_id,
+                AccountDataTypes.DIRECT,
+                {inviter_user_id: [room_id]},
+            )
+        )
+        self.get_success(
+            self.store.add_account_data_for_user(
+                inviter_user_id,
+                AccountDataTypes.DIRECT,
+                {invitee_user_id: [room_id]},
+            )
+        )
+
+        return room_id
 
     def test_sync_list(self) -> None:
         """
@@ -1335,4 +1385,81 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # with because we weren't able to find anything new yet.
         self.assertEqual(
             channel.json_body["next_pos"], future_position_token_serialized
+        )
+
+    def test_filter_list(self) -> None:
+        """
+        Test that filters apply to lists
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a DM room
+        dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+        )
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "dms": {
+                        "ranges": [[0, 99]],
+                        "sort": ["by_recency"],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": True},
+                    },
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "sort": ["by_recency"],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": False},
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["dms", "foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the room we are joined to
+        self.assertListEqual(
+            list(channel.json_body["lists"]["dms"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [dm_room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["dms"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["foo-list"]),
         )
