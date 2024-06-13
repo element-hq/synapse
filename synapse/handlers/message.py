@@ -1551,6 +1551,7 @@ class EventCreationHandler:
                     # stream_ordering entry manually (as it was persisted on
                     # another worker).
                     event.internal_metadata.stream_ordering = stream_id
+                    event.internal_metadata.instance_name = writer_instance
 
                 return event
 

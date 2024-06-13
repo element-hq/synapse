@@ -205,8 +205,24 @@ class EmailPusherTests(HomeserverTestCase):
 
         # Multipart: plain text, base 64 encoded; html, base 64 encoded
         multipart_msg = email.message_from_bytes(msg)
-        txt = multipart_msg.get_payload()[0].get_payload(decode=True).decode()
-        html = multipart_msg.get_payload()[1].get_payload(decode=True).decode()
+
+        # Extract the text (non-HTML) portion of the multipart Message,
+        # as a Message.
+        txt_message = multipart_msg.get_payload(i=0)
+        assert isinstance(txt_message, email.message.Message)
+
+        # Extract the actual bytes from the Message object, and decode them to a `str`.
+        txt_bytes = txt_message.get_payload(decode=True)
+        assert isinstance(txt_bytes, bytes)
+        txt = txt_bytes.decode()
+
+        # Do the same for the HTML portion of the multipart Message.
+        html_message = multipart_msg.get_payload(i=1)
+        assert isinstance(html_message, email.message.Message)
+        html_bytes = html_message.get_payload(decode=True)
+        assert isinstance(html_bytes, bytes)
+        html = html_bytes.decode()
+
         self.assertIn("/_synapse/client/unsubscribe", txt)
         self.assertIn("/_synapse/client/unsubscribe", html)
 
@@ -347,12 +363,17 @@ class EmailPusherTests(HomeserverTestCase):
         # That email should contain the room's avatar
         msg: bytes = args[5]
         # Multipart: plain text, base 64 encoded; html, base 64 encoded
-        html = (
-            email.message_from_bytes(msg)
-            .get_payload()[1]
-            .get_payload(decode=True)
-            .decode()
-        )
+
+        # Extract the html Message object from the Multipart Message.
+        # We need the asserts to convince mypy that this is OK.
+        html_message = email.message_from_bytes(msg).get_payload(i=1)
+        assert isinstance(html_message, email.message.Message)
+
+        # Extract the `bytes` from the html Message object, and decode to a `str`.
+        html = html_message.get_payload(decode=True)
+        assert isinstance(html, bytes)
+        html = html.decode()
+
         self.assertIn("_matrix/media/v1/thumbnail/DUMMY_MEDIA_ID", html)
 
     def test_empty_room(self) -> None:

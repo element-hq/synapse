@@ -204,6 +204,8 @@ pub struct EventInternalMetadata {
     /// The stream ordering of this event. None, until it has been persisted.
     #[pyo3(get, set)]
     stream_ordering: Option<NonZeroI64>,
+    #[pyo3(get, set)]
+    instance_name: Option<String>,
 
     /// whether this event is an outlier (ie, whether we have the state at that
     /// point in the DAG)
@@ -232,6 +234,7 @@ impl EventInternalMetadata {
         Ok(EventInternalMetadata {
             data,
             stream_ordering: None,
+            instance_name: None,
             outlier: false,
         })
     }

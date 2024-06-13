@@ -2207,6 +2207,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         super().__init__(database, db_conn, hs)
 
         self._event_reports_id_gen = IdGenerator(db_conn, "event_reports", "id")
+        self._room_reports_id_gen = IdGenerator(db_conn, "room_reports", "id")
 
         self._instance_name = hs.get_instance_name()
 
@@ -2413,6 +2414,37 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
                 "content": json_encoder.encode(content),
             },
             desc="add_event_report",
+        )
+        return next_id
+
+    async def add_room_report(
+        self,
+        room_id: str,
+        user_id: str,
+        reason: str,
+        received_ts: int,
+    ) -> int:
+        """Add a room report
+
+        Args:
+            room_id: The room ID being reported.
+            user_id: User who reports the room.
+            reason: Description that the user specifies.
+            received_ts: Time when the user submitted the report (milliseconds).
+        Returns:
+            Id of the room report.
+        """
+        next_id = self._room_reports_id_gen.get_next()
+        await self.db_pool.simple_insert(
+            table="room_reports",
+            values={
+                "id": next_id,
+                "received_ts": received_ts,
+                "room_id": room_id,
+                "user_id": user_id,
+                "reason": reason,
+            },
+            desc="add_room_report",
         )
         return next_id
 
