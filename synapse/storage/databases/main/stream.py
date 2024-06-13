@@ -946,14 +946,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # (sharded event persisters). The first subquery handles the events that
             # would be within the vector clock and gets all rows between the minimum and
             # maximum stream ordering in the token which need to be filtered against the
-            # `instance_map`. The second subquery handles the "before" case and finds a
-            # row before the token. We then filter out any results past the token's
-            # vector clock and return the first row that matches.
+            # `instance_map`. The second subquery handles the "before" case and finds
+            # the first row before the token. We then filter out any results past the
+            # token's vector clock and return the first row that matches.
             min_stream = end_token.stream
             max_stream = end_token.get_max_stream_pos()
 
             # We use `union all` because we don't need any of the deduplication logic
-            # (`union` is really a union + distinct). `UNION ALL`` does preserve the
+            # (`union` is really a union + distinct). `UNION ALL` does preserve the
             # ordering of the operand queries but there is no actual gurantee that it
             # has this behavior in all scenarios so we need the extra `ORDER BY` at the
             # bottom.

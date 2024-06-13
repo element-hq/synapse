@@ -347,7 +347,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def test_after_room_created(self) -> None:
         """
-        Test that an event returned if we are using a token after the room was created
+        Test that an event is returned if we are using a token after the room was created
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -369,8 +369,8 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def test_activity_in_other_rooms(self) -> None:
         """
-        Test to make sure that the last event in room is returned even if the
-        `stream_ordering` has advanced past it (and that's from the correct room)
+        Test to make sure that the last event in the room is returned even if the
+        `stream_ordering` has advanced from activity in other rooms.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -488,8 +488,8 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
     def test_last_event_before_sharded_token(self) -> None:
         """
-        Test to make sure we can find the last event that that is *before* the sharded
-        token (a token that has an `instance_map` and looks like
+        Test to make sure we can find the last event that is *before* the sharded token
+        (a token that has an `instance_map` and looks like
         `m{min_pos}~{writer1}.{pos1}~{writer2}.{pos2}`).
         """
         user1_id = self.register_user("user1", "pass")
@@ -504,7 +504,6 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         )
 
         # Create another room to advance the `stream_ordering` on the same worker
-        # so we can sandwich event3 in the middle of the token
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
         event_response3, event_pos3 = self._send_event_on_instance(
             "worker1", room_id2, user1_tok
