@@ -489,7 +489,7 @@ class SlidingSyncHandler:
         # TODO: Re-order filters so that the easiest, most likely to eliminate rooms,
         # are first. This way when people use multiple filters, we can eliminate rooms
         # and do less work for the subsequent filters.
-        #
+
         # TODO: Exclude partially stated rooms unless the `required_state` has
         # `["m.room.member", "$LAZY"]`
 
