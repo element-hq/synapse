@@ -388,6 +388,7 @@ LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
     RoomVersions.V9,
     RoomVersions.V10,
     RoomVersions.MSC1767v10,
+    RoomVersions.MSC3757v10,
 }
 
 
@@ -790,9 +791,10 @@ def get_send_level(
 
 
 def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> bool:
+    state_key = event.get_state_key()
     power_levels_event = get_power_level_event(auth_events)
 
-    send_level = get_send_level(event.type, event.get("state_key"), power_levels_event)
+    send_level = get_send_level(event.type, state_key, power_levels_event)
     user_level = get_user_power_level(event.user_id, auth_events)
 
     if user_level < send_level:
@@ -803,11 +805,24 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
             errcode=Codes.INSUFFICIENT_POWER,
         )
 
-    # Check state_key
-    if hasattr(event, "state_key"):
-        if event.state_key.startswith("@"):
-            if event.state_key != event.user_id:
-                raise AuthError(403, "You are not allowed to set others state")
+    if (
+        state_key is not None
+        and state_key.startswith("@")
+        and state_key != event.user_id
+    ):
+        if event.room_version is RoomVersions.MSC3757v10:
+            colon_idx = state_key.find(":")
+            if colon_idx != -1:
+                suffix_idx = state_key.find("_", colon_idx)
+                state_key_user_id = (
+                    state_key[:suffix_idx] if suffix_idx != -1 else state_key
+                )
+                if (
+                    state_key_user_id == event.user_id
+                    or user_level > get_user_power_level(state_key_user_id, auth_events)
+                ):
+                    return True
+        raise AuthError(403, "You are not allowed to set others state")
 
     return True
 

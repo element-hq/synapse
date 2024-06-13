@@ -320,6 +320,26 @@ class RoomVersions:
         enforce_int_power_levels=True,
         msc3931_push_features=(PushRuleRoomFlag.EXTENSIBLE_EVENTS,),
     )
+    MSC3757v10 = RoomVersion(
+        # MSC3757 (Restricting who can overwrite a state event) based on room version "10"
+        "org.matrix.msc3757.10",
+        RoomDisposition.UNSTABLE,
+        EventFormatVersions.ROOM_V4_PLUS,
+        StateResolutionVersions.V2,
+        enforce_key_validity=True,
+        special_case_aliases_auth=False,
+        strict_canonicaljson=True,
+        limit_notifications_power_levels=True,
+        implicit_room_creator=False,
+        updated_redaction_rules=False,
+        restricted_join_rule=True,
+        restricted_join_rule_fix=True,
+        knock_join_rule=True,
+        msc3389_relation_redactions=False,
+        knock_restricted_join_rule=True,
+        enforce_int_power_levels=True,
+        msc3931_push_features=(),
+    )
     V11 = RoomVersion(
         "11",
         RoomDisposition.STABLE,
@@ -355,6 +375,7 @@ KNOWN_ROOM_VERSIONS: Dict[str, RoomVersion] = {
         RoomVersions.V9,
         RoomVersions.V10,
         RoomVersions.V11,
+        RoomVersions.MSC3757v10,
     )
 }
 
