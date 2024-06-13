@@ -388,6 +388,7 @@ LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
     RoomVersions.V9,
     RoomVersions.V10,
     RoomVersions.MSC1767v10,
+    RoomVersions.MSC3779v10,
 }
 
 
@@ -753,7 +754,10 @@ def _check_joined_room(
 
 
 def get_send_level(
-    etype: str, state_key: Optional[str], power_levels_event: Optional["EventBase"]
+    etype: str,
+    state_key: Optional[str],
+    power_levels_event: Optional["EventBase"],
+    msc_3779_sender: Optional[str] = None,
 ) -> int:
     """Get the power level required to send an event of a given type
 
@@ -767,6 +771,8 @@ def get_send_level(
             a state event.
         power_levels_event: power levels event
             in force at this point in the room
+        msc_3779_sender: MXID of the user who sent the event.
+            Only for rooms with MSC3779 ("owned" state events) applied.
     Returns:
         power level required to send this event.
     """
@@ -781,7 +787,15 @@ def get_send_level(
 
     # otherwise, fall back to the state_default/events_default.
     if send_level is None:
-        if state_key is not None:
+        is_owned_state_event = (
+            msc_3779_sender is not None
+            and state_key is not None
+            and (
+                state_key == msc_3779_sender
+                or state_key.startswith(msc_3779_sender + "_")
+            )
+        )
+        if state_key is not None and not is_owned_state_event:
             send_level = power_levels_content.get("state_default", 50)
         else:
             send_level = power_levels_content.get("events_default", 0)
@@ -792,7 +806,12 @@ def get_send_level(
 def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> bool:
     power_levels_event = get_power_level_event(auth_events)
 
-    send_level = get_send_level(event.type, event.get("state_key"), power_levels_event)
+    send_level = get_send_level(
+        event.type,
+        event.get("state_key"),
+        power_levels_event,
+        event.user_id if event.room_version is RoomVersions.MSC3779v10 else None,
+    )
     user_level = get_user_power_level(event.user_id, auth_events)
 
     if user_level < send_level:
