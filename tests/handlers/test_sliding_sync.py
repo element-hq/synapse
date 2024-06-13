@@ -32,6 +32,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -334,7 +335,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Leave during the from_token/to_token range (newly_left)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room2_token = self.event_sources.get_current_token()
 
@@ -1148,6 +1149,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
 
     def _create_dm_room(
         self,
@@ -1247,35 +1249,31 @@ class FilterRoomsTestCase(HomeserverTestCase):
             invitee_tok=user2_tok,
         )
 
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
+        after_rooms_token = self.event_sources.get_current_token()
 
         # Try with `is_dm=True`
-        # -----------------------------
-        truthy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=True,
-        )
-
-        # Filter the rooms
         truthy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, truthy_filters
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=True,
+                ),
+                after_rooms_token,
             )
         )
 
         self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
 
         # Try with `is_dm=False`
-        # -----------------------------
-        falsy_filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            is_dm=False,
-        )
-
-        # Filter the rooms
         falsy_filtered_room_ids = self.get_success(
             self.sliding_sync_handler.filter_rooms(
-                UserID.from_string(user1_id), {room_id, dm_room_id}, falsy_filters
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=False,
+                ),
+                after_rooms_token,
             )
         )
 
@@ -1351,16 +1349,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
             tok=user1_tok,
         )
 
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
-
-        filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            spaces=[
-                space_a,
-                space_b,
-            ],
-        )
+        after_rooms_token = self.event_sources.get_current_token()
 
         # Try filtering the rooms
         filtered_room_ids = self.get_success(
@@ -1378,7 +1367,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
                     # not in any space
                     room_not_in_space1,
                 },
-                filters,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    spaces=[
+                        space_a,
+                        space_b,
+                    ],
+                ),
+                after_rooms_token,
             )
         )
 
@@ -1427,16 +1422,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Add to space_b
         self._add_space_child(space_b, room_id2, user2_tok)
 
-        # TODO: Better way to avoid the circular import? (see
-        # https://github.com/element-hq/synapse/pull/17187#discussion_r1619492779)
-        from synapse.handlers.sliding_sync import SlidingSyncConfig
-
-        filters = SlidingSyncConfig.SlidingSyncList.Filters(
-            spaces=[
-                space_a,
-                space_b,
-            ],
-        )
+        after_rooms_token = self.event_sources.get_current_token()
 
         # Try filtering the rooms
         filtered_room_ids = self.get_success(
@@ -1448,7 +1434,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
                     # b (but user1 isn't in space_b)
                     room_id2,
                 },
-                filters,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    spaces=[
+                        space_a,
+                        space_b,
+                    ],
+                ),
+                after_rooms_token,
             )
         )
 

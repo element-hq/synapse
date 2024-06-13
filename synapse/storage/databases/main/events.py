@@ -207,6 +207,7 @@ class PersistEventsStore:
         async with stream_ordering_manager as stream_orderings:
             for (event, _), stream in zip(events_and_contexts, stream_orderings):
                 event.internal_metadata.stream_ordering = stream
+                event.internal_metadata.instance_name = self._instance_name
 
             await self.db_pool.runInteraction(
                 "persist_events",
