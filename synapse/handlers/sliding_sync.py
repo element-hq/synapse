@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, AbstractSet, Dict, List, Optional
 
 from immutabledict import immutabledict
 
-from synapse.api.constants import Membership
+from synapse.api.constants import AccountDataTypes, Membership
 from synapse.events import EventBase
 from synapse.types import Requester, RoomStreamToken, StreamToken, UserID
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
@@ -69,9 +69,19 @@ class SlidingSyncHandler:
         from_token: Optional[StreamToken] = None,
         timeout_ms: int = 0,
     ) -> SlidingSyncResult:
-        """Get the sync for a client if we have new data for it now. Otherwise
+        """
+        Get the sync for a client if we have new data for it now. Otherwise
         wait for new data to arrive on the server. If the timeout expires, then
         return an empty sync result.
+
+        Args:
+            requester: The user making the request
+            sync_config: Sync configuration
+            from_token: The point in the stream to sync from. Token of the end of the
+                previous batch. May be `None` if this is the initial sync request.
+            timeout_ms: The time in milliseconds to wait for new data to arrive. If 0,
+                we will immediately but there might not be any new data so we just return an
+                empty response.
         """
         # If the user is not part of the mau group, then check that limits have
         # not been exceeded (if not part of the group by this point, almost certain
@@ -143,6 +153,14 @@ class SlidingSyncHandler:
         """
         Generates the response body of a Sliding Sync result, represented as a
         `SlidingSyncResult`.
+
+        We fetch data according to the token range (> `from_token` and <= `to_token`).
+
+        Args:
+            sync_config: Sync configuration
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from. Token of the end of the
+                previous batch. May be `None` if this is the initial sync request.
         """
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
@@ -163,11 +181,12 @@ class SlidingSyncHandler:
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         if sync_config.lists:
             for list_key, list_config in sync_config.lists.items():
-                # TODO: Apply filters
-                #
-                # TODO: Exclude partially stated rooms unless the `required_state` has
-                # `["m.room.member", "$LAZY"]`
+                # Apply filters
                 filtered_room_ids = room_id_set
+                if list_config.filters is not None:
+                    filtered_room_ids = await self.filter_rooms(
+                        sync_config.user, room_id_set, list_config.filters, to_token
+                    )
                 # TODO: Apply sorts
                 sorted_room_ids = sorted(filtered_room_ids)
 
@@ -217,6 +236,12 @@ class SlidingSyncHandler:
           `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
           to tell when a room was forgotten at the moment so we can't factor it into the
           from/to range.
+
+
+        Args:
+            user: User to fetch rooms for
+            to_token: The token to fetch rooms up to.
+            from_token: The point in the stream to sync from.
         """
         user_id = user.to_string()
 
@@ -439,3 +464,84 @@ class SlidingSyncHandler:
                 sync_room_id_set.add(room_id)
 
         return sync_room_id_set
+
+    async def filter_rooms(
+        self,
+        user: UserID,
+        room_id_set: AbstractSet[str],
+        filters: SlidingSyncConfig.SlidingSyncList.Filters,
+        to_token: StreamToken,
+    ) -> AbstractSet[str]:
+        """
+        Filter rooms based on the sync request.
+
+        Args:
+            user: User to filter rooms for
+            room_id_set: Set of room IDs to filter down
+            filters: Filters to apply
+            to_token: We filter based on the state of the room at this token
+        """
+        user_id = user.to_string()
+
+        # TODO: Apply filters
+        #
+        # TODO: Exclude partially stated rooms unless the `required_state` has
+        # `["m.room.member", "$LAZY"]`
+
+        filtered_room_id_set = set(room_id_set)
+
+        # Filter for Direct-Message (DM) rooms
+        if filters.is_dm is not None:
+            # We're using global account data (`m.direct`) instead of checking for
+            # `is_direct` on membership events because that property only appears for
+            # the invitee membership event (doesn't show up for the inviter). Account
+            # data is set by the client so it needs to be scrutinized.
+            #
+            # We're unable to take `to_token` into account for global account data since
+            # we only keep track of the latest account data for the user.
+            dm_map = await self.store.get_global_account_data_by_type_for_user(
+                user_id, AccountDataTypes.DIRECT
+            )
+
+            # Flatten out the map
+            dm_room_id_set = set()
+            if dm_map:
+                for room_ids in dm_map.values():
+                    # Account data should be a list of room IDs. Ignore anything else
+                    if isinstance(room_ids, list):
+                        for room_id in room_ids:
+                            if isinstance(room_id, str):
+                                dm_room_id_set.add(room_id)
+
+            if filters.is_dm:
+                # Only DM rooms please
+                filtered_room_id_set = filtered_room_id_set.intersection(dm_room_id_set)
+            else:
+                # Only non-DM rooms please
+                filtered_room_id_set = filtered_room_id_set.difference(dm_room_id_set)
+
+        if filters.spaces:
+            raise NotImplementedError()
+
+        if filters.is_encrypted:
+            raise NotImplementedError()
+
+        if filters.is_invite:
+            raise NotImplementedError()
+
+        if filters.room_types:
+            raise NotImplementedError()
+
+        if filters.not_room_types:
+            raise NotImplementedError()
+
+        if filters.room_name_like:
+            raise NotImplementedError()
+
+        if filters.tags:
+            raise NotImplementedError()
+
+        if filters.not_tags:
+            raise NotImplementedError()
+
+        return filtered_room_id_set

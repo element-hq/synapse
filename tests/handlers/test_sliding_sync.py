@@ -22,8 +22,9 @@ from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, JoinRules, Membership
+from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
+from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -1116,3 +1117,130 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
                 room_id3,
             },
         )
+
+
+class FilterRoomsTestCase(HomeserverTestCase):
+    """
+    Tests Sliding Sync handler `filter_rooms()` to make sure it includes/excludes rooms
+    correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def _create_dm_room(
+        self,
+        inviter_user_id: str,
+        inviter_tok: str,
+        invitee_user_id: str,
+        invitee_tok: str,
+    ) -> str:
+        """
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the room. The
+        "invitee" user also will join the room. The `m.direct` account data will be set
+        for both users.
+        """
+
+        # Create a room and send an invite the other user
+        room_id = self.helper.create_room_as(
+            inviter_user_id,
+            is_public=False,
+            tok=inviter_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=inviter_user_id,
+            targ=invitee_user_id,
+            tok=inviter_tok,
+            extra_data={"is_direct": True},
+        )
+        # Person that was invited joins the room
+        self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+
+        # Mimic the client setting the room as a direct message in the global account
+        # data
+        self.get_success(
+            self.store.add_account_data_for_user(
+                invitee_user_id,
+                AccountDataTypes.DIRECT,
+                {inviter_user_id: [room_id]},
+            )
+        )
+        self.get_success(
+            self.store.add_account_data_for_user(
+                inviter_user_id,
+                AccountDataTypes.DIRECT,
+                {invitee_user_id: [room_id]},
+            )
+        )
+
+        return room_id
+
+    def test_filter_dm_rooms(self) -> None:
+        """
+        Test `filter.is_dm` for DM rooms
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        # Create a DM room
+        dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Try with `is_dm=True`
+        truthy_filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
+
+        # Try with `is_dm=False`
+        falsy_filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {room_id, dm_room_id},
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_dm=False,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(falsy_filtered_room_ids, {room_id})
