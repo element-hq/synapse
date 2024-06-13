@@ -90,6 +90,7 @@ def prune_event(event: EventBase) -> EventBase:
     pruned_event.internal_metadata.stream_ordering = (
         event.internal_metadata.stream_ordering
     )
+    pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
 
     # Mark the event as redacted
@@ -116,6 +117,7 @@ def clone_event(event: EventBase) -> EventBase:
     new_event.internal_metadata.stream_ordering = (
         event.internal_metadata.stream_ordering
     )
+    new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     new_event.internal_metadata.outlier = event.internal_metadata.outlier
 
     return new_event

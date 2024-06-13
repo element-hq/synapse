@@ -431,6 +431,7 @@ class EventChainStoreTestCase(HomeserverTestCase):
 
         for e in events:
             e.internal_metadata.stream_ordering = self._next_stream_ordering
+            e.internal_metadata.instance_name = self.hs.get_instance_name()
             self._next_stream_ordering += 1
 
         def _persist(txn: LoggingTransaction) -> None:
