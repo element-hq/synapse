@@ -216,7 +216,6 @@ class SlidingSyncHandler:
                         sync_config.user, sync_room_map, list_config.filters, to_token
                     )
 
-                # TODO: Apply sorts
                 sorted_room_info = await self.sort_rooms(
                     filtered_sync_room_map, to_token
                 )

@@ -1299,7 +1299,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_notification_level", "by_recency", "by_name"],
                         "required_state": [
                             ["m.room.join_rules", ""],
                             ["m.room.history_visibility", ""],
@@ -1361,7 +1360,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_notification_level", "by_recency", "by_name"],
                         "required_state": [
                             ["m.room.join_rules", ""],
                             ["m.room.history_visibility", ""],
@@ -1415,14 +1413,12 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "dms": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_recency"],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": True},
                     },
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_recency"],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": False},

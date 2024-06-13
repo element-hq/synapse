@@ -176,7 +176,7 @@ class SlidingSyncBody(RequestBodyModel):
                 is used and all rooms are returned in this list. Integers are
                 *inclusive*.
             slow_get_all_rooms: Just get all rooms (for clients that don't want to deal with
-                sliding windows). When true, the `ranges` and `sort` fields are ignored.
+                sliding windows). When true, the `ranges` field is ignored.
             required_state: Required state for each room returned. An array of event
                 type and state key tuples. Elements in this array are ORd together to
                 produce the final set of state events to return.
@@ -215,12 +215,6 @@ class SlidingSyncBody(RequestBodyModel):
                 `user_id` and optionally `avatar_url` and `displayname`) for the users used
                 to calculate the room name.
             filters: Filters to apply to the list before sorting.
-            bump_event_types: Allowlist of event types which should be considered recent activity
-                when sorting `by_recency`. By omitting event types from this field,
-                clients can ensure that uninteresting events (e.g. a profile rename) do
-                not cause a room to jump to the top of its list(s). Empty or omitted
-                `bump_event_types` have no effect—all events in a room will be
-                considered recent activity.
         """
 
         class Filters(RequestBodyModel):
@@ -289,7 +283,6 @@ class SlidingSyncBody(RequestBodyModel):
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
         filters: Optional[Filters] = None
-        bump_event_types: Optional[List[StrictStr]] = None
 
     class RoomSubscription(CommonRoomParameters):
         pass
