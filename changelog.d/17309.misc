@@ -1,0 +1,1 @@
+When rolling back to a previous Synapse version and then forwards again to this release, don't require server operators to manually run SQL.
