@@ -481,7 +481,7 @@ jobs:
       env:
         # If this is a pull request to a release branch, use that branch as default branch for sytest, else use develop
         # This works because the release script always create a branch on the sytest repo with the same name as the release branch
-        SYTEST_DEFAULT_BRANCH: ${{ startsWith(github.head_ref, 'release-') && github.head_ref || 'develop' }}
+        SYTEST_DEFAULT_BRANCH: ${{ startsWith(github.base_ref, 'release-') && github.base_ref || 'develop' }}
         SYTEST_BRANCH: ${{ github.head_ref }}
         POSTGRES: ${{ matrix.job.postgres && 1}}
         MULTI_POSTGRES: ${{ (matrix.job.postgres == 'multi-postgres') || '' }}
