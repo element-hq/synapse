@@ -114,7 +114,7 @@ class ReplicationDataHandler:
         """
         all_room_ids: Set[str] = set()
         if stream_name == DeviceListsStream.NAME:
-            if any(row.entity.startswith("@") and not row.is_signature for row in rows):
+            if any(not row.is_signature and not row.hosts_calculated for row in rows):
                 prev_token = self.store.get_device_stream_token()
                 all_room_ids = await self.store.get_all_device_list_changes(
                     prev_token, token
@@ -149,7 +149,7 @@ class ReplicationDataHandler:
             )
             await self._pusher_pool.on_new_receipts({row.user_id for row in rows})
         elif stream_name == ToDeviceStream.NAME:
-            entities = [row.entity for row in rows if row.entity.startswith("@")]
+            entities = [row.user_id for row in rows if not row.hosts_calculated]
             if entities:
                 self.notifier.on_new_event(
                     StreamKeyType.TO_DEVICE, token, users=entities
@@ -433,11 +433,7 @@ class FederationSenderHandler:
             # The entities are either user IDs (starting with '@') whose devices
             # have changed, or remote servers that we need to tell about
             # changes.
-            hosts = {
-                row.entity
-                for row in rows
-                if not row.entity.startswith("@") and not row.is_signature
-            }
+            hosts = await self.store.get_destinations_for_device(token)
             await self.federation_sender.send_device_messages(hosts, immediate=False)
 
         elif stream_name == ToDeviceStream.NAME:

@@ -207,22 +207,25 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     ) -> None:
         for row in rows:
             if row.is_signature:
-                self._user_signature_stream_cache.entity_has_changed(row.entity, token)
+                self._user_signature_stream_cache.entity_has_changed(row.user_id, token)
                 continue
 
             # The entities are either user IDs (starting with '@') whose devices
             # have changed, or remote servers that we need to tell about
             # changes.
-            if row.entity.startswith("@"):
-                self._device_list_stream_cache.entity_has_changed(row.entity, token)
-                self.get_cached_devices_for_user.invalidate((row.entity,))
-                self._get_cached_user_device.invalidate((row.entity,))
-                self.get_device_list_last_stream_id_for_remote.invalidate((row.entity,))
+            if not row.hosts_calculated:
+                self._device_list_stream_cache.entity_has_changed(row.user_id, token)
+                self.get_cached_devices_for_user.invalidate((row.user_id,))
+                self._get_cached_user_device.invalidate((row.user_id,))
+                self.get_device_list_last_stream_id_for_remote.invalidate(
+                    (row.user_id,)
+                )
 
             else:
-                self._device_list_federation_stream_cache.entity_has_changed(
-                    row.entity, token
-                )
+                # self._device_list_federation_stream_cache.entity_has_changed(
+                #     row.entity, token
+                # )
+                pass
 
     def device_lists_in_rooms_have_changed(
         self, room_ids: StrCollection, token: int
@@ -364,18 +367,18 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         """
         now_stream_id = self.get_device_stream_token()
 
-        has_changed = self._device_list_federation_stream_cache.has_entity_changed(
-            destination, int(from_stream_id)
-        )
-        if not has_changed:
-            # debugging for https://github.com/matrix-org/synapse/issues/14251
-            issue_8631_logger.debug(
-                "%s: no change between %i and %i",
-                destination,
-                from_stream_id,
-                now_stream_id,
-            )
-            return now_stream_id, []
+        # has_changed = self._device_list_federation_stream_cache.has_entity_changed(
+        #     destination, int(from_stream_id)
+        # )
+        # if not has_changed:
+        #     # debugging for https://github.com/matrix-org/synapse/issues/14251
+        #     issue_8631_logger.debug(
+        #         "%s: no change between %i and %i",
+        #         destination,
+        #         from_stream_id,
+        #         now_stream_id,
+        #     )
+        #     return now_stream_id, []
 
         updates = await self.db_pool.runInteraction(
             "get_device_updates_by_remote",
@@ -1575,6 +1578,14 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         return await self.db_pool.runInteraction(
             "get_device_list_changes_in_room",
             get_device_list_changes_in_room_txn,
+        )
+
+    async def get_destinations_for_device(self, stream_id: int) -> StrCollection:
+        return await self.db_pool.simple_select_onecol(
+            table="device_lists_outbound_pokes",
+            keyvalues={"stream_id": stream_id},
+            retcol="destination",
+            desc="get_destinations_for_device",
         )
 
 
