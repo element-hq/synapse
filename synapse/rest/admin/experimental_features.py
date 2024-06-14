@@ -41,7 +41,6 @@ class ExperimentalFeature(str, Enum):
 
     MSC3026 = "msc3026"
     MSC3881 = "msc3881"
-    MSC3967 = "msc3967"
 
 
 class ExperimentalFeaturesRestServlet(RestServlet):
