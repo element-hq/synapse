@@ -524,7 +524,7 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(id_gen_5.get_current_token_for_writer("third"), 6)
 
     def test_sequence_consistency(self) -> None:
-        """Test that we correct sequence if the table and sequence diverges."""
+        """Test that we correct the sequence if the table and sequence diverges."""
 
         # Prefill with some rows
         self._insert_row_with_id("master", 3)
