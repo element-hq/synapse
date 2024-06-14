@@ -55,7 +55,6 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.sequence import (
-    PostgresSequenceGenerator,
     build_sequence_generator,
 )
 
@@ -280,7 +279,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self._max_position_of_local_instance = self._max_seen_allocated_stream_id
 
         # This goes and fills out the above state from the database.
-        self._load_current_ids(db_conn, tables)
+        self._load_current_ids(db_conn, tables, sequence_name)
 
         self._sequence_gen = build_sequence_generator(
             db_conn=db_conn,
@@ -330,6 +329,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         self,
         db_conn: LoggingDatabaseConnection,
         tables: List[Tuple[str, str, str]],
+        sequence_name: str,
     ) -> None:
         cur = db_conn.cursor(txn_name="_load_current_ids")
 
@@ -369,9 +369,12 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # date. If we're using Postgres for the sequences, we can just use the current
         # sequence value as our own position.
         if self._instance_name in self._writers:
-            if isinstance(self._sequence_gen, PostgresSequenceGenerator):
+            if isinstance(self._db.engine, PostgresEngine):
+                cur.execute(f"SELECT last_value FROM {sequence_name}")
+                row = cur.fetchone()
+                assert row is not None
                 self._current_positions[self._instance_name] = (
-                    self._sequence_gen.current_sequence_value(cur)
+                    row[0] * self._return_factor
                 )
 
         # We set the `_persisted_upto_position` to be the minimum of all current
