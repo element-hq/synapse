@@ -165,7 +165,7 @@ class PostgresSequenceGenerator(SequenceGenerator):
             # forwards again. We resolve this by setting the sequence to the
             # right value.
             logger.warning(
-                "Postgres sequence %s is behind table %s: %d < %d",
+                "Postgres sequence %s is behind table %s: %d < %d. Updating sequence.",
                 self._sequence_name,
                 table,
                 last_value,
