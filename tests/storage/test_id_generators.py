@@ -28,7 +28,6 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
-from synapse.storage.engines import IncorrectDatabaseSetup
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.storage.util.sequence import (
@@ -525,7 +524,7 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
         self.assertEqual(id_gen_5.get_current_token_for_writer("third"), 6)
 
     def test_sequence_consistency(self) -> None:
-        """Test that we error out if the table and sequence diverges."""
+        """Test that we correct the sequence if the table and sequence diverges."""
 
         # Prefill with some rows
         self._insert_row_with_id("master", 3)
@@ -536,9 +535,14 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
         self.get_success(self.db_pool.runInteraction("_insert", _insert))
 
-        # Creating the ID gen should error
-        with self.assertRaises(IncorrectDatabaseSetup):
-            self._create_id_generator("first")
+        # Creating the ID gen should now fix the inconsistency
+        id_gen = self._create_id_generator()
+
+        async def _get_next_async() -> None:
+            async with id_gen.get_next() as stream_id:
+                self.assertEqual(stream_id, 27)
+
+        self.get_success(_get_next_async())
 
     def test_minimal_local_token(self) -> None:
         self._insert_rows("first", 3)
