@@ -107,6 +107,13 @@ class PostgresSequenceGenerator(SequenceGenerator):
         )
         return [i for (i,) in txn]
 
+    def current_sequence_value(self, txn: Cursor) -> int:
+        """Load the current value of the sequence without bumping it"""
+        txn.execute(f"SELECT last_value FROM {self._sequence_name}")
+        row = txn.fetchone()
+        assert row is not None
+        return row[0]
+
     def check_consistency(
         self,
         db_conn: "LoggingDatabaseConnection",

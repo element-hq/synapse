@@ -54,7 +54,10 @@ from synapse.storage.database import (
 )
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
-from synapse.storage.util.sequence import build_sequence_generator
+from synapse.storage.util.sequence import (
+    PostgresSequenceGenerator,
+    build_sequence_generator,
+)
 
 if TYPE_CHECKING:
     from synapse.notifier import ReplicationNotifier
@@ -359,6 +362,17 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 for instance, stream_id in cur
                 if instance in self._writers
             }
+
+        # If we're a writer, we can assume we're at the end of the stream
+        # Usually, we would get that from the stream_positions, but in some cases,
+        # like if we rolled back Synapse, the stream_positions table might not be up to
+        # date. If we're using Postgres for the sequences, we can just use the current
+        # sequence value as our own position.
+        if self._instance_name in self._writers:
+            if isinstance(self._sequence_gen, PostgresSequenceGenerator):
+                self._current_positions[self._instance_name] = (
+                    self._sequence_gen.current_sequence_value(cur)
+                )
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
