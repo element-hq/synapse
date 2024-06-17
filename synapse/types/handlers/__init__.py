@@ -31,7 +31,7 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.types import JsonMapping, StreamToken, UserID
+from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
 from synapse.types.rest.client import SlidingSyncBody
 
 
@@ -193,7 +193,7 @@ class SlidingSyncResult:
         required_state: List[EventBase]
         timeline: List[EventBase]
         is_dm: bool
-        stripped_state: Optional[List[EventBase]]
+        stripped_state: Optional[List[JsonDict]]
         prev_batch: StreamToken
         limited: bool
         joined_count: int

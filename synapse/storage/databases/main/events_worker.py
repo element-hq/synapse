@@ -55,7 +55,7 @@ from synapse.api.room_versions import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.events.utils import prune_event
+from synapse.events.utils import prune_event, strip_event
 from synapse.logging.context import (
     PreserveLoggingContext,
     current_context,
@@ -1025,15 +1025,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         state_to_include = await self.get_events(selected_state_ids.values())
 
-        return [
-            {
-                "type": e.type,
-                "state_key": e.state_key,
-                "content": e.content,
-                "sender": e.sender,
-            }
-            for e in state_to_include.values()
-        ]
+        return [strip_event(e) for e in state_to_include.values()]
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""

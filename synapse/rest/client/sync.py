@@ -1017,18 +1017,10 @@ class SlidingSyncRestServlet(RestServlet):
 
             # Stripped state only applies to invite/knock rooms
             if room_result.stripped_state:
-                serialized_stripped_state = (
-                    await self.event_serializer.serialize_events(
-                        room_result.stripped_state,
-                        time_now,
-                        config=serialize_options,
-                    )
-                )
-
                 # TODO: Would be good to rename this to `stripped_state` so it can be
                 # shared between invite and knock rooms, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1117629919
-                serialized_rooms[room_id]["invite_state"] = serialized_stripped_state
+                serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
 
         return serialized_rooms
 

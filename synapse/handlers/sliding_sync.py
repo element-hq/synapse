@@ -25,8 +25,10 @@ from immutabledict import immutabledict
 
 from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membership
 from synapse.events import EventBase
+from synapse.events.utils import strip_event
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import (
+    JsonDict,
     PersistedEventPosition,
     Requester,
     RoomStreamToken,
@@ -793,7 +795,7 @@ class SlidingSyncHandler:
             )
 
         # Figure out any stripped state events for invite/knocks
-        stripped_state: List[EventBase] = []
+        stripped_state: List[JsonDict] = []
         if rooms_for_user_membership_at_to_token.membership in {
             Membership.INVITE,
             Membership.KNOCK,
@@ -804,15 +806,15 @@ class SlidingSyncHandler:
 
             stripped_state = []
             if invite_or_knock_event.membership == Membership.INVITE:
-                stripped_state = invite_or_knock_event.unsigned.get(
-                    "invite_room_state", []
+                stripped_state.extend(
+                    invite_or_knock_event.unsigned.get("invite_room_state", [])
                 )
             elif invite_or_knock_event.membership == Membership.KNOCK:
-                stripped_state = invite_or_knock_event.unsigned.get(
-                    "knock_room_state", []
+                stripped_state.extend(
+                    invite_or_knock_event.unsigned.get("knock_room_state", [])
                 )
 
-            stripped_state.append(invite_or_knock_event)
+            stripped_state.append(strip_event(invite_or_knock_event))
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
