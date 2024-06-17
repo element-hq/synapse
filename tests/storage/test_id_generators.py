@@ -690,6 +690,9 @@ class WorkerMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 class BackwardsMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
     """Tests MultiWriterIdGenerator that produce *negative* stream IDs."""
 
+    if not USE_POSTGRES_FOR_TESTS:
+         skip = "Requires Postgres"
+
     positive = False
 
     def test_single_instance(self) -> None:
@@ -759,6 +762,9 @@ class BackwardsMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
 
 class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
+    if not USE_POSTGRES_FOR_TESTS:
+         skip = "Requires Postgres"
+
     tables = ["foobar1", "foobar2"]
 
     def test_load_existing_stream(self) -> None:
