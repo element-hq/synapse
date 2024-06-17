@@ -46,10 +46,10 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
+from synapse.util import Clock
 from synapse.util.stringutils import is_ascii
 
 if TYPE_CHECKING:
-    from synapse.media.media_storage import MultipartResponder
     from synapse.storage.databases.main.media_repository import LocalMedia
 
 
@@ -275,8 +275,9 @@ def _can_encode_filename_as_token(x: str) -> bool:
 
 
 async def respond_with_multipart_responder(
+    clock: Clock,
     request: SynapseRequest,
-    responder: "Optional[MultipartResponder]",
+    responder: "Optional[Responder]",
     media_info: "LocalMedia",
 ) -> None:
     """
@@ -299,15 +300,22 @@ async def respond_with_multipart_responder(
             )
             return
 
+        from synapse.media.media_storage import MultipartFileConsumer
+
+        multipart_consumer = MultipartFileConsumer(
+            clock, request, media_info.media_type, {}
+        )
+
         logger.debug("Responding to media request with responder %s", responder)
         if media_info.media_length is not None:
             request.setHeader(b"Content-Length", b"%d" % (media_info.media_length,))
         request.setHeader(
-            b"Content-Type", b"multipart/mixed; boundary=%s" % responder.boundary
+            b"Content-Type",
+            b"multipart/mixed; boundary=%s" % multipart_consumer.boundary,
         )
 
         try:
-            await responder.write_to_consumer(request)
+            await responder.write_to_consumer(multipart_consumer)
         except Exception as e:
             # The majority of the time this will be due to the client having gone
             # away. Unfortunately, Twisted simply throws a generic exception at us
