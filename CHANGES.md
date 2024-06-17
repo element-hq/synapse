@@ -1,3 +1,16 @@
+# Synapse 1.109.0rc3 (2024-06-17)
+
+### Bugfixes
+
+- When rolling back to a previous Synapse version and then forwards again to this release, don't require server operators to manually run SQL. ([\#17305](https://github.com/element-hq/synapse/issues/17305), [\#17309](https://github.com/element-hq/synapse/issues/17309))
+
+### Internal Changes
+
+- Use the release branch for sytest in release-branch PRs. ([\#17306](https://github.com/element-hq/synapse/issues/17306))
+
+
+
+
 # Synapse 1.109.0rc2 (2024-06-11)
 
 ### Bugfixes
