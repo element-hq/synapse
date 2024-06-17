@@ -1282,11 +1282,20 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         after_rooms_token = self.event_sources.get_current_token()
 
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
         # Try with `is_encrypted=True`
-        truthy_filtered_room_ids = self.get_success(
+        truthy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, encrypted_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_encrypted=True,
                 ),
@@ -1294,13 +1303,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(truthy_filtered_room_ids, {encrypted_room_id})
+        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
 
         # Try with `is_encrypted=False`
-        falsy_filtered_room_ids = self.get_success(
+        falsy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, encrypted_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_encrypted=False,
                 ),
@@ -1308,7 +1317,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(falsy_filtered_room_ids, {room_id})
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
 
 class SortRoomsTestCase(HomeserverTestCase):
