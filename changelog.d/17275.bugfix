@@ -1,1 +1,0 @@
-Fix bug where OTKs were not always included in `/sync` response when using workers. Introduced v1.109.0rc1.

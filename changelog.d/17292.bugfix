@@ -1,1 +1,0 @@
-Fix bug where `/sync` could get stuck due to edge case in device lists handling. Introduced in v1.109.0rc1.
