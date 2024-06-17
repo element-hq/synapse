@@ -81,7 +81,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
       - uses: matrix-org/setup-python-poetry@v1
         with:
@@ -148,7 +148,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       - name: Setup Poetry
@@ -208,7 +208,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
       - uses: matrix-org/setup-python-poetry@v1
         with:
@@ -225,7 +225,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
         with:
             components: clippy
       - uses: Swatinem/rust-cache@v2
@@ -344,7 +344,7 @@ jobs:
             postgres:${{ matrix.job.postgres-version }}
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       - uses: matrix-org/setup-python-poetry@v1
@@ -386,7 +386,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       # There aren't wheels for some of the older deps, so we need to install
@@ -498,7 +498,7 @@ jobs:
         run: cat sytest-blacklist .ci/worker-blacklist > synapse-blacklist-with-workers
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       - name: Run SyTest
@@ -642,7 +642,7 @@ jobs:
           path: synapse
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       - name: Prepare Complement's Prerequisites
@@ -674,7 +674,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.66.0
+        uses: dtolnay/rust-toolchain@1.90.0
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo test
