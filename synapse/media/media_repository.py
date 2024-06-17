@@ -58,7 +58,7 @@ from synapse.media._base import (
     respond_with_responder,
 )
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage, MultipartResponder
+from synapse.media.media_storage import MediaStorage
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
@@ -467,8 +467,9 @@ class MediaRepository:
         )
         if federation:
             # this really should be a Multipart responder but just in case
-            assert isinstance(responder, MultipartResponder)
-            await respond_with_multipart_responder(request, responder, media_info)
+            await respond_with_multipart_responder(
+                self.clock, request, responder, media_info
+            )
         else:
             await respond_with_responder(
                 request, responder, media_type, media_length, upload_name

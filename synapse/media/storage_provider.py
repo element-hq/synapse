@@ -24,7 +24,6 @@ import logging
 import os
 import shutil
 from typing import TYPE_CHECKING, Callable, Optional
-from uuid import uuid4
 
 from synapse.config._base import Config
 from synapse.logging.context import defer_to_thread, run_in_background
@@ -33,7 +32,7 @@ from synapse.util.async_helpers import maybe_awaitable
 
 from ..storage.databases.main.media_repository import LocalMedia
 from ._base import FileInfo, Responder
-from .media_storage import FileResponder, MultipartResponder
+from .media_storage import FileResponder
 
 logger = logging.getLogger(__name__)
 
@@ -201,12 +200,6 @@ class FileStorageProviderBackend(StorageProvider):
 
         backup_fname = os.path.join(self.base_directory, path)
         if os.path.isfile(backup_fname):
-            if federation:
-                assert media_info is not None
-                boundary = uuid4().hex.encode("ascii")
-                return MultipartResponder(
-                    open(backup_fname, "rb"), media_info, boundary
-                )
             return FileResponder(open(backup_fname, "rb"))
 
         return None
