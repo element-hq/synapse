@@ -277,7 +277,7 @@ class PaginationTestCase(HomeserverTestCase):
 
 class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
     """
-    Test `get_last_event_in_room_before_stream_ordering(...)`
+    Test `get_last_event_pos_in_room_before_stream_ordering(...)`
     """
 
     servlets = [
@@ -337,7 +337,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id,
                 end_token=before_room_token.room_key,
             )
@@ -357,7 +357,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id,
                 end_token=after_room_token.room_key,
             )
@@ -383,7 +383,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=after_room_token.room_key,
             )
@@ -413,7 +413,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=after_room_token.room_key,
             )
@@ -464,7 +464,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=end_token,
             )
@@ -523,7 +523,7 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
         last_event_result = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=end_token,
             )

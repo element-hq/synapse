@@ -910,8 +910,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             The ID of the most recent event, or None if there are no events in the room
             before this stream ordering.
         """
-        last_event_result = await self.get_last_event_in_room_before_stream_ordering(
-            room_id, end_token
+        last_event_result = (
+            await self.get_last_event_pos_in_room_before_stream_ordering(
+                room_id, end_token
+            )
         )
 
         if last_event_result:
@@ -919,7 +921,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return None
 
-    async def get_last_event_in_room_before_stream_ordering(
+    async def get_last_event_pos_in_room_before_stream_ordering(
         self,
         room_id: str,
         end_token: RoomStreamToken,
@@ -937,7 +939,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             events in the room before this stream ordering.
         """
 
-        def get_last_event_in_room_before_stream_ordering_txn(
+        def get_last_event_pos_in_room_before_stream_ordering_txn(
             txn: LoggingTransaction,
         ) -> Optional[Tuple[str, PersistedEventPosition]]:
             # We're looking for the closest event at or before the token. We need to
@@ -1008,8 +1010,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             return None
 
         return await self.db_pool.runInteraction(
-            "get_last_event_in_room_before_stream_ordering",
-            get_last_event_in_room_before_stream_ordering_txn,
+            "get_last_event_pos_in_room_before_stream_ordering",
+            get_last_event_pos_in_room_before_stream_ordering_txn,
         )
 
     async def get_current_room_stream_token_for_room_id(

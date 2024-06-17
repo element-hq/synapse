@@ -620,7 +620,7 @@ class SlidingSyncHandler:
             # at/before the `to_token`.
             if room_for_user.membership == Membership.JOIN:
                 last_event_result = (
-                    await self.store.get_last_event_in_room_before_stream_ordering(
+                    await self.store.get_last_event_pos_in_room_before_stream_ordering(
                         room_id, to_token.room_key
                     )
                 )
