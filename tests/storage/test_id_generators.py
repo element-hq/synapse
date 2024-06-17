@@ -691,7 +691,7 @@ class BackwardsMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
     """Tests MultiWriterIdGenerator that produce *negative* stream IDs."""
 
     if not USE_POSTGRES_FOR_TESTS:
-         skip = "Requires Postgres"
+        skip = "Requires Postgres"
 
     positive = False
 
@@ -763,7 +763,7 @@ class BackwardsMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
 
 class MultiTableMultiWriterIdGeneratorTestCase(MultiWriterIdGeneratorBase):
     if not USE_POSTGRES_FOR_TESTS:
-         skip = "Requires Postgres"
+        skip = "Requires Postgres"
 
     tables = ["foobar1", "foobar2"]
 
