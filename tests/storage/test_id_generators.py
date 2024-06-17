@@ -69,11 +69,14 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
                     instance_name TEXT NOT NULL,
                     data TEXT
                 );
-                """ % (table,)
+                """
+                % (table,)
             )
 
     def _create_id_generator(
-        self, instance_name: str = "master", writers: Optional[List[str]] = None,
+        self,
+        instance_name: str = "master",
+        writers: Optional[List[str]] = None,
     ) -> MultiWriterIdGenerator:
         def _create(conn: LoggingDatabaseConnection) -> MultiWriterIdGenerator:
             return MultiWriterIdGenerator(
@@ -88,7 +91,9 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
                 positive=self.positive,
             )
 
-        self.instances[instance_name] = self.get_success_or_raise(self.db_pool.runWithConnection(_create))
+        self.instances[instance_name] = self.get_success_or_raise(
+            self.db_pool.runWithConnection(_create)
+        )
         return self.instances[instance_name]
 
     def _replicate(self, instance_name: str) -> None:
@@ -106,14 +111,19 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
         for instance_name in self.instances:
             self._replicate(instance_name)
 
-    def _insert_row(self, instance_name: str, stream_id: int) -> None:
+    def _insert_row(
+        self, instance_name: str, stream_id: int, table: Optional[str] = None
+    ) -> None:
         """Insert one row as the given instance with given stream_id."""
+
+        if table is None:
+            table = self.tables[0]
 
         factor = 1 if self.positive else -1
 
         def _insert(txn: LoggingTransaction) -> None:
             txn.execute(
-                "INSERT INTO foobar VALUES (?, ?)",
+                "INSERT INTO %s VALUES (?, ?)" % (table,),
                 (
                     stream_id,
                     instance_name,
@@ -129,8 +139,13 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
 
         self.get_success(self.db_pool.runInteraction("_insert_row", _insert))
 
-
-    def _insert_rows(self, instance_name: str, number: int, table: Optional[str] = None, update_stream_table: bool = True) -> None:
+    def _insert_rows(
+        self,
+        instance_name: str,
+        number: int,
+        table: Optional[str] = None,
+        update_stream_table: bool = True,
+    ) -> None:
         """Insert N rows as the given instance, inserting with stream IDs pulled
         from the postgres sequence.
         """
@@ -144,7 +159,8 @@ class MultiWriterIdGeneratorBase(HomeserverTestCase):
             for _ in range(number):
                 next_val = self.seq_gen.get_next_id_txn(txn)
                 txn.execute(
-                    "INSERT INTO %s (stream_id, instance_name) VALUES (?, ?)" % (table,),
+                    "INSERT INTO %s (stream_id, instance_name) VALUES (?, ?)"
+                    % (table,),
                     (next_val, instance_name),
                 )
 
