@@ -162,8 +162,9 @@ class SlidingSyncResult:
             timeline: Latest events in the room. The last event is the most recent
             is_dm: Flag to specify whether the room is a direct-message room (most likely
                 between two people).
-            invite_state: Stripped state events. Same as `rooms.invite.$room_id.invite_state`
-                in sync v2, absent on joined/left rooms
+            stripped_state: Stripped state events (for rooms where the usre is
+                invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
+                absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
             limited: True if their are more events than fit between the given position and now.
@@ -192,7 +193,7 @@ class SlidingSyncResult:
         required_state: List[EventBase]
         timeline: List[EventBase]
         is_dm: bool
-        invite_state: List[EventBase]
+        stripped_state: Optional[List[EventBase]]
         prev_batch: StreamToken
         limited: bool
         joined_count: int
