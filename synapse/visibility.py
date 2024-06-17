@@ -82,7 +82,6 @@ async def filter_events_for_client(
     is_peeking: bool = False,
     always_include_ids: FrozenSet[str] = frozenset(),
     filter_send_to_client: bool = True,
-    msc4115_membership_on_events: bool = False,
 ) -> List[EventBase]:
     """
     Check which events a user is allowed to see. If the user can see the event but its
@@ -101,12 +100,10 @@ async def filter_events_for_client(
         filter_send_to_client: Whether we're checking an event that's going to be
             sent to a client. This might not always be the case since this function can
             also be called to check whether a user can see the state at a given point.
-        msc4115_membership_on_events: Whether to include the requesting user's
-            membership in the "unsigned" data, per MSC4115.
 
     Returns:
-        The filtered events. If `msc4115_membership_on_events` is true, the `unsigned`
-        data is annotated with the membership state of `user_id` at each event.
+        The filtered events. The `unsigned` data is annotated with the membership state
+        of `user_id` at each event.
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients.
@@ -159,9 +156,6 @@ async def filter_events_for_client(
         if filtered is None:
             return None
 
-        if not msc4115_membership_on_events:
-            return filtered
-
         # Annotate the event with the user's membership after the event.
         #
         # Normally we just look in `state_after_event`, but if the event is an outlier
@@ -186,7 +180,7 @@ async def filter_events_for_client(
         # Copy the event before updating the unsigned data: this shouldn't be persisted
         # to the cache!
         cloned = clone_event(filtered)
-        cloned.unsigned[EventUnsignedContentFields.MSC4115_MEMBERSHIP] = user_membership
+        cloned.unsigned[EventUnsignedContentFields.MEMBERSHIP] = user_membership
 
         return cloned
 

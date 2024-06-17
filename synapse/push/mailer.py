@@ -532,7 +532,6 @@ class Mailer:
             self._storage_controllers,
             user_id,
             results.events_before,
-            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
         the_events.append(notif_event)
 
