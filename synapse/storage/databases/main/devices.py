@@ -366,6 +366,8 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
               EDU contents.
         """
         now_stream_id = self.get_device_stream_token()
+        if from_stream_id == now_stream_id:
+            return now_stream_id, []
 
         # has_changed = self._device_list_federation_stream_cache.has_entity_changed(
         #     destination, int(from_stream_id)
