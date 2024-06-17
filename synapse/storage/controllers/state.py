@@ -430,7 +430,7 @@ class StateStorageController:
         # which might not be the same as the "current state" of the room at the time
         # of the stream token if there were multiple forward extremities at the time.
         last_event_id = (
-            await self.stores.main.get_last_event_in_room_before_stream_ordering(
+            await self.stores.main.get_last_event_id_in_room_before_stream_ordering(
                 room_id,
                 end_token=stream_position.room_key,
             )
