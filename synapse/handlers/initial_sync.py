@@ -224,7 +224,6 @@ class InitialSyncHandler:
                     self._storage_controllers,
                     user_id,
                     messages,
-                    msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
                 )
 
                 start_token = now_token.copy_and_replace(StreamKeyType.ROOM, token)
@@ -383,7 +382,6 @@ class InitialSyncHandler:
             requester.user.to_string(),
             messages,
             is_peeking=is_peeking,
-            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
 
         start_token = StreamToken.START.copy_and_replace(StreamKeyType.ROOM, token)
@@ -498,7 +496,6 @@ class InitialSyncHandler:
             requester.user.to_string(),
             messages,
             is_peeking=is_peeking,
-            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
 
         start_token = now_token.copy_and_replace(StreamKeyType.ROOM, token)
