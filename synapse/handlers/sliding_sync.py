@@ -243,21 +243,21 @@ class SlidingSyncHandler:
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
-                        room_id_set = {
+                        sliced_room_ids = [
                             room_id
                             for room_id, _ in sorted_room_info[range[0] : range[1]]
-                        }
+                        ]
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=list(room_id_set),
+                                room_ids=sliced_room_ids,
                             )
                         )
 
                         # Update the relevant room map
-                        for room_id in room_id_set:
+                        for room_id in sliced_room_ids:
                             if relevant_room_map.get(room_id) is not None:
                                 # Take the highest timeline limit
                                 if (
