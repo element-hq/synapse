@@ -20,6 +20,8 @@
 import logging
 from unittest.mock import patch
 
+from parameterized import parameterized
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
@@ -79,7 +81,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_get_newly_joined_room(self) -> None:
         """
@@ -103,7 +105,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id})
+        self.assertEqual(room_id_results.keys(), {room_id})
 
     def test_get_already_joined_room(self) -> None:
         """
@@ -124,7 +126,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id})
+        self.assertEqual(room_id_results.keys(), {room_id})
 
     def test_get_invited_banned_knocked_room(self) -> None:
         """
@@ -180,7 +182,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Ensure that the invited, ban, and knock rooms show up
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 invited_room_id,
                 ban_room_id,
@@ -226,7 +228,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # The kicked room should show up
-        self.assertEqual(room_id_results, {kick_room_id})
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
 
     def test_forgotten_rooms(self) -> None:
         """
@@ -308,7 +310,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_only_newly_left_rooms_show_up(self) -> None:
         """
@@ -340,7 +342,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only the newly_left room should show up
-        self.assertEqual(room_id_results, {room_id2})
+        self.assertEqual(room_id_results.keys(), {room_id2})
 
     def test_no_joins_after_to_token(self) -> None:
         """
@@ -368,7 +370,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
@@ -398,7 +400,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # We should still see the room because we were joined during the
         # from_token/to_token time period.
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
@@ -425,7 +427,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We should still see the room because we were joined before the `from_token`
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_kicked_before_range_and_left_after_to_token(self) -> None:
         """
@@ -473,7 +475,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # We shouldn't see the room because it was forgotten
-        self.assertEqual(room_id_results, {kick_room_id})
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -510,7 +512,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_newly_left_during_range_and_join_after_to_token(self) -> None:
         """
@@ -546,7 +548,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should still show up because it's newly_left during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_no_from_token(self) -> None:
         """
@@ -587,7 +589,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -648,7 +650,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         #
         # There won't be any newly_left rooms because the `from_token` is ahead of the
         # `to_token` and that range will give no membership changes to check.
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -683,7 +685,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_leave_before_range_and_join_after_to_token(self) -> None:
         """
@@ -717,7 +719,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results, set())
+        self.assertEqual(room_id_results.keys(), set())
 
     def test_join_leave_multiple_times_during_range_and_after_to_token(
         self,
@@ -759,7 +761,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because it was newly_left and joined during the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_join_leave_multiple_times_before_range_and_after_to_token(
         self,
@@ -799,7 +801,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because we were joined before the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_invite_before_range_and_join_leave_after_to_token(
         self,
@@ -836,7 +838,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Room should show up because we were invited before the from/to range
-        self.assertEqual(room_id_results, {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1})
 
     def test_multiple_rooms_are_not_confused(
         self,
@@ -889,7 +891,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 # `room_id1` shouldn't show up because we left before the from/to range
                 #
@@ -1048,7 +1050,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
 
         # Get a token while things are stuck after our activity
         stuck_activity_token = self.event_sources.get_current_token()
-        logger.info("stuck_activity_token %s", stuck_activity_token)
         # Let's make sure we're working with a token that has an `instance_map`
         self.assertNotEqual(len(stuck_activity_token.room_key.instance_map), 0)
 
@@ -1058,7 +1059,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_on_worker2_pos = self.get_success(
             self.store.get_position_for_event(join_on_worker2_response["event_id"])
         )
-        logger.info("join_on_worker2_pos %s", join_on_worker2_pos)
         # Ensure the join technially came after our token
         self.assertGreater(
             join_on_worker2_pos.stream,
@@ -1077,7 +1077,6 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_on_worker3_pos = self.get_success(
             self.store.get_position_for_event(join_on_worker3_response["event_id"])
         )
-        logger.info("join_on_worker3_pos %s", join_on_worker3_pos)
         # Ensure the join came after the min but still encapsulated by the token
         self.assertGreaterEqual(
             join_on_worker3_pos.stream,
@@ -1103,7 +1102,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         )
 
         self.assertEqual(
-            room_id_results,
+            room_id_results.keys(),
             {
                 room_id1,
                 # room_id2 shouldn't show up because we left before the from/to range
@@ -1217,11 +1216,20 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         after_rooms_token = self.event_sources.get_current_token()
 
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
         # Try with `is_dm=True`
-        truthy_filtered_room_ids = self.get_success(
+        truthy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, dm_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=True,
                 ),
@@ -1229,13 +1237,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(truthy_filtered_room_ids, {dm_room_id})
+        self.assertEqual(truthy_filtered_room_map.keys(), {dm_room_id})
 
         # Try with `is_dm=False`
-        falsy_filtered_room_ids = self.get_success(
+        falsy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
-                {room_id, dm_room_id},
+                sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     is_dm=False,
                 ),
@@ -1243,4 +1251,160 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(falsy_filtered_room_ids, {room_id})
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
+
+class SortRoomsTestCase(HomeserverTestCase):
+    """
+    Tests Sliding Sync handler `sort_rooms()` to make sure it sorts/orders rooms
+    correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def test_sort_activity_basic(self) -> None:
+        """
+        Rooms with newer activity are sorted first.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Sort the rooms (what we're testing)
+        sorted_room_info = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_id for room_id, _ in sorted_room_info],
+            [room_id2, room_id1],
+        )
+
+    @parameterized.expand(
+        [
+            (Membership.LEAVE,),
+            (Membership.INVITE,),
+            (Membership.KNOCK,),
+            (Membership.BAN,),
+        ]
+    )
+    def test_activity_after_xxx(self, room1_membership: str) -> None:
+        """
+        When someone has left/been invited/knocked/been banned from a room, they
+        shouldn't take anything into account after that membership event.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        before_rooms_token = self.event_sources.get_current_token()
+
+        # Create the rooms as user2 so we can have user1 with a clean slate to work from
+        # and join in whatever order we need for the tests.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # If we're testing knocks, set the room to knock
+        if room1_membership == Membership.KNOCK:
+            self.helper.send_state(
+                room_id1,
+                EventTypes.JoinRules,
+                {"join_rule": JoinRules.KNOCK},
+                tok=user2_tok,
+            )
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+
+        # Here is the activity with user1 that will determine the sort of the rooms
+        # (room2, room1, room3)
+        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        if room1_membership == Membership.LEAVE:
+            self.helper.join(room_id1, user1_id, tok=user1_tok)
+            self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        elif room1_membership == Membership.INVITE:
+            self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        elif room1_membership == Membership.KNOCK:
+            self.helper.knock(room_id1, user1_id, tok=user1_tok)
+        elif room1_membership == Membership.BAN:
+            self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # Activity before the token but the user is only been xxx to this room so it
+        # shouldn't be taken into account
+        self.helper.send(room_id1, "activity in room1", tok=user2_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Activity after the token. Just make it in a different order than what we
+        # expect to make sure we're not taking the activity after the token into
+        # account.
+        self.helper.send(room_id1, "activity in room1", tok=user2_tok)
+        self.helper.send(room_id2, "activity in room2", tok=user2_tok)
+        self.helper.send(room_id3, "activity in room3", tok=user2_tok)
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_rooms_token,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Sort the rooms (what we're testing)
+        sorted_room_info = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_id for room_id, _ in sorted_room_info],
+            [room_id2, room_id1, room_id3],
+            "Corresponding map to disambiguate the opaque room IDs: "
+            + str(
+                {
+                    "room_id1": room_id1,
+                    "room_id2": room_id2,
+                    "room_id3": room_id3,
+                }
+            ),
+        )
