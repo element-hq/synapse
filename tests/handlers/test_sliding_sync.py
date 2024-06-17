@@ -18,11 +18,19 @@
 #
 #
 import logging
+from typing import List, Optional
 from unittest.mock import patch
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventContentFields,
+    EventTypes,
+    JoinRules,
+    Membership,
+    RoomTypes,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import SlidingSyncConfig
 from synapse.rest import admin
@@ -1191,6 +1199,32 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         return room_id
 
+    def _add_space_child(
+        self,
+        space_id: str,
+        room_id: str,
+        token: str,
+        order: Optional[str] = None,
+        via: Optional[List[str]] = None,
+    ) -> None:
+        """
+        Helper to add a child room to a space.
+        """
+
+        if via is None:
+            via = [self.hs.hostname]
+
+        content: JsonDict = {"via": via}
+        if order is not None:
+            content["order"] = order
+        self.helper.send_state(
+            space_id,
+            event_type=EventTypes.SpaceChild,
+            body=content,
+            tok=token,
+            state_key=room_id,
+        )
+
     def test_filter_dm_rooms(self) -> None:
         """
         Test `filter.is_dm` for DM rooms
@@ -1244,3 +1278,170 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(falsy_filtered_room_ids, {room_id})
+
+    def test_filter_space_rooms(self) -> None:
+        """
+        Test `filter.spaces` for rooms in spaces
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        space_a = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        space_b = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        space_c = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to space_a
+        self._add_space_child(space_a, room_id1, user1_tok)
+
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to space_a and space_b
+        self._add_space_child(space_a, room_id2, user1_tok)
+        self._add_space_child(space_c, room_id2, user1_tok)
+
+        room_id3 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to all spaces
+        self._add_space_child(space_a, room_id3, user1_tok)
+        self._add_space_child(space_b, room_id3, user1_tok)
+        self._add_space_child(space_c, room_id3, user1_tok)
+
+        room_id4 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to space_c
+        self._add_space_child(space_c, room_id3, user1_tok)
+
+        room_not_in_space1 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Try filtering the rooms
+        filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {
+                    # a
+                    room_id1,
+                    # a, c
+                    room_id2,
+                    # a, b, c
+                    room_id3,
+                    # c
+                    room_id4,
+                    # not in any space
+                    room_not_in_space1,
+                },
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    spaces=[
+                        space_a,
+                        space_b,
+                    ],
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_ids, {room_id1, room_id2, room_id3})
+
+    def test_filter_only_joined_spaces(self) -> None:
+        """
+        Test `filter.spaces` to make sure the filter only takes into account spaces we
+        are joined to.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # space_a created by user1
+        space_a = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # space_b created by user2
+        space_b = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to space_a
+        self._add_space_child(space_a, room_id1, user1_tok)
+
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        # Add to space_b
+        self._add_space_child(space_b, room_id2, user2_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Try filtering the rooms
+        filtered_room_ids = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                {
+                    # a
+                    room_id1,
+                    # b (but user1 isn't in space_b)
+                    room_id2,
+                },
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    spaces=[
+                        space_a,
+                        space_b,
+                    ],
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_ids, {room_id1})
