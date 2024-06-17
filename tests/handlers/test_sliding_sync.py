@@ -1253,6 +1253,72 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
+    def test_filter_encrypted_rooms(self) -> None:
+        """
+        Test `filter.is_encrypted` for encrypted rooms
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+
+        # Create an encrypted room
+        encrypted_room_id = self.helper.create_room_as(
+            user1_id,
+            is_public=False,
+            tok=user1_tok,
+        )
+        self.helper.send_state(
+            encrypted_room_id,
+            EventTypes.RoomEncryption,
+            {"algorithm": "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Try with `is_encrypted=True`
+        truthy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
+
+        # Try with `is_encrypted=False`
+        falsy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=False,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
 
 class SortRoomsTestCase(HomeserverTestCase):
     """

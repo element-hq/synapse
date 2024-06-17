@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, Membership
+from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.events import EventBase
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import (
@@ -33,6 +33,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -85,6 +86,7 @@ class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
         self.auth_blocking = hs.get_auth_blocking()
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
@@ -570,8 +572,26 @@ class SlidingSyncHandler:
         if filters.spaces:
             raise NotImplementedError()
 
-        if filters.is_encrypted:
-            raise NotImplementedError()
+        # Filter for encrypted rooms
+        if filters.is_encrypted is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                state_at_to_token = await self.storage_controllers.state.get_state_at(
+                    room_id,
+                    to_token,
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.RoomEncryption, "")]
+                    ),
+                )
+                is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
+
+                # If we're looking for encrypted rooms, filter out rooms that are not
+                # encrypted and vice versa
+                if (filters.is_encrypted and not is_encrypted) or (
+                    not filters.is_encrypted and is_encrypted
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.is_invite:
             raise NotImplementedError()
