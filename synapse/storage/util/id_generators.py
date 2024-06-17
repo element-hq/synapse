@@ -278,9 +278,6 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
         # no active writes in progress.
         self._max_position_of_local_instance = self._max_seen_allocated_stream_id
 
-        # This goes and fills out the above state from the database.
-        self._load_current_ids(db_conn, tables, sequence_name)
-
         self._sequence_gen = build_sequence_generator(
             db_conn=db_conn,
             database_engine=db.engine,
@@ -304,6 +301,13 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 stream_name=stream_name,
                 positive=positive,
             )
+
+        # This goes and fills out the above state from the database.
+        # This may read on the PostgreSQL sequence, and
+        # SequenceGenerator.check_consistency might have fixed up the sequence, which
+        # means the SequenceGenerator needs to be setup before we read the value from
+        # the sequence.
+        self._load_current_ids(db_conn, tables, sequence_name)
 
         self._max_seen_allocated_stream_id = max(
             self._current_positions.values(), default=1
@@ -373,9 +377,7 @@ class MultiWriterIdGenerator(AbstractStreamIdGenerator):
                 cur.execute(f"SELECT last_value FROM {sequence_name}")
                 row = cur.fetchone()
                 assert row is not None
-                self._current_positions[self._instance_name] = (
-                    row[0] * self._return_factor
-                )
+                self._current_positions[self._instance_name] = row[0]
 
         # We set the `_persisted_upto_position` to be the minimum of all current
         # positions. If empty we use the max stream ID from the DB table.
