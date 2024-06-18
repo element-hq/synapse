@@ -33,7 +33,6 @@ A sample YAML file accepted by `register_new_matrix_user` is described below:
   * `-p`, `--password`:
     New password for user. Will prompt if this option and `--password-file` are omitted.
     Supplying the password on the command line is not recommended.
-    Use `--password-file` if possible.
 
   * `--password-file`:
     File containing the new password for user. If set, overrides `--password`.
