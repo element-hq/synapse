@@ -102,7 +102,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-11]
+        os: [ubuntu-20.04, macos-13]
         arch: [x86_64, aarch64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
@@ -112,9 +112,9 @@ jobs:
         exclude:
           # Don't build macos wheels on PR CI.
           - is_pr: true
-            os: "macos-11"
+            os: "macos-13"
           # Don't build aarch64 wheels on mac.
-          - os: "macos-11"
+          - os: "macos-13"
             arch: aarch64
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
@@ -122,12 +122,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          # setup-python@v4 doesn't impose a default python version. Need to use 3.x
-          # here, because `python` on osx points to Python 2.7.
-          python-version: "3.x"
 
       - name: Install cibuildwheel
         run: python -m pip install cibuildwheel==2.16.2
