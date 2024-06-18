@@ -1,3 +1,9 @@
+matrix-synapse-py3 (1.109.0~rc2+nmu1) UNRELEASED; urgency=medium
+
+  * `register_new_matrix_user` now supports a --password-file flag.
+
+ -- Synapse Packaging team <work@izzy>  Tue, 18 Jun 2024 11:06:32 +0100
+
 matrix-synapse-py3 (1.109.0~rc2) stable; urgency=medium
 
   * New synapse release 1.109.0rc2.
