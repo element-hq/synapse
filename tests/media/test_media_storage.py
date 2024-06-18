@@ -49,10 +49,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
-from synapse.media.storage_provider import (
-    FileStorageProviderBackend,
-    StorageProviderWrapper,
-)
+from synapse.media.storage_provider import FileStorageProviderBackend
 from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
@@ -81,14 +78,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
         hs.config.media.media_store_path = self.primary_base_path
 
-        storage_providers = [
-            StorageProviderWrapper(
-                FileStorageProviderBackend(hs, self.secondary_base_path),
-                store_local=True,
-                store_remote=False,
-                store_synchronous=True,
-            )
-        ]
+        storage_providers = [FileStorageProviderBackend(hs, self.secondary_base_path)]
 
         self.filepaths = MediaFilePaths(self.primary_base_path)
         self.media_storage = MediaStorage(
