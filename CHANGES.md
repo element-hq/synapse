@@ -1,3 +1,12 @@
+# Synapse 1.109.0 (2024-06-18)
+
+### Internal Changes
+
+- Fix the building of binary wheels for macOS by switching to macOS 12 CI runners. ([\#17319](https://github.com/element-hq/synapse/issues/17319))
+
+
+
+
 # Synapse 1.109.0rc3 (2024-06-17)
 
 ### Bugfixes
