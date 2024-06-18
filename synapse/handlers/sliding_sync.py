@@ -764,6 +764,13 @@ class SlidingSyncHandler:
                 room_id=room_id,
                 # We're going to paginate backwards from the `to_token`
                 from_key=to_token.room_key,
+                # We should always return historical messages (outside token range) in
+                # these cases because clients want to be able to show a basic screen of
+                # information:
+                #  - Initial sync (because no `from_token`)
+                #  - When users newly_join
+                #  - TODO: For incremental sync where we haven't sent it down this
+                #    connection before
                 to_key=from_token.room_key if from_token is not None else None,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
@@ -824,14 +831,23 @@ class SlidingSyncHandler:
 
         required_state = []
         if len(room_sync_config.required_state) > 0:
-            required_state = await self.storage_controllers.state.get_state_at(
+            await self.storage_controllers.state.get_current_state(
                 room_id,
-                to_token,
                 state_filter=StateFilter.from_types(TODO),
+                await_full_state=False,
             )
+
+            # TODO: rewind
+
+            # required_state = await self.storage_controllers.state.get_state_at(
+            #     room_id,
+            #     to_token,
+            #     state_filter=StateFilter.from_types(TODO),
+            # )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
+            # TODO: Make this optional because a computed name doesn't make sense for translated cases
             name="TODO",
             # TODO: Dummy value
             avatar=None,

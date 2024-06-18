@@ -1021,6 +1021,7 @@ class SlidingSyncRestServlet(RestServlet):
                 # shared between invite and knock rooms, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1117629919
                 serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
+                # TODO: `knocked_state` but that isn't specced yet
 
         return serialized_rooms
 
