@@ -1017,11 +1017,13 @@ class SlidingSyncRestServlet(RestServlet):
 
             # Stripped state only applies to invite/knock rooms
             if room_result.stripped_state:
-                # TODO: Would be good to rename this to `stripped_state` so it can be
-                # shared between invite and knock rooms, see
+                # TODO: `knocked_state` but that isn't specced yet.
+                #
+                # TODO: Instead of adding `knocked_state`, it would be good to rename
+                # this to `stripped_state` so it can be shared between invite and knock
+                # rooms, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1117629919
                 serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
-                # TODO: `knocked_state` but that isn't specced yet
 
         return serialized_rooms
 
