@@ -349,25 +349,17 @@ new line, it is inserted before:</p>
 <pre><code>host    all         all             ::1/128     ident
 </code></pre>
 <h3 id="fixing-incorrect-collate-or-ctype"><a class="header" href="#fixing-incorrect-collate-or-ctype">Fixing incorrect <code>COLLATE</code> or <code>CTYPE</code></a></h3>
-<p>Synapse will refuse to set up a new database if it has the wrong values of
-<code>COLLATE</code> and <code>CTYPE</code> set. Synapse will also refuse to start an existing database with incorrect values
-of <code>COLLATE</code> and <code>CTYPE</code> unless the config flag <code>allow_unsafe_locale</code>, found in the 
-<code>database</code> section of the config, is set to true. Using different locales can cause issues if the locale library is updated from
-underneath the database, or if a different version of the locale is used on any
-replicas.</p>
+<p>Synapse will refuse to start when using a database with incorrect values of
+<code>COLLATE</code> and <code>CTYPE</code> unless the config flag <code>allow_unsafe_locale</code>, found in the
+<code>database</code> section of the config, is set to true. Using different locales can
+cause issues if the locale library is updated from underneath the database, or
+if a different version of the locale is used on any replicas.</p>
 <p>If you have a database with an unsafe locale, the safest way to fix the issue is to dump the database and recreate it with
 the correct locale parameter (as shown above). It is also possible to change the
 parameters on a live database and run a <code>REINDEX</code> on the entire database,
 however extreme care must be taken to avoid database corruption.</p>
 <p>Note that the above may fail with an error about duplicate rows if corruption
 has already occurred, and such duplicate rows will need to be manually removed.</p>
-<h3 id="fixing-inconsistent-sequences-error"><a class="header" href="#fixing-inconsistent-sequences-error">Fixing inconsistent sequences error</a></h3>
-<p>Synapse uses Postgres sequences to generate IDs for various tables. A sequence
-and associated table can get out of sync if, for example, Synapse has been
-downgraded and then upgraded again.</p>
-<p>To fix the issue shut down Synapse (including any and all workers) and run the
-SQL command included in the error message. Once done Synapse should start
-successfully.</p>
 
                     </main>
 
