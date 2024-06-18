@@ -711,6 +711,10 @@ class UserDirectoryICUTestCase(HomeserverTestCase):
             ),
         )
 
+        self.assertEqual(_parse_words_with_icu("user-1"), ["user-1"])
+        self.assertEqual(_parse_words_with_icu("user-ab"), ["user-ab"])
+        self.assertEqual(_parse_words_with_icu("user.--1"), ["user", "-1"])
+
     def test_regex_word_boundary_punctuation(self) -> None:
         """
         Tests the behaviour of punctuation with the non-ICU tokeniser

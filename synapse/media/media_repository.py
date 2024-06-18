@@ -42,6 +42,7 @@ from synapse.api.errors import (
     SynapseError,
     cs_error,
 )
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.repository import ThumbnailRequirement
 from synapse.http.server import respond_with_json
 from synapse.http.site import SynapseRequest
@@ -53,10 +54,11 @@ from synapse.media._base import (
     ThumbnailInfo,
     get_filename_from_headers,
     respond_404,
+    respond_with_multipart_responder,
     respond_with_responder,
 )
 from synapse.media.filepath import MediaFilePaths
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_storage import MediaStorage, MultipartResponder
 from synapse.media.storage_provider import StorageProviderWrapper
 from synapse.media.thumbnailer import Thumbnailer, ThumbnailError
 from synapse.media.url_previewer import UrlPreviewer
@@ -110,6 +112,12 @@ class MediaRepository:
             hs.config.federation.federation_domain_whitelist
         )
         self.prevent_media_downloads_from = hs.config.media.prevent_media_downloads_from
+
+        self.download_ratelimiter = Ratelimiter(
+            store=hs.get_storage_controllers().main,
+            clock=hs.get_clock(),
+            cfg=hs.config.ratelimiting.remote_media_downloads,
+        )
 
         # List of StorageProviders where we should search for media and
         # potentially upload to.
@@ -422,6 +430,7 @@ class MediaRepository:
         media_id: str,
         name: Optional[str],
         max_timeout_ms: int,
+        federation: bool = False,
     ) -> None:
         """Responds to requests for local media, if exists, or returns 404.
 
@@ -433,6 +442,7 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            federation: whether the local media being fetched is for a federation request
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -452,10 +462,17 @@ class MediaRepository:
 
         file_info = FileInfo(None, media_id, url_cache=bool(url_cache))
 
-        responder = await self.media_storage.fetch_media(file_info)
-        await respond_with_responder(
-            request, responder, media_type, media_length, upload_name
+        responder = await self.media_storage.fetch_media(
+            file_info, media_info, federation
         )
+        if federation:
+            # this really should be a Multipart responder but just in case
+            assert isinstance(responder, MultipartResponder)
+            await respond_with_multipart_responder(request, responder, media_info)
+        else:
+            await respond_with_responder(
+                request, responder, media_type, media_length, upload_name
+            )
 
     async def get_remote_media(
         self,
@@ -464,6 +481,7 @@ class MediaRepository:
         media_id: str,
         name: Optional[str],
         max_timeout_ms: int,
+        ip_address: str,
     ) -> None:
         """Respond to requests for remote media.
 
@@ -475,6 +493,7 @@ class MediaRepository:
                 the filename in the Content-Disposition header of the response.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            ip_address: the IP address of the requester
 
         Returns:
             Resolves once a response has successfully been written to request
@@ -500,7 +519,11 @@ class MediaRepository:
         key = (server_name, media_id)
         async with self.remote_media_linearizer.queue(key):
             responder, media_info = await self._get_remote_media_impl(
-                server_name, media_id, max_timeout_ms
+                server_name,
+                media_id,
+                max_timeout_ms,
+                self.download_ratelimiter,
+                ip_address,
             )
 
         # We deliberately stream the file outside the lock
@@ -517,7 +540,7 @@ class MediaRepository:
             respond_404(request)
 
     async def get_remote_media_info(
-        self, server_name: str, media_id: str, max_timeout_ms: int
+        self, server_name: str, media_id: str, max_timeout_ms: int, ip_address: str
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -527,6 +550,7 @@ class MediaRepository:
             media_id: The media ID of the content (as defined by the remote server).
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            ip_address: IP address of the requester
 
         Returns:
             The media info of the file
@@ -542,7 +566,11 @@ class MediaRepository:
         key = (server_name, media_id)
         async with self.remote_media_linearizer.queue(key):
             responder, media_info = await self._get_remote_media_impl(
-                server_name, media_id, max_timeout_ms
+                server_name,
+                media_id,
+                max_timeout_ms,
+                self.download_ratelimiter,
+                ip_address,
             )
 
         # Ensure we actually use the responder so that it releases resources
@@ -553,7 +581,12 @@ class MediaRepository:
         return media_info
 
     async def _get_remote_media_impl(
-        self, server_name: str, media_id: str, max_timeout_ms: int
+        self,
+        server_name: str,
+        media_id: str,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
     ) -> Tuple[Optional[Responder], RemoteMedia]:
         """Looks for media in local cache, if not there then attempt to
         download from remote server.
@@ -564,6 +597,9 @@ class MediaRepository:
                 remote server).
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            download_ratelimiter: a ratelimiter limiting remote media downloads, keyed to
+                requester IP.
+            ip_address: the IP address of the requester
 
         Returns:
             A tuple of responder and the media info of the file.
@@ -596,7 +632,7 @@ class MediaRepository:
 
         try:
             media_info = await self._download_remote_file(
-                server_name, media_id, max_timeout_ms
+                server_name, media_id, max_timeout_ms, download_ratelimiter, ip_address
             )
         except SynapseError:
             raise
@@ -630,6 +666,8 @@ class MediaRepository:
         server_name: str,
         media_id: str,
         max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
     ) -> RemoteMedia:
         """Attempt to download the remote file from the given server name,
         using the given file_id as the local id.
@@ -641,6 +679,9 @@ class MediaRepository:
                 locally generated.
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
+            download_ratelimiter: a ratelimiter limiting remote media downloads, keyed to
+                requester IP
+            ip_address: the IP address of the requester
 
         Returns:
             The media info of the file.
@@ -658,6 +699,8 @@ class MediaRepository:
                     output_stream=f,
                     max_size=self.max_upload_size,
                     max_timeout_ms=max_timeout_ms,
+                    download_ratelimiter=download_ratelimiter,
+                    ip_address=ip_address,
                 )
             except RequestSendFailed as e:
                 logger.warning(

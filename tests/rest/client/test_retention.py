@@ -167,7 +167,6 @@ class RetentionTestCase(unittest.HomeserverTestCase):
                 storage_controllers,
                 self.user_id,
                 events,
-                msc4115_membership_on_events=True,
             )
         )
 

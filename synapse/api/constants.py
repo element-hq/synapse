@@ -50,7 +50,7 @@ class Membership:
     KNOCK: Final = "knock"
     LEAVE: Final = "leave"
     BAN: Final = "ban"
-    LIST: Final = (INVITE, JOIN, KNOCK, LEAVE, BAN)
+    LIST: Final = {INVITE, JOIN, KNOCK, LEAVE, BAN}
 
 
 class PresenceState:
@@ -238,7 +238,7 @@ class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
 
     # Requesting user's membership, per MSC4115
-    MSC4115_MEMBERSHIP: Final = "io.element.msc4115.membership"
+    MEMBERSHIP: Final = "membership"
 
 
 class RoomTypes:

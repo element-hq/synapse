@@ -27,7 +27,6 @@ from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.errors import SynapseError
 from synapse.api.filtering import Filter
 from synapse.events.utils import SerializeEventConfig
-from synapse.handlers.room import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
 from synapse.logging.opentracing import trace
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -41,6 +40,7 @@ from synapse.types import (
     StreamKeyType,
     TaskStatus,
 )
+from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import ReadWriteLock
 from synapse.visibility import filter_events_for_client
@@ -623,7 +623,6 @@ class PaginationHandler:
                 user_id,
                 events,
                 is_peeking=(member_event_id is None),
-                msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
             )
 
         # if after the filter applied there are no more events

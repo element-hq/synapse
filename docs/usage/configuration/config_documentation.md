@@ -1946,6 +1946,24 @@ Example configuration:
 max_image_pixels: 35M
 ```
 ---
+### `remote_media_download_burst_count`
+
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+
+Example configuration:
+```yaml
+remote_media_download_burst_count: 200M
+```
+---
+### `remote_media_download_per_second`
+
+Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads - this configuration option determines the rate at which the "bucket" (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has "drained" from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`.
+
+Example configuration:
+```yaml
+remote_media_download_per_second: 40K
+```
+---
 ### `prevent_media_downloads_from`
 
 A list of domains to never download media from. Media from these
@@ -4132,7 +4150,7 @@ By default, no room is excluded.
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
-    - !foo:example.com
+    - "!foo:example.com"
 ```
 
 ---

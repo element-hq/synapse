@@ -27,6 +27,7 @@ from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
+    AccountDataTypes,
     EventContentFields,
     EventTypes,
     ReceiptTypes,
@@ -34,7 +35,7 @@ from synapse.api.constants import (
 )
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType
 from synapse.util import Clock
 
 from tests import unittest
@@ -1204,3 +1205,314 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SlidingSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding MSC3575 Sliding Sync `/sync` endpoint.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.sync_endpoint = "/_matrix/client/unstable/org.matrix.msc3575/sync"
+        self.store = hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def _create_dm_room(
+        self,
+        inviter_user_id: str,
+        inviter_tok: str,
+        invitee_user_id: str,
+        invitee_tok: str,
+    ) -> str:
+        """
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the
+        room. The "invitee" user also will join the room. The `m.direct` account data
+        will be set for both users.
+        """
+
+        # Create a room and send an invite the other user
+        room_id = self.helper.create_room_as(
+            inviter_user_id,
+            is_public=False,
+            tok=inviter_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=inviter_user_id,
+            targ=invitee_user_id,
+            tok=inviter_tok,
+            extra_data={"is_direct": True},
+        )
+        # Person that was invited joins the room
+        self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+
+        # Mimic the client setting the room as a direct message in the global account
+        # data
+        self.get_success(
+            self.store.add_account_data_for_user(
+                invitee_user_id,
+                AccountDataTypes.DIRECT,
+                {inviter_user_id: [room_id]},
+            )
+        )
+        self.get_success(
+            self.store.add_account_data_for_user(
+                inviter_user_id,
+                AccountDataTypes.DIRECT,
+                {invitee_user_id: [room_id]},
+            )
+        )
+
+        return room_id
+
+    def test_sync_list(self) -> None:
+        """
+        Test that room IDs show up in the Sliding Sync lists
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+
+        room_id = self.helper.create_room_as(
+            alice_user_id, tok=alice_access_token, is_public=True
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=alice_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the room we are joined to
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+    def test_wait_for_sync_token(self) -> None:
+        """
+        Test that worker will wait until it catches up to the given token
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+
+        # Create a future token that will cause us to wait. Since we never send a new
+        # event to reach that future stream_ordering, the worker will wait until the
+        # full timeout.
+        current_token = self.event_sources.get_current_token()
+        future_position_token = current_token.copy_and_replace(
+            StreamKeyType.ROOM,
+            RoomStreamToken(stream=current_token.room_key.stream + 1),
+        )
+
+        future_position_token_serialized = self.get_success(
+            future_position_token.to_string(self.store)
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?pos={future_position_token_serialized}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=alice_access_token,
+            await_result=False,
+        )
+        # Block for 10 seconds to make `notifier.wait_for_stream_token(from_token)`
+        # timeout
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=9900)
+        channel.await_result(timeout_ms=200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We expect the `next_pos` in the result to be the same as what we requested
+        # with because we weren't able to find anything new yet.
+        self.assertEqual(
+            channel.json_body["next_pos"], future_position_token_serialized
+        )
+
+    def test_filter_list(self) -> None:
+        """
+        Test that filters apply to lists
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a DM room
+        dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+        )
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "dms": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": True},
+                    },
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": False},
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["dms", "foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the room we are joined to
+        self.assertListEqual(
+            list(channel.json_body["lists"]["dms"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [dm_room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["dms"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["foo-list"]),
+        )
+
+    def test_sort_list(self) -> None:
+        """
+        Test that the lists are sorted by `stream_ordering`
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+
+        # Activity that will order the rooms
+        self.helper.send(room_id3, "activity in room3", tok=user1_tok)
+        self.helper.send(room_id1, "activity in room1", tok=user1_tok)
+        self.helper.send(room_id2, "activity in room2", tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list is sorted in the way we expect
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id2, room_id1, room_id3],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )

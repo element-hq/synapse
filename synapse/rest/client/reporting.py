@@ -32,8 +32,8 @@ from synapse.http.servlet import (
     parse_json_object_from_request,
 )
 from synapse.http.site import SynapseRequest
-from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict
+from synapse.types.rest import RequestBodyModel
 
 from ._base import client_patterns
 
@@ -107,7 +107,15 @@ class ReportEventRestServlet(RestServlet):
 
 
 class ReportRoomRestServlet(RestServlet):
-    # https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    """This endpoint lets clients report a room for abuse.
+
+    Whilst MSC4151 is not yet merged, this unstable endpoint is enabled on matrix.org
+    for content moderation purposes, and therefore backwards compatibility should be
+    carefully considered when changing anything on this endpoint.
+
+    More details on the MSC: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    """
+
     PATTERNS = client_patterns(
         "/org.matrix.msc4151/rooms/(?P<room_id>[^/]*)/report$",
         releases=[],

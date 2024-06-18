@@ -1,0 +1,1 @@
+Fix wrong retention policy being used when filtering events.

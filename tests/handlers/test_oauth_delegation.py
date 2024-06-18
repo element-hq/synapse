@@ -541,6 +541,8 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
         self.assertEqual(channel.code, 200, channel.json_body)
 
+        # Try uploading *different* keys; it should cause a 501 error.
+        keys_upload_body = self.make_device_keys(USER_ID, DEVICE)
         channel = self.make_request(
             "POST",
             "/_matrix/client/v3/keys/device_signing/upload",

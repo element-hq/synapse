@@ -201,7 +201,7 @@ class MessageHandler:
 
         if at_token:
             last_event_id = (
-                await self.store.get_last_event_in_room_before_stream_ordering(
+                await self.store.get_last_event_id_in_room_before_stream_ordering(
                     room_id,
                     end_token=at_token.room_key,
                 )
@@ -1551,6 +1551,7 @@ class EventCreationHandler:
                     # stream_ordering entry manually (as it was persisted on
                     # another worker).
                     event.internal_metadata.stream_ordering = stream_id
+                    event.internal_metadata.instance_name = writer_instance
 
                 return event
 
