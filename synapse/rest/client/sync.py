@@ -785,7 +785,7 @@ class SlidingSyncRestServlet(RestServlet):
 
     Response JSON::
         {
-            "next_pos": "s58_224_0_13_10_1_1_16_0_1",
+            "pos": "s58_224_0_13_10_1_1_16_0_1",
             "lists": {
                 "foo-list": {
                     "count": 1337,
@@ -824,7 +824,8 @@ class SlidingSyncRestServlet(RestServlet):
                     "joined_count": 41,
                     "invited_count": 1,
                     "notification_count": 1,
-                    "highlight_count": 0
+                    "highlight_count": 0,
+                    "num_live": 2"
                 },
                 // rooms from list
                 "!foo:bar": {
@@ -849,7 +850,8 @@ class SlidingSyncRestServlet(RestServlet):
                     "joined_count": 4,
                     "invited_count": 0,
                     "notification_count": 54,
-                    "highlight_count": 3
+                    "highlight_count": 3,
+                    "num_live": 1,
                 },
                  // ... 99 more items
             },
@@ -927,7 +929,7 @@ class SlidingSyncRestServlet(RestServlet):
     ) -> JsonDict:
         response: JsonDict = defaultdict(dict)
 
-        response["next_pos"] = await sliding_sync_result.next_pos.to_string(self.store)
+        response["pos"] = await sliding_sync_result.next_pos.to_string(self.store)
         serialized_lists = self.encode_lists(sliding_sync_result.lists)
         if serialized_lists:
             response["lists"] = serialized_lists

@@ -769,26 +769,29 @@ class SlidingSyncHandler:
                 and rooms_for_user_membership_at_to_token.membership == Membership.JOIN
             ):
                 newly_joined = (
-                    rooms_for_user_membership_at_to_token.event_pos.stream
-                    > from_token.room_key.get_stream_pos_for_instance(
-                        rooms_for_user_membership_at_to_token.event_pos.instance_name
+                    rooms_for_user_membership_at_to_token.event_pos.persisted_after(
+                        from_token.room_key
                     )
                 )
+
+            # We should return historical messages (before token range) in the
+            # following cases because we want clients to be able to show a basic
+            # screen of information:
+            #  - Initial sync (because no `from_token` to limit us anyway)
+            #  - When users `newly_joined`
+            #  - TODO: For an incremental sync where we haven't sent it down this
+            #    connection before
+            should_limit_timeline_to_token_range = (
+                from_token is not None and not newly_joined
+            )
 
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
                 # We're going to paginate backwards from the `to_token`
                 from_key=to_token.room_key,
-                # We should return historical messages (before token range) in the
-                # following cases because we want clients to be able to show a basic
-                # screen of information:
-                #  - Initial sync (because no `from_token` to limit us anyway)
-                #  - When users `newly_joined`
-                #  - TODO: For an incremental sync where we haven't sent it down this
-                #    connection before
                 to_key=(
                     from_token.room_key
-                    if from_token is not None and not newly_joined
+                    if should_limit_timeline_to_token_range
                     else None
                 ),
                 direction=Direction.BACKWARDS,
@@ -832,7 +835,7 @@ class SlidingSyncHandler:
             # old events in the timeline)
             num_live = 0
             if from_token is not None:
-                for timeline_event in timeline_events:
+                for timeline_event in reversed(timeline_events):
                     # This fields should be present for all persisted events
                     assert timeline_event.internal_metadata.stream_ordering is not None
                     assert timeline_event.internal_metadata.instance_name is not None
@@ -843,6 +846,12 @@ class SlidingSyncHandler:
                     )
                     if persisted_position.persisted_after(from_token.room_key):
                         num_live += 1
+                    else:
+                        # Since we're iterating over the timeline events in
+                        # reverse-chronological order, we can break once we hit an event
+                        # that's not live. In the future, we could potentially optimize
+                        # this more with a binary search (bisect).
+                        break
 
             prev_batch_token = prev_batch_token.copy_and_replace(
                 StreamKeyType.ROOM, new_room_key
