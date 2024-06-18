@@ -60,8 +60,6 @@ class StorageProvider(metaclass=abc.ABCMeta):
         self,
         path: str,
         file_info: FileInfo,
-        media_info: Optional[LocalMedia] = None,
-        federation: bool = False,
     ) -> Optional[Responder]:
         """Attempt to fetch the file described by file_info and stream it
         into writer.
@@ -69,8 +67,6 @@ class StorageProvider(metaclass=abc.ABCMeta):
         Args:
             path: Relative path of file in local cache
             file_info: The metadata of the file.
-            media_info: metadata of the media item
-            federation: Whether the requested media is for a federation request
 
         Returns:
             Returns a Responder if the provider has the file, otherwise returns None.
@@ -137,8 +133,6 @@ class StorageProviderWrapper(StorageProvider):
         self,
         path: str,
         file_info: FileInfo,
-        media_info: Optional[LocalMedia] = None,
-        federation: bool = False,
     ) -> Optional[Responder]:
         if file_info.url_cache:
             # Files in the URL preview cache definitely aren't stored here,
@@ -147,9 +141,7 @@ class StorageProviderWrapper(StorageProvider):
 
         # store_file is supposed to return an Awaitable, but guard
         # against improper implementations.
-        return await maybe_awaitable(
-            self.backend.fetch(path, file_info, media_info, federation)
-        )
+        return await maybe_awaitable(self.backend.fetch(path, file_info))
 
 
 class FileStorageProviderBackend(StorageProvider):
