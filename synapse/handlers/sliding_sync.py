@@ -96,9 +96,10 @@ class RoomSyncConfig:
 
     Attributes:
         timeline_limit: The maximum number of events to return in the timeline.
-        required_state: The minimum set of state events requested for the room. The
-            values are close to `StateKey` but actually use a syntax where you can provide
-            `*` and `$LAZY` as the state key part of the tuple (type, state_key).
+        required_state: The set of state events requested for the room. The
+            values are close to `StateKey` but actually use a syntax where you can
+            provide `*` wildcard and `$LAZY` for lazy room members as the `state_key` part
+            of the tuple (type, state_key).
     """
 
     timeline_limit: int
@@ -828,22 +829,6 @@ class SlidingSyncHandler:
                 )
 
             stripped_state.append(strip_event(invite_or_knock_event))
-
-        required_state = []
-        if len(room_sync_config.required_state) > 0:
-            await self.storage_controllers.state.get_current_state(
-                room_id,
-                state_filter=StateFilter.from_types(TODO),
-                await_full_state=False,
-            )
-
-            # TODO: rewind
-
-            # required_state = await self.storage_controllers.state.get_state_at(
-            #     room_id,
-            #     to_token,
-            #     state_filter=StateFilter.from_types(TODO),
-            # )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
