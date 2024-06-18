@@ -101,6 +101,15 @@ class DeltaState:
 
 @attr.s(slots=True, auto_attribs=True)
 class NewEventChainLinks:
+    """Information about new auth chain links that need to be added to the DB.
+
+    Attributes:
+        chain_id, sequence_number: the IDs corresponding to the event being
+            inserted, and the starting point of the links
+        links: Lists the links that need to be added, 2-tuple of the chain
+            ID/sequence number of the end point of the link.
+    """
+
     chain_id: int
     sequence_number: int
 
@@ -661,6 +670,10 @@ class PersistEventsStore:
             event_to_types: Event ID to type and state_key of the event
             event_to_auth_chain: Event ID to list of auth event IDs of the
                 event (events with no auth events can be excluded).
+
+        Returns:
+            A mapping with any new auth chain links we need to add, keyed by
+            event ID.
         """
 
         # Map from event ID to chain ID/sequence number.
