@@ -110,15 +110,17 @@ jobs:
           - ${{ startsWith(github.ref, 'refs/pull/') }}
 
         exclude:
-          # Don't build macos wheels on PR CI.
-          - is_pr: true
-            os: "macos-13"
+          # TEMP: build all wheels for testing
+          ## Don't build macos wheels on PR CI.
+          #- is_pr: true
+          #  os: "macos-13"
           # Don't build aarch64 wheels on mac.
           - os: "macos-13"
             arch: aarch64
-          # Don't build aarch64 wheels on PR CI.
-          - is_pr: true
-            arch: aarch64
+          # TEMP: build all wheels for testing
+          ## Don't build aarch64 wheels on PR CI.
+          #- is_pr: true
+          #  arch: aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -136,9 +138,10 @@ jobs:
         if: matrix.arch == 'aarch64'
         run: echo 'CIBW_ARCHS_LINUX=aarch64' >> $GITHUB_ENV
 
-      - name: Only build a single wheel on PR
-        if: startsWith(github.ref, 'refs/pull/')
-        run: echo "CIBW_BUILD="cp38-manylinux_${{ matrix.arch }}"" >> $GITHUB_ENV
+      # TEMP: build all wheels for testing
+      #- name: Only build a single wheel on PR
+      #  if: startsWith(github.ref, 'refs/pull/')
+      #  run: echo "CIBW_BUILD="cp38-manylinux_${{ matrix.arch }}"" >> $GITHUB_ENV
 
       - name: Build wheels
         run: python -m cibuildwheel --output-dir wheelhouse
