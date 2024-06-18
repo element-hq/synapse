@@ -277,7 +277,7 @@ class PaginationTestCase(HomeserverTestCase):
 
 class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
     """
-    Test `get_last_event_in_room_before_stream_ordering(...)`
+    Test `get_last_event_pos_in_room_before_stream_ordering(...)`
     """
 
     servlets = [
@@ -336,14 +336,14 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id,
                 end_token=before_room_token.room_key,
             )
         )
 
-        self.assertIsNone(last_event)
+        self.assertIsNone(last_event_result)
 
     def test_after_room_created(self) -> None:
         """
@@ -356,14 +356,16 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id,
                 end_token=after_room_token.room_key,
             )
         )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
 
-        self.assertIsNotNone(last_event)
+        self.assertIsNotNone(last_event_id)
 
     def test_activity_in_other_rooms(self) -> None:
         """
@@ -380,16 +382,18 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=after_room_token.room_key,
             )
         )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
 
         # Make sure it's the event we expect (which also means we know it's from the
         # correct room)
-        self.assertEqual(last_event, event_response["event_id"])
+        self.assertEqual(last_event_id, event_response["event_id"])
 
     def test_activity_after_token_has_no_effect(self) -> None:
         """
@@ -408,15 +412,17 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after1", tok=user1_tok)
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=after_room_token.room_key,
             )
         )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
 
         # Make sure it's the last event before the token
-        self.assertEqual(last_event, event_response["event_id"])
+        self.assertEqual(last_event_id, event_response["event_id"])
 
     def test_last_event_within_sharded_token(self) -> None:
         """
@@ -457,18 +463,20 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after1", tok=user1_tok)
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=end_token,
             )
         )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
 
-        # Should find closest event at/before the token in room1
+        # Should find closest event before the token in room1
         self.assertEqual(
-            last_event,
+            last_event_id,
             event_response3["event_id"],
-            f"We expected {event_response3['event_id']} but saw {last_event} which corresponds to "
+            f"We expected {event_response3['event_id']} but saw {last_event_id} which corresponds to "
             + str(
                 {
                     "event1": event_response1["event_id"],
@@ -514,18 +522,20 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
         self.helper.send(room_id1, "after1", tok=user1_tok)
         self.helper.send(room_id1, "after2", tok=user1_tok)
 
-        last_event = self.get_success(
-            self.store.get_last_event_in_room_before_stream_ordering(
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
                 room_id=room_id1,
                 end_token=end_token,
             )
         )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
 
-        # Should find closest event at/before the token in room1
+        # Should find closest event before the token in room1
         self.assertEqual(
-            last_event,
+            last_event_id,
             event_response2["event_id"],
-            f"We expected {event_response2['event_id']} but saw {last_event} which corresponds to "
+            f"We expected {event_response2['event_id']} but saw {last_event_id} which corresponds to "
             + str(
                 {
                     "event1": event_response1["event_id"],

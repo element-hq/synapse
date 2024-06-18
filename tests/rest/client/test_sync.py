@@ -1299,7 +1299,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_notification_level", "by_recency", "by_name"],
                         "required_state": [
                             ["m.room.join_rules", ""],
                             ["m.room.history_visibility", ""],
@@ -1361,7 +1360,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_notification_level", "by_recency", "by_name"],
                         "required_state": [
                             ["m.room.join_rules", ""],
                             ["m.room.history_visibility", ""],
@@ -1415,14 +1413,12 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "lists": {
                     "dms": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_recency"],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": True},
                     },
                     "foo-list": {
                         "ranges": [[0, 99]],
-                        "sort": ["by_recency"],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": False},
@@ -1462,4 +1458,61 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 }
             ],
             list(channel.json_body["lists"]["foo-list"]),
+        )
+
+    def test_sort_list(self) -> None:
+        """
+        Test that the lists are sorted by `stream_ordering`
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+
+        # Activity that will order the rooms
+        self.helper.send(room_id3, "activity in room3", tok=user1_tok)
+        self.helper.send(room_id1, "activity in room1", tok=user1_tok)
+        self.helper.send(room_id2, "activity in room2", tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list is sorted in the way we expect
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id2, room_id1, room_id3],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
         )
