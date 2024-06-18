@@ -93,10 +93,16 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
 class RoomSyncConfig:
     """
     Holds the config for what data we should fetch for a room in the sync response.
+
+    Attributes:
+        timeline_limit: The maximum number of events to return in the timeline.
+        required_state: The minimum set of state events requested for the room. The
+            values are close to `StateKey` but actually use a syntax where you can provide
+            `*` and `$LAZY` as the state key part of the tuple (type, state_key).
     """
 
     timeline_limit: int
-    required_state: Set[StateKey]
+    required_state: Set[Tuple[str, str]]
 
 
 class SlidingSyncHandler:
@@ -815,6 +821,14 @@ class SlidingSyncHandler:
                 )
 
             stripped_state.append(strip_event(invite_or_knock_event))
+
+        required_state = []
+        if len(room_sync_config.required_state) > 0:
+            required_state = await self.storage_controllers.state.get_state_at(
+                room_id,
+                to_token,
+                state_filter=StateFilter.from_types(TODO),
+            )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
