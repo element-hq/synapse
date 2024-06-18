@@ -37,7 +37,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
-from synapse.types.state import StateFilter, StateKey
+from synapse.types.state import StateFilter
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -764,6 +764,7 @@ class SlidingSyncHandler:
         if room_sync_config.timeline_limit > 0:
             newly_joined = False
             if (
+                # We can only determine new-ness if we have a `from_token` to define our range
                 from_token is not None
                 and rooms_for_user_membership_at_to_token.membership == Membership.JOIN
             ):
@@ -778,11 +779,11 @@ class SlidingSyncHandler:
                 room_id=room_id,
                 # We're going to paginate backwards from the `to_token`
                 from_key=to_token.room_key,
-                # We should return historical messages (outside token range) in the
+                # We should return historical messages (before token range) in the
                 # following cases because we want clients to be able to show a basic
                 # screen of information:
                 #  - Initial sync (because no `from_token` to limit us anyway)
-                #  - When users newly_joined
+                #  - When users `newly_joined`
                 #  - TODO: For an incremental sync where we haven't sent it down this
                 #    connection before
                 to_key=(
@@ -832,12 +833,15 @@ class SlidingSyncHandler:
             num_live = 0
             if from_token is not None:
                 for timeline_event in timeline_events:
-                    if (
-                        timeline_event.internal_metadata.stream_ordering
-                        > from_token.room_key.get_stream_pos_for_instance(
-                            timeline_event.internal_metadata.instance_name
-                        )
-                    ):
+                    # This fields should be present for all persisted events
+                    assert timeline_event.internal_metadata.stream_ordering is not None
+                    assert timeline_event.internal_metadata.instance_name is not None
+
+                    persisted_position = PersistedEventPosition(
+                        instance_name=timeline_event.internal_metadata.instance_name,
+                        stream=timeline_event.internal_metadata.stream_ordering,
+                    )
+                    if persisted_position.persisted_after(from_token.room_key):
                         num_live += 1
 
             prev_batch_token = prev_batch_token.copy_and_replace(
