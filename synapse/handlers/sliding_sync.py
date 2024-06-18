@@ -753,6 +753,7 @@ class SlidingSyncHandler:
             to_token: The point in the stream to sync up to.
         """
 
+        # Assemble the list of timeline events
         timeline_events: List[EventBase] = []
         limited = False
         # We want to use `to_token` (vs `from_token`) because we look backwards from the
@@ -761,18 +762,34 @@ class SlidingSyncHandler:
         # fetched the events.
         prev_batch_token = to_token
         if room_sync_config.timeline_limit > 0:
+            newly_joined = False
+            if (
+                from_token is not None
+                and rooms_for_user_membership_at_to_token.membership == Membership.JOIN
+            ):
+                newly_joined = (
+                    rooms_for_user_membership_at_to_token.event_pos.stream
+                    > from_token.room_key.get_stream_pos_for_instance(
+                        rooms_for_user_membership_at_to_token.event_pos.instance_name
+                    )
+                )
+
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
                 # We're going to paginate backwards from the `to_token`
                 from_key=to_token.room_key,
-                # We should always return historical messages (outside token range) in
-                # these cases because clients want to be able to show a basic screen of
-                # information:
-                #  - Initial sync (because no `from_token`)
-                #  - When users newly_join
-                #  - TODO: For incremental sync where we haven't sent it down this
+                # We should return historical messages (outside token range) in the
+                # following cases because we want clients to be able to show a basic
+                # screen of information:
+                #  - Initial sync (because no `from_token` to limit us anyway)
+                #  - When users newly_joined
+                #  - TODO: For an incremental sync where we haven't sent it down this
                 #    connection before
-                to_key=from_token.room_key if from_token is not None else None,
+                to_key=(
+                    from_token.room_key
+                    if from_token is not None and not newly_joined
+                    else None
+                ),
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -803,6 +820,25 @@ class SlidingSyncHandler:
                 new_room_key = RoomStreamToken(
                     stream=timeline_events[0].internal_metadata.stream_ordering - 1
                 )
+
+            # Determine how many "live" events we have (events within the given token range).
+            #
+            # This is mostly useful to determine whether a given @mention event should
+            # make a noise or not. Clients cannot rely solely on the absence of
+            # `initial: true` to determine live events because if a room not in the
+            # sliding window bumps into the window because of an @mention it will have
+            # `initial: true` yet contain a single live event (with potentially other
+            # old events in the timeline)
+            num_live = 0
+            if from_token is not None:
+                for timeline_event in timeline_events:
+                    if (
+                        timeline_event.internal_metadata.stream_ordering
+                        > from_token.room_key.get_stream_pos_for_instance(
+                            timeline_event.internal_metadata.instance_name
+                        )
+                    ):
+                        num_live += 1
 
             prev_batch_token = prev_batch_token.copy_and_replace(
                 StreamKeyType.ROOM, new_room_key
@@ -838,7 +874,7 @@ class SlidingSyncHandler:
             avatar=None,
             # TODO: Dummy value
             heroes=None,
-            # Since we can't determine whether we've already sent a room down this
+            # TODO: Since we can't determine whether we've already sent a room down this
             # Sliding Sync connection before (we plan to add this optimization in the
             # future), we're always returning the requested room state instead of
             # updates.
@@ -859,6 +895,5 @@ class SlidingSyncHandler:
             # (encrypted rooms).
             notification_count=0,
             highlight_count=0,
-            # TODO: Dummy value
-            num_live=0,
+            num_live=num_live,
         )
