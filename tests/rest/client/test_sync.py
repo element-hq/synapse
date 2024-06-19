@@ -1228,7 +1228,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.sync_endpoint = "/_matrix/client/unstable/org.matrix.msc3575/sync"
+        self.sync_endpoint = (
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+        )
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
