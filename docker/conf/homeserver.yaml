@@ -176,7 +176,6 @@ app_service_config_files:
 {% endif %}
 
 macaroon_secret_key: "{{ SYNAPSE_MACAROON_SECRET_KEY }}"
-expire_access_token: False
 
 ## Signing Keys ##
 
