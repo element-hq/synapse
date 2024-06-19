@@ -1795,6 +1795,83 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(room_id, channel.json_body["rooms"][0].get("room_id"))
         self.assertEqual("ж", channel.json_body["rooms"][0].get("name"))
 
+    def test_filter_public_rooms(self) -> None:
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=False
+        )
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(3, response.json_body["total_rooms"])
+        self.assertEqual(3, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?public_rooms=true",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(2, response.json_body["total_rooms"])
+        self.assertEqual(2, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?public_rooms=false",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(1, response.json_body["total_rooms"])
+        self.assertEqual(1, len(response.json_body["rooms"]))
+
+    def test_filter_empty_rooms(self) -> None:
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=False
+        )
+        self.helper.leave(room_id, self.admin_user, tok=self.admin_user_tok)
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(3, response.json_body["total_rooms"])
+        self.assertEqual(3, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?empty_rooms=false",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(2, response.json_body["total_rooms"])
+        self.assertEqual(2, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?empty_rooms=true",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(1, response.json_body["total_rooms"])
+        self.assertEqual(1, len(response.json_body["rooms"]))
+
     def test_single_room(self) -> None:
         """Test that a single room can be requested correctly"""
         # Create two test rooms
