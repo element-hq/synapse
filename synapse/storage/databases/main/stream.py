@@ -1551,6 +1551,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """Returns list of events before or after a given token.
 
+        When Direction.FORWARDS: from_key < x <= to_key
+        When Direction.BACKWARDS: from_key >= x > to_key
+
         Args:
             room_id
             from_key: The token used to stream from
@@ -1566,6 +1569,23 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             stream has been reached (i.e. there are no events between `from_key`
             and `to_key`).
         """
+
+        # We can bail early if we're looking forwards, and our `to_key` is already
+        # before our `from_key`.
+        if (
+            direction == Direction.FORWARDS
+            and to_key is not None
+            and to_key.is_before_or_eq(from_key)
+        ):
+            return [], from_key
+        # Or vice-versa, if we're looking backwards and our `from_key` is already before
+        # our `to_key`.
+        elif (
+            direction == Direction.BACKWARDS
+            and to_key is not None
+            and from_key.is_before_or_eq(to_key)
+        ):
+            return [], from_key
 
         rows, token = await self.db_pool.runInteraction(
             "paginate_room_events",

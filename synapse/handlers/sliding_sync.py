@@ -775,24 +775,36 @@ class SlidingSyncHandler:
                     )
                 )
 
+            # We're going to paginate backwards from the `to_token`
+            from_bound = to_token.room_key
+            # People shouldn't see past their leave/ban event
+            if rooms_for_user_membership_at_to_token.membership in (
+                Membership.LEAVE,
+                Membership.BAN,
+            ):
+                from_bound = (
+                    rooms_for_user_membership_at_to_token.event_pos.to_room_stream_token()
+                )
+
+            # Determine whether we should limit the timeline to the token range.
+            #
+            # We should return historical messages (before token range) in the
+            # following cases because we want clients to be able to show a basic
+            # screen of information:
+            #  - Initial sync (because no `from_token` to limit us anyway)
+            #  - When users `newly_joined`
+            #  - TODO: For an incremental sync where we haven't sent it down this
+            #    connection before
+            to_bound = (
+                from_token.room_key
+                if from_token is not None and not newly_joined
+                else None
+            )
+
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
-                # We're going to paginate backwards from the `to_token`
-                from_key=to_token.room_key,
-                to_key=(
-                    # Determine whether we should limit the timeline to the token range.
-                    #
-                    # We should return historical messages (before token range) in the
-                    # following cases because we want clients to be able to show a basic
-                    # screen of information:
-                    #  - Initial sync (because no `from_token` to limit us anyway)
-                    #  - When users `newly_joined`
-                    #  - TODO: For an incremental sync where we haven't sent it down this
-                    #    connection before
-                    from_token.room_key
-                    if from_token is not None and not newly_joined
-                    else None
-                ),
+                from_key=from_bound,
+                to_key=to_bound,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -867,10 +879,10 @@ class SlidingSyncHandler:
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
         stripped_state: List[JsonDict] = []
-        if rooms_for_user_membership_at_to_token.membership in {
+        if rooms_for_user_membership_at_to_token.membership in (
             Membership.INVITE,
             Membership.KNOCK,
-        }:
+        ):
             invite_or_knock_event = await self.store.get_event(
                 rooms_for_user_membership_at_to_token.event_id
             )
