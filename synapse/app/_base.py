@@ -626,13 +626,13 @@ async def start(hs: "HomeServer") -> None:
         gc.freeze()
 
         def exit() -> None:
-            logger.info("Doing FREEZE")
+            logger.warning("Doing FREEZE")
 
             start = time.time()
             gc.freeze()
             end = time.time()
 
-            logger.info("GC freeze took %d ms", (end - start) * 1000)
+            logger.warning("GC freeze took %d ms", (end - start) * 1000)
 
         # Speed up shutdowns by freezing all allocated objects. This moves everything
         # into the permanent generation and excludes them from the final GC.
