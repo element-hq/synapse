@@ -31,6 +31,7 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
+from synapse.handlers.relations import BundledAggregations
 from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
 from synapse.types.rest.client import SlidingSyncBody
 
@@ -159,7 +160,11 @@ class SlidingSyncResult:
                 entirely and NOT send "initial":false as this is wasteful on bandwidth. The
                 absence of this flag means 'false'.
             required_state: The current state of the room
-            timeline: Latest events in the room. The last event is the most recent
+            timeline: Latest events in the room. The last event is the most recent.
+            bundled_aggregations: A mapping of event ID to the bundled aggregations for
+                the timeline events above. This allows clients to show accurate reaction
+                counts (or edits, threads), even if some of the reaction events were skipped
+                over in a gappy sync.
             is_dm: Flag to specify whether the room is a direct-message room (most likely
                 between two people).
             stripped_state: Stripped state events (for rooms where the usre is
@@ -191,7 +196,8 @@ class SlidingSyncResult:
         heroes: Optional[List[EventBase]]
         initial: bool
         required_state: List[EventBase]
-        timeline: List[EventBase]
+        timeline_events: List[EventBase]
+        bundled_aggregations: Optional[Dict[str, BundledAggregations]]
         is_dm: bool
         stripped_state: Optional[List[JsonDict]]
         prev_batch: StreamToken

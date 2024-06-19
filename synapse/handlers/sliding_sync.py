@@ -114,6 +114,7 @@ class SlidingSyncHandler:
         self.auth_blocking = hs.get_auth_blocking()
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
+        self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
 
     async def wait_for_sync_for_user(
@@ -881,6 +882,18 @@ class SlidingSyncHandler:
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
+        # TODO: Handle timeline gaps (`get_timeline_gaps()`)
+
+        # If the timeline is `limited=True`, the client does not have all events
+        # necessary to calculate aggregations themselves.
+        bundled_aggregations = None
+        if limited:
+            bundled_aggregations = (
+                await self.relations_handler.get_bundled_aggregations(
+                    timeline_events, user.to_string()
+                )
+            )
+
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
             name=None,
@@ -895,7 +908,8 @@ class SlidingSyncHandler:
             initial=True,
             # TODO: Dummy value
             required_state=[],
-            timeline=timeline_events,
+            timeline_events=timeline_events,
+            bundled_aggregations=bundled_aggregations,
             # TODO: Dummy value
             is_dm=False,
             stripped_state=stripped_state,

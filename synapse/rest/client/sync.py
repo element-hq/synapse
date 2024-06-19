@@ -976,11 +976,10 @@ class SlidingSyncRestServlet(RestServlet):
         serialized_rooms = {}
         for room_id, room_result in rooms.items():
             serialized_timeline = await self.event_serializer.serialize_events(
-                room_result.timeline,
+                room_result.timeline_events,
                 time_now,
                 config=serialize_options,
-                # TODO
-                # bundle_aggregations=room.timeline.bundled_aggregations,
+                bundle_aggregations=room_result.bundled_aggregations,
             )
 
             serialized_required_state = await self.event_serializer.serialize_events(
