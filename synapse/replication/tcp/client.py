@@ -155,7 +155,7 @@ class ReplicationDataHandler:
             )
             await self._pusher_pool.on_new_receipts({row.user_id for row in rows})
         elif stream_name == ToDeviceStream.NAME:
-            entities = [row.user_id for row in rows if not row.hosts_calculated]
+            entities = [row.entity for row in rows if row.entity.startswith("@")]
             if entities:
                 self.notifier.on_new_event(
                     StreamKeyType.TO_DEVICE, token, users=entities
