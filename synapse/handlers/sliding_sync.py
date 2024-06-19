@@ -879,8 +879,7 @@ class SlidingSyncHandler:
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
-            # TODO: Make this optional because a computed name doesn't make sense for translated cases
-            name="TODO",
+            name=None,
             # TODO: Dummy value
             avatar=None,
             # TODO: Dummy value

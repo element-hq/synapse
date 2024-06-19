@@ -990,7 +990,6 @@ class SlidingSyncRestServlet(RestServlet):
             )
 
             serialized_rooms[room_id] = {
-                "name": room_result.name,
                 "required_state": serialized_required_state,
                 "timeline": serialized_timeline,
                 "prev_batch": await room_result.prev_batch.to_string(self.store),
@@ -1001,6 +1000,9 @@ class SlidingSyncRestServlet(RestServlet):
                 "highlight_count": room_result.highlight_count,
                 "num_live": room_result.num_live,
             }
+
+            if room_result.name:
+                serialized_rooms[room_id]["name"] = room_result.name
 
             if room_result.avatar:
                 serialized_rooms[room_id]["avatar"] = room_result.avatar

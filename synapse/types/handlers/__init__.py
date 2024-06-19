@@ -186,7 +186,7 @@ class SlidingSyncResult:
                 (with potentially other old events in the timeline).
         """
 
-        name: str
+        name: Optional[str]
         avatar: Optional[str]
         heroes: Optional[List[EventBase]]
         initial: bool
