@@ -25,6 +25,7 @@ import os
 import signal
 import socket
 import sys
+import time
 import traceback
 import warnings
 from textwrap import indent
@@ -624,9 +625,16 @@ async def start(hs: "HomeServer") -> None:
         gc.collect()
         gc.freeze()
 
+        def exit() -> None:
+            start = time.time()
+            gc.freeze()
+            end = time.time()
+
+            logger.info("GC freeze took %d ms", (end - start) * 1000)
+
         # Speed up shutdowns by freezing all allocated objects. This moves everything
         # into the permanent generation and excludes them from the final GC.
-        atexit.register(gc.freeze)
+        atexit.register(exit)
 
 
 def reload_cache_config(config: HomeServerConfig) -> None:
