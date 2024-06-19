@@ -1,1 +1,1 @@
-Dynamically update the year in the footer
+Dynamically update the year in the footer.
