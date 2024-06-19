@@ -804,17 +804,9 @@ class SlidingSyncHandler:
             # most recent).
             timeline_events.reverse()
 
-            # Make sure we don't expose any events that the client shouldn't see
-            timeline_events = await filter_events_for_client(
-                self.storage_controllers,
-                user.to_string(),
-                timeline_events,
-                is_peeking=rooms_for_user_membership_at_to_token.membership
-                != Membership.JOIN,
-                filter_send_to_client=True,
-            )
-
-            # Determine our `limited` status
+            # Determine our `limited` status based on the timeline. We do this before
+            # filtering the events so we can accurately determine if there is more to
+            # paginate even if we filter out some/all events.
             if len(timeline_events) > room_sync_config.timeline_limit:
                 limited = True
                 # Get rid of that extra "+ 1" event because we only used it to determine
@@ -824,6 +816,19 @@ class SlidingSyncHandler:
                 new_room_key = RoomStreamToken(
                     stream=timeline_events[0].internal_metadata.stream_ordering - 1
                 )
+
+            # TODO: Does `newly_joined` affect `limited`? It does in sync v2 but I fail
+            # to understand why.
+
+            # Make sure we don't expose any events that the client shouldn't see
+            timeline_events = await filter_events_for_client(
+                self.storage_controllers,
+                user.to_string(),
+                timeline_events,
+                is_peeking=rooms_for_user_membership_at_to_token.membership
+                != Membership.JOIN,
+                filter_send_to_client=True,
+            )
 
             # Determine how many "live" events we have (events within the given token range).
             #

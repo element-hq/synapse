@@ -1874,6 +1874,13 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             [],
             channel.json_body["rooms"][room_id1]["timeline"],
         )
+        # Even though we don't get any timeline events because they are filtered out,
+        # there is still more to paginate
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["limited"],
+            True,
+            channel.json_body["rooms"][room_id1],
+        )
         # We should have some `stripped_state` so the potential joiner can identify the
         # room (we don't care about the order).
         self.assertCountEqual(
@@ -1906,3 +1913,4 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             ],
             channel.json_body["rooms"][room_id1]["invite_state"],
         )
+
