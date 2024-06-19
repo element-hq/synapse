@@ -4150,7 +4150,7 @@ By default, no room is excluded.
 Example configuration:
 ```yaml
 exclude_rooms_from_sync:
-    - !foo:example.com
+    - "!foo:example.com"
 ```
 
 ---
