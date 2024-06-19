@@ -1829,7 +1829,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
     async def get_push_actions_for_user(
         self,
         user_id: str,
-        before: Optional[str] = None,
+        before: Optional[int] = None,
         limit: int = 50,
         only_highlight: bool = False,
     ) -> List[UserPushAction]:
