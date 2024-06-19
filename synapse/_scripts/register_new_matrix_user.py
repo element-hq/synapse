@@ -299,7 +299,15 @@ def main() -> None:
     if args.admin or args.no_admin:
         admin = args.admin
 
-    register_new_user(args.user, password, server_url, secret, admin, args.user_type, exists_ok=args.exists_ok)
+    register_new_user(
+        args.user,
+        password,
+        server_url,
+        secret,
+        admin,
+        args.user_type,
+        exists_ok=args.exists_ok,
+    )
 
 
 def _read_file(file_path: Any, config_path: str) -> str:
