@@ -605,14 +605,26 @@ class SlidingSyncHandler:
         if filters.is_invite:
             raise NotImplementedError()
 
-        if filters.room_types is not None:
+        # Filter by room type (space vs room, etc). A room must match one of the types
+        # provided in the list. `None` is a valid type for rooms which do not have a
+        # room type.
+        if filters.room_types is not None or filters.not_room_types is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
             for room_id in list(filtered_room_id_set):
                 create_event = await self.store.get_create_event_for_room(room_id)
+                room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
+                if (
+                    filters.room_types is not None
+                    and room_type not in filters.room_types
+                ):
+                    filtered_room_id_set.remove(room_id)
 
-                create_event.content.get(EventContentFields.ROOM_TYPE)
-
-        if filters.not_room_types:
-            raise NotImplementedError()
+                if (
+                    filters.not_room_types is not None
+                    and room_type in filters.not_room_types
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.room_name_like:
             raise NotImplementedError()
