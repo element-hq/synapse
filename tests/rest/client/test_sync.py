@@ -18,9 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import logging
 import json
-from typing import List
+import logging
+from typing import Dict, List
 
 from parameterized import parameterized, parameterized_class
 
@@ -1237,6 +1237,51 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
+    def _add_new_dm_to_global_account_data(
+        self, source_user_id: str, target_user_id: str, target_room_id: str
+    ) -> None:
+        """
+        Helper to handle inserting a new DM for the source user into global account data
+        (handles all of the list merging).
+
+        Args:
+            source_user_id: The user ID of the DM mapping we're going to update
+            target_user_id: User ID of the person the DM is with
+            target_room_id: Room ID of the DM
+        """
+
+        # Get the current DM map
+        existing_dm_map = self.get_success(
+            self.store.get_global_account_data_by_type_for_user(
+                source_user_id, AccountDataTypes.DIRECT
+            )
+        )
+        # Scrutinize the account data since it has no concrete type. We're just copying
+        # everything into a known type. It should be a mapping from user ID to a list of
+        # room IDs. Ignore anything else.
+        new_dm_map: Dict[str, List[str]] = {}
+        if isinstance(existing_dm_map, dict):
+            for user_id, room_ids in existing_dm_map.items():
+                if isinstance(user_id, str) and isinstance(room_ids, list):
+                    for room_id in room_ids:
+                        if isinstance(room_id, str):
+                            new_dm_map[user_id] = new_dm_map.get(user_id, []) + [
+                                room_id
+                            ]
+
+        # Add the new DM to the map
+        new_dm_map[target_user_id] = new_dm_map.get(target_user_id, []) + [
+            target_room_id
+        ]
+        # Save the DM map to global account data
+        self.get_success(
+            self.store.add_account_data_for_user(
+                source_user_id,
+                AccountDataTypes.DIRECT,
+                new_dm_map,
+            )
+        )
+
     def _create_dm_room(
         self,
         inviter_user_id: str,
@@ -1269,45 +1314,12 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
 
         # Mimic the client setting the room as a direct message in the global account
-        # data.
-        # -------------------------------------
-
-        # For the invitee: Get the current map and add to it
-        existing_invitee_dm_map = self.get_success(
-            self.store.get_global_account_data_by_type_for_user(
-                invitee_user_id, AccountDataTypes.DIRECT
-            )
+        # data for both users.
+        self._add_new_dm_to_global_account_data(
+            invitee_user_id, inviter_user_id, room_id
         )
-        # Merge any existing entries
-        new_invitee_dm_map = existing_invitee_dm_map or {}
-        new_invitee_dm_map[inviter_user_id] = new_invitee_dm_map.get(
-            inviter_user_id, []
-        ) + [room_id]
-        self.get_success(
-            self.store.add_account_data_for_user(
-                invitee_user_id,
-                AccountDataTypes.DIRECT,
-                new_invitee_dm_map,
-            )
-        )
-
-        # For the inviter: Get the current map and add to it
-        existing_inviter_dm_map = self.get_success(
-            self.store.get_global_account_data_by_type_for_user(
-                inviter_user_id, AccountDataTypes.DIRECT
-            )
-        )
-        # Merge any existing entries
-        new_inviter_dm_map = existing_inviter_dm_map or {}
-        new_inviter_dm_map[invitee_user_id] = new_inviter_dm_map.get(
-            invitee_user_id, []
-        ) + [room_id]
-        self.get_success(
-            self.store.add_account_data_for_user(
-                inviter_user_id,
-                AccountDataTypes.DIRECT,
-                new_inviter_dm_map,
-            )
+        self._add_new_dm_to_global_account_data(
+            inviter_user_id, invitee_user_id, room_id
         )
 
         return room_id

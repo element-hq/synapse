@@ -554,7 +554,7 @@ class SlidingSyncHandler:
 
             # Flatten out the map
             dm_room_id_set = set()
-            if dm_map:
+            if isinstance(dm_map, dict):
                 for room_ids in dm_map.values():
                     # Account data should be a list of room IDs. Ignore anything else
                     if isinstance(room_ids, list):
