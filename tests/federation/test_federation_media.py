@@ -102,13 +102,13 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # TODO: the json object expected will change once MSC3911 is implemented, currently
         # {} is returned for all requests as a placeholder (per MSC3196)
         found_json = any(
-            "\r\nContent-Type: application/json\r\n{}" in field for field in stripped
+            "\r\nContent-Type: application/json\r\n\r\n{}" in field for field in stripped
         )
         self.assertTrue(found_json)
 
         # check that text file and expected value exist
         found_file = any(
-            "\r\nContent-Type: text/plain\r\nfile_to_stream" in field
+            "\r\nContent-Type: text/plain\r\n\r\nfile_to_stream" in field
             for field in stripped
         )
         self.assertTrue(found_file)
@@ -143,7 +143,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         assert body is not None
         stripped_bytes = body.split(b"\r\n" + b"--" + boundary.encode("utf-8"))
         found_json = any(
-            b"\r\nContent-Type: application/json\r\n{}" in field
+            b"\r\nContent-Type: application/json\r\n\r\n{}" in field
             for field in stripped_bytes
         )
         self.assertTrue(found_json)

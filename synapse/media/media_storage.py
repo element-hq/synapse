@@ -422,7 +422,7 @@ class MultipartFileConsumer:
         # The producer that registered with us, and if its a push or pull
         # producer.
         self.producer: Optional["interfaces.IProducer"] = None
-        self.streaming = Optional[None]
+        self.streaming: Optional[bool] = None
 
         # Whether the wrapped consumer has asked us to pause.
         self.paused = False
@@ -457,7 +457,7 @@ class MultipartFileConsumer:
         self.producer = producer
         self.streaming = streaming
 
-        self.wrapped_consumer.registerProducer(self, True)
+        self.wrapped_consumer.registerProducer(self, streaming)
 
     def unregisterProducer(self) -> None:
         """
@@ -484,7 +484,7 @@ class MultipartFileConsumer:
 
             json_field = json.dumps(self.json_field)
             json_bytes = json_field.encode("utf-8")
-            self.wrapped_consumer.write(json_bytes)
+            self.wrapped_consumer.write(CRLF + json_bytes)
             self.wrapped_consumer.write(CRLF + b"--" + self.boundary + CRLF)
 
             self.json_field_written = True
@@ -493,7 +493,7 @@ class MultipartFileConsumer:
         if not self.content_type_written:
             type = self.file_content_type.encode("utf-8")
             content_type = Header(b"Content-Type", type)
-            self.wrapped_consumer.write(bytes(content_type) + CRLF)
+            self.wrapped_consumer.write(bytes(content_type) + CRLF + CRLF)
             self.content_type_written = True
 
         self.wrapped_consumer.write(data)
