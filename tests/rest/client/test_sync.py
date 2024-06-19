@@ -1874,7 +1874,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             [],
             channel.json_body["rooms"][room_id1]["timeline"],
         )
-        # We should have some stripped state so the potential joiner can identify the
+        # We should have some `stripped_state` so the potential joiner can identify the
         # room (we don't care about the order).
         self.assertCountEqual(
             channel.json_body["rooms"][room_id1]["invite_state"],

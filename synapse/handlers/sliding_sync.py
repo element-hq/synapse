@@ -756,10 +756,10 @@ class SlidingSyncHandler:
         # Assemble the list of timeline events
         timeline_events: List[EventBase] = []
         limited = False
-        # We want to use `to_token` (vs `from_token`) because we look backwards from the
-        # `to_token` up to the `timeline_limit` and we might not reach `from_token`
-        # before we hit the limit. We will update the room stream position once we've
-        # fetched the events.
+        # We want to start off using the `to_token` (vs `from_token`) because we look
+        # backwards from the `to_token` up to the `timeline_limit` and we might not
+        # reach the `from_token` before we hit the limit. We will update the room stream
+        # position once we've fetched the events.
         prev_batch_token = to_token
         if room_sync_config.timeline_limit > 0:
             newly_joined = False
@@ -803,6 +803,7 @@ class SlidingSyncHandler:
             # most recent).
             timeline_events.reverse()
 
+            # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_events_for_client(
                 self.storage_controllers,
                 user.to_string(),
@@ -851,11 +852,14 @@ class SlidingSyncHandler:
                         # this more with a binary search (bisect).
                         break
 
+            # Update the `prev_batch_token` to point to the position that allows us to
+            # keep paginating backwards from the oldest event we return in the timeline.
             prev_batch_token = prev_batch_token.copy_and_replace(
                 StreamKeyType.ROOM, new_room_key
             )
 
-        # Figure out any stripped state events for invite/knocks
+        # Figure out any stripped state events for invite/knocks. This allows the
+        # potential joiner to identify the room.
         stripped_state: List[JsonDict] = []
         if rooms_for_user_membership_at_to_token.membership in {
             Membership.INVITE,
