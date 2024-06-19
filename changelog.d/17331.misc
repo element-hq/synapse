@@ -1,1 +1,1 @@
-Change the path the sliding sync imlementation is under to `/org.matrix.simplified_msc3575/sync`.
+Change path of the Sliding Sync implementation to `/org.matrix.simplified_msc3575/sync` since our simplified API is slightly incompatible with what's in the current MSC.
