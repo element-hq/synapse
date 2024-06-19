@@ -46,6 +46,7 @@ from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import (
     MAX_PDU_SIZE,
+    ZERO_LENGTH_STATE_KEY_EVENT_TYPES,
     EventContentFields,
     EventTypes,
     JoinRules,
@@ -794,6 +795,7 @@ def get_send_level(
                 state_key == msc_3779_sender
                 or state_key.startswith(msc_3779_sender + "_")
             )
+            and etype not in ZERO_LENGTH_STATE_KEY_EVENT_TYPES
         )
         if state_key is not None and not is_owned_state_event:
             send_level = power_levels_content.get("state_default", 50)
