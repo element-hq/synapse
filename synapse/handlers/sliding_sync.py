@@ -595,7 +595,10 @@ class SlidingSyncHandler:
 
         # Filter for rooms that the user has been invited to
         if filters.is_invite is not None:
-            for room_id, room_for_user in sync_room_map.items():
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                room_for_user = sync_room_map[room_id]
                 # If we're looking for invite rooms, filter out rooms that the user is
                 # not invited to and vice versa
                 if (
