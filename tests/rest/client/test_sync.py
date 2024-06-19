@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import logging
 import json
 from typing import List
 
@@ -43,6 +44,8 @@ from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
 from tests.server import TimedOutException
+
+logger = logging.getLogger(__name__)
 
 
 class FilterTestCase(unittest.HomeserverTestCase):
@@ -1240,6 +1243,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         inviter_tok: str,
         invitee_user_id: str,
         invitee_tok: str,
+        should_join_room: bool = True,
     ) -> str:
         """
         Helper to create a DM room as the "inviter" and invite the "invitee" user to the
@@ -1260,23 +1264,49 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             tok=inviter_tok,
             extra_data={"is_direct": True},
         )
-        # Person that was invited joins the room
-        self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+        if should_join_room:
+            # Person that was invited joins the room
+            self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
 
         # Mimic the client setting the room as a direct message in the global account
-        # data
+        # data.
+        # -------------------------------------
+
+        # For the invitee: Get the current map and add to it
+        existing_invitee_dm_map = self.get_success(
+            self.store.get_global_account_data_by_type_for_user(
+                invitee_user_id, AccountDataTypes.DIRECT
+            )
+        )
+        # Merge any existing entries
+        new_invitee_dm_map = existing_invitee_dm_map or {}
+        new_invitee_dm_map[inviter_user_id] = new_invitee_dm_map.get(
+            inviter_user_id, []
+        ) + [room_id]
         self.get_success(
             self.store.add_account_data_for_user(
                 invitee_user_id,
                 AccountDataTypes.DIRECT,
-                {inviter_user_id: [room_id]},
+                new_invitee_dm_map,
             )
         )
+
+        # For the inviter: Get the current map and add to it
+        existing_inviter_dm_map = self.get_success(
+            self.store.get_global_account_data_by_type_for_user(
+                inviter_user_id, AccountDataTypes.DIRECT
+            )
+        )
+        # Merge any existing entries
+        new_inviter_dm_map = existing_inviter_dm_map or {}
+        new_inviter_dm_map[invitee_user_id] = new_inviter_dm_map.get(
+            invitee_user_id, []
+        ) + [room_id]
         self.get_success(
             self.store.add_account_data_for_user(
                 inviter_user_id,
                 AccountDataTypes.DIRECT,
-                {invitee_user_id: [room_id]},
+                new_inviter_dm_map,
             )
         )
 
@@ -1397,15 +1427,28 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
 
         # Create a DM room
-        dm_room_id = self._create_dm_room(
+        joined_dm_room_id = self._create_dm_room(
             inviter_user_id=user1_id,
             inviter_tok=user1_tok,
             invitee_user_id=user2_id,
             invitee_tok=user2_tok,
+            should_join_room=True,
+        )
+        invited_dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+            should_join_room=False,
         )
 
         # Create a normal room
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create a room that user1 is invited to
+        invite_room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        self.helper.invite(invite_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
@@ -1413,17 +1456,33 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             self.sync_endpoint,
             {
                 "lists": {
+                    # Absense of filters does not imply "False" values
+                    "all": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {},
+                    },
+                    # Test single truthy filter
                     "dms": {
                         "ranges": [[0, 99]],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": True},
                     },
-                    "foo-list": {
+                    # Test single falsy filter
+                    "non-dms": {
                         "ranges": [[0, 99]],
                         "required_state": [],
                         "timeline_limit": 1,
                         "filters": {"is_dm": False},
+                    },
+                    # Test how multiple filters should stack (AND'd together)
+                    "room-invites": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": False, "is_invite": True},
                     },
                 }
             },
@@ -1434,32 +1493,59 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make sure it has the foo-list we requested
         self.assertListEqual(
             list(channel.json_body["lists"].keys()),
-            ["dms", "foo-list"],
+            ["all", "dms", "non-dms", "room-invites"],
             channel.json_body["lists"].keys(),
         )
 
-        # Make sure the list includes the room we are joined to
+        # Make sure the lists have the correct rooms
+        self.assertListEqual(
+            list(channel.json_body["lists"]["all"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [
+                        invite_room_id,
+                        room_id,
+                        invited_dm_room_id,
+                        joined_dm_room_id,
+                    ],
+                }
+            ],
+            list(channel.json_body["lists"]["all"]),
+        )
         self.assertListEqual(
             list(channel.json_body["lists"]["dms"]["ops"]),
             [
                 {
                     "op": "SYNC",
                     "range": [0, 99],
-                    "room_ids": [dm_room_id],
+                    "room_ids": [invited_dm_room_id, joined_dm_room_id],
                 }
             ],
             list(channel.json_body["lists"]["dms"]),
         )
         self.assertListEqual(
-            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            list(channel.json_body["lists"]["non-dms"]["ops"]),
             [
                 {
                     "op": "SYNC",
                     "range": [0, 99],
-                    "room_ids": [room_id],
+                    "room_ids": [invite_room_id, room_id],
                 }
             ],
-            list(channel.json_body["lists"]["foo-list"]),
+            list(channel.json_body["lists"]["non-dms"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["room-invites"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [invite_room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["room-invites"]),
         )
 
     def test_sort_list(self) -> None:
