@@ -864,7 +864,7 @@ class SlidingSyncRestServlet(RestServlet):
     """
 
     PATTERNS = client_patterns(
-        "/org.matrix.msc3575/sync$", releases=[], v1=False, unstable=True
+        "/org.matrix.simplified_msc3575/sync$", releases=[], v1=False, unstable=True
     )
 
     def __init__(self, hs: "HomeServer"):
