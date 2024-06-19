@@ -591,7 +591,7 @@ class SlidingSyncHandler:
                 if (filters.is_encrypted and not is_encrypted) or (
                     not filters.is_encrypted and is_encrypted
                 ):
-                    filtered_room_id_set.discard(room_id)
+                    filtered_room_id_set.remove(room_id)
 
         # Filter for rooms that the user has been invited to
         if filters.is_invite is not None:
@@ -607,7 +607,7 @@ class SlidingSyncHandler:
                     not filters.is_invite
                     and room_for_user.membership == Membership.INVITE
                 ):
-                    filtered_room_id_set.discard(room_id)
+                    filtered_room_id_set.remove(room_id)
 
         if filters.room_types:
             raise NotImplementedError()
