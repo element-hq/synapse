@@ -626,6 +626,8 @@ async def start(hs: "HomeServer") -> None:
         gc.freeze()
 
         def exit() -> None:
+            logger.info("Doing FREEZE")
+
             start = time.time()
             gc.freeze()
             end = time.time()
