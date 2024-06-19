@@ -1935,7 +1935,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1]["invite_state"],
         )
 
-    
     def test_rooms_invite_world_readable_history_initial_sync(self) -> None:
         """
         Test that `rooms` we are invited to have some stripped `invite_state` and that
@@ -1949,17 +1948,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
         user2 = UserID.from_string(user2_id)
 
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, 
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
             extra_content={
                 "preset": "public_chat",
                 "initial_state": [
                     {
-                        "content": {"history_visibility": HistoryVisibility.WORLD_READABLE},
+                        "content": {
+                            "history_visibility": HistoryVisibility.WORLD_READABLE
+                        },
                         "state_key": "",
                         "type": EventTypes.RoomHistoryVisibility,
                     }
                 ],
-            },)
+            },
+        )
         # Ensure we're testing with a room with `world_readable` history visibility
         # which means events are visible to anyone even without membership.
         history_visibility_response = self.helper.get_state(
@@ -1972,7 +1976,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         self.helper.send(room_id1, "activity before1", tok=user2_tok)
         event_response2 = self.helper.send(room_id1, "activity before2", tok=user2_tok)
-        use1_invite_response = self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        use1_invite_response = self.helper.invite(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
         event_response3 = self.helper.send(room_id1, "activity after3", tok=user2_tok)
         event_response4 = self.helper.send(room_id1, "activity after4", tok=user2_tok)
 
