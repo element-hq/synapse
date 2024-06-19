@@ -532,7 +532,13 @@ async def start(hs: "HomeServer") -> None:
     # numbers of DNS requests don't starve out other users of the threadpool.
     resolver_threadpool = ThreadPool(name="gai_resolver")
     resolver_threadpool.start()
-    reactor.addSystemEventTrigger("during", "shutdown", resolver_threadpool.stop)
+
+    def stop_threadpool() -> None:
+        logger.warning("Stopping thread pool...")
+        resolver_threadpool.stop()
+        logger.warning("Stopped thread pool")
+
+    reactor.addSystemEventTrigger("during", "shutdown", stop_threadpool)
     reactor.installNameResolver(
         GAIResolver(reactor, getThreadPool=lambda: resolver_threadpool)
     )
