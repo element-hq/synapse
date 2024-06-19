@@ -1607,7 +1607,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # With no `from_token` (initial sync), it's all historical since there is no
-        # "current" range
+        # "live" range
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["num_live"],
             0,
@@ -1674,7 +1674,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def test_rooms_incremental_sync(self) -> None:
         """
-        Test that `rooms` data during an incremental sync after an initial sync.
+        Test `rooms` data during an incremental sync after an initial sync.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1889,7 +1889,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             [],
             channel.json_body["rooms"][room_id1]["timeline"],
         )
-        # No "live" events in a initial sync (no `from_token` to define the "live"
+        # No "live" events in an initial sync (no `from_token` to define the "live"
         # range) and no events returned in the timeline anyway so nothing could be
         # "live".
         self.assertEqual(
@@ -2016,7 +2016,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             ],
             channel.json_body["rooms"][room_id1]["timeline"],
         )
-        # No "live" events in a initial sync (no `from_token` to define the "live"
+        # No "live" events in an initial sync (no `from_token` to define the "live"
         # range)
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["num_live"],
@@ -2116,7 +2116,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             ],
             channel.json_body["rooms"][room_id1]["timeline"],
         )
-        # No "live" events in a initial sync (no `from_token` to define the "live"
+        # No "live" events in an initial sync (no `from_token` to define the "live"
         # range)
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["num_live"],
@@ -2206,7 +2206,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def test_rooms_ban_incremental_sync2(self) -> None:
         """
-        Test that `rooms` we are banned from before the incremental sync doesn't return
+        Test that `rooms` we are banned from before the incremental sync don't return
         any events in the timeline.
         """
         user1_id = self.register_user("user1", "pass")

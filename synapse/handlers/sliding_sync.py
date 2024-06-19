@@ -264,7 +264,7 @@ class SlidingSyncHandler:
                             )
                         )
 
-                        # Update the relevant room map
+                        # Take the superset of the `RoomSyncConfig` for each room
                         for room_id in sliced_room_ids:
                             if relevant_room_map.get(room_id) is not None:
                                 # Take the highest timeline limit
@@ -739,7 +739,7 @@ class SlidingSyncHandler:
         to_token: StreamToken,
     ) -> SlidingSyncResult.RoomResult:
         """
-        Fetch room data for a room.
+        Fetch room data for the sync response.
 
         We fetch data according to the token range (> `from_token` and <= `to_token`).
 
@@ -760,7 +760,7 @@ class SlidingSyncHandler:
         # We want to start off using the `to_token` (vs `from_token`) because we look
         # backwards from the `to_token` up to the `timeline_limit` and we might not
         # reach the `from_token` before we hit the limit. We will update the room stream
-        # position once we've fetched the events.
+        # position once we've fetched the events to point to the earliest event fetched.
         prev_batch_token = to_token
         if room_sync_config.timeline_limit > 0:
             newly_joined = False
