@@ -165,7 +165,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
         )
 
         self._device_list_federation_stream_cache = None
-        if hs.get_federation_sender() is not None:
+        if hs.should_send_federation():
             (
                 device_list_federation_prefill,
                 device_list_federation_list_id,

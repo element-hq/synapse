@@ -439,7 +439,7 @@ class FederationSenderHandler:
             # The entities are either user IDs (starting with '@') whose devices
             # have changed, or remote servers that we need to tell about
             # changes.
-            if any(row.hosts_calcualted for row in rows):
+            if any(row.hosts_calculated for row in rows):
                 hosts = await self.store.get_destinations_for_device(token)
                 await self.federation_sender.send_device_messages(
                     hosts, immediate=False
