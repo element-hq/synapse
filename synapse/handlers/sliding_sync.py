@@ -22,7 +22,12 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, EventTypes, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventContentFields,
+    EventTypes,
+    Membership,
+)
 from synapse.events import EventBase
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import (
@@ -583,6 +588,10 @@ class SlidingSyncHandler:
                     state_filter=StateFilter.from_types(
                         [(EventTypes.RoomEncryption, "")]
                     ),
+                    # Partially stated rooms should have all state events except for the
+                    # membership events so we don't need to wait. Plus we don't want to
+                    # block the whole sync waiting for this one room.
+                    await_full_state=False,
                 )
                 is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
 
@@ -596,8 +605,11 @@ class SlidingSyncHandler:
         if filters.is_invite:
             raise NotImplementedError()
 
-        if filters.room_types:
-            raise NotImplementedError()
+        if filters.room_types is not None:
+            for room_id in list(filtered_room_id_set):
+                create_event = await self.store.get_create_event_for_room(room_id)
+
+                create_event.content.get(EventContentFields.ROOM_TYPE)
 
         if filters.not_room_types:
             raise NotImplementedError()
