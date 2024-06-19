@@ -774,24 +774,22 @@ class SlidingSyncHandler:
                     )
                 )
 
-            # We should return historical messages (before token range) in the
-            # following cases because we want clients to be able to show a basic
-            # screen of information:
-            #  - Initial sync (because no `from_token` to limit us anyway)
-            #  - When users `newly_joined`
-            #  - TODO: For an incremental sync where we haven't sent it down this
-            #    connection before
-            should_limit_timeline_to_token_range = (
-                from_token is not None and not newly_joined
-            )
-
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
                 # We're going to paginate backwards from the `to_token`
                 from_key=to_token.room_key,
                 to_key=(
+                    # Determine whether we should limit the timeline to the token range.
+                    #
+                    # We should return historical messages (before token range) in the
+                    # following cases because we want clients to be able to show a basic
+                    # screen of information:
+                    #  - Initial sync (because no `from_token` to limit us anyway)
+                    #  - When users `newly_joined`
+                    #  - TODO: For an incremental sync where we haven't sent it down this
+                    #    connection before
                     from_token.room_key
-                    if should_limit_timeline_to_token_range
+                    if from_token is not None and not newly_joined
                     else None
                 ),
                 direction=Direction.BACKWARDS,
