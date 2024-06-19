@@ -48,6 +48,9 @@ A sample YAML file accepted by `register_new_matrix_user` is described below:
     Shared secret as defined in server config file. This is an optional
     parameter as it can be also supplied via the YAML file.
 
+  * `--exists-ok`:
+    Do not fail if the user already exists. The user account will be not updated in this case.
+
   * `server_url`:
     URL of the home server. Defaults to 'https://localhost:8448'.
 
