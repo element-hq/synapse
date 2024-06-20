@@ -303,13 +303,13 @@ class PersistEventsStore:
             retcols=("room_id", "has_auth_chain_index"),
             allow_none=True,
         )
-        if row is None:
+        if row is None or row[1] is False:
             return {}
 
-        # Filter out already persisted events.
+        # Filter out events that we've already calculated.
         rows = self.db_pool.simple_select_many_txn(
             txn,
-            table="events",
+            table="event_auth_chains",
             column="event_id",
             iterable=[e.event_id for e in state_events],
             keyvalues={},
@@ -319,7 +319,7 @@ class PersistEventsStore:
         state_events = [
             event
             for event in state_events
-            if event.event_id in already_persisted_events
+            if event.event_id not in already_persisted_events
         ]
 
         if not state_events:
@@ -600,6 +600,9 @@ class PersistEventsStore:
         events: List[EventBase],
         new_event_links: Dict[str, NewEventChainLinks],
     ) -> None:
+        if new_event_links:
+            self._persist_chain_cover_index(txn, self.db_pool, new_event_links)
+
         # We only care about state events, so this if there are no state events.
         if not any(e.is_state() for e in events):
             return
@@ -621,9 +624,6 @@ class PersistEventsStore:
                 if event.is_state()
             ],
         )
-
-        if new_event_links:
-            self._persist_chain_cover_index(txn, self.db_pool, new_event_links)
 
     @classmethod
     def _add_chain_cover_index(
