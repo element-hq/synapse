@@ -105,16 +105,39 @@ class RoomSyncConfig:
     timeline_limit: int
     required_state_map: Dict[str, Set[Tuple[str, str]]]
 
-    def from_list_config(list_config: SlidingSyncConfig.SlidingSyncList) -> "RoomSyncConfig":
+    def from_room_parameters(
+        room_params: SlidingSyncConfig.CommonRoomParameters,
+    ) -> "RoomSyncConfig":
         """
-        Create a `RoomSyncConfig` from a `SlidingSyncList` config.
+        Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
+
+        Args:
+            room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
         """
+        required_state_map: Dict[str, Set[Tuple[str, str]]] = {}
+        for (
+            state_type,
+            state_key,
+        ) in room_params.required_state:
+            # If we already have a wildcard, we don't need to add anything else
+            if (
+                # This is just a tricky way to grab the first element of the set
+                next(iter(required_state_map.get(state_type) or []), None)
+                == (state_type, StateKeys.WILDCARD)
+            ):
+                continue
+
+            # If we're getting a wildcard, that's all that matters so get rid of any
+            # other state keys
+            if state_key == StateKeys.WILDCARD:
+                required_state_map[state_type] = (state_type, state_key)
+            # Otherwise, just add it to the set
+            else:
+                required_state_map[state_type].add((state_type, state_key))
+
         return RoomSyncConfig(
-            timeline_limit=list_config.timeline_limit,
-            required_state_map={
-                state_type: {(state_type, state_key) for state_key in state_keys}
-                for state_type, state_keys in list_config.required_state.items()
-            },
+            timeline_limit=room_params.timeline_limit,
+            required_state_map=required_state_map,
         )
 
     def combine_room_sync_config(
@@ -325,12 +348,8 @@ class SlidingSyncHandler:
 
                         # Take the superset of the `RoomSyncConfig` for each room
                         for room_id in sliced_room_ids:
-                            room_sync_config = RoomSyncConfig(
-                                timeline_limit=list_config.timeline_limit,
-                                required_state_map={
-                                    state_type: (state_type, state_key)
-                                    for state_type, state_key in list_config.required_state.items()
-                                },
+                            room_sync_config = RoomSyncConfig.from_room_parameters(
+                                list_config
                             )
                             existing_room_sync_config = relevant_room_map.get(room_id)
 
@@ -967,21 +986,21 @@ class SlidingSyncHandler:
                 )
             )
 
-        room_sync_config.required_state
+        # TODO: room_sync_config.required_state
 
-        room_state = await self._storage_controllers.state.get_current_state(
-            room_id,
-            StateFilter.from_types(
-                [
-                    (EventTypes.Member, user.to_string()),
-                    (EventTypes.CanonicalAlias, ""),
-                    (EventTypes.Name, ""),
-                    (EventTypes.Create, ""),
-                    (EventTypes.JoinRules, ""),
-                    (EventTypes.RoomAvatar, ""),
-                ]
-            ),
-        )
+        # room_state = await self._storage_controllers.state.get_current_state(
+        #     room_id,
+        #     StateFilter.from_types(
+        #         [
+        #             (EventTypes.Member, user.to_string()),
+        #             (EventTypes.CanonicalAlias, ""),
+        #             (EventTypes.Name, ""),
+        #             (EventTypes.Create, ""),
+        #             (EventTypes.JoinRules, ""),
+        #             (EventTypes.RoomAvatar, ""),
+        #         ]
+        #     ),
+        # )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value

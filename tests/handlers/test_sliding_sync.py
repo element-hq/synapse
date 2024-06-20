@@ -26,18 +26,24 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.handlers.sliding_sync import SlidingSyncConfig
+from synapse.handlers.sliding_sync import RoomSyncConfig
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, UserID
+from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 
 logger = logging.getLogger(__name__)
+
+
+class RoomSyncConfigTestCase(TestCase):
+    def test_from_list_config() -> None:
+        RoomSyncConfig
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
