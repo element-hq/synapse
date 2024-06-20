@@ -154,10 +154,6 @@ class SlidingSyncBody(RequestBodyModel):
                 (Max 1000 messages)
         """
 
-        class IncludeOldRooms(RequestBodyModel):
-            timeline_limit: StrictInt
-            required_state: List[Tuple[StrictStr, StrictStr]]
-
         required_state: List[Tuple[StrictStr, StrictStr]]
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
         if TYPE_CHECKING:
