@@ -21,12 +21,13 @@ import logging
 from unittest.mock import patch
 
 from parameterized import parameterized
+from copy import deepcopy
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.handlers.sliding_sync import RoomSyncConfig
+from synapse.handlers.sliding_sync import RoomSyncConfig, StateKeys
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -42,8 +43,257 @@ logger = logging.getLogger(__name__)
 
 
 class RoomSyncConfigTestCase(TestCase):
-    def test_from_list_config() -> None:
-        RoomSyncConfig
+    def test_from_list_config(self) -> None:
+        """
+        Test that we can convert a `SlidingSyncConfig.SlidingSyncList` to a
+        `RoomSyncConfig`.
+        """
+
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.Member, "@baz"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self.assertEqual(room_sync_config.timeline_limit, 10)
+        self.assertEqual(
+            room_sync_config.required_state_map,
+            {
+                EventTypes.Name: {(EventTypes.Name, "")},
+                EventTypes.Member: {
+                    (EventTypes.Member, "@foo"),
+                    (EventTypes.Member, "@bar"),
+                    (EventTypes.Member, "@baz"),
+                },
+                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+            },
+        )
+
+    def test_from_room_subscription(self) -> None:
+        """
+        Test that we can convert a `SlidingSyncConfig.RoomSubscription` to a
+        `RoomSyncConfig`.
+        """
+        room_subscription_config = SlidingSyncConfig.RoomSubscription(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.Member, "@baz"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(room_subscription_config)
+
+        self.assertEqual(room_sync_config.timeline_limit, 10)
+        self.assertEqual(
+            room_sync_config.required_state_map,
+            {
+                EventTypes.Name: {(EventTypes.Name, "")},
+                EventTypes.Member: {
+                    (EventTypes.Member, "@foo"),
+                    (EventTypes.Member, "@bar"),
+                    (EventTypes.Member, "@baz"),
+                },
+                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+            },
+        )
+
+    def test_from_room_config_wildcard(self) -> None:
+        """
+        Test that a wildcard (*) will override all other values for the same event type.
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.Member, StateKeys.WILDCARD),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.Member, StateKeys.LAZY),
+                (EventTypes.Member, "@baz"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self.assertEqual(room_sync_config.timeline_limit, 10)
+        self.assertEqual(
+            room_sync_config.required_state_map,
+            {
+                EventTypes.Name: {(EventTypes.Name, "")},
+                EventTypes.Member: {
+                    (EventTypes.Member, "*"),
+                },
+                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+            },
+        )
+
+    def test_from_room_config_lazy_members(self) -> None:
+        """
+        `$LAZY` room members should just be another additional key next to other
+        explicit keys. We will unroll the special `$LAZY` meaning later.
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.Member, StateKeys.LAZY),
+                (EventTypes.Member, "@baz"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self.assertEqual(room_sync_config.timeline_limit, 10)
+        self.assertEqual(
+            room_sync_config.required_state_map,
+            {
+                EventTypes.Name: {(EventTypes.Name, "")},
+                EventTypes.Member: {
+                    (EventTypes.Member, "@foo"),
+                    (EventTypes.Member, "@bar"),
+                    (EventTypes.Member, StateKeys.LAZY),
+                    (EventTypes.Member, "@baz"),
+                },
+                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+            },
+        )
+
+    @parameterized.expand(
+        [
+            (
+                "No direct overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Name: {(EventTypes.Name, "")},
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@foo"),
+                            (EventTypes.Member, "@bar"),
+                        },
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Member: {
+                            (EventTypes.Member, StateKeys.LAZY),
+                            (EventTypes.Member, "@baz"),
+                        },
+                        EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {(EventTypes.Name, "")},
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@foo"),
+                            (EventTypes.Member, "@bar"),
+                            (EventTypes.Member, StateKeys.LAZY),
+                            (EventTypes.Member, "@baz"),
+                        },
+                        EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+                    },
+                ),
+            ),
+            (
+                "Wildcard overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "foo")},
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@foo"),
+                            (EventTypes.Member, "@baz"),
+                            (EventTypes.Member, "*"),
+                        },
+                        "org.matrix.flowers": {("org.matrix.flowers", "*")},
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "*")},
+                        "org.matrix.flowers": {("org.matrix.flowers", "tulips")},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {
+                            (EventTypes.Dummy, "*"),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, "*"),
+                        },
+                        "org.matrix.flowers": {("org.matrix.flowers", "*")},
+                    },
+                ),
+            ),
+        ]
+    )
+    def test_combine_room_sync_config(
+        self,
+        _test_label: str,
+        a: RoomSyncConfig,
+        b: RoomSyncConfig,
+        expected: RoomSyncConfig,
+    ) -> None:
+        """
+        Combine A into B and B into A to make sure we get the same result.
+        """
+        # Since we're mutating these in place, make a copy for each of our trials
+        room_sync_config_a = deepcopy(a)
+        room_sync_config_b = deepcopy(b)
+
+        # Combine B into A
+        room_sync_config_a.combine_room_sync_config(room_sync_config_b)
+
+        self.assertEqual(room_sync_config_a.timeline_limit, expected.timeline_limit)
+        self.assertCountEqual(
+            room_sync_config_a.required_state_map, expected.required_state_map
+        )
+        for event_type, expected_state_keys in expected.required_state_map.items():
+            self.assertCountEqual(
+                room_sync_config_a.required_state_map[event_type], expected_state_keys
+            )
+
+        # Since we're mutating these in place, make a copy for each of our trials
+        room_sync_config_a = deepcopy(a)
+        room_sync_config_b = deepcopy(b)
+
+        # Combine A into B
+        room_sync_config_b.combine_room_sync_config(room_sync_config_a)
+
+        self.assertEqual(room_sync_config_b.timeline_limit, expected.timeline_limit)
+        self.assertCountEqual(
+            room_sync_config_b.required_state_map, expected.required_state_map
+        )
+        for event_type, expected_state_keys in expected.required_state_map.items():
+            self.assertCountEqual(
+                room_sync_config_b.required_state_map[event_type], expected_state_keys
+            )
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):

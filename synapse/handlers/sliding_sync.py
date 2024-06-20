@@ -18,6 +18,7 @@
 #
 #
 import logging
+from collections import defaultdict
 from typing import TYPE_CHECKING, Dict, Final, List, Optional, Set, Tuple
 
 import attr
@@ -96,16 +97,19 @@ class RoomSyncConfig:
 
     Attributes:
         timeline_limit: The maximum number of events to return in the timeline.
-        required_state_map: Map from state type to a list of state events requested for the
-            room. The values are close to `StateKey` but actually use a syntax where you can
-            provide `*` wildcard and `$LAZY` for lazy room members as the `state_key` part
-            of the tuple (type, state_key).
+
+        required_state_map: Map from state type to a set of state (type, state_key)
+            tuples requested for the room. The values are close to `StateKey` but actually
+            use a syntax where you can provide `*` wildcard and `$LAZY` for lazy room
+            members as the `state_key` part of the tuple (type, state_key).
     """
 
     timeline_limit: int
     required_state_map: Dict[str, Set[Tuple[str, str]]]
 
-    def from_room_parameters(
+    @classmethod
+    def from_room_config(
+        cls,
         room_params: SlidingSyncConfig.CommonRoomParameters,
     ) -> "RoomSyncConfig":
         """
@@ -130,12 +134,15 @@ class RoomSyncConfig:
             # If we're getting a wildcard, that's all that matters so get rid of any
             # other state keys
             if state_key == StateKeys.WILDCARD:
-                required_state_map[state_type] = (state_type, state_key)
+                required_state_map[state_type] = {(state_type, state_key)}
             # Otherwise, just add it to the set
             else:
-                required_state_map[state_type].add((state_type, state_key))
+                if required_state_map.get(state_type) is None:
+                    required_state_map[state_type] = {(state_type, state_key)}
+                else:
+                    required_state_map[state_type].add((state_type, state_key))
 
-        return RoomSyncConfig(
+        return cls(
             timeline_limit=room_params.timeline_limit,
             required_state_map=required_state_map,
         )
@@ -164,15 +171,18 @@ class RoomSyncConfig:
             ):
                 continue
 
-            for state_key in state_key_set:
+            for _state_type, state_key in state_key_set:
                 # If we're getting a wildcard, that's all that matters so get rid of any
                 # other state keys
                 if state_key == StateKeys.WILDCARD:
-                    self.required_state_map[state_type] = (state_type, state_key)
+                    self.required_state_map[state_type] = {(state_type, state_key)}
                     break
                 # Otherwise, just add it to the set
                 else:
-                    self.required_state_map[state_type].add((state_type, state_key))
+                    if self.required_state_map.get(state_type) is None:
+                        self.required_state_map[state_type] = {(state_type, state_key)}
+                    else:
+                        self.required_state_map[state_type].add((state_type, state_key))
 
 
 class StateKeys:
@@ -348,18 +358,17 @@ class SlidingSyncHandler:
 
                         # Take the superset of the `RoomSyncConfig` for each room
                         for room_id in sliced_room_ids:
-                            room_sync_config = RoomSyncConfig.from_room_parameters(
+                            room_sync_config = RoomSyncConfig.from_room_config(
                                 list_config
                             )
                             existing_room_sync_config = relevant_room_map.get(room_id)
 
-                            relevant_room_map[room_id] = (
+                            if existing_room_sync_config is not None:
                                 existing_room_sync_config.combine_room_sync_config(
                                     room_sync_config
                                 )
-                                if existing_room_sync_config is not None
-                                else room_sync_config
-                            )
+                            else:
+                                relevant_room_map[room_id] = room_sync_config
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
                     count=len(sorted_room_info),
