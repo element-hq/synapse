@@ -551,6 +551,9 @@ class EventFederationWorkerStoreTestCase(tests.unittest.HomeserverTestCase):
         rooms.
         """
 
+        # We allow partial covers for this test
+        self.hs.get_datastores().main.tests_allow_no_chain_cover_index = True
+
         room_id = "@ROOM:local"
 
         # The silly auth graph we use to test the auth difference algorithm,
