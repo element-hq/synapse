@@ -1009,6 +1009,9 @@ class SlidingSyncHandler:
 
                     for user_id in timeline_membership:
                         required_state_types.append((EventTypes.Member, user_id))
+
+                    # TODO: We probably also care about invite, ban, kick, targets, etc
+                    # but the spec only mentions "senders".
                 else:
                     required_state_types.append((state_type, state_key))
 
