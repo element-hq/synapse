@@ -18,7 +18,17 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, Final, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Final,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    AbstractSet,
+)
 
 import attr
 from immutabledict import immutabledict
@@ -87,6 +97,17 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
     return membership != Membership.LEAVE or sender != user_id
 
 
+R = TypeVar("R")
+
+
+def get_first_item_in_set(target_set: Optional[AbstractSet[R]]) -> R:
+    """
+    Helper to grab the "first" item in a set. A set is an unordered collection so this
+    is just a way to grab some item in the set.
+    """
+    return next(iter(target_set or []), None)
+
+
 # We can't freeze this class because we want to update it in place with the
 # de-duplicated data.
 @attr.s(slots=True, auto_attribs=True)
@@ -123,8 +144,9 @@ class RoomSyncConfig:
         ) in room_params.required_state:
             # If we already have a wildcard, we don't need to add anything else
             if (
-                # This is just a tricky way to grab the first element of the set
-                next(iter(required_state_map.get(state_type) or []), None)
+                # This is just a tricky way to grab the first element of the set. We
+                # assume that if a wildcard is present, it's the only thing in the set.
+                get_first_item_in_set(required_state_map.get(state_type))
                 == (state_type, StateKeys.WILDCARD)
             ):
                 continue
@@ -316,6 +338,8 @@ class SlidingSyncHandler:
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        # Keep track of the rooms that we're going to display and need to fetch more
+        # info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
         if sync_config.lists:
             # Get all of the room IDs that the user should be able to see in the sync
@@ -359,8 +383,26 @@ class SlidingSyncHandler:
                             room_sync_config = RoomSyncConfig.from_room_config(
                                 list_config
                             )
-                            existing_room_sync_config = relevant_room_map.get(room_id)
 
+                            membership_state_keys = (
+                                room_sync_config.required_state_map.get(
+                                    EventTypes.Member
+                                )
+                            )
+                            # Exclude partially stated rooms unless the `required_state`
+                            # only has `["m.room.member", "$LAZY"]` for membership.
+                            if (
+                                is_room_partial
+                                and membership_state_keys is not None
+                                and len(membership_state_keys) == 1
+                                and get_first_item_in_set(membership_state_keys)
+                                == (EventTypes.Member, StateKeys.LAZY)
+                            ):
+                                continue
+
+                            # Update our `relevant_room_map` with the room we're going
+                            # to display and need to fetch more info about.
+                            existing_room_sync_config = relevant_room_map.get(room_id)
                             if existing_room_sync_config is not None:
                                 existing_room_sync_config.combine_room_sync_config(
                                     room_sync_config
@@ -678,9 +720,6 @@ class SlidingSyncHandler:
         user_id = user.to_string()
 
         # TODO: Apply filters
-        #
-        # TODO: Exclude partially stated rooms unless the `required_state` has
-        # `["m.room.member", "$LAZY"]`
 
         filtered_room_id_set = set(sync_room_map.keys())
 
@@ -993,6 +1032,12 @@ class SlidingSyncHandler:
                 )
             )
 
+        # TODO: Since we can't determine whether we've already sent a room down this
+        # Sliding Sync connection before (we plan to add this optimization in the
+        # future), we're always returning the requested room state instead of
+        # updates.
+        initial = True
+
         # Fetch the required state for the room
         required_state_types: List[Tuple[str, Optional[str]]] = []
         for state_type, state_key_set in room_sync_config.required_state_map.items():
@@ -1015,10 +1060,17 @@ class SlidingSyncHandler:
                 else:
                     required_state_types.append((state_type, state_key))
 
-        room_state = await self.storage_controllers.state.get_current_state(
-            room_id,
-            StateFilter.from_types(required_state_types),
-        )
+        if initial:
+            room_state = await self.storage_controllers.state.get_current_state(
+                room_id,
+                StateFilter.from_types(required_state_types),
+                await_full_state=False,
+            )
+            # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+        else:
+            # TODO: Once we can figure out if we've sent a room down this connection before,
+            # we can return updates instead of the full required state.
+            raise NotImplementedError()
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
@@ -1027,11 +1079,7 @@ class SlidingSyncHandler:
             avatar=None,
             # TODO: Dummy value
             heroes=None,
-            # TODO: Since we can't determine whether we've already sent a room down this
-            # Sliding Sync connection before (we plan to add this optimization in the
-            # future), we're always returning the requested room state instead of
-            # updates.
-            initial=True,
+            initial=initial,
             required_state=list(room_state.values()),
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
