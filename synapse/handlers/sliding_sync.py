@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, Final, List, Optional, Set, Tuple
 
 import attr
 from immutabledict import immutabledict
@@ -96,14 +96,73 @@ class RoomSyncConfig:
 
     Attributes:
         timeline_limit: The maximum number of events to return in the timeline.
-        required_state: The set of state events requested for the room. The
-            values are close to `StateKey` but actually use a syntax where you can
+        required_state_map: Map from state type to a list of state events requested for the
+            room. The values are close to `StateKey` but actually use a syntax where you can
             provide `*` wildcard and `$LAZY` for lazy room members as the `state_key` part
             of the tuple (type, state_key).
     """
 
     timeline_limit: int
-    required_state: Set[Tuple[str, str]]
+    required_state_map: Dict[str, Set[Tuple[str, str]]]
+
+    def from_list_config(list_config: SlidingSyncConfig.SlidingSyncList) -> "RoomSyncConfig":
+        """
+        Create a `RoomSyncConfig` from a `SlidingSyncList` config.
+        """
+        return RoomSyncConfig(
+            timeline_limit=list_config.timeline_limit,
+            required_state_map={
+                state_type: {(state_type, state_key) for state_key in state_keys}
+                for state_type, state_keys in list_config.required_state.items()
+            },
+        )
+
+    def combine_room_sync_config(
+        self, other_room_sync_config: "RoomSyncConfig"
+    ) -> None:
+        """
+        Combine this `RoomSyncConfig` with another `RoomSyncConfig` and take the
+        superset union of the two.
+        """
+        # Take the highest timeline limit
+        if self.timeline_limit < other_room_sync_config.timeline_limit:
+            self.timeline_limit = other_room_sync_config.timeline_limit
+
+        # Union the required state
+        for (
+            state_type,
+            state_key_set,
+        ) in other_room_sync_config.required_state_map.items():
+            # If we already have a wildcard, we don't need to add anything else
+            if (
+                # This is just a tricky way to grab the first element of the set
+                next(iter(self.required_state_map.get(state_type) or []), None)
+                == (state_type, StateKeys.WILDCARD)
+            ):
+                continue
+
+            for state_key in state_key_set:
+                # If we're getting a wildcard, that's all that matters so get rid of any
+                # other state keys
+                if state_key == StateKeys.WILDCARD:
+                    self.required_state_map[state_type] = (state_type, state_key)
+                    break
+                # Otherwise, just add it to the set
+                else:
+                    self.required_state_map[state_type].add((state_type, state_key))
+
+
+class StateKeys:
+    """
+    Understood values of the `state_key` part of the tuple (type, state_key) in
+    `required_state`.
+    """
+
+    # Include all state events of the given type
+    WILDCARD: Final = "*"
+    # Lazy-load room membership events (include room membership events for any event
+    # `sender` in the timeline)
+    LAZY: Final = "$LAZY"
 
 
 class SlidingSyncHandler:
@@ -266,25 +325,22 @@ class SlidingSyncHandler:
 
                         # Take the superset of the `RoomSyncConfig` for each room
                         for room_id in sliced_room_ids:
-                            if relevant_room_map.get(room_id) is not None:
-                                # Take the highest timeline limit
-                                if (
-                                    relevant_room_map[room_id].timeline_limit
-                                    < list_config.timeline_limit
-                                ):
-                                    relevant_room_map[room_id].timeline_limit = (
-                                        list_config.timeline_limit
-                                    )
+                            room_sync_config = RoomSyncConfig(
+                                timeline_limit=list_config.timeline_limit,
+                                required_state_map={
+                                    state_type: (state_type, state_key)
+                                    for state_type, state_key in list_config.required_state.items()
+                                },
+                            )
+                            existing_room_sync_config = relevant_room_map.get(room_id)
 
-                                # Union the required state
-                                relevant_room_map[room_id].required_state.update(
-                                    list_config.required_state
+                            relevant_room_map[room_id] = (
+                                existing_room_sync_config.combine_room_sync_config(
+                                    room_sync_config
                                 )
-                            else:
-                                relevant_room_map[room_id] = RoomSyncConfig(
-                                    timeline_limit=list_config.timeline_limit,
-                                    required_state=set(list_config.required_state),
-                                )
+                                if existing_room_sync_config is not None
+                                else room_sync_config
+                            )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
                     count=len(sorted_room_info),
@@ -910,6 +966,22 @@ class SlidingSyncHandler:
                     timeline_events, user.to_string()
                 )
             )
+
+        room_sync_config.required_state
+
+        room_state = await self._storage_controllers.state.get_current_state(
+            room_id,
+            StateFilter.from_types(
+                [
+                    (EventTypes.Member, user.to_string()),
+                    (EventTypes.CanonicalAlias, ""),
+                    (EventTypes.Name, ""),
+                    (EventTypes.Create, ""),
+                    (EventTypes.JoinRules, ""),
+                    (EventTypes.RoomAvatar, ""),
+                ]
+            ),
+        )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
