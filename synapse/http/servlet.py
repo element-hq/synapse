@@ -119,7 +119,7 @@ def parse_integer(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-        negative: whether to allow negative integers, defaults to True.
+        negative: whether to allow negative integers, defaults to False.
     Returns:
         An int value or the default.
 
@@ -164,7 +164,7 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
-    negative: bool = True,
+    negative: bool = False,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -174,7 +174,7 @@ def parse_integer_from_args(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-        negative: whether to allow negative integers, defaults to True.
+        negative: whether to allow negative integers, defaults to False.
 
     Returns:
         An int value or the default.

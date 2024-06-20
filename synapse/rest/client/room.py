@@ -510,7 +510,7 @@ class PublicRoomListRestServlet(RestServlet):
             if server:
                 raise e
 
-        limit: Optional[int] = parse_integer(request, "limit", 0, negative=False)
+        limit: Optional[int] = parse_integer(request, "limit", 0)
         since_token = parse_string(request, "since")
 
         if limit == 0:
