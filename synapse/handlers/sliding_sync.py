@@ -96,7 +96,6 @@ class RoomSyncConfig:
 
     Attributes:
         timeline_limit: The maximum number of events to return in the timeline.
-
         required_state_map: Map from state type to a set of state (type, state_key)
             tuples requested for the room. The values are close to `StateKey` but actually
             use a syntax where you can provide `*` wildcard and `$LAZY` for lazy room
@@ -994,21 +993,29 @@ class SlidingSyncHandler:
                 )
             )
 
-        # TODO: room_sync_config.required_state
+        # Fetch the required state for the room
+        required_state_types: List[Tuple[str, Optional[str]]] = []
+        for state_type, state_key_set in room_sync_config.required_state_map.items():
+            for _state_type, state_key in state_key_set:
+                if state_key == StateKeys.WILDCARD:
+                    # `None` is a wildcard in the `StateFilter`
+                    required_state_types.append((state_type, None))
+                # We need to fetch all relevant people when we're lazy-loading membership
+                if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
+                    # Everyone in the timeline is relevant
+                    timeline_membership: Set[str] = set()
+                    for timeline_event in timeline_events:
+                        timeline_membership.add(timeline_event.sender)
 
-        # room_state = await self._storage_controllers.state.get_current_state(
-        #     room_id,
-        #     StateFilter.from_types(
-        #         [
-        #             (EventTypes.Member, user.to_string()),
-        #             (EventTypes.CanonicalAlias, ""),
-        #             (EventTypes.Name, ""),
-        #             (EventTypes.Create, ""),
-        #             (EventTypes.JoinRules, ""),
-        #             (EventTypes.RoomAvatar, ""),
-        #         ]
-        #     ),
-        # )
+                    for user_id in timeline_membership:
+                        required_state_types.append((EventTypes.Member, user_id))
+                else:
+                    required_state_types.append((state_type, state_key))
+
+        room_state = await self.storage_controllers.state.get_current_state(
+            room_id,
+            StateFilter.from_types(required_state_types),
+        )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
@@ -1022,8 +1029,7 @@ class SlidingSyncHandler:
             # future), we're always returning the requested room state instead of
             # updates.
             initial=True,
-            # TODO: Dummy value
-            required_state=[],
+            required_state=list(room_state.values()),
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
             # TODO: Dummy value
