@@ -25,7 +25,16 @@ import os
 import urllib
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Awaitable, Dict, Generator, List, Optional, Tuple, Type
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Dict,
+    Generator,
+    List,
+    Optional,
+    Tuple,
+    Type,
+)
 
 import attr
 
@@ -37,7 +46,12 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
+from synapse.util import Clock
 from synapse.util.stringutils import is_ascii
+
+if TYPE_CHECKING:
+    from synapse.storage.databases.main.media_repository import LocalMedia
+
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +272,69 @@ def _can_encode_filename_as_token(x: str) -> bool:
         if ord(c) >= 127 or ord(c) <= 32 or c in _FILENAME_SEPARATOR_CHARS:
             return False
     return True
+
+
+async def respond_with_multipart_responder(
+    clock: Clock,
+    request: SynapseRequest,
+    responder: "Optional[Responder]",
+    media_info: "LocalMedia",
+) -> None:
+    """
+    Responds to requests originating from the federation media `/download` endpoint by
+    streaming a multipart/mixed response
+
+    Args:
+        request: the federation request to respond to
+        responder: the responder which will send the response
+        media_info: metadata about the media item
+    """
+    if not responder:
+        respond_404(request)
+        return
+
+    # If we have a responder we *must* use it as a context manager.
+    with responder:
+        if request._disconnected:
+            logger.warning(
+                "Not sending response to request %s, already disconnected.", request
+            )
+            return
+
+        from synapse.media.media_storage import MultipartFileConsumer
+
+        # note that currently the json_object is just {}, this will change when linked media
+        # is implemented
+        multipart_consumer = MultipartFileConsumer(
+            clock, request, media_info.media_type, {}
+        )
+
+        logger.debug("Responding to media request with responder %s", responder)
+        # ensure that the response length takes into account the multipart boundary and headers,
+        # which is currently 180 bytes (note that this will need to be determined dynamically when
+        # the json object passed into the multipart file consumer isn't just {})
+        if media_info.media_length is not None:
+            request.setHeader(
+                b"Content-Length", b"%d" % (media_info.media_length + 180,)
+            )
+        request.setHeader(
+            b"Content-Type",
+            b"multipart/mixed; boundary=%s" % multipart_consumer.boundary,
+        )
+
+        try:
+            await responder.write_to_consumer(multipart_consumer)
+        except Exception as e:
+            # The majority of the time this will be due to the client having gone
+            # away. Unfortunately, Twisted simply throws a generic exception at us
+            # in that case.
+            logger.warning("Failed to write to consumer: %s %s", type(e), e)
+
+            # Unregister the producer, if it has one, so Twisted doesn't complain
+            if request.producer:
+                request.unregisterProducer()
+
+    finish_request(request)
 
 
 async def respond_with_responder(
