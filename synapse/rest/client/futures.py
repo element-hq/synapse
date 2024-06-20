@@ -16,7 +16,7 @@
 #
 #
 
-""" This module contains REST servlets to do with futures: /futures/<paths> """
+""" This module contains REST servlets to do with futures: /future/<paths> """
 import logging
 from typing import TYPE_CHECKING, List, Tuple
 
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 # TODO: Needs unit testing
 class FuturesTokenServlet(RestServlet):
     PATTERNS = client_patterns(
-        r"/org\.matrix\.msc4140/futures/(?P<token>[^/]*)$", releases=(), v1=False
+        r"/org\.matrix\.msc4140/future/(?P<token>[^/]*)$", releases=(), v1=False
     )
     CATEGORY = "Future management requests"
 
@@ -72,7 +72,7 @@ class FuturesTokenServlet(RestServlet):
 
 # TODO: Needs unit testing
 class FuturesServlet(RestServlet):
-    PATTERNS = client_patterns(r"/org\.matrix\.msc4140/futures$", releases=(), v1=False)
+    PATTERNS = client_patterns(r"/org\.matrix\.msc4140/future$", releases=(), v1=False)
     CATEGORY = "Future management requests"
 
     def __init__(self, hs: "HomeServer"):
