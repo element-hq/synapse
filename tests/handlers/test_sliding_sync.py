@@ -18,10 +18,10 @@
 #
 #
 import logging
+from copy import deepcopy
 from unittest.mock import patch
 
 from parameterized import parameterized
-from copy import deepcopy
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -43,6 +43,19 @@ logger = logging.getLogger(__name__)
 
 
 class RoomSyncConfigTestCase(TestCase):
+    def _assert_room_config_equal(
+        self, actual: RoomSyncConfig, expected: RoomSyncConfig
+    ) -> None:
+        self.assertEqual(actual.timeline_limit, expected.timeline_limit)
+
+        # `self.assertEqual(...)` works fine to catch differences but the output is
+        # almost impossible to read because of the way it truncates the output
+        self.assertCountEqual(actual.required_state_map, expected.required_state_map)
+        for event_type, expected_state_keys in expected.required_state_map.items():
+            self.assertCountEqual(
+                actual.required_state_map[event_type], expected_state_keys
+            )
+
     def test_from_list_config(self) -> None:
         """
         Test that we can convert a `SlidingSyncConfig.SlidingSyncList` to a
@@ -62,18 +75,20 @@ class RoomSyncConfigTestCase(TestCase):
 
         room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
-        self.assertEqual(room_sync_config.timeline_limit, 10)
-        self.assertEqual(
-            room_sync_config.required_state_map,
-            {
-                EventTypes.Name: {(EventTypes.Name, "")},
-                EventTypes.Member: {
-                    (EventTypes.Member, "@foo"),
-                    (EventTypes.Member, "@bar"),
-                    (EventTypes.Member, "@baz"),
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    EventTypes.Name: {(EventTypes.Name, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, "@baz"),
+                    },
+                    EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                 },
-                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
-            },
+            ),
         )
 
     def test_from_room_subscription(self) -> None:
@@ -94,18 +109,20 @@ class RoomSyncConfigTestCase(TestCase):
 
         room_sync_config = RoomSyncConfig.from_room_config(room_subscription_config)
 
-        self.assertEqual(room_sync_config.timeline_limit, 10)
-        self.assertEqual(
-            room_sync_config.required_state_map,
-            {
-                EventTypes.Name: {(EventTypes.Name, "")},
-                EventTypes.Member: {
-                    (EventTypes.Member, "@foo"),
-                    (EventTypes.Member, "@bar"),
-                    (EventTypes.Member, "@baz"),
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    EventTypes.Name: {(EventTypes.Name, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, "@baz"),
+                    },
+                    EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                 },
-                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
-            },
+            ),
         )
 
     def test_from_room_config_wildcard(self) -> None:
@@ -127,16 +144,18 @@ class RoomSyncConfigTestCase(TestCase):
 
         room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
-        self.assertEqual(room_sync_config.timeline_limit, 10)
-        self.assertEqual(
-            room_sync_config.required_state_map,
-            {
-                EventTypes.Name: {(EventTypes.Name, "")},
-                EventTypes.Member: {
-                    (EventTypes.Member, "*"),
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    EventTypes.Name: {(EventTypes.Name, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, "*"),
+                    },
+                    EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                 },
-                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
-            },
+            ),
         )
 
     def test_from_room_config_lazy_members(self) -> None:
@@ -158,19 +177,21 @@ class RoomSyncConfigTestCase(TestCase):
 
         room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
-        self.assertEqual(room_sync_config.timeline_limit, 10)
-        self.assertEqual(
-            room_sync_config.required_state_map,
-            {
-                EventTypes.Name: {(EventTypes.Name, "")},
-                EventTypes.Member: {
-                    (EventTypes.Member, "@foo"),
-                    (EventTypes.Member, "@bar"),
-                    (EventTypes.Member, StateKeys.LAZY),
-                    (EventTypes.Member, "@baz"),
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    EventTypes.Name: {(EventTypes.Name, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, StateKeys.LAZY),
+                        (EventTypes.Member, "@baz"),
+                    },
+                    EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                 },
-                EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
-            },
+            ),
         )
 
     @parameterized.expand(
@@ -222,8 +243,6 @@ class RoomSyncConfigTestCase(TestCase):
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "foo")},
                         EventTypes.Member: {
-                            (EventTypes.Member, "@foo"),
-                            (EventTypes.Member, "@baz"),
                             (EventTypes.Member, "*"),
                         },
                         "org.matrix.flowers": {("org.matrix.flowers", "*")},
@@ -270,14 +289,7 @@ class RoomSyncConfigTestCase(TestCase):
         # Combine B into A
         room_sync_config_a.combine_room_sync_config(room_sync_config_b)
 
-        self.assertEqual(room_sync_config_a.timeline_limit, expected.timeline_limit)
-        self.assertCountEqual(
-            room_sync_config_a.required_state_map, expected.required_state_map
-        )
-        for event_type, expected_state_keys in expected.required_state_map.items():
-            self.assertCountEqual(
-                room_sync_config_a.required_state_map[event_type], expected_state_keys
-            )
+        self._assert_room_config_equal(room_sync_config_a, expected)
 
         # Since we're mutating these in place, make a copy for each of our trials
         room_sync_config_a = deepcopy(a)
@@ -286,14 +298,7 @@ class RoomSyncConfigTestCase(TestCase):
         # Combine A into B
         room_sync_config_b.combine_room_sync_config(room_sync_config_a)
 
-        self.assertEqual(room_sync_config_b.timeline_limit, expected.timeline_limit)
-        self.assertCountEqual(
-            room_sync_config_b.required_state_map, expected.required_state_map
-        )
-        for event_type, expected_state_keys in expected.required_state_map.items():
-            self.assertCountEqual(
-                room_sync_config_b.required_state_map[event_type], expected_state_keys
-            )
+        self._assert_room_config_equal(room_sync_config_b, expected)
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):

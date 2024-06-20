@@ -18,7 +18,6 @@
 #
 #
 import logging
-from collections import defaultdict
 from typing import TYPE_CHECKING, Dict, Final, List, Optional, Set, Tuple
 
 import attr
