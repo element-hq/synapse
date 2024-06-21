@@ -547,7 +547,9 @@ class JsonResource(DirectServeJsonResource):
 
         # Is it synchronous? We'll allow this for now.
         if isinstance(raw_callback_return, (defer.Deferred, types.CoroutineType)):
-            callback_return = await raw_callback_return
+            callback_return = await measure_coroutine(
+                request.request_metrics.name, raw_callback_return
+            )
         else:
             callback_return = raw_callback_return
 
