@@ -1237,6 +1237,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+        self.storage_controllers = hs.get_storage_controllers()
 
     def _create_dm_room(
         self,
@@ -2266,3 +2267,60 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             False,
             channel.json_body["rooms"][room_id1],
         )
+
+    def test_rooms_required_state_initial_sync(self) -> None:
+        """
+        Test `rooms.required_state` returns requested state events in the room during an
+        initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.RoomHistoryVisibility, ""],
+                            # This one doesn't exist in the room
+                            [EventTypes.Tombstone, ""],
+                        ],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state_ids(room_id1)
+        )
+
+        self.assertEqual(
+            [
+                state_event["event_id"]
+                for state_event in channel.json_body["rooms"][room_id1][
+                    "required_state"
+                ]
+            ],
+            [
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            ],
+            channel.json_body["rooms"][room_id1]["required_state"],
+        )
+
+    # TODO: Add more `required_state` tests
+
+    # TODO: Add tests for partially-stated rooms being excluded
