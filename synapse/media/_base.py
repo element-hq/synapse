@@ -309,7 +309,6 @@ async def respond_with_multipart_responder(
             clock, request, media_info.media_type, {}
         )
 
-
         logger.debug("Responding to media request with responder %s", responder)
         # ensure that the response length takes into account the multipart boundary and headers,
         # which is currently 177 bytes (note that this will need to be determined dynamically when
