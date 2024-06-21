@@ -334,10 +334,7 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             request.request_metrics.name = self.__class__.__name__
 
             with trace_servlet(request, self._extract_context):
-                callback_return = await measure_coroutine(
-                    request.request_metrics.name, self._async_render(request)
-                )
-
+                callback_return = await self._async_render(request)
                 if callback_return is not None:
                     code, response = callback_return
                     self._send_response(request, code, response)
@@ -368,7 +365,9 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
 
             # Is it synchronous? We'll allow this for now.
             if isawaitable(raw_callback_return):
-                callback_return = await raw_callback_return
+                callback_return = await measure_coroutine(
+                    request.request_metrics.name, raw_callback_return
+                )
             else:
                 callback_return = raw_callback_return
 
