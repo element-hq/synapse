@@ -20,6 +20,7 @@
 import logging
 from typing import (
     TYPE_CHECKING,
+    AbstractSet,
     Dict,
     Final,
     List,
@@ -27,7 +28,6 @@ from typing import (
     Set,
     Tuple,
     TypeVar,
-    AbstractSet,
 )
 
 import attr
@@ -100,7 +100,7 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
 R = TypeVar("R")
 
 
-def get_first_item_in_set(target_set: Optional[AbstractSet[R]]) -> R:
+def get_first_item_in_set(target_set: Optional[AbstractSet[R]]) -> Optional[R]:
     """
     Helper to grab the "first" item in a set. A set is an unordered collection so this
     is just a way to grab some item in the set.
@@ -167,6 +167,17 @@ class RoomSyncConfig:
             required_state_map=required_state_map,
         )
 
+    def deep_copy(self) -> "RoomSyncConfig":
+        required_state_map: Dict[str, Set[Tuple[str, str]]] = {
+            state_type: state_key_set.copy()
+            for state_type, state_key_set in self.required_state_map.items()
+        }
+
+        return RoomSyncConfig(
+            timeline_limit=self.timeline_limit,
+            required_state_map=required_state_map,
+        )
+
     def combine_room_sync_config(
         self, other_room_sync_config: "RoomSyncConfig"
     ) -> None:
@@ -186,7 +197,7 @@ class RoomSyncConfig:
             # If we already have a wildcard, we don't need to add anything else
             if (
                 # This is just a tricky way to grab the first element of the set
-                next(iter(self.required_state_map.get(state_type) or []), None)
+                get_first_item_in_set(self.required_state_map.get(state_type))
                 == (state_type, StateKeys.WILDCARD)
             ):
                 continue
@@ -358,31 +369,36 @@ class SlidingSyncHandler:
                         sync_config.user, sync_room_map, list_config.filters, to_token
                     )
 
+                # Sort the list
                 sorted_room_info = await self.sort_rooms(
                     filtered_sync_room_map, to_token
                 )
 
+                # Find which rooms are partially stated and may need to be filtered out
+                # depending on the `required_state` requested (see below).
+                partial_state_room_map = await self.store.is_partial_state_room_batched(
+                    filtered_sync_room_map.keys()
+                )
+
+                # Since creating the `RoomSyncConfig` takes some work, let's just do it
+                # once and make a copy whenever we need it.
+                room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
-                        sliced_room_ids = [
-                            room_id
-                            for room_id, _ in sorted_room_info[range[0] : range[1]]
-                        ]
+                        room_ids_in_list = []
 
-                        ops.append(
-                            SlidingSyncResult.SlidingWindowList.Operation(
-                                op=OperationType.SYNC,
-                                range=range,
-                                room_ids=sliced_room_ids,
-                            )
-                        )
-
-                        # Take the superset of the `RoomSyncConfig` for each room
-                        for room_id in sliced_room_ids:
-                            room_sync_config = RoomSyncConfig.from_room_config(
-                                list_config
-                            )
+                        # We're going to loop through the sorted list of rooms starting
+                        # at the range start index and keep adding rooms until we fill
+                        # up the range or run out of rooms.
+                        current_range_index = range[0]
+                        range_end_index = range[1]
+                        while (
+                            current_range_index < range_end_index
+                            and current_range_index <= len(sorted_room_info) - 1
+                        ):
+                            room_id, _ = sorted_room_info[current_range_index]
 
                             membership_state_keys = (
                                 room_sync_config.required_state_map.get(
@@ -392,14 +408,19 @@ class SlidingSyncHandler:
                             # Exclude partially stated rooms unless the `required_state`
                             # only has `["m.room.member", "$LAZY"]` for membership.
                             if (
-                                is_room_partial
+                                partial_state_room_map.get(room_id)
                                 and membership_state_keys is not None
                                 and len(membership_state_keys) == 1
                                 and get_first_item_in_set(membership_state_keys)
                                 == (EventTypes.Member, StateKeys.LAZY)
                             ):
+                                # Since we're skipping this room, we need to allow
+                                # for the next room to take its place in the list
+                                range_end_index += 1
                                 continue
 
+                            # Take the superset of the `RoomSyncConfig` for each room.
+                            #
                             # Update our `relevant_room_map` with the room we're going
                             # to display and need to fetch more info about.
                             existing_room_sync_config = relevant_room_map.get(room_id)
@@ -408,7 +429,22 @@ class SlidingSyncHandler:
                                     room_sync_config
                                 )
                             else:
-                                relevant_room_map[room_id] = room_sync_config
+                                # Make a copy so if we modify it later, it doesn't
+                                # affect all references.
+                                relevant_room_map[room_id] = (
+                                    room_sync_config.deep_copy()
+                                )
+
+                            room_ids_in_list.append(room_id)
+                            current_range_index += 1
+
+                        ops.append(
+                            SlidingSyncResult.SlidingWindowList.Operation(
+                                op=OperationType.SYNC,
+                                range=range,
+                                room_ids=room_ids_in_list,
+                            )
+                        )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
                     count=len(sorted_room_info),
