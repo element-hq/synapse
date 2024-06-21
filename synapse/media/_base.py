@@ -309,14 +309,16 @@ async def respond_with_multipart_responder(
             clock, request, media_info.media_type, {}
         )
 
+
         logger.debug("Responding to media request with responder %s", responder)
         # ensure that the response length takes into account the multipart boundary and headers,
-        # which is currently 180 bytes (note that this will need to be determined dynamically when
+        # which is currently 177 bytes (note that this will need to be determined dynamically when
         # the json object passed into the multipart file consumer isn't just {})
         if media_info.media_length is not None:
             request.setHeader(
-                b"Content-Length", b"%d" % (media_info.media_length + 180,)
+                b"Content-Length", b"%d" % (media_info.media_length + 177,)
             )
+
         request.setHeader(
             b"Content-Type",
             b"multipart/mixed; boundary=%s" % multipart_consumer.boundary,
