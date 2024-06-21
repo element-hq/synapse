@@ -292,6 +292,9 @@ class RoomStateEventRestServlet(RestServlet):
         try:
             if event_type == EventTypes.Member:
                 membership = content.get("membership", None)
+                if not isinstance(membership, str):
+                    raise SynapseError(400, "Invalid membership (must be a string)")
+
                 event_id, _ = await self.room_member_handler.update_membership(
                     requester,
                     target=UserID.from_string(state_key),
@@ -414,6 +417,7 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         super().__init__(hs)
         super(ResolveRoomIdMixin, self).__init__(hs)  # ensure the Mixin is set up
         self.auth = hs.get_auth()
+        self._support_via = hs.config.experimental.msc4156_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /join/$room_identifier[/$txn_id]
@@ -432,6 +436,13 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
         remote_room_hosts = parse_strings_from_args(args, "server_name", required=False)
+        if self._support_via:
+            remote_room_hosts = parse_strings_from_args(
+                args,
+                "org.matrix.msc4156.via",
+                default=remote_room_hosts,
+                required=False,
+            )
         room_id, remote_room_hosts = await self.resolve_room_id(
             room_identifier,
             remote_room_hosts,

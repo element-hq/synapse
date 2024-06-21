@@ -57,7 +57,7 @@ from twisted.internet.interfaces import IReactorTime
 from twisted.internet.task import Cooperator
 from twisted.web.client import ResponseFailed
 from twisted.web.http_headers import Headers
-from twisted.web.iweb import IAgent, IBodyProducer, IResponse
+from twisted.web.iweb import UNKNOWN_LENGTH, IAgent, IBodyProducer, IResponse
 
 import synapse.metrics
 import synapse.util.retryutils
@@ -68,6 +68,7 @@ from synapse.api.errors import (
     RequestSendFailed,
     SynapseError,
 )
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.crypto.context_factory import FederationPolicyForHTTPS
 from synapse.http import QuieterFileBodyProducer
 from synapse.http.client import (
@@ -1411,9 +1412,11 @@ class MatrixFederationHttpClient:
         destination: str,
         path: str,
         output_stream: BinaryIO,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+        max_size: int,
         args: Optional[QueryParams] = None,
         retry_on_dns_fail: bool = True,
-        max_size: Optional[int] = None,
         ignore_backoff: bool = False,
         follow_redirects: bool = False,
     ) -> Tuple[int, Dict[bytes, List[bytes]]]:
@@ -1422,6 +1425,10 @@ class MatrixFederationHttpClient:
             destination: The remote server to send the HTTP request to.
             path: The HTTP path to GET.
             output_stream: File to write the response body to.
+            download_ratelimiter: a ratelimiter to limit remote media downloads, keyed to
+                requester IP
+            ip_address: IP address of the requester
+            max_size: maximum allowable size in bytes of the file
             args: Optional dictionary used to create the query string.
             ignore_backoff: true to ignore the historical backoff data
                 and try the request anyway.
@@ -1441,10 +1448,26 @@ class MatrixFederationHttpClient:
                 federation whitelist
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
+            SynapseError: If the requested file exceeds ratelimits
         """
         request = MatrixFederationRequest(
             method="GET", destination=destination, path=path, query=args
         )
+
+        # check for a minimum balance of 1MiB in ratelimiter before initiating request
+        send_req, _ = await download_ratelimiter.can_do_action(
+            requester=None, key=ip_address, n_actions=1048576, update=False
+        )
+
+        if not send_req:
+            msg = "Requested file size exceeds ratelimits"
+            logger.warning(
+                "{%s} [%s] %s",
+                request.txn_id,
+                request.destination,
+                msg,
+            )
+            raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
 
         response = await self._send_request(
             request,
@@ -1455,12 +1478,36 @@ class MatrixFederationHttpClient:
 
         headers = dict(response.headers.getAllRawHeaders())
 
+        expected_size = response.length
+        # if we don't get an expected length then use the max length
+        if expected_size == UNKNOWN_LENGTH:
+            expected_size = max_size
+            logger.debug(
+                f"File size unknown, assuming file is max allowable size: {max_size}"
+            )
+
+        read_body, _ = await download_ratelimiter.can_do_action(
+            requester=None,
+            key=ip_address,
+            n_actions=expected_size,
+        )
+        if not read_body:
+            msg = "Requested file size exceeds ratelimits"
+            logger.warning(
+                "{%s} [%s] %s",
+                request.txn_id,
+                request.destination,
+                msg,
+            )
+            raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
+
         try:
-            d = read_body_with_max_size(response, output_stream, max_size)
+            # add a byte of headroom to max size as function errs at >=
+            d = read_body_with_max_size(response, output_stream, expected_size + 1)
             d.addTimeout(self.default_timeout_seconds, self.reactor)
             length = await make_deferred_yieldable(d)
         except BodyExceededMaxSize:
-            msg = "Requested file is too large > %r bytes" % (max_size,)
+            msg = "Requested file is too large > %r bytes" % (expected_size,)
             logger.warning(
                 "{%s} [%s] %s",
                 request.txn_id,

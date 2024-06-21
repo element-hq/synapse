@@ -330,9 +330,12 @@ class RestHelper:
             data,
         )
 
-        assert channel.code == expect_code, "Expected: %d, got: %d, resp: %r" % (
+        assert (
+            channel.code == expect_code
+        ), "Expected: %d, got: %d, PUT %s -> resp: %r" % (
             expect_code,
             channel.code,
+            path,
             channel.result["body"],
         )
 

@@ -1,1 +1,0 @@
-Fix bug where typing updates would not be sent when using workers after a restart.

@@ -35,7 +35,7 @@ class RoomsForUser:
     sender: str
     membership: str
     event_id: str
-    stream_ordering: int
+    event_pos: PersistedEventPosition
     room_version_id: str
 
 

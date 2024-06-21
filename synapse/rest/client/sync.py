@@ -33,6 +33,7 @@ from synapse.events.utils import (
     format_event_raw,
 )
 from synapse.handlers.presence import format_user_presence_state
+from synapse.handlers.sliding_sync import SlidingSyncConfig, SlidingSyncResult
 from synapse.handlers.sync import (
     ArchivedSyncResult,
     InvitedSyncResult,
@@ -43,10 +44,17 @@ from synapse.handlers.sync import (
     SyncVersion,
 )
 from synapse.http.server import HttpServer
-from synapse.http.servlet import RestServlet, parse_boolean, parse_integer, parse_string
+from synapse.http.servlet import (
+    RestServlet,
+    parse_and_validate_json_object_from_request,
+    parse_boolean,
+    parse_integer,
+    parse_string,
+)
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
 from synapse.types import JsonDict, Requester, StreamToken
+from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
 
@@ -735,8 +743,228 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         return 200, response
 
 
+class SlidingSyncRestServlet(RestServlet):
+    """
+    API endpoint for MSC3575 Sliding Sync `/sync`. Allows for clients to request a
+    subset (sliding window) of rooms, state, and timeline events (just what they need)
+    in order to bootstrap quickly and subscribe to only what the client cares about.
+    Because the client can specify what it cares about, we can respond quickly and skip
+    all of the work we would normally have to do with a sync v2 response.
+
+    Request query parameters:
+        timeout: How long to wait for new events in milliseconds.
+        pos: Stream position token when asking for incremental deltas.
+
+    Request body::
+        {
+            // Sliding Window API
+            "lists": {
+                "foo-list": {
+                    "ranges": [ [0, 99] ],
+                    "sort": [ "by_notification_level", "by_recency", "by_name" ],
+                    "required_state": [
+                        ["m.room.join_rules", ""],
+                        ["m.room.history_visibility", ""],
+                        ["m.space.child", "*"]
+                    ],
+                    "timeline_limit": 10,
+                    "filters": {
+                        "is_dm": true
+                    },
+                    "bump_event_types": [ "m.room.message", "m.room.encrypted" ],
+                }
+            },
+            // Room Subscriptions API
+            "room_subscriptions": {
+                "!sub1:bar": {
+                    "required_state": [ ["*","*"] ],
+                    "timeline_limit": 10,
+                    "include_old_rooms": {
+                        "timeline_limit": 1,
+                        "required_state": [ ["m.room.tombstone", ""], ["m.room.create", ""] ],
+                    }
+                }
+            },
+            // Extensions API
+            "extensions": {}
+        }
+
+    Response JSON::
+        {
+            "next_pos": "s58_224_0_13_10_1_1_16_0_1",
+            "lists": {
+                "foo-list": {
+                    "count": 1337,
+                    "ops": [{
+                        "op": "SYNC",
+                        "range": [0, 99],
+                        "room_ids": [
+                            "!foo:bar",
+                            // ... 99 more room IDs
+                        ]
+                    }]
+                }
+            },
+            // Aggregated rooms from lists and room subscriptions
+            "rooms": {
+                // Room from room subscription
+                "!sub1:bar": {
+                    "name": "Alice and Bob",
+                    "avatar": "mxc://...",
+                    "initial": true,
+                    "required_state": [
+                        {"sender":"@alice:example.com","type":"m.room.create", "state_key":"", "content":{"creator":"@alice:example.com"}},
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.room.member", "state_key":"@alice:example.com", "content":{"membership":"join"}}
+                    ],
+                    "timeline": [
+                        {"sender":"@alice:example.com","type":"m.room.create", "state_key":"", "content":{"creator":"@alice:example.com"}},
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.room.member", "state_key":"@alice:example.com", "content":{"membership":"join"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}},
+                    ],
+                    "prev_batch": "t111_222_333",
+                    "joined_count": 41,
+                    "invited_count": 1,
+                    "notification_count": 1,
+                    "highlight_count": 0
+                },
+                // rooms from list
+                "!foo:bar": {
+                    "name": "The calculated room name",
+                    "avatar": "mxc://...",
+                    "initial": true,
+                    "required_state": [
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.history_visibility", "state_key":"", "content":{"history_visibility":"joined"}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!foo:example.com", "content":{"via":["example.com"]}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!bar:example.com", "content":{"via":["example.com"]}},
+                        {"sender":"@alice:example.com","type":"m.space.child", "state_key":"!baz:example.com", "content":{"via":["example.com"]}}
+                    ],
+                    "timeline": [
+                        {"sender":"@alice:example.com","type":"m.room.join_rules", "state_key":"", "content":{"join_rule":"invite"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"A"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"B"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"C"}},
+                        {"sender":"@alice:example.com","type":"m.room.message", "content":{"body":"D"}},
+                    ],
+                    "prev_batch": "t111_222_333",
+                    "joined_count": 4,
+                    "invited_count": 0,
+                    "notification_count": 54,
+                    "highlight_count": 3
+                },
+                 // ... 99 more items
+            },
+            "extensions": {}
+        }
+    """
+
+    PATTERNS = client_patterns(
+        "/org.matrix.simplified_msc3575/sync$", releases=[], v1=False, unstable=True
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+        self.filtering = hs.get_filtering()
+        self.sliding_sync_handler = hs.get_sliding_sync_handler()
+
+    # TODO: Update this to `on_GET` once we figure out how we want to handle params
+    async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        user = requester.user
+        device_id = requester.device_id
+
+        timeout = parse_integer(request, "timeout", default=0)
+        # Position in the stream
+        from_token_string = parse_string(request, "pos")
+
+        from_token = None
+        if from_token_string is not None:
+            from_token = await StreamToken.from_string(self.store, from_token_string)
+
+        # TODO: We currently don't know whether we're going to use sticky params or
+        # maybe some filters like sync v2  where they are built up once and referenced
+        # by filter ID. For now, we will just prototype with always passing everything
+        # in.
+        body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
+        logger.info("Sliding sync request: %r", body)
+
+        sync_config = SlidingSyncConfig(
+            user=user,
+            device_id=device_id,
+            # FIXME: Currently, we're just manually copying the fields from the
+            # `SlidingSyncBody` into the config. How can we gurantee into the future
+            # that we don't forget any? I would like something more structured like
+            # `copy_attributes(from=body, to=config)`
+            lists=body.lists,
+            room_subscriptions=body.room_subscriptions,
+            extensions=body.extensions,
+        )
+
+        sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(
+            requester,
+            sync_config,
+            from_token,
+            timeout,
+        )
+
+        # The client may have disconnected by now; don't bother to serialize the
+        # response if so.
+        if request._disconnected:
+            logger.info("Client has disconnected; not serializing response.")
+            return 200, {}
+
+        response_content = await self.encode_response(sliding_sync_results)
+
+        return 200, response_content
+
+    # TODO: Is there a better way to encode things?
+    async def encode_response(
+        self,
+        sliding_sync_result: SlidingSyncResult,
+    ) -> JsonDict:
+        response: JsonDict = defaultdict(dict)
+
+        response["next_pos"] = await sliding_sync_result.next_pos.to_string(self.store)
+        serialized_lists = self.encode_lists(sliding_sync_result.lists)
+        if serialized_lists:
+            response["lists"] = serialized_lists
+        response["rooms"] = {}  # TODO: sliding_sync_result.rooms
+        response["extensions"] = {}  # TODO: sliding_sync_result.extensions
+
+        return response
+
+    def encode_lists(
+        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+    ) -> JsonDict:
+        def encode_operation(
+            operation: SlidingSyncResult.SlidingWindowList.Operation,
+        ) -> JsonDict:
+            return {
+                "op": operation.op.value,
+                "range": operation.range,
+                "room_ids": operation.room_ids,
+            }
+
+        serialized_lists = {}
+        for list_key, list_result in lists.items():
+            serialized_lists[list_key] = {
+                "count": list_result.count,
+                "ops": [encode_operation(op) for op in list_result.ops],
+            }
+
+        return serialized_lists
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc3575_enabled:
+        SlidingSyncRestServlet(hs).register(http_server)
         SlidingSyncE2eeRestServlet(hs).register(http_server)

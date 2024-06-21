@@ -148,7 +148,6 @@ class EventHandler:
     def __init__(self, hs: "HomeServer"):
         self.store = hs.get_datastores().main
         self._storage_controllers = hs.get_storage_controllers()
-        self._config = hs.config
 
     async def get_event(
         self,
@@ -194,7 +193,6 @@ class EventHandler:
             user.to_string(),
             [event],
             is_peeking=is_peeking,
-            msc4115_membership_on_events=self._config.experimental.msc4115_membership_on_events,
         )
 
         if not filtered:
