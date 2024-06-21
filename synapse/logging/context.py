@@ -50,6 +50,7 @@ from typing import (
 )
 
 import attr
+from prometheus_client import Counter
 from typing_extensions import Literal, ParamSpec
 
 from twisted.internet import defer, threads
@@ -60,6 +61,10 @@ if TYPE_CHECKING:
     from synapse.types import ISynapseReactor
 
 logger = logging.getLogger(__name__)
+
+context_ru_utime = Counter(
+    "synapse_logging_context_ru_utime", "utime in log context", ("name",)
+)
 
 try:
     import resource
@@ -982,13 +987,20 @@ _T = TypeVar("_T")
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _ResourceTracker(Generator[defer.Deferred[Any], Any, _T]):
+    name: str
     gen: Generator[defer.Deferred[Any], Any, _T]
 
     def send(self, val: Any) -> defer.Deferred[_T]:
+        rusage_start = get_thread_resource_usage()
+
         try:
             return self.gen.send(val)
         finally:
-            pass
+            rusage_end = get_thread_resource_usage()
+            if rusage_start and rusage_end:
+                context_ru_utime.labels(self.name).inc(
+                    max(0, rusage_end.ru_utime - rusage_start.ru_utime)
+                )
 
     @overload
     def throw(
@@ -1006,20 +1018,27 @@ class _ResourceTracker(Generator[defer.Deferred[Any], Any, _T]):
 
     def throw(self, a: Any, b: Any = None, c: Any = None) -> defer.Deferred[Any]:
         try:
-            return self.throw(a, b, c)
+            return self.gen.throw(a, b, c)
         finally:
             pass
 
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _ResourceTracker2(Coroutine[defer.Deferred[Any], Any, _T]):
+    name: str
     gen: Coroutine[defer.Deferred[Any], Any, _T]
 
     def send(self, val: Any) -> defer.Deferred[_T]:
+        rusage_start = get_thread_resource_usage()
+
         try:
             return self.gen.send(val)
         finally:
-            pass
+            rusage_end = get_thread_resource_usage()
+            if rusage_start and rusage_end:
+                context_ru_utime.labels(self.name).inc(
+                    max(0, rusage_end.ru_utime - rusage_start.ru_utime)
+                )
 
     @overload
     def throw(
@@ -1037,12 +1056,18 @@ class _ResourceTracker2(Coroutine[defer.Deferred[Any], Any, _T]):
 
     def throw(self, a: Any, b: Any = None, c: Any = None) -> defer.Deferred[Any]:
         try:
-            return self.throw(a, b, c)
+            return self.gen.throw(a, b, c)
         finally:
             pass
 
     def __await__(self) -> Generator[defer.Deferred[Any], Any, _T]:
-        return _ResourceTracker(self.gen.__await__())
+        return _ResourceTracker(self.name, self.gen.__await__())
 
     def close(self) -> None:
         return self.gen.close()
+
+
+async def measure_coroutine(
+    name: str, co: Coroutine[defer.Deferred[Any], Any, _T]
+) -> _T:
+    return await _ResourceTracker2(name, co)

@@ -72,7 +72,12 @@ from synapse.api.errors import (
     UnrecognizedRequestError,
 )
 from synapse.config.homeserver import HomeServerConfig
-from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
+from synapse.logging.context import (
+    defer_to_thread,
+    measure_coroutine,
+    preserve_fn,
+    run_in_background,
+)
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
 from synapse.util import json_encoder
 from synapse.util.caches import intern_dict
@@ -329,7 +334,9 @@ class _AsyncResource(resource.Resource, metaclass=abc.ABCMeta):
             request.request_metrics.name = self.__class__.__name__
 
             with trace_servlet(request, self._extract_context):
-                callback_return = await self._async_render(request)
+                callback_return = await measure_coroutine(
+                    request.request_metrics.name, self._async_render(request)
+                )
 
                 if callback_return is not None:
                     code, response = callback_return
