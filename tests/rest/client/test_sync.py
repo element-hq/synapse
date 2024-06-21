@@ -2322,5 +2322,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
     # TODO: Add more `required_state` tests
+    # TODO: Add test for `"required_state": [ ["*","*"] ],`
+    # TODO: Add test for `"required_state": [ ["*","foobarbaz"] ],`
 
     # TODO: Add tests for partially-stated rooms being excluded
