@@ -665,14 +665,13 @@ class PreserveLoggingContext:
                 )
 
 
-_CURRENT_CONTEXT_VAR: ContextVar[LoggingContextOrSentinel] = ContextVar(
-    "current_context", default=SENTINEL_CONTEXT
-)
+_thread_local = threading.local()
+_thread_local.current_context = SENTINEL_CONTEXT
 
 
 def current_context() -> LoggingContextOrSentinel:
     """Get the current logging context from thread local storage"""
-    return _CURRENT_CONTEXT_VAR.get()
+    return getattr(_thread_local, "current_context", SENTINEL_CONTEXT)
 
 
 def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSentinel:
@@ -693,7 +692,7 @@ def set_current_context(context: LoggingContextOrSentinel) -> LoggingContextOrSe
     if current is not context:
         rusage = get_thread_resource_usage()
         current.stop(rusage)
-        _CURRENT_CONTEXT_VAR.set(context)
+        _thread_local.current_context = context
         context.start(rusage)
 
     return current
