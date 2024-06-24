@@ -841,6 +841,8 @@ class SlidingSyncHandler:
                 != Membership.JOIN,
                 filter_send_to_client=True,
             )
+            # TODO: Filter out `EventTypes.CallInvite` in public rooms,
+            # see https://github.com/element-hq/synapse/pull/16908#discussion_r1651598029
 
             # Determine how many "live" events we have (events within the given token range).
             #
