@@ -829,9 +829,6 @@ class SlidingSyncHandler:
                     stream=timeline_events[0].internal_metadata.stream_ordering - 1
                 )
 
-            # TODO: Does `newly_joined` affect `limited`? It does in sync v2 but I fail
-            # to understand why.
-
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_events_for_client(
                 self.storage_controllers,
