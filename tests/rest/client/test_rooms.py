@@ -3819,3 +3819,108 @@ class TimestampLookupTestCase(unittest.HomeserverTestCase):
 
         # Make sure the outlier event is not returned
         self.assertNotEqual(channel.json_body["event_id"], outlier_event.event_id)
+
+
+class UserSuspensionTests(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        profile.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user1 = self.register_user("thomas", "hackme")
+        self.tok1 = self.login("thomas", "hackme")
+
+        self.user2 = self.register_user("teresa", "hackme")
+        self.tok2 = self.login("teresa", "hackme")
+
+        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.store = hs.get_datastores().main
+
+    def test_suspended_user_cannot_send_message_to_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room1}/send/m.room.message/1",
+            access_token=self.tok1,
+            content={"body": "hello", "msgtype": "m.text"},
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_change_profile_data(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user1}/avatar_url",
+            access_token=self.tok1,
+            content={"avatar_url": "mxc://matrix.org/wefh34uihSDRGhw34"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        channel2 = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user1}/displayname",
+            access_token=self.tok1,
+            content={"displayname": "something offensive"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel2.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_redact_messages_other_than_their_own(self) -> None:
+        # first user sends message
+        self.make_request("POST", f"/rooms/{self.room1}/join", access_token=self.tok2)
+        res = self.helper.send_event(
+            self.room1,
+            "m.room.message",
+            {"body": "hello", "msgtype": "m.text"},
+            tok=self.tok2,
+        )
+        event_id = res["event_id"]
+
+        # second user sends message
+        self.make_request("POST", f"/rooms/{self.room1}/join", access_token=self.tok1)
+        res2 = self.helper.send_event(
+            self.room1,
+            "m.room.message",
+            {"body": "bad_message", "msgtype": "m.text"},
+            tok=self.tok1,
+        )
+        event_id2 = res2["event_id"]
+
+        # set the second user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # second user can't redact first user's message
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/redact/{event_id}/1",
+            access_token=self.tok1,
+            content={"reason": "bogus"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        # but can redact their own
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/redact/{event_id2}/1",
+            access_token=self.tok1,
+            content={"reason": "bogus"},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)

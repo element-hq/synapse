@@ -61,8 +61,8 @@ class ListDestinationsRestServlet(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         destination = parse_string(request, "destination")
 
@@ -181,8 +181,8 @@ class DestinationMembershipRestServlet(RestServlet):
         if not await self._store.is_destination_known(destination):
             raise NotFoundError("Unknown destination")
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         direction = parse_enum(request, "dir", Direction, default=Direction.FORWARDS)
 

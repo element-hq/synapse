@@ -1,0 +1,1 @@
+Handle device lists notifications for large accounts more efficiently in worker mode.
