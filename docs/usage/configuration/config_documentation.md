@@ -2137,7 +2137,7 @@ define a public DNS entry that points to a private IP address and circumvent
 the blacklist. Applications that perform redirects or serve different content
 when detecting that Synapse is accessing them can also bypass the blacklist.
 This is more useful if you know there is an entire shape of URL that you know
-that will never want synapse to try to spider.
+that you do not want Synapse to preview.
 
 Each list entry is a dictionary of url component attributes as returned
 by urlparse.urlsplit as applied to the absolute form of the URL.  See
