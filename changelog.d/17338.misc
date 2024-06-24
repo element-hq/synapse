@@ -1,1 +1,1 @@
-Do not block event sending/receiving while calulating large event auth chains.
+Do not block event sending/receiving while calculating large event auth chains.
