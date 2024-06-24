@@ -401,6 +401,7 @@ class MultipartFileConsumer:
         wrapped_consumer: interfaces.IConsumer,
         file_content_type: str,
         json_object: JsonDict,
+        content_length: Optional[int] = None,
     ) -> None:
         self.clock = clock
         self.wrapped_consumer = wrapped_consumer
@@ -417,6 +418,8 @@ class MultipartFileConsumer:
 
         # Whether the wrapped consumer has asked us to pause.
         self.paused = False
+
+        self.length = content_length
 
     ### IConsumer APIs ###
 
@@ -538,6 +541,28 @@ class MultipartFileConsumer:
             # If the producer is not a streaming producer we need to start
             # repeatedly calling  `resumeProducing` in a loop.
             run_in_background(self._resumeProducingRepeatedly)
+
+    def content_length(self) -> Optional[int]:
+        """
+        Calculate the content length of the multipart response
+        """
+        if not self.length:
+            return None
+        else:
+            # calculate length of json field and content-type header
+            json_field = json.dumps(self.json_field)
+            json_bytes = json_field.encode("utf-8")
+            json_length = len(json_bytes)
+
+            type = self.file_content_type.encode("utf-8")
+            content_type = Header(b"Content-Type", type)
+            type_length = len(bytes(content_type))
+
+            # 154 is the length of the elements that aren't variable, ie
+            # CRLFs and boundary strings, etc
+            self.length += json_length + type_length + 154
+
+            return self.length
 
     ### Internal APIs. ###
 
