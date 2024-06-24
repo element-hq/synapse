@@ -27,11 +27,13 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
+from synapse._pydantic_compat import HAS_PYDANTIC_V2
 from synapse.api.constants import Direction, UserTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
     RestServlet,
     assert_params_in_dict,
+    parse_and_validate_json_object_from_request,
     parse_boolean,
     parse_enum,
     parse_integer,
@@ -49,9 +51,16 @@ from synapse.rest.client._base import client_patterns
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.types import JsonDict, JsonMapping, UserID
+from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+if TYPE_CHECKING or HAS_PYDANTIC_V2:
+    from pydantic.v1 import StrictBool
+else:
+    from pydantic import StrictBool
+
 
 logger = logging.getLogger(__name__)
 
@@ -90,8 +99,8 @@ class UsersRestServletV2(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         user_id = parse_string(request, "user_id")
         name = parse_string(request, "name", encoding="utf-8")
@@ -730,6 +739,36 @@ class DeactivateAccountRestServlet(RestServlet):
             id_server_unbind_result = "no-support"
 
         return HTTPStatus.OK, {"id_server_unbind_result": id_server_unbind_result}
+
+
+class SuspendAccountRestServlet(RestServlet):
+    PATTERNS = admin_patterns("/suspend/(?P<target_user_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self.auth = hs.get_auth()
+        self.is_mine = hs.is_mine
+        self.store = hs.get_datastores().main
+
+    class PutBody(RequestBodyModel):
+        suspend: StrictBool
+
+    async def on_PUT(
+        self, request: SynapseRequest, target_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        await assert_user_is_admin(self.auth, requester)
+
+        if not self.is_mine(UserID.from_string(target_user_id)):
+            raise SynapseError(HTTPStatus.BAD_REQUEST, "Can only suspend local users")
+
+        if not await self.store.get_user_by_id(target_user_id):
+            raise NotFoundError("User not found")
+
+        body = parse_and_validate_json_object_from_request(request, self.PutBody)
+        suspend = body.suspend
+        await self.store.set_user_suspended_status(target_user_id, suspend)
+
+        return HTTPStatus.OK, {f"user_{target_user_id}_suspended": suspend}
 
 
 class AccountValidityRenewServlet(RestServlet):

@@ -63,10 +63,10 @@ class UserMediaStatisticsRestServlet(RestServlet):
             ),
         )
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
-        from_ts = parse_integer(request, "from_ts", default=0, negative=False)
-        until_ts = parse_integer(request, "until_ts", negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
+        from_ts = parse_integer(request, "from_ts", default=0)
+        until_ts = parse_integer(request, "until_ts")
 
         if until_ts is not None:
             if until_ts <= from_ts:
