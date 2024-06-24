@@ -311,8 +311,8 @@ class DeleteMediaByDateSize(RestServlet):
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        before_ts = parse_integer(request, "before_ts", required=True, negative=False)
-        size_gt = parse_integer(request, "size_gt", default=0, negative=False)
+        before_ts = parse_integer(request, "before_ts", required=True)
+        size_gt = parse_integer(request, "size_gt", default=0)
         keep_profiles = parse_boolean(request, "keep_profiles", default=True)
 
         if before_ts < 30000000000:  # Dec 1970 in milliseconds, Aug 2920 in seconds
@@ -377,8 +377,8 @@ class UserMediaRestServlet(RestServlet):
         if user is None:
             raise NotFoundError("Unknown user")
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.
@@ -421,8 +421,8 @@ class UserMediaRestServlet(RestServlet):
         if user is None:
             raise NotFoundError("Unknown user")
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.
