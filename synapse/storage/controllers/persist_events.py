@@ -617,6 +617,17 @@ class EventsPersistenceStorageController:
                         room_id, chunk
                     )
 
+            with Measure(self._clock, "calculate_chain_cover_index_for_events"):
+                # We now calculate chain ID/sequence numbers for any state events we're
+                # persisting. We ignore out of band memberships as we're not in the room
+                # and won't have their auth chain (we'll fix it up later if we join the
+                # room).
+                #
+                # See: docs/auth_chain_difference_algorithm.md
+                new_event_links = await self.persist_events_store.calculate_chain_cover_index_for_events(
+                    room_id, [e for e, _ in chunk]
+                )
+
             await self.persist_events_store._persist_events_and_state_updates(
                 room_id,
                 chunk,
@@ -624,6 +635,7 @@ class EventsPersistenceStorageController:
                 new_forward_extremities=new_forward_extremities,
                 use_negative_stream_ordering=backfilled,
                 inhibit_local_membership_updates=backfilled,
+                new_event_links=new_event_links,
             )
 
         return replaced_events
