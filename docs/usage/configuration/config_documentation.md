@@ -3806,7 +3806,7 @@ This setting defines options related to the user directory.
 This option has the following sub-options:
 * `enabled`:  Defines whether users can search the user directory. If false then
    empty responses are returned to all queries. Defaults to true.
-* `search_all_users`: Defines whether to search all users visible to your HS at the time the search is performed.
+* `search_all_users`: Defines whether to search all users visible to your homeserver at the time the search is performed.
    If set to true, will return all users known to the homeserver matching the search query.
    If false, search results will only contain users
     visible in public rooms and users sharing a room with the requester.
