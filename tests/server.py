@@ -291,8 +291,7 @@ class FakeChannel:
         while not self.is_finished():
             # If there's a producer, tell it to resume producing so we get content
             if self._producer:
-                # self._producer.resumeProducing()
-                pass
+                self._producer.resumeProducing()
 
             if self._reactor.seconds() > end_time:
                 raise TimedOutException("Timed out waiting for request to finish.")
