@@ -1035,14 +1035,16 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 SELECT stream_id, user_id, hosts FROM (
                     SELECT stream_id, user_id, false AS hosts FROM device_lists_stream
                     UNION ALL
-                    SELECT DISTINCT stream_id, user_id, true AS hosts FROM device_lists_outbound_pokes
+                    SELECT MAX(stream_id), user_id, true AS hosts FROM device_lists_outbound_pokes
+                    WHERE ? < stream_id AND stream_id <= ?
+                    GROUP BY user_id
                 ) AS e
                 WHERE ? < stream_id AND stream_id <= ?
                 ORDER BY stream_id ASC
                 LIMIT ?
             """
 
-            txn.execute(sql, (last_id, current_id, limit))
+            txn.execute(sql, (last_id, current_id, last_id, current_id, limit))
             updates = [(row[0], row[1:]) for row in txn]
             limited = False
             upto_token = current_id
