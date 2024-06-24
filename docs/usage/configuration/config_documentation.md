@@ -1759,8 +1759,9 @@ rc_3pid_validation:
 ### `rc_invites`
 
 This option sets ratelimiting how often invites can be sent in a room or to a
-specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10` and
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`.
+specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
 room](https://spec.matrix.org/v1.2/client-server-api/#post_matrixclientv3createroom)
