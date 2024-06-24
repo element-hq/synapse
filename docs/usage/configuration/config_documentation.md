@@ -1760,7 +1760,7 @@ rc_3pid_validation:
 
 This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5` and `per_issuer` 
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
 defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
