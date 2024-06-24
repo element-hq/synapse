@@ -510,7 +510,7 @@ class PublicRoomListRestServlet(RestServlet):
             if server:
                 raise e
 
-        limit: Optional[int] = parse_integer(request, "limit", 0, negative=False)
+        limit: Optional[int] = parse_integer(request, "limit", 0)
         since_token = parse_string(request, "since")
 
         if limit == 0:
@@ -1430,16 +1430,7 @@ class RoomHierarchyRestServlet(RestServlet):
         requester = await self._auth.get_user_by_req(request, allow_guest=True)
 
         max_depth = parse_integer(request, "max_depth")
-        if max_depth is not None and max_depth < 0:
-            raise SynapseError(
-                400, "'max_depth' must be a non-negative integer", Codes.BAD_JSON
-            )
-
         limit = parse_integer(request, "limit")
-        if limit is not None and limit <= 0:
-            raise SynapseError(
-                400, "'limit' must be a positive integer", Codes.BAD_JSON
-            )
 
         return 200, await self._room_summary_handler.get_room_hierarchy(
             requester,

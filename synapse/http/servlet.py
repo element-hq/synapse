@@ -119,14 +119,15 @@ def parse_integer(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-        negative: whether to allow negative integers, defaults to True.
+        negative: whether to allow negative integers, defaults to False (disallowing
+            negatives).
     Returns:
         An int value or the default.
 
     Raises:
         SynapseError: if the parameter is absent and required, if the
             parameter is present and not an integer, or if the
-            parameter is illegitimate negative.
+            parameter is illegitimately negative.
     """
     args: Mapping[bytes, Sequence[bytes]] = request.args  # type: ignore
     return parse_integer_from_args(args, name, default, required, negative)
@@ -164,7 +165,7 @@ def parse_integer_from_args(
     name: str,
     default: Optional[int] = None,
     required: bool = False,
-    negative: bool = True,
+    negative: bool = False,
 ) -> Optional[int]:
     """Parse an integer parameter from the request string
 
@@ -174,7 +175,8 @@ def parse_integer_from_args(
         default: value to use if the parameter is absent, defaults to None.
         required: whether to raise a 400 SynapseError if the parameter is absent,
             defaults to False.
-        negative: whether to allow negative integers, defaults to True.
+        negative: whether to allow negative integers, defaults to False (disallowing
+            negatives).
 
     Returns:
         An int value or the default.
@@ -182,7 +184,7 @@ def parse_integer_from_args(
     Raises:
         SynapseError: if the parameter is absent and required, if the
             parameter is present and not an integer, or if the
-            parameter is illegitimate negative.
+            parameter is illegitimately negative.
     """
     name_bytes = name.encode("ascii")
 

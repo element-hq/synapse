@@ -90,8 +90,8 @@ class UsersRestServletV2(RestServlet):
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
 
-        start = parse_integer(request, "from", default=0, negative=False)
-        limit = parse_integer(request, "limit", default=100, negative=False)
+        start = parse_integer(request, "from", default=0)
+        limit = parse_integer(request, "limit", default=100)
 
         user_id = parse_string(request, "user_id")
         name = parse_string(request, "name", encoding="utf-8")
