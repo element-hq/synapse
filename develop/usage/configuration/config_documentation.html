@@ -1677,8 +1677,9 @@ Defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>.</p>
 <hr />
 <h3 id="rc_invites"><a class="header" href="#rc_invites"><code>rc_invites</code></a></h3>
 <p>This option sets ratelimiting how often invites can be sent in a room or to a
-specific user. <code>per_room</code> defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code> and
-<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>.</p>
+specific user. <code>per_room</code> defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>,
+<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>, and <code>per_issuer</code> 
+defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>.</p>
 <p>Client requests that invite user(s) when <a href="https://spec.matrix.org/v1.2/client-server-api/#post_matrixclientv3createroom">creating a
 room</a>
 will count against the <code>rc_invites.per_room</code> limit, whereas
