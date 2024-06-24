@@ -108,6 +108,19 @@ class ProfileDisplaynameRestServlet(RestServlet):
 
         propagate = _read_propagate(self.hs, request)
 
+        requester_suspended = (
+            await self.hs.get_datastores().main.get_user_suspended_status(
+                requester.user.to_string()
+            )
+        )
+
+        if requester_suspended:
+            raise SynapseError(
+                403,
+                "Updating displayname while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
         await self.profile_handler.set_displayname(
             user, requester, new_name, is_admin, propagate=propagate
         )
@@ -166,6 +179,19 @@ class ProfileAvatarURLRestServlet(RestServlet):
             )
 
         propagate = _read_propagate(self.hs, request)
+
+        requester_suspended = (
+            await self.hs.get_datastores().main.get_user_suspended_status(
+                requester.user.to_string()
+            )
+        )
+
+        if requester_suspended:
+            raise SynapseError(
+                403,
+                "Updating avatar URL while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
 
         await self.profile_handler.set_avatar_url(
             user, requester, new_avatar_url, is_admin, propagate=propagate
