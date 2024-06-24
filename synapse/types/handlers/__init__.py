@@ -31,9 +31,11 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.handlers.relations import BundledAggregations
 from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
 from synapse.types.rest.client import SlidingSyncBody
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 
 
 class ShutdownRoomParams(TypedDict):
@@ -197,7 +199,7 @@ class SlidingSyncResult:
         initial: bool
         required_state: List[EventBase]
         timeline_events: List[EventBase]
-        bundled_aggregations: Optional[Dict[str, BundledAggregations]]
+        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
         is_dm: bool
         stripped_state: Optional[List[JsonDict]]
         prev_batch: StreamToken
