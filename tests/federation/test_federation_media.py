@@ -104,7 +104,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         )
         self.assertTrue(found_json)
 
-        # check that text file and expected value exist
+        # check that the text file and expected value exist
         found_file = any(
             "\r\nContent-Type: text/plain\r\n\r\nfile_to_stream" in field
             for field in stripped
@@ -146,7 +146,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         )
         self.assertTrue(found_json)
 
-        # check that png file exists and matches what was uploaded
+        # check that the png file exists and matches what was uploaded
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
 

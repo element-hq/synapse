@@ -411,7 +411,7 @@ class MultipartFileConsumer:
         self.file_content_type = file_content_type
         self.boundary = uuid4().hex.encode("ascii")
 
-        # The producer that registered with us, and if its a push or pull
+        # The producer that registered with us, and if it's a push or pull
         # producer.
         self.producer: Optional["interfaces.IProducer"] = None
         self.streaming: Optional[bool] = None
@@ -453,7 +453,7 @@ class MultipartFileConsumer:
 
         self.wrapped_consumer.registerProducer(self, True)
 
-        # kick off producing if producer is not streaming producer
+        # kick off producing if `self.producer` is not a streaming producer
         if not streaming:
             self.resumeProducing()
 

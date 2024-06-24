@@ -285,6 +285,7 @@ async def respond_with_multipart_responder(
     streaming a multipart/mixed response
 
     Args:
+        clock:
         request: the federation request to respond to
         responder: the responder which will send the response
         media_info: metadata about the media item
