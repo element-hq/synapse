@@ -360,13 +360,29 @@ class BaseFederationServlet:
                                     "request"
                                 )
                                 return None
+                            if (
+                                func.__self__.__class__.__name__  # type: ignore
+                                == "FederationUnstableMediaDownloadServlet"
+                            ):
+                                response = await func(
+                                    origin, content, request, *args, **kwargs
+                                )
+                            else:
+                                response = await func(
+                                    origin, content, request.args, *args, **kwargs
+                                )
+                    else:
+                        if (
+                            func.__self__.__class__.__name__  # type: ignore
+                            == "FederationUnstableMediaDownloadServlet"
+                        ):
+                            response = await func(
+                                origin, content, request, *args, **kwargs
+                            )
+                        else:
                             response = await func(
                                 origin, content, request.args, *args, **kwargs
                             )
-                    else:
-                        response = await func(
-                            origin, content, request.args, *args, **kwargs
-                        )
             finally:
                 # if we used the origin's context as the parent, add a new span using
                 # the servlet span as a parent, so that we have a link
