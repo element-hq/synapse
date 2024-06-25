@@ -197,18 +197,23 @@ class SlidingSyncResult:
         avatar: Optional[str]
         heroes: Optional[List[EventBase]]
         initial: bool
-        required_state: List[EventBase]
-        timeline_events: List[EventBase]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        required_state: Optional[List[EventBase]]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        timeline_events: Optional[List[EventBase]]
         bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
         is_dm: bool
         stripped_state: Optional[List[JsonDict]]
-        prev_batch: StreamToken
-        limited: bool
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        prev_batch: Optional[StreamToken]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        limited: Optional[bool]
         joined_count: int
         invited_count: int
         notification_count: int
         highlight_count: int
-        num_live: int
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        num_live: Optional[int]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:

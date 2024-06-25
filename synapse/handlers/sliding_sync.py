@@ -755,14 +755,23 @@ class SlidingSyncHandler:
         """
 
         # Assemble the list of timeline events
-        timeline_events: List[EventBase] = []
-        limited = False
-        # We want to start off using the `to_token` (vs `from_token`) because we look
-        # backwards from the `to_token` up to the `timeline_limit` and we might not
-        # reach the `from_token` before we hit the limit. We will update the room stream
-        # position once we've fetched the events to point to the earliest event fetched.
-        prev_batch_token = to_token
-        if room_sync_config.timeline_limit > 0:
+        timeline_events: Optional[List[EventBase]] = None
+        limited: Optional[bool] = None
+        prev_batch_token: Optional[StreamToken] = None
+        num_live: Optional[int] = None
+        if (
+            room_sync_config.timeline_limit > 0
+            # No timeline for invite/knock rooms (just `stripped_state`)
+            and rooms_for_user_membership_at_to_token.membership
+            not in (Membership.INVITE, Membership.KNOCK)
+        ):
+            limited = False
+            # We want to start off using the `to_token` (vs `from_token`) because we look
+            # backwards from the `to_token` up to the `timeline_limit` and we might not
+            # reach the `from_token` before we hit the limit. We will update the room stream
+            # position once we've fetched the events to point to the earliest event fetched.
+            prev_batch_token = to_token
+
             newly_joined = False
             if (
                 # We can only determine new-ness if we have a `from_token` to define our range
@@ -903,7 +912,7 @@ class SlidingSyncHandler:
         # If the timeline is `limited=True`, the client does not have all events
         # necessary to calculate aggregations themselves.
         bundled_aggregations = None
-        if limited:
+        if limited and timeline_events is not None:
             bundled_aggregations = (
                 await self.relations_handler.get_bundled_aggregations(
                     timeline_events, user.to_string()

@@ -1881,27 +1881,134 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Should not see anything (except maybe the invite event) because we haven't
-        # joined yet (history visibility is `shared`) (`filter_events_for_client(...)`
-        # is doing the work here)
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["timeline"],
-            [],
-            channel.json_body["rooms"][room_id1]["timeline"],
-        )
-        # No "live" events in an initial sync (no `from_token` to define the "live"
-        # range) and no events returned in the timeline anyway so nothing could be
-        # "live".
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["num_live"],
-            0,
+        # `timeline` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("timeline"),
             channel.json_body["rooms"][room_id1],
         )
-        # Even though we don't get any timeline events because they are filtered out,
-        # there is still more to paginate
+        # `num_live` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("num_live"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `limited` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("limited"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("prev_batch"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # We should have some `stripped_state` so the potential joiner can identify the
+        # room (we don't care about the order).
+        self.assertCountEqual(
+            channel.json_body["rooms"][room_id1]["invite_state"],
+            [
+                {
+                    "content": {"creator": user2_id, "room_version": "10"},
+                    "sender": user2_id,
+                    "state_key": "",
+                    "type": "m.room.create",
+                },
+                {
+                    "content": {"join_rule": "public"},
+                    "sender": user2_id,
+                    "state_key": "",
+                    "type": "m.room.join_rules",
+                },
+                {
+                    "content": {"displayname": user2.localpart, "membership": "join"},
+                    "sender": user2_id,
+                    "state_key": user2_id,
+                    "type": "m.room.member",
+                },
+                {
+                    "content": {"displayname": user1.localpart, "membership": "invite"},
+                    "sender": user2_id,
+                    "state_key": user1_id,
+                    "type": "m.room.member",
+                },
+            ],
+            channel.json_body["rooms"][room_id1]["invite_state"],
+        )
+
+    def test_rooms_invite_shared_history_incremental_sync(self) -> None:
+        """
+        Test that `rooms` we are invited to have some stripped `invite_state` 
+        
+        This is an `invite` room so we should only have `stripped_state` (no timeline)
+        but we also shouldn't see any timeline events because the history visiblity is
+        `shared` and we haven't joined the room yet.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user1 = UserID.from_string(user1_id)
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user2 = UserID.from_string(user2_id)
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Ensure we're testing with a room with `shared` history visibility which means
+        # history visible until you actually join the room.
+        history_visibility_response = self.helper.get_state(
+            room_id1, EventTypes.RoomHistoryVisibility, tok=user2_tok
+        )
         self.assertEqual(
-            channel.json_body["rooms"][room_id1]["limited"],
-            True,
+            history_visibility_response.get("history_visibility"),
+            HistoryVisibility.SHARED,
+        )
+
+        self.helper.send(room_id1, "activity before invite1", tok=user2_tok)
+        self.helper.send(room_id1, "activity before invite2", tok=user2_tok)
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.send(room_id1, "activity after invite3", tok=user2_tok)
+        self.helper.send(room_id1, "activity after invite4", tok=user2_tok)
+
+        from_token = self.event_sources.get_current_token()
+
+        self.helper.send(room_id1, "activity after token5", tok=user2_tok)
+        self.helper.send(room_id1, "activity after toekn6", tok=user2_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(
+            from_token.to_string(self.store)
+        )}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # `timeline` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("timeline"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `num_live` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("num_live"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `limited` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("limited"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("prev_batch"),
             channel.json_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
@@ -1977,12 +2084,10 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
         self.helper.send(room_id1, "activity before1", tok=user2_tok)
-        event_response2 = self.helper.send(room_id1, "activity before2", tok=user2_tok)
-        use1_invite_response = self.helper.invite(
-            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
-        )
-        event_response3 = self.helper.send(room_id1, "activity after3", tok=user2_tok)
-        event_response4 = self.helper.send(room_id1, "activity after4", tok=user2_tok)
+        self.helper.send(room_id1, "activity before2", tok=user2_tok)
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.send(room_id1, "activity after3", tok=user2_tok)
+        self.helper.send(room_id1, "activity after4", tok=user2_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
@@ -2002,31 +2107,24 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Should see the last 4 events in the room
-        self.assertEqual(
-            [
-                event["event_id"]
-                for event in channel.json_body["rooms"][room_id1]["timeline"]
-            ],
-            [
-                event_response2["event_id"],
-                use1_invite_response["event_id"],
-                event_response3["event_id"],
-                event_response4["event_id"],
-            ],
-            channel.json_body["rooms"][room_id1]["timeline"],
-        )
-        # No "live" events in an initial sync (no `from_token` to define the "live"
-        # range)
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["num_live"],
-            0,
+        # `timeline` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("timeline"),
             channel.json_body["rooms"][room_id1],
         )
-        # There is still more to paginate
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["limited"],
-            True,
+        # `num_live` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("num_live"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `limited` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("limited"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("prev_batch"),
             channel.json_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
