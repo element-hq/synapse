@@ -535,7 +535,7 @@ class SlidingSyncHandler:
 
         # 2) -----------------------------------------------------
         # We fix-up newly_left rooms after the first fixup because it may have removed
-        # some left rooms that we can figure out our newly_left in the following code
+        # some left rooms that we can figure out are newly_left in the following code
 
         # 2) Fetch membership changes that fall in the range from `from_token` up to `to_token`
         membership_change_events_in_from_to_range = []
