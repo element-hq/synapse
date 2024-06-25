@@ -2133,7 +2133,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
         user_id: str,
         device_id: str,
         hosts: Collection[str],
-        stream_ids: List[int],
+        stream_id: int,
         context: Optional[Dict[str, str]],
     ) -> None:
         if self._device_list_federation_stream_cache:
@@ -2141,11 +2141,10 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
                 txn.call_after(
                     self._device_list_federation_stream_cache.entity_has_changed,
                     host,
-                    stream_ids[-1],
+                    stream_id,
                 )
 
         now = self._clock.time_msec()
-        stream_id_iterator = iter(stream_ids)
 
         encoded_context = json_encoder.encode(context)
         mark_sent = not self.hs.is_mine_id(user_id)
@@ -2154,7 +2153,7 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             (
                 destination,
                 self._instance_name,
-                next(stream_id_iterator),
+                stream_id,
                 user_id,
                 device_id,
                 mark_sent,
@@ -2339,22 +2338,22 @@ class DeviceStore(DeviceWorkerStore, DeviceBackgroundUpdateStore):
             return
 
         def add_device_list_outbound_pokes_txn(
-            txn: LoggingTransaction, stream_ids: List[int]
+            txn: LoggingTransaction, stream_id: int
         ) -> None:
             self._add_device_outbound_poke_to_stream_txn(
                 txn,
                 user_id=user_id,
                 device_id=device_id,
                 hosts=hosts,
-                stream_ids=stream_ids,
+                stream_id=stream_id,
                 context=context,
             )
 
-        async with self._device_list_id_gen.get_next_mult(len(hosts)) as stream_ids:
+        async with self._device_list_id_gen.get_next() as stream_id:
             return await self.db_pool.runInteraction(
                 "add_device_list_outbound_pokes",
                 add_device_list_outbound_pokes_txn,
-                stream_ids,
+                stream_id,
             )
 
     async def add_remote_device_list_to_pending(
