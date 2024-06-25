@@ -25,6 +25,8 @@ deployment. It includes advanced identity management, auditing,
 moderation and data retention options as well as Long Term Support and
 SLAs. ESS can be used to support any Matrix-based frontend client.
 
+.. contents::
+
 🛠️ Installing and configuration
 ===============================
 
