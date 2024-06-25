@@ -1836,9 +1836,12 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def test_rooms_invite_shared_history_initial_sync(self) -> None:
         """
-        Test that `rooms` we are invited to have some stripped `invite_state` and that
-        we can't see any timeline events because the history visiblity is `shared` and
-        we haven't joined the room yet.
+        Test that `rooms` we are invited to have some stripped `invite_state` during an
+        initial sync.
+
+        This is an `invite` room so we should only have `stripped_state` (no `timeline`)
+        but we also shouldn't see any timeline events because the history visiblity is
+        `shared` and we haven't joined the room yet.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1936,9 +1939,10 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def test_rooms_invite_shared_history_incremental_sync(self) -> None:
         """
-        Test that `rooms` we are invited to have some stripped `invite_state` 
-        
-        This is an `invite` room so we should only have `stripped_state` (no timeline)
+        Test that `rooms` we are invited to have some stripped `invite_state` during an
+        incremental sync.
+
+        This is an `invite` room so we should only have `stripped_state` (no `timeline`)
         but we also shouldn't see any timeline events because the history visiblity is
         `shared` and we haven't joined the room yet.
         """
@@ -2046,9 +2050,14 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def test_rooms_invite_world_readable_history_initial_sync(self) -> None:
         """
-        Test that `rooms` we are invited to have some stripped `invite_state` and that
-        we can't see any timeline events because the history visiblity is `shared` and
-        we haven't joined the room yet.
+        Test that `rooms` we are invited to have some stripped `invite_state` during an
+        initial sync.
+
+        This is an `invite` room so we should only have `stripped_state` (no `timeline`)
+        but depending on the semantics we decide, we could potentially see some
+        historical events before/after the `from_token` because the history is
+        `world_readable`. Same situation for events after the `from_token` if the
+        history visibility was set to `invited`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -2093,6 +2102,135 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        # Large enough to see the latest events and before the invite
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # `timeline` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("timeline"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `num_live` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("num_live"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `limited` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("limited"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("prev_batch"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # We should have some `stripped_state` so the potential joiner can identify the
+        # room (we don't care about the order).
+        self.assertCountEqual(
+            channel.json_body["rooms"][room_id1]["invite_state"],
+            [
+                {
+                    "content": {"creator": user2_id, "room_version": "10"},
+                    "sender": user2_id,
+                    "state_key": "",
+                    "type": "m.room.create",
+                },
+                {
+                    "content": {"join_rule": "public"},
+                    "sender": user2_id,
+                    "state_key": "",
+                    "type": "m.room.join_rules",
+                },
+                {
+                    "content": {"displayname": user2.localpart, "membership": "join"},
+                    "sender": user2_id,
+                    "state_key": user2_id,
+                    "type": "m.room.member",
+                },
+                {
+                    "content": {"displayname": user1.localpart, "membership": "invite"},
+                    "sender": user2_id,
+                    "state_key": user1_id,
+                    "type": "m.room.member",
+                },
+            ],
+            channel.json_body["rooms"][room_id1]["invite_state"],
+        )
+
+    def test_rooms_invite_world_readable_history_incremental_sync(self) -> None:
+        """
+        Test that `rooms` we are invited to have some stripped `invite_state` during an
+        incremental sync.
+
+        This is an `invite` room so we should only have `stripped_state` (no `timeline`)
+        but depending on the semantics we decide, we could potentially see some
+        historical events before/after the `from_token` because the history is
+        `world_readable`. Same situation for events after the `from_token` if the
+        history visibility was set to `invited`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user1 = UserID.from_string(user1_id)
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user2 = UserID.from_string(user2_id)
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "preset": "public_chat",
+                "initial_state": [
+                    {
+                        "content": {
+                            "history_visibility": HistoryVisibility.WORLD_READABLE
+                        },
+                        "state_key": "",
+                        "type": EventTypes.RoomHistoryVisibility,
+                    }
+                ],
+            },
+        )
+        # Ensure we're testing with a room with `world_readable` history visibility
+        # which means events are visible to anyone even without membership.
+        history_visibility_response = self.helper.get_state(
+            room_id1, EventTypes.RoomHistoryVisibility, tok=user2_tok
+        )
+        self.assertEqual(
+            history_visibility_response.get("history_visibility"),
+            HistoryVisibility.WORLD_READABLE,
+        )
+
+        self.helper.send(room_id1, "activity before invite1", tok=user2_tok)
+        self.helper.send(room_id1, "activity before invite2", tok=user2_tok)
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+        self.helper.send(room_id1, "activity after invite3", tok=user2_tok)
+        self.helper.send(room_id1, "activity after invite4", tok=user2_tok)
+
+        from_token = self.event_sources.get_current_token()
+
+        self.helper.send(room_id1, "activity after token5", tok=user2_tok)
+        self.helper.send(room_id1, "activity after toekn6", tok=user2_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(
+            from_token.to_string(self.store)
+        )}",
             {
                 "lists": {
                     "foo-list": {

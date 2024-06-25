@@ -26,6 +26,7 @@ from immutabledict import immutabledict
 from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membership
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
+from synapse.handlers.relations import BundledAggregations
 from synapse.storage.roommember import RoomsForUser
 from synapse.types import (
     JsonDict,
@@ -756,6 +757,7 @@ class SlidingSyncHandler:
 
         # Assemble the list of timeline events
         timeline_events: Optional[List[EventBase]] = None
+        bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
         limited: Optional[bool] = None
         prev_batch_token: Optional[StreamToken] = None
         num_live: Optional[int] = None
@@ -848,7 +850,9 @@ class SlidingSyncHandler:
                 filter_send_to_client=True,
             )
             # TODO: Filter out `EventTypes.CallInvite` in public rooms,
-            # see https://github.com/element-hq/synapse/pull/16908#discussion_r1651598029
+            # see https://github.com/element-hq/synapse/issues/17359
+
+            # TODO: Handle timeline gaps (`get_timeline_gaps()`)
 
             # Determine how many "live" events we have (events within the given token range).
             #
@@ -878,6 +882,15 @@ class SlidingSyncHandler:
                         # this more with a binary search (bisect).
                         break
 
+            # If the timeline is `limited=True`, the client does not have all events
+            # necessary to calculate aggregations themselves.
+            if limited:
+                bundled_aggregations = (
+                    await self.relations_handler.get_bundled_aggregations(
+                        timeline_events, user.to_string()
+                    )
+                )
+
             # Update the `prev_batch_token` to point to the position that allows us to
             # keep paginating backwards from the oldest event we return in the timeline.
             prev_batch_token = prev_batch_token.copy_and_replace(
@@ -906,18 +919,6 @@ class SlidingSyncHandler:
                 )
 
             stripped_state.append(strip_event(invite_or_knock_event))
-
-        # TODO: Handle timeline gaps (`get_timeline_gaps()`)
-
-        # If the timeline is `limited=True`, the client does not have all events
-        # necessary to calculate aggregations themselves.
-        bundled_aggregations = None
-        if limited and timeline_events is not None:
-            bundled_aggregations = (
-                await self.relations_handler.get_bundled_aggregations(
-                    timeline_events, user.to_string()
-                )
-            )
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value

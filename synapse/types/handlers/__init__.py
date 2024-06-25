@@ -203,6 +203,7 @@ class SlidingSyncResult:
         timeline_events: Optional[List[EventBase]]
         bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
         is_dm: bool
+        # Optional because it's only relevant to invite/knock rooms
         stripped_state: Optional[List[JsonDict]]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         prev_batch: Optional[StreamToken]
