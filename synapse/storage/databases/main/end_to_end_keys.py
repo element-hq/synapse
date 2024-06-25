@@ -123,9 +123,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         if stream_name == DeviceListsStream.NAME:
             for row in rows:
                 assert isinstance(row, DeviceListsStream.DeviceListsStreamRow)
-                if not row.hosts_calculated:
+                if row.entity.startswith("@"):
                     self._get_e2e_device_keys_for_federation_query_inner.invalidate(
-                        (row.user_id,)
+                        (row.entity,)
                     )
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
