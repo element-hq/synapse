@@ -756,6 +756,11 @@ class SlidingSyncHandler:
         """
 
         # Assemble the list of timeline events
+        #
+        # It would be nice to make the `rooms` response more uniform regardless of
+        # membership. Currently, we have to make all of these optional because
+        # `invite`/`knock` rooms only have `stripped_state`. See
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
         timeline_events: Optional[List[EventBase]] = None
         bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
         limited: Optional[bool] = None
