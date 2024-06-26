@@ -831,7 +831,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     e.sender
                 FROM current_state_delta_stream AS s
                     INNER JOIN events AS e ON e.stream_ordering = s.stream_id
-                    INNER JOIN room_memberships AS m ON m.event_id = e.event_id
+                    INNER JOIN room_memberships AS m ON m.event_stream_ordering = s.stream_id
                 WHERE m.user_id = ?
                     AND s.stream_id > ? AND s.stream_id <= ?
                 ORDER BY s.stream_id ASC
