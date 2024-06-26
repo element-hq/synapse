@@ -399,8 +399,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
 
             yield cached_links
 
-        logger.info("CHAINS: Found cached chain links %d", len(found_cached_chains))
-
         # This query is structured to first get all chain IDs reachable, and
         # then pull out all links from those chains. This does pull out more
         # rows than is strictly necessary, however there isn't a way of
@@ -439,23 +437,16 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         chains_to_fetch_sorted = SortedSet(chains_to_fetch)
         chains_to_fetch_sorted.difference_update(found_cached_chains)
 
-        logger.info("CHAINS: Fetching chain links %d", len(chains_to_fetch_sorted))
-
         start_block = time.monotonic()
 
         while chains_to_fetch_sorted:
             batch2 = list(chains_to_fetch_sorted.islice(-BATCH_SIZE))
             chains_to_fetch_sorted.difference_update(batch2)
-            logger.info("CHAINS: batch2 %d", len(batch2))
 
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "origin_chain_id", batch2
             )
-            start_query = time.monotonic()
             txn.execute(sql % (clause,), args)
-            end_query = time.monotonic()
-
-            logger.info("CHAINS: query took %d ms", (end_query - start_query) * 1000)
 
             links: Dict[int, List[Tuple[int, int, int]]] = {}
 
@@ -494,14 +485,9 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
 
             chains_to_fetch_sorted.difference_update(links)
 
-            logger.info("CHAINS: returned %d", len(links))
-            logger.info("CHAINS: remaining %d", len(chains_to_fetch_sorted))
-
             yield links
 
         end_block = time.monotonic()
-
-        logger.info("CHAINS: block took %d ms", (end_block - start_block) * 1000)
 
     def _get_auth_chain_ids_txn(
         self, txn: LoggingTransaction, event_ids: Collection[str], include_given: bool
@@ -689,7 +675,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # are reachable from any event.
 
         # (We need to take a copy of `seen_chains` as the function mutates it)
-        logger.info("CHAINS: for room %s", room_id)
         for links in self._get_chain_links(txn, seen_chains, self._chain_links_cache):
             for chains in set_to_chain:
                 for chain_id in links:
@@ -699,8 +684,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
                     _materialize(chain_id, chains[chain_id], links, chains)
 
                 seen_chains.update(chains)
-
-        logger.info("CHAINS: materialized chains %d", len(chains))
 
         # Now for each chain we figure out the maximum sequence number reachable
         # from *any* state set and the minimum sequence number reachable from
