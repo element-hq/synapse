@@ -63,7 +63,7 @@ from typing_extensions import Literal
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes
+from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -126,6 +126,7 @@ class CurrentStateDeltaMembership:
     event_id: Optional[str]
     prev_event_id: Optional[str]
     room_id: str
+    membership: str
     # Could be useful but we're not using it yet.
     # event_pos: PersistedEventPosition
 
@@ -832,7 +833,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # `null` when the server is no longer in the room or a state reset happened
             # and it was unset).
             sql = """
-                SELECT s.event_id, s.prev_event_id, s.room_id, s.instance_name, s.stream_id
+                SELECT
+                    s.event_id,
+                    s.prev_event_id,
+                    s.room_id,
+                    s.instance_name,
+                    s.stream_id,
+                    m.membership
                 FROM current_state_delta_stream AS s
                 WHERE s.type = ? AND s.state_key = ?
                     AND s.stream_id > ? AND s.stream_id <= ?
@@ -846,12 +853,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     event_id=event_id,
                     prev_event_id=prev_event_id,
                     room_id=room_id,
+                    # We can assume that the membership is `LEAVE` as a default. This
+                    # will happen when `current_state_delta_stream.event_id` is null
+                    # because it was unset due to a state reset or the server is no
+                    # longer in the room (everyone on our local server left).
+                    membership=membership if membership else Membership.LEAVE,
                     # event_pos=PersistedEventPosition(
                     #     instance_name=instance_name,
                     #     stream=stream_ordering,
                     # ),
                 )
-                for event_id, prev_event_id, room_id, instance_name, stream_ordering in txn
+                for event_id, prev_event_id, room_id, instance_name, stream_ordering, membership in txn
                 if _filter_results_by_stream(
                     from_key,
                     to_key,
