@@ -18,7 +18,8 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from collections import defaultdict
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 import attr
 from immutabledict import immutabledict
@@ -103,6 +104,9 @@ class _RoomMembershipForUser:
     membership: str
     sender: str
     newly_joined: bool
+
+    def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
+        return attr.evolve(self, **kwds)
 
 
 class SlidingSyncHandler:
@@ -414,6 +418,7 @@ class SlidingSyncHandler:
         # - 1b) Add back rooms that the user left after the `to_token`
         # - 1c) Update room membership events to the point in time of the `to_token`
         # - 2) Add back newly_left rooms (> `from_token` and <= `to_token`)
+        # - 3) Figure out which rooms are `newly_joined`
 
         # 1) -----------------------------------------------------
 
@@ -529,18 +534,48 @@ class SlidingSyncHandler:
         last_membership_change_by_room_id_in_from_to_range: Dict[
             str, CurrentStateDeltaMembership
         ] = {}
+        # We also want to assemble a list of the first membership events during the token
+        # range so we can step backward to the previous membership that would apply to
+        # before the token range to see if we have `newly_joined` the room.
+        first_membership_change_by_room_id_in_from_to_range: Dict[
+            str, CurrentStateDeltaMembership
+        ] = {}
+        non_join_event_ids_by_room_id_in_from_to_range: Dict[str, List[str]] = (
+            defaultdict(list)
+        )
         for (
             membership_change
         ) in current_state_delta_membership_changes_in_from_to_range:
-            last_membership_change_by_room_id_in_from_to_range[
-                membership_change.room_id
-            ] = membership_change
+            room_id = membership_change.room_id
+
+            last_membership_change_by_room_id_in_from_to_range[room_id] = (
+                membership_change
+            )
+
+            # Only set if we haven't already set it
+            first_membership_change_by_room_id_in_from_to_range.setdefault(
+                room_id, membership_change
+            )
+
+            if membership_change.membership != Membership.JOIN:
+                non_join_event_ids_by_room_id_in_from_to_range[room_id].append(
+                    membership_change.event_id
+                )
 
         # 2) Fixup
+        #
+        # 3) We also want to assemble a list of possibly newly joined rooms. Someone
+        # could have left and joined multiple times during the given range but we only
+        # care about whether they are joined at the end of the token range so we are
+        # working with the last membership even in the token range.
+        possibly_newly_joined_room_ids = set()
         for (
             last_membership_change_in_from_to_range
         ) in last_membership_change_by_room_id_in_from_to_range.values():
             room_id = last_membership_change_in_from_to_range.room_id
+
+            if last_membership_change_in_from_to_range.membership == Membership.JOIN:
+                possibly_newly_joined_room_ids.add(room_id)
 
             # 2) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
@@ -554,7 +589,44 @@ class SlidingSyncHandler:
                     newly_joined=False,
                 )
 
-        # TODO: Figure out `newly_joined`
+        # 3) Figure out `newly_joined`
+        prev_event_ids_before_token_range: List[str] = []
+        for possibly_newly_joined_room_id in possibly_newly_joined_room_ids:
+            non_joins_for_room = non_join_event_ids_by_room_id_in_from_to_range[
+                possibly_newly_joined_room_id
+            ]
+            if len(non_joins_for_room) > 0:
+                # We found a `newly_joined` room (we left and joined within the token range)
+                filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
+                    room_id
+                ].copy_and_replace(newly_joined=True)
+            else:
+                prev_event_id = first_membership_change_by_room_id_in_from_to_range[
+                    room_id
+                ].prev_event_id
+
+                if prev_event_id is None:
+                    # We found a `newly_joined` room (we are joining the room for the
+                    # first time within the token range)
+                    filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
+                        room_id
+                    ].copy_and_replace(newly_joined=True)
+                else:
+                    # Last resort, we need to step back to the previous membership event
+                    # just before the token range to see if we're joined then or not.
+                    prev_event_ids_before_token_range.append(prev_event_id)
+
+        # 3) more
+        prev_events_before_token_range = await self.store.get_events(
+            prev_event_ids_before_token_range
+        )
+        for prev_event_before_token_range in prev_events_before_token_range.values():
+            if prev_event_before_token_range.membership != Membership.JOIN:
+                # We found a `newly_joined` room (we left before the token range
+                # and joined within the token range)
+                filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
+                    room_id
+                ].copy_and_replace(newly_joined=True)
 
         return filtered_sync_room_id_set
 

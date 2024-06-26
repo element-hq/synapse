@@ -116,6 +116,9 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        # We should be considered `newly_joined` because we joined during the token
+        # range
+        self.assertEqual(room_id_results[room_id].newly_joined, True)
 
     def test_get_already_joined_room(self) -> None:
         """
@@ -146,6 +149,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id].newly_joined, False)
 
     def test_get_invited_banned_knocked_room(self) -> None:
         """
@@ -232,6 +237,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[knock_room_id].event_id,
             knock_room_membership_state_event.event_id,
         )
+        # We should *NOT* be `newly_joined` because we were not joined at the the time
+        # of the `to_token`.
+        self.assertEqual(room_id_results[invited_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[ban_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[knock_room_id].newly_joined, False)
 
     def test_get_kicked_room(self) -> None:
         """
@@ -277,6 +287,9 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[kick_room_id].event_id,
             kick_response["event_id"],
         )
+        # We should *NOT* be `newly_joined` because we were not joined at the the time
+        # of the `to_token`.
+        self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
 
     def test_forgotten_rooms(self) -> None:
         """
@@ -396,6 +409,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id2].event_id,
             leave_response["event_id"],
         )
+        # We should *NOT* be `newly_joined` because we are instead `newly_left`
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
 
     def test_no_joins_after_to_token(self) -> None:
         """
@@ -432,6 +447,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
 
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
@@ -477,6 +494,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
 
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
@@ -519,6 +538,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_kicked_before_range_and_left_after_to_token(self) -> None:
         """
@@ -581,6 +602,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we were kicked
+        self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -632,6 +655,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we left during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_newly_left_during_range_and_join_after_to_token(self) -> None:
         """
@@ -681,6 +706,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we left during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_no_from_token(self) -> None:
         """
@@ -727,6 +754,9 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
+        # We should *NOT* be `newly_joined` because there is no `from_token` to
+        # define a "live" range to compare against
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -793,6 +823,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
+        # We should *NOT* be `newly_joined` because we joined `room1` before either of the tokens
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
@@ -920,6 +952,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
 
     def test_join_leave_multiple_times_before_range_and_after_to_token(
         self,
@@ -976,6 +1010,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_invite_before_range_and_join_leave_after_to_token(
         self,
@@ -1028,8 +1064,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we were only invited before the
+        # token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
-    def test_display_name_changes_in_token_range(
+    def test_join_and_display_name_changes_in_token_range(
         self,
     ) -> None:
         """
@@ -1101,6 +1140,68 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+
+    def test_display_name_changes_in_token_range(
+        self,
+    ) -> None:
+        """
+        Test that we point to the correct membership event within the from/to range even
+        if there is `displayname`/`avatar_url` updates.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Update the displayname during the token range
+        displayname_change_during_token_range_response = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_change1_token = self.event_sources.get_current_token()
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_room1_token,
+                to_token=after_change1_token,
+            )
+        )
+
+        # Room should show up because we were joined during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            displayname_change_during_token_range_response["event_id"],
+            "Corresponding map to disambiguate the opaque event IDs: "
+            + str(
+                {
+                    "join_response": join_response["event_id"],
+                    "displayname_change_during_token_range_response": displayname_change_during_token_range_response[
+                        "event_id"
+                    ],
+                }
+            ),
+        )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_display_name_changes_before_and_after_token_range(
         self,
@@ -1172,6 +1273,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
 
     def test_display_name_changes_leave_after_token_range(
         self,
@@ -1250,6 +1353,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
 
     def test_display_name_changes_join_after_token_range(
         self,
@@ -1297,6 +1402,123 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Room shouldn't show up because we joined after the from/to range
         self.assertEqual(room_id_results.keys(), set())
+
+    def test_newly_joined_with_leave_join_in_token_range(
+        self,
+    ) -> None:
+        """
+        Test that `newly_joined` TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Leave and join back during the token range
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_more_changes_token = self.event_sources.get_current_token()
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_room1_token,
+                to_token=after_more_changes_token,
+            )
+        )
+
+        # Room should show up because we were joined during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            join_response2["event_id"],
+        )
+        # We should be considered `newly_joined` because there is some non-join event in
+        # between our latest join event.
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+
+    def test_newly_joined_only_joins_during_token_range(
+        self,
+    ) -> None:
+        """
+        Test that a join and more joins caused by display name changes, all during the
+        token range, still count as `newly_joined`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        before_room1_token = self.event_sources.get_current_token()
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # Join, leave, join back to the room before the from/to range
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # Update the displayname during the token range (looks like another join)
+        displayname_change_during_token_range_response1 = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+        # Update the displayname during the token range (looks like another join)
+        displayname_change_during_token_range_response2 = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_room1_token,
+                to_token=after_room1_token,
+            )
+        )
+
+        # Room should show up because it was newly_left and joined during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            displayname_change_during_token_range_response2["event_id"],
+            "Corresponding map to disambiguate the opaque event IDs: "
+            + str(
+                {
+                    "join_response1": join_response1["event_id"],
+                    "displayname_change_during_token_range_response1": displayname_change_during_token_range_response1[
+                        "event_id"
+                    ],
+                    "displayname_change_during_token_range_response2": displayname_change_during_token_range_response2[
+                        "event_id"
+                    ],
+                }
+            ),
+        )
+        # We should be `newly_joined` because we first joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
 
     def test_multiple_rooms_are_not_confused(
         self,
