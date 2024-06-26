@@ -63,7 +63,7 @@ from typing_extensions import Literal
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction
+from synapse.api.constants import Direction, EventTypes
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -807,7 +807,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: List[Any] = [user_id, min_from_id, max_to_id]
+            args: List[Any] = [min_from_id, max_to_id, user_id, EventTypes.Member]
 
             # TODO: It would be good to assert that the `from_token`/`to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
@@ -824,16 +824,18 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     e.event_id,
                     s.prev_event_id,
                     s.room_id,
-                    s.instance_name,
-                    s.stream_id,
+                    e.instance_name,
+                    e.stream_ordering,
                     e.topological_ordering,
                     m.membership,
                     e.sender
                 FROM current_state_delta_stream AS s
                     INNER JOIN events AS e ON e.stream_ordering = s.stream_id
                     INNER JOIN room_memberships AS m ON m.event_stream_ordering = s.stream_id
-                WHERE m.user_id = ?
-                    AND s.stream_id > ? AND s.stream_id <= ?
+                WHERE s.stream_id > ? AND s.stream_id <= ?
+                    AND m.user_id = ?
+                    AND s.state_key = m.user_id
+                    AND s.type = ?
                 ORDER BY s.stream_id ASC
             """
 
