@@ -201,7 +201,7 @@ class MessageHandler:
 
         if at_token:
             last_event_id = (
-                await self.store.get_last_event_in_room_before_stream_ordering(
+                await self.store.get_last_event_id_in_room_before_stream_ordering(
                     room_id,
                     end_token=at_token.room_key,
                 )
@@ -496,13 +496,6 @@ class EventCreationHandler:
 
         self.room_prejoin_state_types = self.hs.config.api.room_prejoin_state
 
-        self.membership_types_to_include_profile_data_in = {
-            Membership.JOIN,
-            Membership.KNOCK,
-        }
-        if self.hs.config.server.include_profile_data_on_invite:
-            self.membership_types_to_include_profile_data_in.add(Membership.INVITE)
-
         self.send_event = ReplicationSendEventRestServlet.make_client(hs)
         self.send_events = ReplicationSendEventsRestServlet.make_client(hs)
 
@@ -594,8 +587,6 @@ class EventCreationHandler:
         Creates an FrozenEvent object, filling out auth_events, prev_events,
         etc.
 
-        Adds display names to Join membership events.
-
         Args:
             requester
             event_dict: An entire event
@@ -651,6 +642,17 @@ class EventCreationHandler:
         """
         await self.auth_blocking.check_auth_blocking(requester=requester)
 
+        if event_dict["type"] == EventTypes.Message:
+            requester_suspended = await self.store.get_user_suspended_status(
+                requester.user.to_string()
+            )
+            if requester_suspended:
+                raise SynapseError(
+                    403,
+                    "Sending messages while account is suspended is not allowed.",
+                    Codes.USER_ACCOUNT_SUSPENDED,
+                )
+
         if event_dict["type"] == EventTypes.Create and event_dict["state_key"] == "":
             room_version_id = event_dict["content"]["room_version"]
             maybe_room_version_obj = KNOWN_ROOM_VERSIONS.get(room_version_id)
@@ -671,29 +673,6 @@ class EventCreationHandler:
         )
 
         self.validator.validate_builder(builder)
-
-        if builder.type == EventTypes.Member:
-            membership = builder.content.get("membership", None)
-            target = UserID.from_string(builder.state_key)
-
-            if membership in self.membership_types_to_include_profile_data_in:
-                # If event doesn't include a display name, add one.
-                profile = self.profile_handler
-                content = builder.content
-
-                try:
-                    if "displayname" not in content:
-                        displayname = await profile.get_displayname(target)
-                        if displayname is not None:
-                            content["displayname"] = displayname
-                    if "avatar_url" not in content:
-                        avatar_url = await profile.get_avatar_url(target)
-                        if avatar_url is not None:
-                            content["avatar_url"] = avatar_url
-                except Exception as e:
-                    logger.info(
-                        "Failed to get profile information for %r: %s", target, e
-                    )
 
         is_exempt = await self._is_exempt_from_privacy_policy(builder, requester)
         if require_consent and not is_exempt:
@@ -1583,6 +1562,7 @@ class EventCreationHandler:
                     # stream_ordering entry manually (as it was persisted on
                     # another worker).
                     event.internal_metadata.stream_ordering = stream_id
+                    event.internal_metadata.instance_name = writer_instance
 
                 return event
 

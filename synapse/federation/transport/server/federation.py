@@ -44,10 +44,13 @@ from synapse.federation.transport.server._base import (
 )
 from synapse.http.servlet import (
     parse_boolean_from_args,
+    parse_integer,
     parse_integer_from_args,
     parse_string_from_args,
     parse_strings_from_args,
 )
+from synapse.http.site import SynapseRequest
+from synapse.media._base import DEFAULT_MAX_TIMEOUT_MS, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS
 from synapse.types import JsonDict
 from synapse.util import SYNAPSE_VERSION
 from synapse.util.ratelimitutils import FederationRateLimiter
@@ -787,6 +790,43 @@ class FederationAccountStatusServlet(BaseFederationServerServlet):
         return 200, {"account_statuses": statuses, "failures": failures}
 
 
+class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
+    """
+    Implementation of new federation media `/download` endpoint outlined in MSC3916. Returns
+    a multipart/mixed response consisting of a JSON object and the requested media
+    item. This endpoint only returns local media.
+    """
+
+    PATH = "/media/download/(?P<media_id>[^/]*)"
+    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc3916"
+    RATELIMIT = True
+
+    def __init__(
+        self,
+        hs: "HomeServer",
+        ratelimiter: FederationRateLimiter,
+        authenticator: Authenticator,
+        server_name: str,
+    ):
+        super().__init__(hs, authenticator, ratelimiter, server_name)
+        self.media_repo = self.hs.get_media_repository()
+
+    async def on_GET(
+        self,
+        origin: Optional[str],
+        content: Literal[None],
+        request: SynapseRequest,
+        media_id: str,
+    ) -> None:
+        max_timeout_ms = parse_integer(
+            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
+        )
+        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
+        await self.media_repo.get_local_media(
+            request, media_id, None, max_timeout_ms, federation=True
+        )
+
+
 FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationSendServlet,
     FederationEventServlet,
@@ -818,4 +858,5 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
+    FederationUnstableMediaDownloadServlet,
 )

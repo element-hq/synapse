@@ -344,6 +344,8 @@ class HomeserverTestCase(TestCase):
         self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
 
+        self.hs.get_datastores().main.tests_allow_no_chain_cover_index = False
+
         # Honour the `use_frozen_dicts` config option. We have to do this
         # manually because this is taken care of in the app `start` code, which
         # we don't run. Plus we want to reset it on tearDown.
@@ -637,13 +639,13 @@ class HomeserverTestCase(TestCase):
         return self.successResultOf(deferred)
 
     def get_failure(
-        self, d: Awaitable[Any], exc: Type[_ExcType]
+        self, d: Awaitable[Any], exc: Type[_ExcType], by: float = 0.0
     ) -> _TypedFailure[_ExcType]:
         """
         Run a Deferred and get a Failure from it. The failure must be of the type `exc`.
         """
         deferred: Deferred[Any] = ensureDeferred(d)  # type: ignore[arg-type]
-        self.pump()
+        self.pump(by)
         return self.failureResultOf(deferred, exc)
 
     def get_success_or_raise(self, d: Awaitable[TV], by: float = 0.0) -> TV:

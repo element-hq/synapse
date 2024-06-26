@@ -66,6 +66,17 @@ class CasConfig(Config):
 
             self.cas_enable_registration = cas_config.get("enable_registration", True)
 
+            self.cas_allow_numeric_ids = cas_config.get("allow_numeric_ids")
+            self.cas_numeric_ids_prefix = cas_config.get("numeric_ids_prefix")
+            if (
+                self.cas_numeric_ids_prefix is not None
+                and self.cas_numeric_ids_prefix.isalnum() is False
+            ):
+                raise ConfigError(
+                    "Only alphanumeric characters are allowed for numeric IDs prefix",
+                    ("cas_config", "numeric_ids_prefix"),
+                )
+
             self.idp_name = cas_config.get("idp_name", "CAS")
             self.idp_icon = cas_config.get("idp_icon")
             self.idp_brand = cas_config.get("idp_brand")
@@ -77,6 +88,8 @@ class CasConfig(Config):
             self.cas_displayname_attribute = None
             self.cas_required_attributes = []
             self.cas_enable_registration = False
+            self.cas_allow_numeric_ids = False
+            self.cas_numeric_ids_prefix = "u"
 
 
 # CAS uses a legacy required attributes mapping, not the one provided by

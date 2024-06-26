@@ -28,7 +28,7 @@ import jinja2
 from markupsafe import Markup
 from prometheus_client import Counter
 
-from synapse.api.constants import EventTypes, Membership, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import StoreError
 from synapse.config.emailconfig import EmailSubjectConfig
 from synapse.events import EventBase
@@ -532,7 +532,6 @@ class Mailer:
             self._storage_controllers,
             user_id,
             results.events_before,
-            msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
         )
         the_events.append(notif_event)
 
@@ -717,7 +716,8 @@ class Mailer:
                 )
                 if (
                     create_event
-                    and create_event.content.get("room_type") == RoomTypes.SPACE
+                    and create_event.content.get(EventContentFields.ROOM_TYPE)
+                    == RoomTypes.SPACE
                 ):
                     return self.email_subjects.invite_from_person_to_space % {
                         "person": inviter_name,

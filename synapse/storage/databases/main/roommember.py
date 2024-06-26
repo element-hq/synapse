@@ -476,7 +476,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
         sql = """
-            SELECT room_id, e.sender, c.membership, event_id, e.stream_ordering, r.room_version
+            SELECT room_id, e.sender, c.membership, event_id, e.instance_name, e.stream_ordering, r.room_version
             FROM local_current_membership AS c
             INNER JOIN events AS e USING (room_id, event_id)
             INNER JOIN rooms AS r USING (room_id)
@@ -488,7 +488,17 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
         txn.execute(sql, (user_id, *args))
-        results = [RoomsForUser(*r) for r in txn]
+        results = [
+            RoomsForUser(
+                room_id=room_id,
+                sender=sender,
+                membership=membership,
+                event_id=event_id,
+                event_pos=PersistedEventPosition(instance_name, stream_ordering),
+                room_version_id=room_version,
+            )
+            for room_id, sender, membership, event_id, instance_name, stream_ordering, room_version in txn
+        ]
 
         return results
 

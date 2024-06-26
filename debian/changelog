@@ -1,3 +1,51 @@
+matrix-synapse-py3 (1.109.0+nmu1) UNRELEASED; urgency=medium
+
+  * `register_new_matrix_user` now supports a --password-file and a --exists-ok flag.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 18 Jun 2024 13:29:36 +0100
+
+matrix-synapse-py3 (1.109.0) stable; urgency=medium
+
+  * New synapse release 1.109.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 18 Jun 2024 09:45:15 +0000
+
+matrix-synapse-py3 (1.109.0~rc3) stable; urgency=medium
+
+  * New synapse release 1.109.0rc3.
+
+ -- Synapse Packaging team <packages@matrix.org>  Mon, 17 Jun 2024 12:05:24 +0000
+
+matrix-synapse-py3 (1.109.0~rc2) stable; urgency=medium
+
+  * New synapse release 1.109.0rc2.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 11 Jun 2024 13:20:17 +0000
+
+matrix-synapse-py3 (1.109.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.109.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 04 Jun 2024 09:42:46 +0100
+
+matrix-synapse-py3 (1.108.0) stable; urgency=medium
+
+  * New Synapse release 1.108.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 28 May 2024 11:54:22 +0100
+
+matrix-synapse-py3 (1.108.0~rc1) stable; urgency=medium
+
+  * New Synapse release 1.108.0rc1.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 21 May 2024 10:54:13 +0100
+
+matrix-synapse-py3 (1.107.0) stable; urgency=medium
+
+  * New Synapse release 1.107.0.
+
+ -- Synapse Packaging team <packages@matrix.org>  Tue, 14 May 2024 14:15:34 +0100
+
 matrix-synapse-py3 (1.107.0~rc1) stable; urgency=medium
 
   * New Synapse release 1.107.0rc1.

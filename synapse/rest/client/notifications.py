@@ -32,6 +32,7 @@ from synapse.http.servlet import RestServlet, parse_integer, parse_string
 from synapse.http.site import SynapseRequest
 from synapse.types import JsonDict
 
+from ...api.errors import SynapseError
 from ._base import client_patterns
 
 if TYPE_CHECKING:
@@ -56,7 +57,22 @@ class NotificationsServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         user_id = requester.user.to_string()
 
-        from_token = parse_string(request, "from", required=False)
+        # While this is intended to be "string" to clients, the 'from' token
+        # is actually based on a numeric ID. So it must parse to an int.
+        from_token_str = parse_string(request, "from", required=False)
+        if from_token_str is not None:
+            # Parse to an integer.
+            try:
+                from_token = int(from_token_str)
+            except ValueError:
+                # If it doesn't parse to an integer, then this cannot possibly be a valid
+                # pagination token, as we only hand out integers.
+                raise SynapseError(
+                    400, 'Query parameter "from" contains unrecognised token'
+                )
+        else:
+            from_token = None
+
         limit = parse_integer(request, "limit", default=50)
         only = parse_string(request, "only", required=False)
 

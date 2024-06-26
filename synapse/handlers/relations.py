@@ -95,7 +95,6 @@ class RelationsHandler:
         self._event_handler = hs.get_event_handler()
         self._event_serializer = hs.get_event_client_serializer()
         self._event_creation_handler = hs.get_event_creation_handler()
-        self._config = hs.config
 
     async def get_relations(
         self,
@@ -164,7 +163,6 @@ class RelationsHandler:
             user_id,
             events,
             is_peeking=(member_event_id is None),
-            msc4115_membership_on_events=self._config.experimental.msc4115_membership_on_events,
         )
 
         # The relations returned for the requested event do include their
@@ -393,9 +391,9 @@ class RelationsHandler:
 
                 # Attempt to find another event to use as the latest event.
                 potential_events, _ = await self._main_store.get_relations_for_event(
+                    room_id,
                     event_id,
                     event,
-                    room_id,
                     RelationTypes.THREAD,
                     direction=Direction.FORWARDS,
                 )
@@ -610,7 +608,6 @@ class RelationsHandler:
             user_id,
             events,
             is_peeking=(member_event_id is None),
-            msc4115_membership_on_events=self._config.experimental.msc4115_membership_on_events,
         )
 
         aggregations = await self.get_bundled_aggregations(

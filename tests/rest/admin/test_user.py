@@ -37,6 +37,7 @@ from synapse.api.constants import ApprovalNoticeMedium, LoginType, UserTypes
 from synapse.api.errors import Codes, HttpResponseException, ResourceLimitError
 from synapse.api.room_versions import RoomVersions
 from synapse.media.filepath import MediaFilePaths
+from synapse.rest import admin
 from synapse.rest.client import (
     devices,
     login,
@@ -5005,3 +5006,86 @@ class AllowCrossSigningReplacementTestCase(unittest.HomeserverTestCase):
         )
         assert timestamp is not None
         self.assertGreater(timestamp, self.clock.time_msec())
+
+
+class UserSuspensionTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "hackme", True)
+        self.admin_tok = self.login("thomas", "hackme")
+
+        self.bad_user = self.register_user("teresa", "hackme")
+        self.bad_user_tok = self.login("teresa", "hackme")
+
+        self.store = hs.get_datastores().main
+
+    @override_config({"experimental_features": {"msc3823_account_suspension": True}})
+    def test_suspend_user(self) -> None:
+        # test that suspending user works
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.bad_user}",
+            {"suspend": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body, {f"user_{self.bad_user}_suspended": True})
+
+        res = self.get_success(self.store.get_user_suspended_status(self.bad_user))
+        self.assertEqual(True, res)
+
+        # test that un-suspending user works
+        channel2 = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.bad_user}",
+            {"suspend": False},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel2.code, 200)
+        self.assertEqual(channel2.json_body, {f"user_{self.bad_user}_suspended": False})
+
+        res2 = self.get_success(self.store.get_user_suspended_status(self.bad_user))
+        self.assertEqual(False, res2)
+
+        # test that trying to un-suspend user who isn't suspended doesn't cause problems
+        channel3 = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.bad_user}",
+            {"suspend": False},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel3.code, 200)
+        self.assertEqual(channel3.json_body, {f"user_{self.bad_user}_suspended": False})
+
+        res3 = self.get_success(self.store.get_user_suspended_status(self.bad_user))
+        self.assertEqual(False, res3)
+
+        # test that trying to suspend user who is already suspended doesn't cause problems
+        channel4 = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.bad_user}",
+            {"suspend": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel4.code, 200)
+        self.assertEqual(channel4.json_body, {f"user_{self.bad_user}_suspended": True})
+
+        res4 = self.get_success(self.store.get_user_suspended_status(self.bad_user))
+        self.assertEqual(True, res4)
+
+        channel5 = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{self.bad_user}",
+            {"suspend": True},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel5.code, 200)
+        self.assertEqual(channel5.json_body, {f"user_{self.bad_user}_suspended": True})
+
+        res5 = self.get_success(self.store.get_user_suspended_status(self.bad_user))
+        self.assertEqual(True, res5)

@@ -332,6 +332,9 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
+        # MSC3575 (Sliding Sync API endpoints)
+        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", False)
+
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
 
@@ -390,9 +393,6 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
-        # MSC3967: Do not require UIA when first uploading cross signing keys
-        self.msc3967_enabled = experimental.get("msc3967_enabled", False)
-
         # MSC3861: Matrix architecture change to delegate authentication via OIDC
         try:
             self.msc3861 = MSC3861(**experimental.get("msc3861", {}))
@@ -433,6 +433,16 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        self.msc4115_membership_on_events = experimental.get(
-            "msc4115_membership_on_events", False
+        self.msc3823_account_suspension = experimental.get(
+            "msc3823_account_suspension", False
         )
+
+        self.msc3916_authenticated_media_enabled = experimental.get(
+            "msc3916_authenticated_media_enabled", False
+        )
+
+        # MSC4151: Report room API (Client-Server API)
+        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
+
+        # MSC4156: Migrate server_name to via
+        self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)

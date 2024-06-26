@@ -19,14 +19,16 @@
 #
 #
 import json
-from typing import List
+import logging
+from typing import Dict, List
 
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
+    AccountDataTypes,
     EventContentFields,
     EventTypes,
     ReceiptTypes,
@@ -34,7 +36,7 @@ from synapse.api.constants import (
 )
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, RoomStreamToken, StreamKeyType
 from synapse.util import Clock
 
 from tests import unittest
@@ -42,6 +44,8 @@ from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
 from tests.server import TimedOutException
+
+logger = logging.getLogger(__name__)
 
 
 class FilterTestCase(unittest.HomeserverTestCase):
@@ -688,24 +692,180 @@ class SyncCacheTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
 
+@parameterized_class(
+    ("sync_endpoint", "experimental_features"),
+    [
+        ("/sync", {}),
+        (
+            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
+            # Enable sliding sync
+            {"msc3575_enabled": True},
+        ),
+    ],
+)
 class DeviceListSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding device list (`device_lists`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
+
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        room.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = self.experimental_features
+        return config
+
+    def test_receiving_local_device_list_changes(self) -> None:
+        """Tests that a local users that share a room receive each other's device list
+        changes.
+        """
+        # Register two users
+        test_device_id = "TESTDEVICE"
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        bob_user_id = self.register_user("bob", "ponyponypony")
+        bob_access_token = self.login(bob_user_id, "ponyponypony")
+
+        # Create a room for them to coexist peacefully in
+        new_room_id = self.helper.create_room_as(
+            alice_user_id, is_public=True, tok=alice_access_token
+        )
+        self.assertIsNotNone(new_room_id)
+
+        # Have Bob join the room
+        self.helper.invite(
+            new_room_id, alice_user_id, bob_user_id, tok=alice_access_token
+        )
+        self.helper.join(new_room_id, bob_user_id, tok=bob_access_token)
+
+        # Now have Bob initiate an initial sync (in order to get a since token)
+        channel = self.make_request(
+            "GET",
+            self.sync_endpoint,
+            access_token=bob_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch_token = channel.json_body["next_batch"]
+
+        # ...and then an incremental sync. This should block until the sync stream is woken up,
+        # which we hope will happen as a result of Alice updating their device list.
+        bob_sync_channel = self.make_request(
+            "GET",
+            f"{self.sync_endpoint}?since={next_batch_token}&timeout=30000",
+            access_token=bob_access_token,
+            # Start the request, then continue on.
+            await_result=False,
+        )
+
+        # Have alice update their device list
+        channel = self.make_request(
+            "PUT",
+            f"/devices/{test_device_id}",
+            {
+                "display_name": "New Device Name",
+            },
+            access_token=alice_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check that bob's incremental sync contains the updated device list.
+        # If not, the client would only receive the device list update on the
+        # *next* sync.
+        bob_sync_channel.await_result()
+        self.assertEqual(bob_sync_channel.code, 200, bob_sync_channel.json_body)
+
+        changed_device_lists = bob_sync_channel.json_body.get("device_lists", {}).get(
+            "changed", []
+        )
+        self.assertIn(alice_user_id, changed_device_lists, bob_sync_channel.json_body)
+
+    def test_not_receiving_local_device_list_changes(self) -> None:
+        """Tests a local users DO NOT receive device updates from each other if they do not
+        share a room.
+        """
+        # Register two users
+        test_device_id = "TESTDEVICE"
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        bob_user_id = self.register_user("bob", "ponyponypony")
+        bob_access_token = self.login(bob_user_id, "ponyponypony")
+
+        # These users do not share a room. They are lonely.
+
+        # Have Bob initiate an initial sync (in order to get a since token)
+        channel = self.make_request(
+            "GET",
+            self.sync_endpoint,
+            access_token=bob_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        next_batch_token = channel.json_body["next_batch"]
+
+        # ...and then an incremental sync. This should block until the sync stream is woken up,
+        # which we hope will happen as a result of Alice updating their device list.
+        bob_sync_channel = self.make_request(
+            "GET",
+            f"{self.sync_endpoint}?since={next_batch_token}&timeout=1000",
+            access_token=bob_access_token,
+            # Start the request, then continue on.
+            await_result=False,
+        )
+
+        # Have alice update their device list
+        channel = self.make_request(
+            "PUT",
+            f"/devices/{test_device_id}",
+            {
+                "display_name": "New Device Name",
+            },
+            access_token=alice_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check that bob's incremental sync does not contain the updated device list.
+        bob_sync_channel.await_result()
+        self.assertEqual(bob_sync_channel.code, 200, bob_sync_channel.json_body)
+
+        changed_device_lists = bob_sync_channel.json_body.get("device_lists", {}).get(
+            "changed", []
+        )
+        self.assertNotIn(
+            alice_user_id, changed_device_lists, bob_sync_channel.json_body
+        )
+
     def test_user_with_no_rooms_receives_self_device_list_updates(self) -> None:
         """Tests that a user with no rooms still receives their own device list updates"""
-        device_id = "TESTDEVICE"
+        test_device_id = "TESTDEVICE"
 
         # Register a user and login, creating a device
-        self.user_id = self.register_user("kermit", "monkey")
-        self.tok = self.login("kermit", "monkey", device_id=device_id)
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
 
         # Request an initial sync
-        channel = self.make_request("GET", "/sync", access_token=self.tok)
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
         self.assertEqual(channel.code, 200, channel.json_body)
         next_batch = channel.json_body["next_batch"]
 
@@ -713,19 +873,19 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         # It won't return until something has happened
         incremental_sync_channel = self.make_request(
             "GET",
-            f"/sync?since={next_batch}&timeout=30000",
-            access_token=self.tok,
+            f"{self.sync_endpoint}?since={next_batch}&timeout=30000",
+            access_token=alice_access_token,
             await_result=False,
         )
 
         # Change our device's display name
         channel = self.make_request(
             "PUT",
-            f"devices/{device_id}",
+            f"devices/{test_device_id}",
             {
                 "display_name": "freeze ray",
             },
-            access_token=self.tok,
+            access_token=alice_access_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
@@ -739,7 +899,230 @@ class DeviceListSyncTestCase(unittest.HomeserverTestCase):
         ).get("changed", [])
 
         self.assertIn(
-            self.user_id, device_list_changes, incremental_sync_channel.json_body
+            alice_user_id, device_list_changes, incremental_sync_channel.json_body
+        )
+
+
+@parameterized_class(
+    ("sync_endpoint", "experimental_features"),
+    [
+        ("/sync", {}),
+        (
+            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
+            # Enable sliding sync
+            {"msc3575_enabled": True},
+        ),
+    ],
+)
+class DeviceOneTimeKeysSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding device one time keys (`device_one_time_keys_count`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = self.experimental_features
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+
+    def test_no_device_one_time_keys(self) -> None:
+        """
+        Tests when no one time keys set, it still has the default `signed_curve25519` in
+        `device_one_time_keys_count`
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertDictEqual(
+            channel.json_body["device_one_time_keys_count"],
+            # Note that "signed_curve25519" is always returned in key count responses
+            # regardless of whether we uploaded any keys for it. This is necessary until
+            # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+            {"signed_curve25519": 0},
+            channel.json_body["device_one_time_keys_count"],
+        )
+
+    def test_returns_device_one_time_keys(self) -> None:
+        """
+        Tests that one time keys for the device/user are counted correctly in the `/sync`
+        response
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Upload one time keys for the user/device
+        keys: JsonDict = {
+            "alg1:k1": "key1",
+            "alg2:k2": {"key": "key2", "signatures": {"k1": "sig1"}},
+            "alg2:k3": {"key": "key3"},
+        }
+        res = self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                alice_user_id, test_device_id, {"one_time_keys": keys}
+            )
+        )
+        # Note that "signed_curve25519" is always returned in key count responses
+        # regardless of whether we uploaded any keys for it. This is necessary until
+        # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+        self.assertDictEqual(
+            res,
+            {"one_time_key_counts": {"alg1": 1, "alg2": 2, "signed_curve25519": 0}},
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertDictEqual(
+            channel.json_body["device_one_time_keys_count"],
+            {"alg1": 1, "alg2": 2, "signed_curve25519": 0},
+            channel.json_body["device_one_time_keys_count"],
+        )
+
+
+@parameterized_class(
+    ("sync_endpoint", "experimental_features"),
+    [
+        ("/sync", {}),
+        (
+            "/_matrix/client/unstable/org.matrix.msc3575/sync/e2ee",
+            # Enable sliding sync
+            {"msc3575_enabled": True},
+        ),
+    ],
+)
+class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding device one time keys (`device_unused_fallback_key_types`) changes.
+
+    Attributes:
+        sync_endpoint: The endpoint under test to use for syncing.
+        experimental_features: The experimental features homeserver config to use.
+    """
+
+    sync_endpoint: str
+    experimental_features: JsonDict
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = self.experimental_features
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = self.hs.get_datastores().main
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+
+    def test_no_device_unused_fallback_key(self) -> None:
+        """
+        Test when no unused fallback key is set, it just returns an empty list. The MSC
+        says "The device_unused_fallback_key_types parameter must be present if the
+        server supports fallback keys.",
+        https://github.com/matrix-org/matrix-spec-proposals/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertListEqual(
+            channel.json_body["device_unused_fallback_key_types"],
+            [],
+            channel.json_body["device_unused_fallback_key_types"],
+        )
+
+    def test_returns_device_one_time_keys(self) -> None:
+        """
+        Tests that device unused fallback key type is returned correctly in the `/sync`
+        """
+        test_device_id = "TESTDEVICE"
+
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(
+            alice_user_id, "correcthorse", device_id=test_device_id
+        )
+
+        # We shouldn't have any unused fallback keys yet
+        res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(alice_user_id, test_device_id)
+        )
+        self.assertEqual(res, [])
+
+        # Upload a fallback key for the user/device
+        fallback_key = {"alg1:k1": "fallback_key1"}
+        self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                alice_user_id,
+                test_device_id,
+                {"fallback_keys": fallback_key},
+            )
+        )
+        # We should now have an unused alg1 key
+        fallback_res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(alice_user_id, test_device_id)
+        )
+        self.assertEqual(fallback_res, ["alg1"], fallback_res)
+
+        # Request an initial sync
+        channel = self.make_request(
+            "GET", self.sync_endpoint, access_token=alice_access_token
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for the unused fallback key types
+        self.assertListEqual(
+            channel.json_body["device_unused_fallback_key_types"],
+            ["alg1"],
+            channel.json_body["device_unused_fallback_key_types"],
         )
 
 
@@ -825,3 +1208,411 @@ class ExcludeRoomTestCase(unittest.HomeserverTestCase):
 
         self.assertNotIn(self.excluded_room_id, channel.json_body["rooms"]["join"])
         self.assertIn(self.included_room_id, channel.json_body["rooms"]["join"])
+
+
+class SlidingSyncTestCase(unittest.HomeserverTestCase):
+    """
+    Tests regarding MSC3575 Sliding Sync `/sync` endpoint.
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.sync_endpoint = (
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+        )
+        self.store = hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+
+    def _add_new_dm_to_global_account_data(
+        self, source_user_id: str, target_user_id: str, target_room_id: str
+    ) -> None:
+        """
+        Helper to handle inserting a new DM for the source user into global account data
+        (handles all of the list merging).
+
+        Args:
+            source_user_id: The user ID of the DM mapping we're going to update
+            target_user_id: User ID of the person the DM is with
+            target_room_id: Room ID of the DM
+        """
+
+        # Get the current DM map
+        existing_dm_map = self.get_success(
+            self.store.get_global_account_data_by_type_for_user(
+                source_user_id, AccountDataTypes.DIRECT
+            )
+        )
+        # Scrutinize the account data since it has no concrete type. We're just copying
+        # everything into a known type. It should be a mapping from user ID to a list of
+        # room IDs. Ignore anything else.
+        new_dm_map: Dict[str, List[str]] = {}
+        if isinstance(existing_dm_map, dict):
+            for user_id, room_ids in existing_dm_map.items():
+                if isinstance(user_id, str) and isinstance(room_ids, list):
+                    for room_id in room_ids:
+                        if isinstance(room_id, str):
+                            new_dm_map[user_id] = new_dm_map.get(user_id, []) + [
+                                room_id
+                            ]
+
+        # Add the new DM to the map
+        new_dm_map[target_user_id] = new_dm_map.get(target_user_id, []) + [
+            target_room_id
+        ]
+        # Save the DM map to global account data
+        self.get_success(
+            self.store.add_account_data_for_user(
+                source_user_id,
+                AccountDataTypes.DIRECT,
+                new_dm_map,
+            )
+        )
+
+    def _create_dm_room(
+        self,
+        inviter_user_id: str,
+        inviter_tok: str,
+        invitee_user_id: str,
+        invitee_tok: str,
+        should_join_room: bool = True,
+    ) -> str:
+        """
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the
+        room. The "invitee" user also will join the room. The `m.direct` account data
+        will be set for both users.
+        """
+
+        # Create a room and send an invite the other user
+        room_id = self.helper.create_room_as(
+            inviter_user_id,
+            is_public=False,
+            tok=inviter_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=inviter_user_id,
+            targ=invitee_user_id,
+            tok=inviter_tok,
+            extra_data={"is_direct": True},
+        )
+        if should_join_room:
+            # Person that was invited joins the room
+            self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+
+        # Mimic the client setting the room as a direct message in the global account
+        # data for both users.
+        self._add_new_dm_to_global_account_data(
+            invitee_user_id, inviter_user_id, room_id
+        )
+        self._add_new_dm_to_global_account_data(
+            inviter_user_id, invitee_user_id, room_id
+        )
+
+        return room_id
+
+    def test_sync_list(self) -> None:
+        """
+        Test that room IDs show up in the Sliding Sync lists
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+
+        room_id = self.helper.create_room_as(
+            alice_user_id, tok=alice_access_token, is_public=True
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=alice_access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the room we are joined to
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+    def test_wait_for_sync_token(self) -> None:
+        """
+        Test that worker will wait until it catches up to the given token
+        """
+        alice_user_id = self.register_user("alice", "correcthorse")
+        alice_access_token = self.login(alice_user_id, "correcthorse")
+
+        # Create a future token that will cause us to wait. Since we never send a new
+        # event to reach that future stream_ordering, the worker will wait until the
+        # full timeout.
+        current_token = self.event_sources.get_current_token()
+        future_position_token = current_token.copy_and_replace(
+            StreamKeyType.ROOM,
+            RoomStreamToken(stream=current_token.room_key.stream + 1),
+        )
+
+        future_position_token_serialized = self.get_success(
+            future_position_token.to_string(self.store)
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?pos={future_position_token_serialized}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=alice_access_token,
+            await_result=False,
+        )
+        # Block for 10 seconds to make `notifier.wait_for_stream_token(from_token)`
+        # timeout
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=9900)
+        channel.await_result(timeout_ms=200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We expect the `next_pos` in the result to be the same as what we requested
+        # with because we weren't able to find anything new yet.
+        self.assertEqual(
+            channel.json_body["next_pos"], future_position_token_serialized
+        )
+
+    def test_filter_list(self) -> None:
+        """
+        Test that filters apply to lists
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a DM room
+        joined_dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+            should_join_room=True,
+        )
+        invited_dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+            should_join_room=False,
+        )
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create a room that user1 is invited to
+        invite_room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        self.helper.invite(invite_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    # Absense of filters does not imply "False" values
+                    "all": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {},
+                    },
+                    # Test single truthy filter
+                    "dms": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": True},
+                    },
+                    # Test single falsy filter
+                    "non-dms": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": False},
+                    },
+                    # Test how multiple filters should stack (AND'd together)
+                    "room-invites": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {"is_dm": False, "is_invite": True},
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["all", "dms", "non-dms", "room-invites"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the lists have the correct rooms
+        self.assertListEqual(
+            list(channel.json_body["lists"]["all"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [
+                        invite_room_id,
+                        room_id,
+                        invited_dm_room_id,
+                        joined_dm_room_id,
+                    ],
+                }
+            ],
+            list(channel.json_body["lists"]["all"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["dms"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [invited_dm_room_id, joined_dm_room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["dms"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["non-dms"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [invite_room_id, room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["non-dms"]),
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["room-invites"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [invite_room_id],
+                }
+            ],
+            list(channel.json_body["lists"]["room-invites"]),
+        )
+
+    def test_sort_list(self) -> None:
+        """
+        Test that the lists are sorted by `stream_ordering`
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+
+        # Activity that will order the rooms
+        self.helper.send(room_id3, "activity in room3", tok=user1_tok)
+        self.helper.send(room_id1, "activity in room1", tok=user1_tok)
+        self.helper.send(room_id2, "activity in room2", tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [
+                            ["m.room.join_rules", ""],
+                            ["m.room.history_visibility", ""],
+                            ["m.space.child", "*"],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list is sorted in the way we expect
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [room_id2, room_id1, room_id3],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
