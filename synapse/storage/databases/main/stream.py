@@ -934,6 +934,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ignore_room_clause, ignore_room_args = make_in_list_sql_clause(
                     txn.database_engine, "e.room_id", excluded_rooms, negative=True
                 )
+                ignore_room_clause = f"AND {ignore_room_clause}"
                 args += ignore_room_args
 
             sql = """
@@ -947,6 +948,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             """ % (
                 ignore_room_clause,
             )
+
+            logger.info("get_membership_changes_for_user: %s", sql)
 
             txn.execute(sql, args)
 
