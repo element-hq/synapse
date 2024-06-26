@@ -63,7 +63,7 @@ from typing_extensions import Literal
 
 from twisted.internet import defer
 
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import Direction
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable, run_in_background
@@ -116,14 +116,13 @@ class _EventsAround:
 class CurrentStateDeltaMembership:
     """
     Attributes:
-        event_id: The "current" membership event ID in this room. May be `None` if the
-            server is no longer in the room or a state reset happened.
+        event_id: The "current" membership event ID in this room.
         prev_event_id: The previous membership event in this room that was replaced by
             the "current" one. May be `None` if there was no previous membership event.
         room_id: The room ID of the membership event.
     """
 
-    event_id: Optional[str]
+    event_id: str
     prev_event_id: Optional[str]
     room_id: str
     membership: str
@@ -406,42 +405,6 @@ def _filter_results(
         else:
             if upper_token.get_stream_pos_for_instance(instance_name) < stream_ordering:
                 return False
-
-    return True
-
-
-def _filter_results_by_stream(
-    lower_token: Optional[RoomStreamToken],
-    upper_token: Optional[RoomStreamToken],
-    instance_name: str,
-    stream_ordering: int,
-) -> bool:
-    """
-    Note: This function only works with "live" tokens with `stream_ordering` only.
-
-    Returns True if the event persisted by the given instance at the given
-    topological/stream_ordering falls between the two tokens (taking a None
-    token to mean unbounded).
-
-    Used to filter results from fetching events in the DB against the given
-    tokens. This is necessary to handle the case where the tokens include
-    position maps, which we handle by fetching more than necessary from the DB
-    and then filtering (rather than attempting to construct a complicated SQL
-    query).
-    """
-    if lower_token:
-        assert lower_token.topological is None
-
-        # If these are live tokens we compare the stream ordering against the
-        # writers stream position.
-        if stream_ordering <= lower_token.get_stream_pos_for_instance(instance_name):
-            return False
-
-    if upper_token:
-        assert upper_token.topological is None
-
-        if upper_token.get_stream_pos_for_instance(instance_name) < stream_ordering:
-            return False
 
     return True
 
@@ -819,58 +782,74 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: List[Any] = [EventTypes.Member, user_id, min_from_id, max_to_id]
+            args: List[Any] = [user_id, min_from_id, max_to_id]
 
             # TODO: It would be good to assert that the `to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
             # interested in. Otherwise, we will end up with empty results and not know
             # it.
 
-            # Note: There is no index for `(type, state_key)` in
-            # `current_state_delta_stream`. We also can't just add an index for
-            # `event_id` and join the `room_memberships` table by `event_id` because it
-            # may be `null` in `current_state_delta_stream` so nothing will match (it's
-            # `null` when the server is no longer in the room or a state reset happened
-            # and it was unset).
+            # We have to look-up events by `stream_ordering` because
+            # `current_state_delta_stream.event_id` can be `null` if the server is no
+            # longer in the room or a state reset happened and it was unset.
+            # `stream_ordering` is unique across the Synapse instance so this should
+            # work fine.
             sql = """
                 SELECT
-                    s.event_id,
+                    e.event_id,
                     s.prev_event_id,
                     s.room_id,
                     s.instance_name,
                     s.stream_id,
+                    e.topological_ordering,
                     m.membership
                 FROM current_state_delta_stream AS s
-                WHERE s.type = ? AND s.state_key = ?
+                    INNER JOIN events AS e ON e.stream_ordering = s.stream_id
+                    INNER JOIN room_memberships AS m ON m.event_id = e.event_id
+                WHERE m.user_id = ?
                     AND s.stream_id > ? AND s.stream_id <= ?
                 ORDER BY s.stream_id ASC
             """
 
             txn.execute(sql, args)
 
-            return [
-                CurrentStateDeltaMembership(
-                    event_id=event_id,
-                    prev_event_id=prev_event_id,
-                    room_id=room_id,
-                    # We can assume that the membership is `LEAVE` as a default. This
-                    # will happen when `current_state_delta_stream.event_id` is null
-                    # because it was unset due to a state reset or the server is no
-                    # longer in the room (everyone on our local server left).
-                    membership=membership if membership else Membership.LEAVE,
-                    # event_pos=PersistedEventPosition(
-                    #     instance_name=instance_name,
-                    #     stream=stream_ordering,
-                    # ),
-                )
-                for event_id, prev_event_id, room_id, instance_name, stream_ordering, membership in txn
-                if _filter_results_by_stream(
+            membership_changes: List[CurrentStateDeltaMembership] = []
+            for (
+                event_id,
+                prev_event_id,
+                room_id,
+                instance_name,
+                stream_ordering,
+                topological_ordering,
+                membership,
+            ) in txn:
+                assert event_id is not None
+                # `prev_event_id` can be `None`
+                assert room_id is not None
+                assert instance_name is not None
+                assert stream_ordering is not None
+                assert topological_ordering is not None
+                assert membership is not None
+
+                if _filter_results(
                     from_key,
                     to_key,
                     instance_name,
+                    topological_ordering,
                     stream_ordering,
-                )
-            ]
+                ):
+                    membership_changes.append(
+                        CurrentStateDeltaMembership(
+                            event_id=event_id,
+                            prev_event_id=prev_event_id,
+                            room_id=room_id,
+                            membership=membership,
+                            # event_pos=PersistedEventPosition(
+                            #     instance_name=instance_name,
+                            #     stream=stream_ordering,
+                            # ),
+                        )
+                    )
 
         current_state_delta_membership_changes = await self.db_pool.runInteraction(
             "get_current_state_delta_membership_changes_for_user", f

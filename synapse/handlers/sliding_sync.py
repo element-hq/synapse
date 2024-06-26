@@ -443,22 +443,16 @@ class SlidingSyncHandler:
                 membership_change.room_id, membership_change
             )
 
-        # 1) Fixup part 1
+        # 1) Fixup
         #
         # Since we fetched a snapshot of the users room list at some point in time after
         # the from/to tokens, we need to revert/rewind some membership changes to match
         # the point in time of the `to_token`.
-        prev_event_ids_in_from_to_range = []
+        prev_event_ids_in_from_to_range: List[str] = []
         for (
             room_id,
             first_membership_change_after_to_token,
         ) in first_membership_change_by_room_id_after_to_token.items():
-            # One of these should exist to be a valid row in `current_state_delta_stream`
-            assert (
-                first_membership_change_after_to_token.event_id is not None
-                or first_membership_change_after_to_token.prev_event_id is not None
-            )
-
             # 1a) Remove rooms that the user joined after the `to_token`
             if first_membership_change_after_to_token.prev_event_id is None:
                 sync_room_id_set.pop(room_id, None)
@@ -469,7 +463,7 @@ class SlidingSyncHandler:
                     first_membership_change_after_to_token.prev_event_id
                 )
 
-        # 1) Fixup part 2
+        # 1) Fixup (more)
         #
         # 1b) 1c) Fetch the previous membership events that apply to the from/to range
         # and fixup our working list.
@@ -522,18 +516,33 @@ class SlidingSyncHandler:
             ] = membership_change
 
         # 2) Fixup
+        last_membership_event_ids_to_include_in_from_to_range: List[str] = []
         for (
             last_membership_change_in_from_to_range
         ) in last_membership_change_by_room_id_in_from_to_range.values():
             room_id = last_membership_change_in_from_to_range.room_id
 
+            sync_room_id_set[room_id]
+
             # 2) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
             if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
-                filtered_sync_room_id_set[room_id] = convert_event_to_rooms_for_user(
-                    last_membership_change_in_from_to_range
-                )
+                # Save the look-up if we already have the `leave` event
+                if sync_room_id_set[room_id].event_id == last_membership_change_in_from_to_range.prev_event_id::
+                    filtered_sync_room_id_set[room_id] = sync_room_id_set[room_id]
+                else:
+                    last_membership_event_ids_to_include_in_from_to_range.append(last_membership_change_in_from_to_range.event_id)
+
+        # TODO
+        # last_membership_events_to_include_in_from_to_range = await self.store.get_events(
+        #     last_membership_event_ids_to_include_in_from_to_range
+        # )
+        # for prev_event_in_from_to_range in prev_events_in_from_to_range.values():
+        #     # 1b) 1c) Update the membership with what we found
+        #     sync_room_id_set[prev_event_in_from_to_range.room_id] = (
+        #         convert_event_to_rooms_for_user(prev_event_in_from_to_range)
+        #     )
 
         # Since we fetched the users room list at some point in time after the from/to
         # tokens, we need to revert/rewind some membership changes to match the point in
