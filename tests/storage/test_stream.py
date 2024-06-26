@@ -37,6 +37,7 @@ from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.types import JsonDict, PersistedEventPosition, RoomStreamToken
 from synapse.util import Clock
 
+from tests.test_utils.event_injection import create_event
 from tests.unittest import HomeserverTestCase
 
 logger = logging.getLogger(__name__)
@@ -809,56 +810,35 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # Persist the user1, user3, and user4 join events in the same batch so they all
         # end up in the `current_state_delta_stream` table with the same
         # stream_ordering.
-        join_event1 = make_event_from_dict(
-            {
-                "sender": user1_id,
-                "type": EventTypes.Member,
-                "state_key": user1_id,
-                "content": {"membership": "join"},
-                "room_id": room_id1,
-                "depth": 0,
-                "origin_server_ts": 0,
-                "prev_events": [],
-                "auth_events": [],
-            },
-            room_version=RoomVersions.V10,
+        join_event1, join_event_context1 = self.get_success(
+            create_event(
+                self.hs,
+                sender=user1_id,
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": "join"},
+                room_id=room_id1,
+            )
         )
-        join_event_context1 = self.get_success(
-            self.state_handler.compute_event_context(join_event1)
+        join_event3, join_event_context3 = self.get_success(
+            create_event(
+                self.hs,
+                sender=user3_id,
+                type=EventTypes.Member,
+                state_key=user3_id,
+                content={"membership": "join"},
+                room_id=room_id1,
+            )
         )
-        join_event3 = make_event_from_dict(
-            {
-                "sender": user3_id,
-                "type": EventTypes.Member,
-                "state_key": user3_id,
-                "content": {"membership": "join"},
-                "room_id": room_id1,
-                "depth": 1,
-                "origin_server_ts": 1,
-                "prev_events": [],
-                "auth_events": [],
-            },
-            room_version=RoomVersions.V10,
-        )
-        join_event_context3 = self.get_success(
-            self.state_handler.compute_event_context(join_event3)
-        )
-        join_event4 = make_event_from_dict(
-            {
-                "sender": user4_id,
-                "type": EventTypes.Member,
-                "state_key": user4_id,
-                "content": {"membership": "join"},
-                "room_id": room_id1,
-                "depth": 2,
-                "origin_server_ts": 2,
-                "prev_events": [],
-                "auth_events": [],
-            },
-            room_version=RoomVersions.V10,
-        )
-        join_event_context4 = self.get_success(
-            self.state_handler.compute_event_context(join_event4)
+        join_event4, join_event_context4 = self.get_success(
+            create_event(
+                self.hs,
+                sender=user4_id,
+                type=EventTypes.Member,
+                state_key=user4_id,
+                content={"membership": "join"},
+                room_id=room_id1,
+            )
         )
         self.get_success(
             self.persistence.persist_events(
