@@ -113,21 +113,37 @@ class _EventsAround:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class CurrentStateDeltaMembership:
+class _CurrentStateDeltaMembershipReturn:
     """
     Attributes:
         event_id: The "current" membership event ID in this room.
         prev_event_id: The previous membership event in this room that was replaced by
             the "current" one. May be `None` if there was no previous membership event.
         room_id: The room ID of the membership event.
+        membership: The membership state of the user in the room.
     """
 
     event_id: str
     prev_event_id: Optional[str]
     room_id: str
     membership: str
-    # Could be useful but we're not using it yet.
-    # event_pos: PersistedEventPosition
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class CurrentStateDeltaMembership:
+    """
+    Attributes:
+        event: The "current" membership event in this room.
+        prev_event: The previous membership event in this room that was replaced by
+            the "current" one. May be `None` if there was no previous membership event.
+        room_id: The room ID of the membership event.
+        membership: The membership state of the user in the room.
+    """
+
+    event: EventBase
+    prev_event: Optional[EventBase]
+    room_id: str
+    membership: str
 
 
 def generate_pagination_where_clause(
@@ -776,7 +792,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
-        def f(txn: LoggingTransaction) -> List[CurrentStateDeltaMembership]:
+        def f(txn: LoggingTransaction) -> List[_CurrentStateDeltaMembershipReturn]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
@@ -813,7 +829,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             txn.execute(sql, args)
 
-            membership_changes: List[CurrentStateDeltaMembership] = []
+            membership_changes: List[_CurrentStateDeltaMembershipReturn] = []
             for (
                 event_id,
                 prev_event_id,
@@ -839,7 +855,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     stream_ordering,
                 ):
                     membership_changes.append(
-                        CurrentStateDeltaMembership(
+                        _CurrentStateDeltaMembershipReturn(
                             event_id=event_id,
                             prev_event_id=prev_event_id,
                             room_id=room_id,
@@ -851,17 +867,37 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         )
                     )
 
-        current_state_delta_membership_changes = await self.db_pool.runInteraction(
+            return membership_changes
+
+        membership_changes = await self.db_pool.runInteraction(
             "get_current_state_delta_membership_changes_for_user", f
         )
+
+        # Fetch all events in one go
+        event_ids = []
+        for m in membership_changes:
+            event_ids.append(m.event_id)
+            if m.prev_event_id is not None:
+                event_ids.append(m.prev_event_id)
+
+        events = await self.get_events(event_ids, get_prev_content=False)
 
         rooms_to_exclude: AbstractSet[str] = set()
         if excluded_rooms is not None:
             rooms_to_exclude = set(excluded_rooms)
 
         return [
-            membership_change
-            for membership_change in current_state_delta_membership_changes
+            CurrentStateDeltaMembership(
+                event=events[membership_change.event_id],
+                prev_event=(
+                    events[membership_change.prev_event_id]
+                    if membership_change.prev_event_id
+                    else None
+                ),
+                room_id=membership_change.room_id,
+                membership=membership_change.membership,
+            )
+            for membership_change in membership_changes
             if membership_change.room_id not in rooms_to_exclude
         ]
 
