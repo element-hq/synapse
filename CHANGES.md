@@ -1,3 +1,12 @@
+# Synapse 1.110.0rc2 (2024-06-26)
+
+### Internal Changes
+
+- Fix uploading packages to PyPi. ([\#17363](https://github.com/element-hq/synapse/issues/17363))
+
+
+
+
 # Synapse 1.110.0rc1 (2024-06-26)
 
 ### Features
