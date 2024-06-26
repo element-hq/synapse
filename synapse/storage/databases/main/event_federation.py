@@ -21,7 +21,6 @@
 import datetime
 import itertools
 import logging
-import time
 from queue import Empty, PriorityQueue
 from typing import (
     TYPE_CHECKING,
@@ -446,8 +445,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         chains_to_fetch_sorted = SortedSet(chains_to_fetch)
         chains_to_fetch_sorted.difference_update(found_cached_chains)
 
-        start_block = time.monotonic()
-
         while chains_to_fetch_sorted:
             batch2 = list(chains_to_fetch_sorted.islice(-BATCH_SIZE))
             chains_to_fetch_sorted.difference_update(batch2)
@@ -495,8 +492,6 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
             chains_to_fetch_sorted.difference_update(links)
 
             yield links
-
-        end_block = time.monotonic()
 
     def _get_auth_chain_ids_txn(
         self, txn: LoggingTransaction, event_ids: Collection[str], include_given: bool
