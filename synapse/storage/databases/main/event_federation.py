@@ -406,8 +406,11 @@ class EventFederationWorkerStore(SignatureWorkerStore, EventsWorkerStore, SQLBas
         # also returning large quantities of redundant data (which can make it a
         # lot slower).
 
-        txn.execute("SET LOCAL jit = off")
-        txn.execute("SET LOCAL enable_seqscan = off")
+        if isinstance(txn.database_engine, PostgresEngine):
+            # JIT and sequential scans sometimes get hit on this code path, which
+            # can make the queries much more expensive
+            txn.execute("SET LOCAL jit = off")
+            txn.execute("SET LOCAL enable_seqscan = off")
 
         sql = """
             WITH RECURSIVE links(chain_id) AS (
