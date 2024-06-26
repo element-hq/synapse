@@ -113,31 +113,24 @@ class _EventsAround:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class _CurrentStateDeltaMembershipReturn:
-    """
-    Attributes:
-        event_id: The "current" membership event ID in this room.
-        prev_event_id: The previous membership event in this room that was replaced by
-            the "current" one. May be `None` if there was no previous membership event.
-        room_id: The room ID of the membership event.
-    """
-
-    event_id: str
-    prev_event_id: Optional[str]
-    room_id: str
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
 class CurrentStateDeltaMembership:
     """
     Attributes:
-        event: The "current" membership event in this room.
-        prev_event: The previous membership event in this room that was replaced by
+        event_id: The "current" membership event ID in this room.
+        event_pos: The position of the "current" membership event in the event stream.
+        prev_event_id: The previous membership event in this room that was replaced by
             the "current" one. May be `None` if there was no previous membership event.
+        room_id: The room ID of the membership event.
+        membership: The membership state of the user in the room
+        sender: The person who sent the membership event
     """
 
-    event: EventBase
-    prev_event: Optional[EventBase]
+    event_id: str
+    event_pos: PersistedEventPosition
+    prev_event_id: Optional[str]
+    room_id: str
+    membership: str
+    sender: str
 
 
 def generate_pagination_where_clause(
@@ -808,7 +801,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if not has_changed:
                 return []
 
-        def f(txn: LoggingTransaction) -> List[_CurrentStateDeltaMembershipReturn]:
+        def f(txn: LoggingTransaction) -> List[CurrentStateDeltaMembership]:
             # To handle tokens with a non-empty instance_map we fetch more
             # results than necessary and then filter down
             min_from_id = from_key.stream
@@ -833,7 +826,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     s.room_id,
                     s.instance_name,
                     s.stream_id,
-                    e.topological_ordering
+                    e.topological_ordering,
+                    m.membership,
+                    e.sender
                 FROM current_state_delta_stream AS s
                     INNER JOIN events AS e ON e.stream_ordering = s.stream_id
                     INNER JOIN room_memberships AS m ON m.event_id = e.event_id
@@ -844,7 +839,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             txn.execute(sql, args)
 
-            membership_changes: List[_CurrentStateDeltaMembershipReturn] = []
+            membership_changes: List[CurrentStateDeltaMembership] = []
             for (
                 event_id,
                 prev_event_id,
@@ -852,6 +847,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 instance_name,
                 stream_ordering,
                 topological_ordering,
+                membership,
+                sender,
             ) in txn:
                 assert event_id is not None
                 # `prev_event_id` can be `None`
@@ -859,6 +856,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 assert instance_name is not None
                 assert stream_ordering is not None
                 assert topological_ordering is not None
+                assert membership is not None
+                assert sender is not None
 
                 if _filter_results(
                     from_key,
@@ -868,43 +867,33 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     stream_ordering,
                 ):
                     membership_changes.append(
-                        _CurrentStateDeltaMembershipReturn(
+                        CurrentStateDeltaMembership(
                             event_id=event_id,
+                            event_pos=PersistedEventPosition(
+                                instance_name=instance_name,
+                                stream=stream_ordering,
+                            ),
                             prev_event_id=prev_event_id,
                             room_id=room_id,
+                            membership=membership,
+                            sender=sender,
                         )
                     )
 
             return membership_changes
 
-        raw_membership_changes = await self.db_pool.runInteraction(
+        membership_changes = await self.db_pool.runInteraction(
             "get_current_state_delta_membership_changes_for_user", f
         )
-
-        # Fetch all events in one go
-        event_ids = []
-        for m in raw_membership_changes:
-            event_ids.append(m.event_id)
-            if m.prev_event_id is not None:
-                event_ids.append(m.prev_event_id)
-
-        events = await self.get_events(event_ids, get_prev_content=False)
 
         room_ids_to_exclude: AbstractSet[str] = set()
         if excluded_room_ids is not None:
             room_ids_to_exclude = set(excluded_room_ids)
 
         return [
-            CurrentStateDeltaMembership(
-                event=events[raw_membership_change.event_id],
-                prev_event=(
-                    events[raw_membership_change.prev_event_id]
-                    if raw_membership_change.prev_event_id
-                    else None
-                ),
-            )
-            for raw_membership_change in raw_membership_changes
-            if raw_membership_change.room_id not in room_ids_to_exclude
+            membership_change
+            for membership_change in membership_changes
+            if membership_change.room_id not in room_ids_to_exclude
         ]
 
     @cancellable
