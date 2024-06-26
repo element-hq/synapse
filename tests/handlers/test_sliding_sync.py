@@ -1029,7 +1029,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             ),
         )
 
-    def test_display_name_changes(
+    def test_display_name_changes_in_token_range(
         self,
     ) -> None:
         """
@@ -1093,6 +1093,77 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 {
                     "join_response": join_response["event_id"],
                     "displayname_change_during_token_range_response": displayname_change_during_token_range_response[
+                        "event_id"
+                    ],
+                    "displayname_change_after_token_range_response": displayname_change_after_token_range_response[
+                        "event_id"
+                    ],
+                }
+            ),
+        )
+
+    def test_display_name_changes_before_and_after_token_range(
+        self,
+    ) -> None:
+        """
+        Test that we point to the correct membership event even though there are no
+        membership events in the from/range but there are `displayname`/`avatar_url`
+        changes before/after the token range.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # We create the room with user2 so the room isn't left with no members when we
+        # leave and can still re-join.
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # Update the displayname before the token range
+        displayname_change_before_token_range_response = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname during token range",
+            },
+            tok=user1_tok,
+        )
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Update the displayname after the token range
+        displayname_change_after_token_range_response = self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user1_id,
+            body={
+                "membership": Membership.JOIN,
+                "displayname": "displayname after token range",
+            },
+            tok=user1_tok,
+        )
+
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=after_room1_token,
+                to_token=after_room1_token,
+            )
+        )
+
+        # Room should show up because we were joined before the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            displayname_change_before_token_range_response["event_id"],
+            "Corresponding map to disambiguate the opaque event IDs: "
+            + str(
+                {
+                    "join_response": join_response["event_id"],
+                    "displayname_change_before_token_range_response": displayname_change_before_token_range_response[
                         "event_id"
                     ],
                     "displayname_change_after_token_range_response": displayname_change_after_token_range_response[
