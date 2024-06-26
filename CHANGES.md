@@ -3,7 +3,7 @@
 ### Features
 
 - Add initial implementation of an experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17187](https://github.com/element-hq/synapse/issues/17187))
-- Add support for [MSC823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823) - Account suspension. ([\#17255](https://github.com/element-hq/synapse/issues/17255))
+- Add experimental support for [MSC3823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823) - Account suspension. ([\#17255](https://github.com/element-hq/synapse/issues/17255))
 - Improve ratelimiting in Synapse. ([\#17256](https://github.com/element-hq/synapse/issues/17256))
 - Add support for the unstable [MSC4151](https://github.com/matrix-org/matrix-spec-proposals/pull/4151) report room API. ([\#17270](https://github.com/element-hq/synapse/issues/17270), [\#17296](https://github.com/element-hq/synapse/issues/17296))
 - Filter for public and empty rooms added to Admin-API [List Room API](https://element-hq.github.io/synapse/latest/admin_api/rooms.html#list-room-api). ([\#17276](https://github.com/element-hq/synapse/issues/17276))
