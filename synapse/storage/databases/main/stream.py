@@ -949,8 +949,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ignore_room_clause,
             )
 
-            logger.info("get_membership_changes_for_user: %s", sql)
-
             txn.execute(sql, args)
 
             rows = [
