@@ -436,8 +436,8 @@ class StateStorageController:
             )
         )
 
-        # FIXME: Do we have to worry about gaps? What happens if we try to get a point
-        # in the room we haven't backfilled before?
+        # FIXME: This will return incorrect results when there are timeline gaps. For
+        # example, when you try to get a point in the room we haven't backfilled before.
 
         if last_event_id:
             state = await self.get_state_after_event(
