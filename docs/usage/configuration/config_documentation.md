@@ -2719,7 +2719,7 @@ Example configuration:
 session_lifetime: 24h
 ```
 ---
-### `refresh_access_token_lifetime`
+### `refreshable_access_token_lifetime`
 
 Time that an access token remains valid for, if the session is using refresh tokens.
 

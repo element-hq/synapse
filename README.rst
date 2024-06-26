@@ -1,9 +1,9 @@
 .. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
    :height: 60px
 
-===========================================================================================================
-Element Synapse - Matrix homeserver implementation |support| |development| |documentation| |license| |pypi| |python|
-===========================================================================================================
+**Element Synapse - Matrix homeserver implementation**
+
+|support| |development| |documentation| |license| |pypi| |python|
 
 Synapse is an open source `Matrix <https://matrix.org>`_ homeserver
 implementation, written and maintained by `Element <https://element.io>`_.
@@ -14,7 +14,7 @@ license. There is no support provided from Element unless you have a
 subscription.
 
 Subscription alternative
-------------------------
+========================
 
 Alternatively, for those that need an enterprise-ready solution, Element
 Server Suite (ESS) is `available as a subscription <https://element.io/pricing>`_.
