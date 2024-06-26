@@ -1882,9 +1882,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint
-            + f"?pos={self.get_success(
-            from_token.to_string(self.store)
-        )}",
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
             {
                 "lists": {
                     "foo-list": {
@@ -2074,9 +2072,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint
-            + f"?pos={self.get_success(
-            from_token.to_string(self.store)
-        )}",
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
             {
                 "lists": {
                     "foo-list": {
@@ -2323,9 +2319,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint
-            + f"?pos={self.get_success(
-            from_token.to_string(self.store)
-        )}",
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
             {
                 "lists": {
                     "foo-list": {
@@ -2493,9 +2487,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint
-            + f"?pos={self.get_success(
-            from_token.to_string(self.store)
-        )}",
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
             {
                 "lists": {
                     "foo-list": {
@@ -2563,9 +2555,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             self.sync_endpoint
-            + f"?pos={self.get_success(
-            from_token.to_string(self.store)
-        )}",
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
             {
                 "lists": {
                     "foo-list": {
