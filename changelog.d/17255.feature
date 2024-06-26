@@ -1,1 +1,0 @@
-Add support for [MSC823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823) - Account suspension.
