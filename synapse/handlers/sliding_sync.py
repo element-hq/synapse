@@ -427,7 +427,7 @@ class SlidingSyncHandler:
                     user_id,
                     from_key=to_token.room_key,
                     to_key=membership_snapshot_token,
-                    excluded_rooms=self.rooms_to_exclude_globally,
+                    excluded_room_ids=self.rooms_to_exclude_globally,
                 )
             )
 
@@ -440,7 +440,7 @@ class SlidingSyncHandler:
         for membership_change in current_state_delta_membership_changes_after_to_token:
             # Only set if we haven't already set it
             first_membership_change_by_room_id_after_to_token.setdefault(
-                membership_change.room_id, membership_change
+                membership_change.event.room_id, membership_change
             )
 
         # 1) Fixup
@@ -484,7 +484,7 @@ class SlidingSyncHandler:
                     user_id,
                     from_key=from_token.room_key,
                     to_key=to_token.room_key,
-                    excluded_rooms=self.rooms_to_exclude_globally,
+                    excluded_room_ids=self.rooms_to_exclude_globally,
                 )
             )
 
@@ -498,19 +498,22 @@ class SlidingSyncHandler:
             membership_change
         ) in current_state_delta_membership_changes_in_from_to_range:
             last_membership_change_by_room_id_in_from_to_range[
-                membership_change.room_id
+                membership_change.event.room_id
             ] = membership_change
 
         # 2) Fixup
         for (
             last_membership_change_in_from_to_range
         ) in last_membership_change_by_room_id_in_from_to_range.values():
-            room_id = last_membership_change_in_from_to_range.room_id
+            room_id = last_membership_change_in_from_to_range.event.room_id
 
             # 2) Add back newly_left rooms (> `from_token` and <= `to_token`). We
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
-            if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
+            if (
+                last_membership_change_in_from_to_range.event.membership
+                == Membership.LEAVE
+            ):
                 filtered_sync_room_id_set[room_id] = convert_event_to_rooms_for_user(
                     last_membership_change_in_from_to_range.event
                 )

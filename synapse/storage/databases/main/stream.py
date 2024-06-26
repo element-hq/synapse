@@ -120,13 +120,11 @@ class _CurrentStateDeltaMembershipReturn:
         prev_event_id: The previous membership event in this room that was replaced by
             the "current" one. May be `None` if there was no previous membership event.
         room_id: The room ID of the membership event.
-        membership: The membership state of the user in the room.
     """
 
     event_id: str
     prev_event_id: Optional[str]
     room_id: str
-    membership: str
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -136,14 +134,10 @@ class CurrentStateDeltaMembership:
         event: The "current" membership event in this room.
         prev_event: The previous membership event in this room that was replaced by
             the "current" one. May be `None` if there was no previous membership event.
-        room_id: The room ID of the membership event.
-        membership: The membership state of the user in the room.
     """
 
     event: EventBase
     prev_event: Optional[EventBase]
-    room_id: str
-    membership: str
 
 
 def generate_pagination_where_clause(
@@ -771,7 +765,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         user_id: str,
         from_key: RoomStreamToken,
         to_key: RoomStreamToken,
-        excluded_rooms: Optional[List[str]] = None,
+        excluded_room_ids: Optional[List[str]] = None,
     ) -> List[CurrentStateDeltaMembership]:
         """
         TODO
@@ -817,8 +811,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     s.room_id,
                     s.instance_name,
                     s.stream_id,
-                    e.topological_ordering,
-                    m.membership
+                    e.topological_ordering
                 FROM current_state_delta_stream AS s
                     INNER JOIN events AS e ON e.stream_ordering = s.stream_id
                     INNER JOIN room_memberships AS m ON m.event_id = e.event_id
@@ -837,7 +830,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 instance_name,
                 stream_ordering,
                 topological_ordering,
-                membership,
             ) in txn:
                 assert event_id is not None
                 # `prev_event_id` can be `None`
@@ -845,7 +837,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 assert instance_name is not None
                 assert stream_ordering is not None
                 assert topological_ordering is not None
-                assert membership is not None
 
                 if _filter_results(
                     from_key,
@@ -859,46 +850,39 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                             event_id=event_id,
                             prev_event_id=prev_event_id,
                             room_id=room_id,
-                            membership=membership,
-                            # event_pos=PersistedEventPosition(
-                            #     instance_name=instance_name,
-                            #     stream=stream_ordering,
-                            # ),
                         )
                     )
 
             return membership_changes
 
-        membership_changes = await self.db_pool.runInteraction(
+        raw_membership_changes = await self.db_pool.runInteraction(
             "get_current_state_delta_membership_changes_for_user", f
         )
 
         # Fetch all events in one go
         event_ids = []
-        for m in membership_changes:
+        for m in raw_membership_changes:
             event_ids.append(m.event_id)
             if m.prev_event_id is not None:
                 event_ids.append(m.prev_event_id)
 
         events = await self.get_events(event_ids, get_prev_content=False)
 
-        rooms_to_exclude: AbstractSet[str] = set()
-        if excluded_rooms is not None:
-            rooms_to_exclude = set(excluded_rooms)
+        room_ids_to_exclude: AbstractSet[str] = set()
+        if excluded_room_ids is not None:
+            room_ids_to_exclude = set(excluded_room_ids)
 
         return [
             CurrentStateDeltaMembership(
-                event=events[membership_change.event_id],
+                event=events[raw_membership_change.event_id],
                 prev_event=(
-                    events[membership_change.prev_event_id]
-                    if membership_change.prev_event_id
+                    events[raw_membership_change.prev_event_id]
+                    if raw_membership_change.prev_event_id
                     else None
                 ),
-                room_id=membership_change.room_id,
-                membership=membership_change.membership,
             )
-            for membership_change in membership_changes
-            if membership_change.room_id not in rooms_to_exclude
+            for raw_membership_change in raw_membership_changes
+            if raw_membership_change.room_id not in room_ids_to_exclude
         ]
 
     @cancellable
