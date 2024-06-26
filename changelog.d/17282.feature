@@ -1,1 +1,0 @@
-Include user membership in events served to clients, per MSC4115.
