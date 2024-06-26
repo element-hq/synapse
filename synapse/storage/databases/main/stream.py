@@ -768,12 +768,34 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         excluded_room_ids: Optional[List[str]] = None,
     ) -> List[CurrentStateDeltaMembership]:
         """
-        TODO
+        Fetch membership events (and the previous event that was replaced by that one)
+        for a given user.
 
-        Note: This function only works with "live" tokens with `stream_ordering` only.
+        We're looking for membership changes in the token range (> `from_key` and <=
+        `to_key`).
 
-        All such events whose stream ordering `s` lies in the range `from_key < s <=
-        to_key` are returned. Events are sorted by `stream_ordering` ascending.
+        Please be mindful to only use this with `from_key` and `to_key` tokens that are
+        recent enough to be after when the first local user joined the room. Otherwise,
+        the results may be incomplete or too greedy. For example, if you use a token
+        range before the first local user joined the room, you will see 0 events since
+        `current_state_delta_stream` tracks what the server thinks is the current state
+        of the room as time goes. It does not track how state progresses from the
+        beginning of the room. So for example, when you remotely join a room, the first
+        rows will just be the state when you joined and progress from there.
+
+        You can probably reasonably use this with `/sync` because the `to_key` passed in
+        will be the "current" now token and the range will cover when the user joined
+        the room.
+
+        Args:
+            user_id: The user ID to fetch membership events for.
+            from_key: The point in the stream to sync from (fetching events > this point).
+            to_key: The token to fetch rooms up to (fetching events <= this point).
+            excluded_room_ids: Optional list of room IDs to exclude from the results.
+
+        Returns:
+            All membership changes to the current state in the token range. Events are
+            sorted by `stream_ordering` ascending.
         """
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
@@ -794,7 +816,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             args: List[Any] = [user_id, min_from_id, max_to_id]
 
-            # TODO: It would be good to assert that the `to_token` is >=
+            # TODO: It would be good to assert that the `from_token`/`to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
             # interested in. Otherwise, we will end up with empty results and not know
             # it.
