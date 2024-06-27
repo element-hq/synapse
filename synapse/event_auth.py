@@ -808,12 +808,12 @@ def get_send_level(
 def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> bool:
     power_levels_event = get_power_level_event(auth_events)
 
-    uses_owned_state_events = event.room_version is RoomVersions.MSC3779v10
+    use_msc3779 = event.room_version is RoomVersions.MSC3779v10
     send_level = get_send_level(
         event.type,
         event.get("state_key"),
         power_levels_event,
-        event.user_id if uses_owned_state_events else None,
+        event.user_id if use_msc3779 else None,
     )
     user_level = get_user_power_level(event.user_id, auth_events)
 
@@ -827,8 +827,11 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
 
     # Check state_key
     if hasattr(event, "state_key"):
-        if not uses_owned_state_events and event.state_key.startswith("@"):
-            if event.state_key != event.user_id:
+        if event.state_key.startswith("@"):
+            if event.state_key != event.user_id and (
+                not use_msc3779
+                or not event.state_key.startswith(event.user_id + "_")
+            ):
                 raise AuthError(403, "You are not allowed to set others state")
 
     return True
