@@ -829,8 +829,7 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
     if hasattr(event, "state_key"):
         if event.state_key.startswith("@"):
             if event.state_key != event.user_id and (
-                not use_msc3779
-                or not event.state_key.startswith(event.user_id + "_")
+                not use_msc3779 or not event.state_key.startswith(event.user_id + "_")
             ):
                 raise AuthError(403, "You are not allowed to set others state")
 
