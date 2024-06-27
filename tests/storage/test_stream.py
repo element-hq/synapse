@@ -1001,10 +1001,13 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
 
     def test_remote_join(self) -> None:
         """
-        Test remote join where the first rows will just be the state when you joined
+        Test remote join where the first rows in `current_state_delta_stream` will just
+        be the state when you joined the remote room.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        before_join_token = self.event_sources.get_current_token()
 
         intially_unjoined_room_id = f"!example:{self.OTHER_SERVER_NAME}"
 
@@ -1128,30 +1131,40 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
                 )
             )
 
-        events_db_dump = self.get_success(
-            self.store.db_pool.simple_select_list(
-                table="events",
-                keyvalues={},
-                retcols=[
-                    "*",
-                ],
-                desc="debug dump events",
+        after_join_token = self.event_sources.get_current_token()
+
+        # Get the membership changes for the user at this point, the
+        # `current_state_delta_stream` table should look like:
+        #
+        # | stream_id | room_id                      | type            | state_key                    | event_id | prev_event_id | instance_name  |
+        # |-----------|------------------------------|-----------------|------------------------------|----------|---------------|----------------|
+        # | 2         | '!example:other.example.com' | 'm.room.member' | '@user1:test'                | '$xxx'   | None          | 'master'       |
+        # | 2         | '!example:other.example.com' | 'm.room.create' | ''                           | '$xxx'   | None          | 'master'       |
+        # | 2         | '!example:other.example.com' | 'm.room.member' | '@creator:other.example.com' | '$xxx'   | None          | 'master'       |
+        membership_changes = self.get_success(
+            self.store.get_current_state_delta_membership_changes_for_user(
+                user1_id,
+                from_key=before_join_token.room_key,
+                to_key=after_join_token.room_key,
             )
         )
 
-        logger.info("events_db_dump: %s", events_db_dump)
-
-        current_state_delta_stream_db_dump = self.get_success(
-            self.store.db_pool.simple_select_list(
-                table="current_state_delta_stream",
-                keyvalues={},
-                retcols=[
-                    "*",
-                ],
-                desc="debug dump current_state_delta_stream",
-            )
+        join_pos = self.get_success(
+            self.store.get_position_for_event(join_event.event_id)
         )
 
-        logger.info(
-            "current_state_delta_stream_db_dump: %s", current_state_delta_stream_db_dump
+        # Let the whole diff show on failure
+        self.maxDiff = None
+        self.assertEqual(
+            membership_changes,
+            [
+                CurrentStateDeltaMembership(
+                    event_id=join_event.event_id,
+                    event_pos=join_pos,
+                    prev_event_id=None,
+                    room_id=intially_unjoined_room_id,
+                    membership="join",
+                    sender=user1_id,
+                ),
+            ],
         )
