@@ -320,8 +320,8 @@ class FuturesStore(SQLBaseStore):
         )
         return [
             {
-                "group_id": str(row[0]),
-                **({"timeout": int(row[1])} if row[1] is not None else {}),
+                "future_group_id": str(row[0]),
+                **({"future_timeout": int(row[1])} if row[1] is not None else {}),
                 "room_id": str(row[2]),
                 "type": str(row[3]),
                 **({"state_key": str(row[4])} if row[4] is not None else {}),
