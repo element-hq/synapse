@@ -105,4 +105,5 @@ class DownloadResource(RestServlet):
                 file_name,
                 max_timeout_ms,
                 ip_address,
+                False,
             )

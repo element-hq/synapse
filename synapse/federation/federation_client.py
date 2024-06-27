@@ -1871,6 +1871,26 @@ class FederationClient(FederationBase):
 
         return filtered_statuses, filtered_failures
 
+    async def federation_download_media(
+        self,
+        destination: str,
+        media_id: str,
+        output_stream: BinaryIO,
+        max_size: int,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+    ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
+        return await self.transport_layer.federation_download_media(
+            destination,
+            media_id,
+            output_stream=output_stream,
+            max_size=max_size,
+            max_timeout_ms=max_timeout_ms,
+            download_ratelimiter=download_ratelimiter,
+            ip_address=ip_address,
+        )
+
     async def download_media(
         self,
         destination: str,
