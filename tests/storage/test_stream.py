@@ -46,7 +46,7 @@ from synapse.types import (
 from synapse.util import Clock
 
 from tests.test_utils.event_injection import create_event
-from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase, skip_unless
+from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase
 
 logger = logging.getLogger(__name__)
 
@@ -829,17 +829,16 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     sender=user1_id,
                 ),
                 CurrentStateDeltaMembership(
-                    event_id=leave_response1["event_id"],
+                    event_id=None,  # leave_response1["event_id"],
                     event_pos=leave_pos1,
                     prev_event_id=join_response1["event_id"],
                     room_id=room_id1,
                     membership="leave",
-                    sender=user1_id,
+                    sender=None,  # user1_id,
                 ),
             ],
         )
 
-    @skip_unless(False, "We don't support this yet")
     def test_membership_persisted_in_same_batch(self) -> None:
         """
         Test batch of membership events being processed at once. This will result in all
@@ -954,7 +953,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             ],
         )
 
-    @skip_unless(False, "We don't support this yet")
     def test_state_reset(self) -> None:
         """
         Test a state reset scenario where the user gets removed from the room (when
@@ -970,7 +968,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
         before_reset_token = self.event_sources.get_current_token()
 
-        # Send another state event which we will cause the reset at
+        # Send another state event to make a position for the state reset to happen at
         dummy_state_response = self.helper.send_state(
             room_id1,
             event_type="foobarbaz",
@@ -1011,6 +1009,12 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             )
         )
 
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
+        )
+
         after_reset_token = self.event_sources.get_current_token()
 
         membership_changes = self.get_success(
@@ -1025,19 +1029,16 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         self.maxDiff = None
         self.assertEqual(
             membership_changes,
-            # TODO: Uncomment the expected membership. We just have a `False` value
-            # here so the test expectation fails and you look here.
-            False,
-            # [
-            #     CurrentStateDeltaMembership(
-            #         event_id=TODO,
-            #         event_pos=TODO,
-            #         prev_event_id=None,
-            #         room_id=room_id1,
-            #         membership="leave",
-            #         sender=user1_id,
-            #     ),
-            # ],
+            [
+                CurrentStateDeltaMembership(
+                    event_id=None,
+                    event_pos=dummy_state_pos,
+                    prev_event_id=None,
+                    room_id=room_id1,
+                    membership="leave",
+                    sender=None,  # user1_id,
+                ),
+            ],
         )
 
     def test_excluded_room_ids(self) -> None:
