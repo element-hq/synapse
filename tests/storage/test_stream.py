@@ -615,7 +615,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 )
             ],
         )
@@ -717,7 +716,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
                     event_id=leave_response1["event_id"],
@@ -726,7 +724,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="leave",
                     sender=user1_id,
-                    state_reset=False,
                 ),
             ],
         )
@@ -885,16 +882,14 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
-                    event_id=leave_response1["event_id"],
+                    event_id=None,  # leave_response1["event_id"],
                     event_pos=leave_pos1,
                     prev_event_id=join_response1["event_id"],
                     room_id=room_id1,
                     membership="leave",
-                    sender=user1_id,
-                    state_reset=False,
+                    sender=None,  # user1_id,
                 ),
             ],
         )
@@ -924,22 +919,25 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # Persist the user1, user3, and user4 join events in the same batch so they all
         # end up in the `current_state_delta_stream` table with the same
         # stream_ordering.
-        join_event1, join_event_context1 = self.get_success(
-            create_event(
-                self.hs,
-                sender=user1_id,
-                type=EventTypes.Member,
-                state_key=user1_id,
-                content={"membership": "join"},
-                room_id=room_id1,
-            )
-        )
         join_event3, join_event_context3 = self.get_success(
             create_event(
                 self.hs,
                 sender=user3_id,
                 type=EventTypes.Member,
                 state_key=user3_id,
+                content={"membership": "join"},
+                room_id=room_id1,
+            )
+        )
+        # We want to put user1 in the middle of the batch. This way, regardless of the
+        # implementation that inserts rows into current_state_delta_stream` (whether it
+        # be minimum/maximum of stream position of the batch), we will still catch bugs.
+        join_event1, join_event_context1 = self.get_success(
+            create_event(
+                self.hs,
+                sender=user1_id,
+                type=EventTypes.Member,
+                state_key=user1_id,
                 content={"membership": "join"},
                 room_id=room_id1,
             )
@@ -957,8 +955,8 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         self.get_success(
             self.persistence.persist_events(
                 [
-                    (join_event1, join_event_context1),
                     (join_event3, join_event_context3),
+                    (join_event1, join_event_context1),
                     (join_event4, join_event_context4),
                 ]
             )
@@ -966,10 +964,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
         after_room1_token = self.event_sources.get_current_token()
 
-        # Let's get membership changes from user3's perspective because it was in the
-        # middle of the batch. This way, if rows in` current_state_delta_stream` are
-        # stored with the first or last event's `stream_ordering`, we will still catch
-        # bugs.
+        # Get the membership changes for the user.
         #
         # At this point, the `current_state_delta_stream` table should look like (notice
         # those three memberships at the end with `stream_id=7` because we persisted
@@ -987,7 +982,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # | 7         | '!x:test' | 'm.room.member'            | '@user4:test'    | '$xxx'   | None          |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
-                user3_id,
+                user1_id,
                 from_key=before_room1_token.room_key,
                 to_key=after_room1_token.room_key,
             )
@@ -1003,13 +998,16 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
-                    event_id=join_event3.event_id,
+                    event_id=join_event1.event_id,
+                    # Ideally, this would be `join_pos1` (to match the `event_id`) but
+                    # when events are persisted in a batch, they are all stored in the
+                    # `current_state_delta_stream` table with the minimum
+                    # `stream_ordering` from the batch.
                     event_pos=join_pos3,
                     prev_event_id=None,
                     room_id=room_id1,
                     membership="join",
-                    sender=user3_id,
-                    state_reset=False,
+                    sender=user1_id,
                 ),
             ],
         )
@@ -1097,7 +1095,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="leave",
                     sender=None,  # user1_id,
-                    state_reset=True,
                 ),
             ],
         )
@@ -1148,7 +1145,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
                     event_id=join_response2["event_id"],
@@ -1157,7 +1153,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id2,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 ),
             ],
         )
@@ -1184,7 +1179,6 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 )
             ],
         )
@@ -1378,7 +1372,6 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
                     room_id=intially_unjoined_room_id,
                     membership="join",
                     sender=user1_id,
-                    state_reset=False,
                 ),
             ],
         )
