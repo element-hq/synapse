@@ -619,7 +619,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             ],
         )
 
-    def test_server_left_after_us_room(self) -> None:
+    def test_server_left_room_after_us(self) -> None:
         """
         Test that when probing over part of the DAG where the server left the room *after
         us*, we still see the join and leave changes.
@@ -652,7 +652,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         join_pos1 = self.get_success(
             self.store.get_position_for_event(join_response1["event_id"])
         )
-        # Make sure random other non-member state that happens to have a state_key
+        # Make sure that random other non-member state that happens to have a `state_key`
         # matching the user ID doesn't mess with things.
         self.helper.send_state(
             room_id1,
@@ -728,7 +728,62 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             ],
         )
 
-    def test_server_left_room(self) -> None:
+    def test_server_left_room_after_us_later(self) -> None:
+        """
+        Test when the user leaves the room, then sometime later, everyone else leaves
+        the room, causing the server to leave the room, we shouldn't see any membership
+        changes.
+
+        This is to make sure we play nicely with this behavior: When the server leaves a
+        room, it will insert new rows with `event_id = null` into the
+        `current_state_delta_stream` table for all current state.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # User1 should leave the room first
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        after_user1_leave_token = self.event_sources.get_current_token()
+
+        # User2 should also leave the room (everyone has left the room which means the
+        # server is no longer in the room).
+        self.helper.leave(room_id1, user2_id, tok=user2_tok)
+
+        after_server_leave_token = self.event_sources.get_current_token()
+
+        # Join another room as user1 just to advance the stream_ordering and bust
+        # `_membership_stream_cache`
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # Get the membership changes for the user.
+        #
+        # At this point, the `current_state_delta_stream` table should look like the
+        # following. When the server leaves a room, it will insert new rows with
+        # `event_id = null` for all current state.
+        #
+        # TODO: Add DB rows to better see what's going on.
+        membership_changes = self.get_success(
+            self.store.get_current_state_delta_membership_changes_for_user(
+                user1_id,
+                from_key=after_user1_leave_token.room_key,
+                to_key=after_server_leave_token.room_key,
+            )
+        )
+
+        # Let the whole diff show on failure
+        self.maxDiff = None
+        self.assertEqual(
+            membership_changes,
+            [],
+        )
+
+    def test_we_cause_server_left_room(self) -> None:
         """
         Test that when probing over part of the DAG where we leave the room causing the
         server to leave the room (because we were the last local user in the room), we
@@ -762,7 +817,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         join_pos1 = self.get_success(
             self.store.get_position_for_event(join_response1["event_id"])
         )
-        # Make sure random other non-member state that happens to have a state_key
+        # Make sure that random other non-member state that happens to have a `state_key`
         # matching the user ID doesn't mess with things.
         self.helper.send_state(
             room_id1,
