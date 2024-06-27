@@ -21,6 +21,7 @@ jobs:
       trial: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.trial }}
       integration: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.integration }}
       linting: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting }}
+      linting_readme: ${{ !startsWith(github.ref, 'refs/pull/') || steps.filter.outputs.linting_readme }}
     steps:
     - uses: dorny/paths-filter@v3
       id: filter
@@ -72,6 +73,8 @@ jobs:
             - 'pyproject.toml'
             - 'poetry.lock'
             - '.github/workflows/tests.yml'
+          
+          linting_readme:
             - 'README.rst'
 
   check-sampleconfig:
@@ -275,7 +278,7 @@ jobs:
   lint-readme:
     runs-on: ubuntu-latest
     needs: changes
-    if: ${{ needs.changes.outputs.linting == 'true' }}
+    if: ${{ needs.changes.outputs.linting_readme == 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
