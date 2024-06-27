@@ -1019,7 +1019,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         before_reset_token = self.event_sources.get_current_token()
 
@@ -1056,8 +1056,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     "type": EventTypes.Member,
                     "state_key": user1_id,
                     "event_id": None,
-                    # FIXME: I'm not sure if a state reset should have a prev_event_id
-                    "prev_event_id": None,
+                    "prev_event_id": join_response1["event_id"],
                     "instance_name": dummy_state_pos.instance_name,
                 },
                 desc="state reset user in current_state_delta_stream",
@@ -1088,7 +1087,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                 CurrentStateDeltaMembership(
                     event_id=None,
                     event_pos=dummy_state_pos,
-                    prev_event_id=None,
+                    prev_event_id=join_response1["event_id"],
                     room_id=room_id1,
                     membership="leave",
                     sender=None,  # user1_id,

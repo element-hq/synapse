@@ -877,10 +877,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     COALESCE(e.instance_name, s.instance_name),
                     COALESCE(e.stream_ordering, s.stream_id),
                     m.membership,
-                    e.sender
+                    e.sender,
+                    m_prev.membership AS prev_membership
                 FROM current_state_delta_stream AS s
                     LEFT JOIN events AS e ON e.event_id = s.event_id
                     LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
+                    LEFT JOIN room_memberships AS m_prev ON s.prev_event_id = m_prev.event_id
                 WHERE s.stream_id > ? AND s.stream_id <= ?
                     AND s.state_key = ?
                     AND s.type = ?
@@ -890,7 +892,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             txn.execute(sql, args)
 
             membership_changes: List[CurrentStateDeltaMembership] = []
-            membership_change_map: Dict[str, CurrentStateDeltaMembership] = {}
             for (
                 event_id,
                 prev_event_id,
@@ -899,6 +900,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 stream_ordering,
                 membership,
                 sender,
+                prev_membership,
             ) in txn:
                 assert room_id is not None
                 assert instance_name is not None
@@ -918,16 +920,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     # `event_id = null` row is a `leave` and we don't want duplicate
                     # membership changes in our results, let's get rid of those
                     # (deduplicate) (see `test_server_left_after_us_room`).
-                    if event_id is None:
-                        already_tracked_membership_change = membership_change_map.get(
-                            prev_event_id
-                        )
-                        if (
-                            already_tracked_membership_change is not None
-                            and already_tracked_membership_change.membership
-                            == Membership.LEAVE
-                        ):
-                            continue
+                    if event_id is None and prev_membership == Membership.LEAVE:
+                        continue
 
                     membership_change = CurrentStateDeltaMembership(
                         event_id=event_id,
@@ -944,8 +938,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     )
 
                     membership_changes.append(membership_change)
-                    if event_id:
-                        membership_change_map[event_id] = membership_change
 
             return membership_changes
 
