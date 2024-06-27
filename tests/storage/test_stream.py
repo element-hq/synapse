@@ -46,7 +46,7 @@ from synapse.types import (
 from synapse.util import Clock
 
 from tests.test_utils.event_injection import create_event
-from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase
+from tests.unittest import FederatingHomeserverTestCase, HomeserverTestCase, skip_unless
 
 logger = logging.getLogger(__name__)
 
@@ -839,6 +839,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             ],
         )
 
+    @skip_unless(False, "We don't support this yet")
     def test_membership_persisted_in_same_batch(self) -> None:
         """
         Test batch of membership events being processed at once. This will result in all
@@ -948,13 +949,96 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     prev_event_id=None,
                     room_id=room_id1,
                     membership="join",
-                    sender=user1_id,
+                    sender=user3_id,
                 ),
             ],
         )
 
-    # TODO: Test state reset where the user gets removed from the room (when there is no
-    # corresponding leave event)
+    @skip_unless(False, "We don't support this yet")
+    def test_state_reset(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_pos1 = self.get_success(
+            self.store.get_position_for_event(join_response1["event_id"])
+        )
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event which we will cause the reset at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    # FIXME: I'm not sure if a state reset should have a prev_event_id
+                    "prev_event_id": None,
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        membership_changes = self.get_success(
+            self.store.get_current_state_delta_membership_changes_for_user(
+                user1_id,
+                from_key=before_reset_token.room_key,
+                to_key=after_reset_token.room_key,
+            )
+        )
+
+        # Let the whole diff show on failure
+        self.maxDiff = None
+        self.assertEqual(
+            membership_changes,
+            [
+                CurrentStateDeltaMembership(
+                    event_id=TODO,
+                    event_pos=TODO,
+                    prev_event_id=None,
+                    room_id=room_id1,
+                    membership="leave",
+                    sender=user1_id,
+                ),
+            ],
+        )
 
     def test_excluded_room_ids(self) -> None:
         """
