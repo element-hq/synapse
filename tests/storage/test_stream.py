@@ -679,23 +679,23 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # following. When the server leaves a room, it will insert new rows with
         # `event_id = null` for all current state.
         #
-        # | stream_id | room_id  | type                        | state_key      | event_id | prev_event_id | instance_name |
-        # |-----------|----------|-----------------------------|----------------|----------|---------------|---------------|
-        # | 2         | !x:test  | 'm.room.create'             | ''             | $xxx     | None          | 'master'      |
-        # | 3         | !x:test  | 'm.room.member'             | '@user2:test'  | $aaa     | None          | 'master'      |
-        # | 4         | !x:test  | 'm.room.history_visibility' | ''             | $xxx     | None          | 'master'      |
-        # | 4         | !x:test  | 'm.room.join_rules'         | ''             | $xxx     | None          | 'master'      |
-        # | 4         | !x:test  | 'm.room.power_levels'       | ''             | $xxx     | None          | 'master'      |
-        # | 7         | !x:test  | 'm.room.member'             | '@user1:test'  | $ooo     | None          | 'master'      |
-        # | 8         | !x:test  | 'foobarbazdummy'            | '@user1:test'  | $xxx     | None          | 'master'      |
-        # | 9         | !x:test  | 'm.room.member'             | '@user1:test'  | $ppp     | $ooo          | 'master'      |
-        # | 10        | !x:test  | 'foobarbazdummy'            | '@user1:test'  | None     | $xxx          | 'master'      |
-        # | 10        | !x:test  | 'm.room.create'             | ''             | None     | $xxx          | 'master'      |
-        # | 10        | !x:test  | 'm.room.history_visibility' | ''             | None     | $xxx          | 'master'      |
-        # | 10        | !x:test  | 'm.room.join_rules'         | ''             | None     | $xxx          | 'master'      |
-        # | 10        | !x:test  | 'm.room.member'             | '@user1:test'  | None     | $ppp          | 'master'      |
-        # | 10        | !x:test  | 'm.room.member'             | '@user2:test'  | None     | $aaa          | 'master'      |
-        # | 10        | !x:test  | 'm.room.power_levels'       |                | None     | $xxx          | 'master'      |
+        # | stream_id | room_id  | type                        | state_key      | event_id | prev_event_id |
+        # |-----------|----------|-----------------------------|----------------|----------|---------------|
+        # | 2         | !x:test  | 'm.room.create'             | ''             | $xxx     | None          |
+        # | 3         | !x:test  | 'm.room.member'             | '@user2:test'  | $aaa     | None          |
+        # | 4         | !x:test  | 'm.room.history_visibility' | ''             | $xxx     | None          |
+        # | 4         | !x:test  | 'm.room.join_rules'         | ''             | $xxx     | None          |
+        # | 4         | !x:test  | 'm.room.power_levels'       | ''             | $xxx     | None          |
+        # | 7         | !x:test  | 'm.room.member'             | '@user1:test'  | $ooo     | None          |
+        # | 8         | !x:test  | 'foobarbazdummy'            | '@user1:test'  | $xxx     | None          |
+        # | 9         | !x:test  | 'm.room.member'             | '@user1:test'  | $ppp     | $ooo          |
+        # | 10        | !x:test  | 'foobarbazdummy'            | '@user1:test'  | None     | $xxx          |
+        # | 10        | !x:test  | 'm.room.create'             | ''             | None     | $xxx          |
+        # | 10        | !x:test  | 'm.room.history_visibility' | ''             | None     | $xxx          |
+        # | 10        | !x:test  | 'm.room.join_rules'         | ''             | None     | $xxx          |
+        # | 10        | !x:test  | 'm.room.member'             | '@user1:test'  | None     | $ppp          |
+        # | 10        | !x:test  | 'm.room.member'             | '@user2:test'  | None     | $aaa          |
+        # | 10        | !x:test  | 'm.room.power_levels'       |                | None     | $xxx          |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user1_id,
@@ -790,23 +790,23 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # following. When the server leaves a room, it will insert new rows with
         # `event_id = null` for all current state.
         #
-        # | stream_id | room_id   | type                        | state_key     | event_id | prev_event_id | instance_name |
-        # |-----------|-----------|-----------------------------|---------------|----------|---------------|---------------|
-        # | 2         | '!x:test' | 'm.room.create'             | ''            | '$xxx'   | None          | 'master'      |
-        # | 3         | '!x:test' | 'm.room.member'             | '@user2:test' | '$aaa'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.history_visibility' | ''            | '$xxx'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.join_rules'         | ''            | '$xxx'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.power_levels'       | ''            | '$xxx'   | None          | 'master'      |
-        # | 7         | '!x:test' | 'm.room.member'             | '@user1:test' | '$ooo'   | None          | 'master'      |
-        # | 8         | '!x:test' | 'foobarbazdummy'            | '@user1:test' | '$xxx'   | None          | 'master'      |
-        # | 9         | '!x:test' | 'm.room.member'             | '@user2:test' | '$bbb'   | '$aaa'        | 'master'      |
-        # | 10        | '!x:test' | 'foobarbazdummy'            | '@user1:test' | None     | '$xxx'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.create'             | ''            | None     | '$xxx'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.history_visibility' | ''            | None     | '$xxx'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.join_rules'         | ''            | None     | '$xxx'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.member'             | '@user1:test' | None     | '$ooo'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.member'             | '@user2:test' | None     | '$bbb'        | 'master'      |
-        # | 10        | '!x:test' | 'm.room.power_levels'       | ''            | None     | '$xxx'        | 'master'      |
+        # | stream_id | room_id   | type                        | state_key     | event_id | prev_event_id |
+        # |-----------|-----------|-----------------------------|---------------|----------|---------------|
+        # | 2         | '!x:test' | 'm.room.create'             | ''            | '$xxx'   | None          |
+        # | 3         | '!x:test' | 'm.room.member'             | '@user2:test' | '$aaa'   | None          |
+        # | 4         | '!x:test' | 'm.room.history_visibility' | ''            | '$xxx'   | None          |
+        # | 4         | '!x:test' | 'm.room.join_rules'         | ''            | '$xxx'   | None          |
+        # | 4         | '!x:test' | 'm.room.power_levels'       | ''            | '$xxx'   | None          |
+        # | 7         | '!x:test' | 'm.room.member'             | '@user1:test' | '$ooo'   | None          |
+        # | 8         | '!x:test' | 'foobarbazdummy'            | '@user1:test' | '$xxx'   | None          |
+        # | 9         | '!x:test' | 'm.room.member'             | '@user2:test' | '$bbb'   | '$aaa'        |
+        # | 10        | '!x:test' | 'foobarbazdummy'            | '@user1:test' | None     | '$xxx'        |
+        # | 10        | '!x:test' | 'm.room.create'             | ''            | None     | '$xxx'        |
+        # | 10        | '!x:test' | 'm.room.history_visibility' | ''            | None     | '$xxx'        |
+        # | 10        | '!x:test' | 'm.room.join_rules'         | ''            | None     | '$xxx'        |
+        # | 10        | '!x:test' | 'm.room.member'             | '@user1:test' | None     | '$ooo'        |
+        # | 10        | '!x:test' | 'm.room.member'             | '@user2:test' | None     | '$bbb'        |
+        # | 10        | '!x:test' | 'm.room.power_levels'       | ''            | None     | '$xxx'        |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user1_id,
@@ -915,16 +915,16 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # those three memberships at the end with `stream_id=7` because we persisted
         # them in the same batch):
         #
-        # | stream_id | room_id   | type                       | state_key        | event_id | prev_event_id | instance_name |
-        # |-----------|-----------|----------------------------|------------------|----------|---------------|---------------|
-        # | 2         | '!x:test' | 'm.room.create'            | ''               | '$xxx'   | None          | 'master'      |
-        # | 3         | '!x:test' | 'm.room.member'            | '@user2:test'    | '$xxx'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.history_visibility'| ''               | '$xxx'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.join_rules'        | ''               | '$xxx'   | None          | 'master'      |
-        # | 4         | '!x:test' | 'm.room.power_levels'      | ''               | '$xxx'   | None          | 'master'      |
-        # | 7         | '!x:test' | 'm.room.member'            | '@user3:test'    | '$xxx'   | None          | 'master'      |
-        # | 7         | '!x:test' | 'm.room.member'            | '@user1:test'    | '$xxx'   | None          | 'master'      |
-        # | 7         | '!x:test' | 'm.room.member'            | '@user4:test'    | '$xxx'   | None          | 'master'      |
+        # | stream_id | room_id   | type                       | state_key        | event_id | prev_event_id |
+        # |-----------|-----------|----------------------------|------------------|----------|---------------|
+        # | 2         | '!x:test' | 'm.room.create'            | ''               | '$xxx'   | None          |
+        # | 3         | '!x:test' | 'm.room.member'            | '@user2:test'    | '$xxx'   | None          |
+        # | 4         | '!x:test' | 'm.room.history_visibility'| ''               | '$xxx'   | None          |
+        # | 4         | '!x:test' | 'm.room.join_rules'        | ''               | '$xxx'   | None          |
+        # | 4         | '!x:test' | 'm.room.power_levels'      | ''               | '$xxx'   | None          |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user3:test'    | '$xxx'   | None          |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user1:test'    | '$xxx'   | None          |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user4:test'    | '$xxx'   | None          |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user3_id,
@@ -1200,11 +1200,11 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
         # following. Notice that all of the events are at the same `stream_id` because
         # the current state starts out where we remotely joined:
         #
-        # | stream_id | room_id                      | type            | state_key                    | event_id | prev_event_id | instance_name  |
-        # |-----------|------------------------------|-----------------|------------------------------|----------|---------------|----------------|
-        # | 2         | '!example:other.example.com' | 'm.room.member' | '@user1:test'                | '$xxx'   | None          | 'master'       |
-        # | 2         | '!example:other.example.com' | 'm.room.create' | ''                           | '$xxx'   | None          | 'master'       |
-        # | 2         | '!example:other.example.com' | 'm.room.member' | '@creator:other.example.com' | '$xxx'   | None          | 'master'       |
+        # | stream_id | room_id                      | type            | state_key                    | event_id | prev_event_id |
+        # |-----------|------------------------------|-----------------|------------------------------|----------|---------------|
+        # | 2         | '!example:other.example.com' | 'm.room.member' | '@user1:test'                | '$xxx'   | None          |
+        # | 2         | '!example:other.example.com' | 'm.room.create' | ''                           | '$xxx'   | None          |
+        # | 2         | '!example:other.example.com' | 'm.room.member' | '@creator:other.example.com' | '$xxx'   | None          |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user1_id,
