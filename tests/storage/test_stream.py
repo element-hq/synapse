@@ -785,9 +785,9 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
     def test_we_cause_server_left_room(self) -> None:
         """
-        Test that when probing over part of the DAG where we leave the room causing the
-        server to leave the room (because we were the last local user in the room), we
-        still see the join and leave changes.
+        Test that when probing over part of the DAG where the user leaves the room
+        causing the server to leave the room (because we were the last local user in the
+        room), we still see the join and leave changes.
 
         This is to make sure we play nicely with this behavior: When the server leaves a
         room, it will insert new rows with `event_id = null` into the

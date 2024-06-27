@@ -846,7 +846,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_from_id = from_key.stream
             max_to_id = to_key.get_max_stream_pos()
 
-            args: List[Any] = [min_from_id, max_to_id, user_id, EventTypes.Member]
+            args: List[Any] = [min_from_id, max_to_id, EventTypes.Member, user_id]
 
             # TODO: It would be good to assert that the `from_token`/`to_token` is >=
             # the first row in `current_state_delta_stream` for the rooms we're
@@ -874,7 +874,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     e.event_id,
                     s.prev_event_id,
                     s.room_id,
-                    COALESCE(e.instance_name, s.instance_name),
+                    s.instance_name,
                     COALESCE(e.stream_ordering, s.stream_id),
                     m.membership,
                     e.sender,
@@ -884,8 +884,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
                     LEFT JOIN room_memberships AS m_prev ON s.prev_event_id = m_prev.event_id
                 WHERE s.stream_id > ? AND s.stream_id <= ?
-                    AND s.state_key = ?
                     AND s.type = ?
+                    AND s.state_key = ?
                 ORDER BY s.stream_id ASC
             """
 
@@ -916,10 +916,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     # `event_id = null` for all current state. This means we might
                     # already have a row for the leave event and then another for the
                     # same leave where the `event_id=null` but the `prev_event_id` is
-                    # pointing back at the earlier leave event. Since we're assuming the
-                    # `event_id = null` row is a `leave` and we don't want duplicate
-                    # membership changes in our results, let's get rid of those
-                    # (deduplicate) (see `test_server_left_after_us_room`).
+                    # pointing back at the earlier leave event. We don't want to report
+                    # the leave, if we already have a leave event.
                     if event_id is None and prev_membership == Membership.LEAVE:
                         continue
 
