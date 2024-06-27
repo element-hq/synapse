@@ -673,6 +673,29 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
         after_room1_token = self.event_sources.get_current_token()
 
+        # Get the membership changes for the user.
+        #
+        # At this point, the `current_state_delta_stream` table should look like the
+        # following. When the server leaves a room, it will insert new rows with
+        # `event_id = null` for all current state.
+        #
+        # | stream_id | room_id  | type                        | state_key      | event_id | prev_event_id | instance_name |
+        # |-----------|----------|-----------------------------|----------------|----------|---------------|---------------|
+        # | 2         | !x:test  | 'm.room.create'             | ''             | $xxx     | None          | 'master'      |
+        # | 3         | !x:test  | 'm.room.member'             | '@user2:test'  | $aaa     | None          | 'master'      |
+        # | 4         | !x:test  | 'm.room.history_visibility' | ''             | $xxx     | None          | 'master'      |
+        # | 4         | !x:test  | 'm.room.join_rules'         | ''             | $xxx     | None          | 'master'      |
+        # | 4         | !x:test  | 'm.room.power_levels'       | ''             | $xxx     | None          | 'master'      |
+        # | 7         | !x:test  | 'm.room.member'             | '@user1:test'  | $ooo     | None          | 'master'      |
+        # | 8         | !x:test  | 'foobarbazdummy'            | '@user1:test'  | $xxx     | None          | 'master'      |
+        # | 9         | !x:test  | 'm.room.member'             | '@user1:test'  | $ppp     | $ooo          | 'master'      |
+        # | 10        | !x:test  | 'foobarbazdummy'            | '@user1:test'  | None     | $xxx          | 'master'      |
+        # | 10        | !x:test  | 'm.room.create'             | ''             | None     | $xxx          | 'master'      |
+        # | 10        | !x:test  | 'm.room.history_visibility' | ''             | None     | $xxx          | 'master'      |
+        # | 10        | !x:test  | 'm.room.join_rules'         | ''             | None     | $xxx          | 'master'      |
+        # | 10        | !x:test  | 'm.room.member'             | '@user1:test'  | None     | $ppp          | 'master'      |
+        # | 10        | !x:test  | 'm.room.member'             | '@user2:test'  | None     | $aaa          | 'master'      |
+        # | 10        | !x:test  | 'm.room.power_levels'       |                | None     | $xxx          | 'master'      |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user1_id,
@@ -761,6 +784,29 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
         after_room1_token = self.event_sources.get_current_token()
 
+        # Get the membership changes for the user.
+        #
+        # At this point, the `current_state_delta_stream` table should look like the
+        # following. When the server leaves a room, it will insert new rows with
+        # `event_id = null` for all current state.
+        #
+        # | stream_id | room_id   | type                        | state_key     | event_id | prev_event_id | instance_name |
+        # |-----------|-----------|-----------------------------|---------------|----------|---------------|---------------|
+        # | 2         | '!x:test' | 'm.room.create'             | ''            | '$xxx'   | None          | 'master'      |
+        # | 3         | '!x:test' | 'm.room.member'             | '@user2:test' | '$aaa'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.history_visibility' | ''            | '$xxx'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.join_rules'         | ''            | '$xxx'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.power_levels'       | ''            | '$xxx'   | None          | 'master'      |
+        # | 7         | '!x:test' | 'm.room.member'             | '@user1:test' | '$ooo'   | None          | 'master'      |
+        # | 8         | '!x:test' | 'foobarbazdummy'            | '@user1:test' | '$xxx'   | None          | 'master'      |
+        # | 9         | '!x:test' | 'm.room.member'             | '@user2:test' | '$bbb'   | '$aaa'        | 'master'      |
+        # | 10        | '!x:test' | 'foobarbazdummy'            | '@user1:test' | None     | '$xxx'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.create'             | ''            | None     | '$xxx'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.history_visibility' | ''            | None     | '$xxx'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.join_rules'         | ''            | None     | '$xxx'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.member'             | '@user1:test' | None     | '$ooo'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.member'             | '@user2:test' | None     | '$bbb'        | 'master'      |
+        # | 10        | '!x:test' | 'm.room.power_levels'       | ''            | None     | '$xxx'        | 'master'      |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user1_id,
@@ -864,6 +910,21 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         # middle of the batch. This way, if rows in` current_state_delta_stream` are
         # stored with the first or last event's `stream_ordering`, we will still catch
         # bugs.
+        #
+        # At this point, the `current_state_delta_stream` table should look like (notice
+        # those three memberships at the end with `stream_id=7` because we persisted
+        # them in the same batch):
+        #
+        # | stream_id | room_id   | type                       | state_key        | event_id | prev_event_id | instance_name |
+        # |-----------|-----------|----------------------------|------------------|----------|---------------|---------------|
+        # | 2         | '!x:test' | 'm.room.create'            | ''               | '$xxx'   | None          | 'master'      |
+        # | 3         | '!x:test' | 'm.room.member'            | '@user2:test'    | '$xxx'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.history_visibility'| ''               | '$xxx'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.join_rules'        | ''               | '$xxx'   | None          | 'master'      |
+        # | 4         | '!x:test' | 'm.room.power_levels'      | ''               | '$xxx'   | None          | 'master'      |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user3:test'    | '$xxx'   | None          | 'master'      |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user1:test'    | '$xxx'   | None          | 'master'      |
+        # | 7         | '!x:test' | 'm.room.member'            | '@user4:test'    | '$xxx'   | None          | 'master'      |
         membership_changes = self.get_success(
             self.store.get_current_state_delta_membership_changes_for_user(
                 user3_id,
@@ -1133,8 +1194,11 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
 
         after_join_token = self.event_sources.get_current_token()
 
-        # Get the membership changes for the user at this point, the
-        # `current_state_delta_stream` table should look like:
+        # Get the membership changes for the user.
+        #
+        # At this point, the `current_state_delta_stream` table should look like the
+        # following. Notice that all of the events are at the same `stream_id` because
+        # the current state starts out where we remotely joined:
         #
         # | stream_id | room_id                      | type            | state_key                    | event_id | prev_event_id | instance_name  |
         # |-----------|------------------------------|-----------------|------------------------------|----------|---------------|----------------|
