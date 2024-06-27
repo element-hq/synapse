@@ -1624,7 +1624,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        _room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
         room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
 
