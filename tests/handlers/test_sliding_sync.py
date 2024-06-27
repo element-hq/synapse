@@ -390,7 +390,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Leave during the from_token/to_token range (newly_left)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        leave_response = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room2_token = self.event_sources.get_current_token()
 
@@ -404,10 +404,13 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Only the newly_left room should show up
         self.assertEqual(room_id_results.keys(), {room_id2})
-        # It should be pointing to the latest membership event in the from/to range
+        # It should be pointing to the latest membership event in the from/to range but
+        # the `event_id` is `None` because we left the room causing the server to leave
+        # the room because no other local users are in it (quirk of the
+        # `current_state_delta_stream` table that we source things from)
         self.assertEqual(
             room_id_results[room_id2].event_id,
-            leave_response["event_id"],
+            None,  # _leave_response2["event_id"],
         )
         # We should *NOT* be `newly_joined` because we are instead `newly_left`
         self.assertEqual(room_id_results[room_id2].newly_joined, False)

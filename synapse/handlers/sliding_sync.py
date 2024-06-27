@@ -18,7 +18,6 @@
 #
 #
 import logging
-from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 import attr
@@ -48,7 +47,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) -> bool:
+def filter_membership_for_sync(
+    *, membership: str, user_id: str, sender: Optional[str]
+) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
     otherwise False.
@@ -65,6 +66,11 @@ def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) ->
     #
     # This logic includes kicks (leave events where the sender is not the same user) and
     # can be read as "anything that isn't a leave or a leave with a different sender".
+    #
+    # When `sender=None` and `membership=Membership.LEAVE`, it means that a state reset
+    # happened that removed the user from the room, or the user was the last person
+    # locally to leave the room which caused the server to leave the room. In both
+    # cases, TODO
     return membership != Membership.LEAVE or sender != user_id
 
 
@@ -99,10 +105,10 @@ class _RoomMembershipForUser:
             range
     """
 
-    event_id: str
+    event_id: Optional[str]
     event_pos: PersistedEventPosition
     membership: str
-    sender: str
+    sender: Optional[str]
     newly_joined: bool
 
     def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
@@ -540,9 +546,11 @@ class SlidingSyncHandler:
         first_membership_change_by_room_id_in_from_to_range: Dict[
             str, CurrentStateDeltaMembership
         ] = {}
-        non_join_event_ids_by_room_id_in_from_to_range: Dict[str, List[str]] = (
-            defaultdict(list)
-        )
+        # Keep track if the room has a non-join event in the token range so we can later
+        # tell if it was a `newly_joined` room. If the last membership event in the
+        # token range is a join and there is also some non-join in the range, we know
+        # they `newly_joined`.
+        has_non_join_event_by_room_id_in_from_to_range: Dict[str, bool] = {}
         for (
             membership_change
         ) in current_state_delta_membership_changes_in_from_to_range:
@@ -551,16 +559,13 @@ class SlidingSyncHandler:
             last_membership_change_by_room_id_in_from_to_range[room_id] = (
                 membership_change
             )
-
             # Only set if we haven't already set it
             first_membership_change_by_room_id_in_from_to_range.setdefault(
                 room_id, membership_change
             )
 
             if membership_change.membership != Membership.JOIN:
-                non_join_event_ids_by_room_id_in_from_to_range[room_id].append(
-                    membership_change.event_id
-                )
+                has_non_join_event_by_room_id_in_from_to_range[room_id] = True
 
         # 2) Fixup
         #
@@ -574,6 +579,7 @@ class SlidingSyncHandler:
         ) in last_membership_change_by_room_id_in_from_to_range.values():
             room_id = last_membership_change_in_from_to_range.room_id
 
+            # 3)
             if last_membership_change_in_from_to_range.membership == Membership.JOIN:
                 possibly_newly_joined_room_ids.add(room_id)
 
@@ -592,10 +598,14 @@ class SlidingSyncHandler:
         # 3) Figure out `newly_joined`
         prev_event_ids_before_token_range: List[str] = []
         for possibly_newly_joined_room_id in possibly_newly_joined_room_ids:
-            non_joins_for_room = non_join_event_ids_by_room_id_in_from_to_range[
-                possibly_newly_joined_room_id
-            ]
-            if len(non_joins_for_room) > 0:
+            has_non_join_in_from_to_range = (
+                has_non_join_event_by_room_id_in_from_to_range.get(
+                    possibly_newly_joined_room_id, False
+                )
+            )
+            # If the last membership event in the token range is a join and there is
+            # also some non-join in the range, we know they `newly_joined`.
+            if has_non_join_in_from_to_range:
                 # We found a `newly_joined` room (we left and joined within the token range)
                 filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
                     room_id
@@ -968,6 +978,10 @@ class SlidingSyncHandler:
             Membership.INVITE,
             Membership.KNOCK,
         ):
+            # This should never happen. If someone is invited/knocked on room, then
+            # there should be an event for it.
+            assert rooms_membership_for_user_at_to_token.event_id is not None
+
             invite_or_knock_event = await self.store.get_event(
                 rooms_membership_for_user_at_to_token.event_id
             )
