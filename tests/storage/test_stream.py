@@ -615,6 +615,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 )
             ],
         )
@@ -716,6 +717,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
                     event_id=leave_response1["event_id"],
@@ -724,6 +726,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="leave",
                     sender=user1_id,
+                    state_reset=False,
                 ),
             ],
         )
@@ -882,14 +885,16 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
-                    event_id=None,  # leave_response1["event_id"],
+                    event_id=leave_response1["event_id"],
                     event_pos=leave_pos1,
                     prev_event_id=join_response1["event_id"],
                     room_id=room_id1,
                     membership="leave",
-                    sender=None,  # user1_id,
+                    sender=user1_id,
+                    state_reset=False,
                 ),
             ],
         )
@@ -1004,6 +1009,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user3_id,
+                    state_reset=False,
                 ),
             ],
         )
@@ -1091,6 +1097,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="leave",
                     sender=None,  # user1_id,
+                    state_reset=True,
                 ),
             ],
         )
@@ -1141,6 +1148,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 ),
                 CurrentStateDeltaMembership(
                     event_id=join_response2["event_id"],
@@ -1149,6 +1157,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id2,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 ),
             ],
         )
@@ -1175,6 +1184,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 )
             ],
         )
@@ -1368,6 +1378,7 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
                     room_id=intially_unjoined_room_id,
                     membership="join",
                     sender=user1_id,
+                    state_reset=False,
                 ),
             ],
         )
