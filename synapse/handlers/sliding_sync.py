@@ -263,7 +263,8 @@ class SlidingSyncHandler:
                     for range in list_config.ranges:
                         sliced_room_ids = [
                             room_id
-                            for room_id, _ in sorted_room_info[range[0] : range[1]]
+                            # Both sides of range are inclusive
+                            for room_id, _ in sorted_room_info[range[0] : range[1] + 1]
                         ]
 
                         ops.append(
