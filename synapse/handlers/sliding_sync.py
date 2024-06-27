@@ -1002,6 +1002,12 @@ class SlidingSyncHandler:
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
+        # TODO: Handle state resets. For example, if we see
+        # `rooms_membership_for_user_at_to_token.membership = Membership.LEAVE` but
+        # `required_state` doesn't include it, we should indicate to the client that a
+        # state reset happened. Perhaps we should indicate this by setting `initial:
+        # True` and empty `required_state`.
+
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
             name=None,
