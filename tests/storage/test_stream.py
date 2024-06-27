@@ -966,10 +966,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         user2_tok = self.login(user2_id, "pass")
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
-        join_pos1 = self.get_success(
-            self.store.get_position_for_event(join_response1["event_id"])
-        )
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         before_reset_token = self.event_sources.get_current_token()
 
@@ -1028,16 +1025,19 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
         self.maxDiff = None
         self.assertEqual(
             membership_changes,
-            [
-                CurrentStateDeltaMembership(
-                    event_id=TODO,
-                    event_pos=TODO,
-                    prev_event_id=None,
-                    room_id=room_id1,
-                    membership="leave",
-                    sender=user1_id,
-                ),
-            ],
+            # TODO: Uncomment the expected membership. We just have a `False` value
+            # here so the test expectation fails and you look here.
+            False,
+            # [
+            #     CurrentStateDeltaMembership(
+            #         event_id=TODO,
+            #         event_pos=TODO,
+            #         prev_event_id=None,
+            #         room_id=room_id1,
+            #         membership="leave",
+            #         sender=user1_id,
+            #     ),
+            # ],
         )
 
     def test_excluded_room_ids(self) -> None:
