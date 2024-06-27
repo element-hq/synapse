@@ -70,8 +70,9 @@ def filter_membership_for_sync(
     # When `sender=None` and `membership=Membership.LEAVE`, it means that a state reset
     # happened that removed the user from the room, or the user was the last person
     # locally to leave the room which caused the server to leave the room. In both
-    # cases, TODO
-    return membership != Membership.LEAVE or sender != user_id
+    # cases, we can just remove the rooms since they are no longer relevant to the user.
+    # They could still be added back later if they are `newly_left`.
+    return membership != Membership.LEAVE or sender not in (user_id, None)
 
 
 # We can't freeze this class because we want to update it in place with the
@@ -508,6 +509,8 @@ class SlidingSyncHandler:
                 )
             )
 
+        # Filter the rooms that that we have updated room membership events to the point
+        # in time of the `to_token` (from the "1)" fixups)
         filtered_sync_room_id_set = {
             room_id: room_membership_for_user
             for room_id, room_membership_for_user in sync_room_id_set.items()
