@@ -320,6 +320,7 @@ jobs:
             lint-clippy
             lint-clippy-nightly
             lint-rustfmt
+            lint-readme
 
 
   calculate-test-jobs:
