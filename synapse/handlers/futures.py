@@ -144,6 +144,7 @@ class FuturesHandler:
                 Codes.INVALID_PARAM,
             )
 
+        # TODO: For state event timeout futures, track state at request time & cancel future on state change!
         (
             future_id,
             group_id,
