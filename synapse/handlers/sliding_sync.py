@@ -554,7 +554,7 @@ class SlidingSyncHandler:
 
             # Flatten out the map
             dm_room_id_set = set()
-            if dm_map:
+            if isinstance(dm_map, dict):
                 for room_ids in dm_map.values():
                     # Account data should be a list of room IDs. Ignore anything else
                     if isinstance(room_ids, list):
@@ -593,8 +593,21 @@ class SlidingSyncHandler:
                 ):
                     filtered_room_id_set.remove(room_id)
 
-        if filters.is_invite:
-            raise NotImplementedError()
+        # Filter for rooms that the user has been invited to
+        if filters.is_invite is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                room_for_user = sync_room_map[room_id]
+                # If we're looking for invite rooms, filter out rooms that the user is
+                # not invited to and vice versa
+                if (
+                    filters.is_invite and room_for_user.membership != Membership.INVITE
+                ) or (
+                    not filters.is_invite
+                    and room_for_user.membership == Membership.INVITE
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.room_types:
             raise NotImplementedError()

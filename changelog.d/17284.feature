@@ -1,1 +1,0 @@
-Do not require user-interactive authentication for uploading cross-signing keys for the first time, per MSC3967.
