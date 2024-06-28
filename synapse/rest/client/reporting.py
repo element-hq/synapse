@@ -106,7 +106,9 @@ class ReportEventRestServlet(RestServlet):
         return 200, {}
 
 
-class ReportRoomRestServlet(RestServlet):
+# TODO: Delete UnstableReportRoomRestServlet after 2-3 releases
+# https://github.com/element-hq/synapse/issues/17373
+class UnstableReportRoomRestServlet(RestServlet):
     """This endpoint lets clients report a room for abuse.
 
     Whilst MSC4151 is not yet merged, this unstable endpoint is enabled on matrix.org
@@ -154,9 +156,49 @@ class ReportRoomRestServlet(RestServlet):
 
         return 200, {}
 
+class ReportRoomRestServlet(RestServlet):
+    """This endpoint lets clients report a room for abuse.
+
+    Introduced by MSC4151: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
+    """
+
+    PATTERNS = client_patterns("/rooms/(?P<room_id>[^/]*)/report$")
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
+        self.store = hs.get_datastores().main
+
+    class PostBody(RequestBodyModel):
+        reason: StrictStr
+
+    async def on_POST(
+        self, request: SynapseRequest, room_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user_id = requester.user.to_string()
+
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        room = await self.store.get_room(room_id)
+        if room is None:
+            raise NotFoundError("Room does not exist")
+
+        await self.store.add_room_report(
+            room_id=room_id,
+            user_id=user_id,
+            reason=body.reason,
+            received_ts=self.clock.time_msec(),
+        )
+
+        return 200, {}
+
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
+    ReportRoomRestServlet(hs).register(http_server)
 
     if hs.config.experimental.msc4151_enabled:
-        ReportRoomRestServlet(hs).register(http_server)
+        UnstableReportRoomRestServlet(hs).register(http_server)
