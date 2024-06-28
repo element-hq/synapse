@@ -1844,9 +1844,10 @@ to download/operate on media.</p>
 <p>This will not prevent the listed domains from accessing media themselves.
 It simply prevents users on this server from downloading media originating
 from the listed servers.</p>
-<p>This will have no effect on media originating from the local server.
-This only affects media downloaded from other Matrix servers, to
-block domains from URL previews see <a href="#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a>.</p>
+<p>This will have no effect on media originating from the local server. This only
+affects media downloaded from other Matrix servers, to control URL previews see
+<a href="#url_preview_ip_range_blacklist"><code>url_preview_ip_range_blacklist</code></a> or
+<a href="#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a>.</p>
 <p>Defaults to an empty list (nothing blocked).</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">prevent_media_downloads_from:
@@ -1972,12 +1973,14 @@ website only visible in your network. Defaults to none.</p>
 </code></pre>
 <hr />
 <h3 id="url_preview_url_blacklist"><a class="header" href="#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a></h3>
-<p>Optional list of URL matches that the URL preview spider is
-denied from accessing.  You should use <code>url_preview_ip_range_blacklist</code>
-in preference to this, otherwise someone could define a public DNS
-entry that points to a private IP address and circumvent the blacklist.
-This is more useful if you know there is an entire shape of URL that
-you know that will never want synapse to try to spider.</p>
+<p>Optional list of URL matches that the URL preview spider is denied from
+accessing.  This is a usability feature, not a security one. You should use
+<code>url_preview_ip_range_blacklist</code> in preference to this, otherwise someone could
+define a public DNS entry that points to a private IP address and circumvent
+the blacklist. Applications that perform redirects or serve different content
+when detecting that Synapse is accessing them can also bypass the blacklist.
+This is more useful if you know there is an entire shape of URL that you know
+that you do not want Synapse to preview.</p>
 <p>Each list entry is a dictionary of url component attributes as returned
 by urlparse.urlsplit as applied to the absolute form of the URL.  See
 <a href="https://docs.python.org/2/library/urlparse.html#urlparse.urlsplit">here</a> for more
