@@ -471,6 +471,7 @@ class MatrixFederationHttpClient:
         self._simple_http_client = SimpleHttpClient(
             hs,
             ip_blocklist=hs.config.server.federation_ip_range_blocklist,
+            ip_allowlist=hs.config.server.federation_ip_range_allowlist,
             use_proxy=True,
         )
 
@@ -1599,7 +1600,9 @@ class MatrixFederationHttpClient:
                 federation whitelist
             RequestSendFailed: If there were problems connecting to the
                 remote, due to e.g. DNS failures, connection timeouts etc.
-            SynapseError: If the requested file exceeds ratelimits
+            SynapseError: If the requested file exceeds ratelimits or the response from the
+            remote server is not a multipart response
+            AssertionError: if the resolved multipart response's length is None
         """
         request = MatrixFederationRequest(
             method="GET", destination=destination, path=path, query=args
@@ -1652,10 +1655,21 @@ class MatrixFederationHttpClient:
             raise SynapseError(HTTPStatus.TOO_MANY_REQUESTS, msg, Codes.LIMIT_EXCEEDED)
 
         # this should be a multipart/mixed response with the boundary string in the header
-        raw_content_type = headers.get(b"Content-Type")
-        assert raw_content_type is not None
-        content_type = raw_content_type[0].decode("UTF-8")
-        boundary = content_type.split("boundary=")[1]
+        try:
+            raw_content_type = headers.get(b"Content-Type")
+            assert raw_content_type is not None
+            content_type = raw_content_type[0].decode("UTF-8")
+            content_type_parts = content_type.split("boundary=")
+            boundary = content_type_parts[1]
+        except Exception:
+            msg = "Remote response is malformed: expected Content-Type of multipart/mixed with a boundary present."
+            logger.warning(
+                "{%s} [%s] %s",
+                request.txn_id,
+                request.destination,
+                msg,
+            )
+            raise SynapseError(HTTPStatus.BAD_GATEWAY, msg)
 
         try:
             # add a byte of headroom to max size as function errs at >=

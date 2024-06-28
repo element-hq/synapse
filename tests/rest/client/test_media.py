@@ -2128,6 +2128,3 @@ class DownloadTestCase(unittest.HomeserverTestCase):
             headers.getRawHeaders(b"Cross-Origin-Resource-Policy"),
             [b"cross-origin"],
         )
-
-    # test that there is now auth
-    # test basic download

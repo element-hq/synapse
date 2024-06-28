@@ -636,8 +636,8 @@ class MediaRepository:
 
         # Failed to find the file anywhere, lets download it.
 
-        if not use_federation_endpoint:
-            try:
+        try:
+            if not use_federation_endpoint:
                 media_info = await self._download_remote_file(
                     server_name,
                     media_id,
@@ -645,19 +645,7 @@ class MediaRepository:
                     download_ratelimiter,
                     ip_address,
                 )
-            except SynapseError:
-                raise
-            except Exception as e:
-                # An exception may be because we downloaded media in another
-                # process, so let's check if we magically have the media.
-                media_info = await self.store.get_cached_remote_media(
-                    server_name, media_id
-                )
-                if not media_info:
-                    raise e
-
-        else:
-            try:
+            else:
                 media_info = await self._federation_download_remote_file(
                     server_name,
                     media_id,
@@ -665,16 +653,15 @@ class MediaRepository:
                     download_ratelimiter,
                     ip_address,
                 )
-            except SynapseError:
-                raise
-            except Exception as e:
-                # An exception may be because we downloaded media in another
-                # process, so let's check if we magically have the media.
-                media_info = await self.store.get_cached_remote_media(
-                    server_name, media_id
-                )
-                if not media_info:
-                    raise e
+
+        except SynapseError:
+            raise
+        except Exception as e:
+            # An exception may be because we downloaded media in another
+            # process, so let's check if we magically have the media.
+            media_info = await self.store.get_cached_remote_media(server_name, media_id)
+            if not media_info:
+                raise e
 
         file_id = media_info.filesystem_id
         if not media_info.media_type:
@@ -818,9 +805,9 @@ class MediaRepository:
         download_ratelimiter: Ratelimiter,
         ip_address: str,
     ) -> RemoteMedia:
-        """Attempt to download the remote file from the given server name,
-        using the given file_id as the local id and downloading over federation v1 download
-        endpoint
+        """Attempt to download the remote file from the given server name.
+        Uses the given file_id as the local id and downloads the file over the federation
+        v1 download endpoint
 
         Args:
             server_name: Originating server
@@ -913,7 +900,7 @@ class MediaRepository:
                 filesystem_id=file_id,
             )
 
-        logger.info("Stored remote media in file %r", fname)
+        logger.debug("Stored remote media in file %r", fname)
 
         return RemoteMedia(
             media_origin=server_name,
