@@ -156,6 +156,7 @@ class UnstableReportRoomRestServlet(RestServlet):
 
         return 200, {}
 
+
 class ReportRoomRestServlet(RestServlet):
     """This endpoint lets clients report a room for abuse.
 
