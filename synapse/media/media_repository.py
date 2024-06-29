@@ -830,7 +830,7 @@ class MediaRepository:
 
         async with self.media_storage.store_into_file(file_info) as (f, fname):
             try:
-                length, headers, json = await self.client.federation_download_media(
+                res = await self.client.federation_download_media(
                     server_name,
                     media_id,
                     output_stream=f,
@@ -839,6 +839,12 @@ class MediaRepository:
                     download_ratelimiter=download_ratelimiter,
                     ip_address=ip_address,
                 )
+                # if we had to fall back to the _matrix/media endpoint it will only return
+                # the headers and length, check the length of the tuple before unpacking
+                if len(res) == 3:
+                    length, headers, json = res
+                else:
+                    length, headers = res
             except RequestSendFailed as e:
                 logger.warning(
                     "Request failed fetching remote media %s/%s: %r",
