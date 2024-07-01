@@ -112,10 +112,10 @@ class UnstableMediaConfigResource(RestServlet):
         respond_with_json(request, 200, self.limits_dict, send_cors=True)
 
 
-class UnstableThumbnailResource(RestServlet):
+class ThumbnailResource(RestServlet):
     PATTERNS = [
         re.compile(
-            "/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
+            "/_matrix/client/v1/media/thumbnail/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
         )
     ]
 
@@ -159,11 +159,25 @@ class UnstableThumbnailResource(RestServlet):
         if self._is_mine_server_name(server_name):
             if self.dynamic_thumbnails:
                 await self.thumbnailer.select_or_generate_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -191,6 +205,7 @@ class UnstableThumbnailResource(RestServlet):
                 m_type,
                 max_timeout_ms,
                 ip_address,
+                True,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
@@ -264,7 +279,5 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
             http_server
         )
     UnstableMediaConfigResource(hs).register(http_server)
-    UnstableThumbnailResource(hs, media_repo, media_repo.media_storage).register(
-        http_server
-    )
+    ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
     DownloadResource(hs, media_repo).register(http_server)
