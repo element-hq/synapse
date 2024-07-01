@@ -51,7 +51,6 @@ from synapse.storage.database import (
     make_in_list_sql_clause,
 )
 from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
 )
 from synapse.types import JsonDict
@@ -92,7 +91,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             self._instance_name in hs.config.worker.writers.to_device
         )
 
-        self._to_device_msg_id_gen: AbstractStreamIdGenerator = MultiWriterIdGenerator(
+        self._to_device_msg_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
             db=database,
             notifier=hs.get_replication_notifier(),
@@ -168,6 +167,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
     def get_to_device_stream_token(self) -> int:
         return self._to_device_msg_id_gen.get_current_token()
+
+    def get_to_device_id_generator(self) -> MultiWriterIdGenerator:
+        return self._to_device_msg_id_gen
 
     async def get_messages_for_user_devices(
         self,

@@ -44,7 +44,6 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.push_rule import PushRulesWorkerStore
 from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
 )
 from synapse.types import JsonDict, JsonMapping
@@ -71,7 +70,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             self._instance_name in hs.config.worker.writers.account_data
         )
 
-        self._account_data_id_gen: AbstractStreamIdGenerator
+        self._account_data_id_gen: MultiWriterIdGenerator
 
         self._account_data_id_gen = MultiWriterIdGenerator(
             db_conn=db_conn,
@@ -112,6 +111,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             int
         """
         return self._account_data_id_gen.get_current_token()
+
+    def get_account_data_id_generator(self) -> MultiWriterIdGenerator:
+        return self._account_data_id_gen
 
     @cached()
     async def get_global_account_data_for_user(
