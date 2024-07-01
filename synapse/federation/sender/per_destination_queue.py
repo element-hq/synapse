@@ -69,6 +69,10 @@ sent_edus_by_type = Counter(
 # If the retry interval is larger than this then we enter "catchup" mode
 CATCHUP_RETRY_INTERVAL = 60 * 60 * 1000
 
+# Limit how many presence states we add to each presence EDU, to ensure that
+# they are bounded in size.
+MAX_PRESENCE_STATES_PER_EDU = 50
+
 
 class PerDestinationQueue:
     """
@@ -725,7 +729,10 @@ class _TransactionQueueManager:
             # Only send max 50 presence entries in the EDU, to bound the amount
             # of data we're sending.
             presence_to_add: List[JsonDict] = []
-            while self.queue._pending_presence and len(presence_to_add) < 50:
+            while (
+                self.queue._pending_presence
+                and len(presence_to_add) < MAX_PRESENCE_STATES_PER_EDU
+            ):
                 _, presence = self.queue._pending_presence.popitem(last=False)
                 presence_to_add.append(
                     format_user_presence_state(presence, self.queue._clock.time_msec())
