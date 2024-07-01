@@ -1672,7 +1672,7 @@ class MatrixFederationHttpClient:
             raise SynapseError(HTTPStatus.BAD_GATEWAY, msg)
 
         try:
-            # add a byte of headroom to max size as function errs at >=
+            # add a byte of headroom to max size as `_MultipartParserProtocol.dataReceived` errs at >=
             deferred = read_multipart_response(
                 response, output_stream, boundary, expected_size + 1
             )

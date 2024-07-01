@@ -23,10 +23,12 @@ import io
 import json
 import os
 import re
-from typing import Any, BinaryIO, Dict, List, Optional, Sequence, Tuple, Type
+from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
+
+from parameterized import parameterized_class
 
 from twisted.internet import defer
 from twisted.internet._resolver import HostResolution
@@ -58,6 +60,7 @@ from synapse.util.stringutils import parse_and_validate_mxc_uri
 from tests import unittest
 from tests.media.test_media_storage import (
     SVG,
+    TestImage,
     empty_file,
     small_lossless_webp,
     small_png,
@@ -1895,10 +1898,9 @@ test_images = [
 input_values = [(x,) for x in test_images]
 
 
-# @parameterized_class(("test_image",), input_values)
+@parameterized_class(("test_image",), input_values)
 class DownloadTestCase(unittest.HomeserverTestCase):
-    # test_image: ClassVar[TestImage]
-    test_image = SVG
+    test_image: ClassVar[TestImage]
     servlets = [
         media.register_servlets,
         login.register_servlets,
