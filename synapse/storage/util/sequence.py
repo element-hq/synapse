@@ -36,21 +36,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-_INCONSISTENT_SEQUENCE_ERROR = """
-Postgres sequence '%(seq)s' is inconsistent with associated
-table '%(table)s'. This can happen if Synapse has been downgraded and
-then upgraded again, or due to a bad migration.
-
-To fix this error, shut down Synapse (including any and all workers)
-and run the following SQL:
-
-    SELECT setval('%(seq)s', (
-        %(max_id_sql)s
-    ));
-
-See docs/postgres.md for more information.
-"""
-
 _INCONSISTENT_STREAM_ERROR = """
 Postgres sequence '%(seq)s' is inconsistent with associated stream position
 of '%(stream_name)s' in the 'stream_positions' table.
@@ -169,25 +154,33 @@ class PostgresSequenceGenerator(SequenceGenerator):
             if row:
                 max_in_stream_positions = row[0]
 
-        txn.close()
-
         # If `is_called` is False then `last_value` is actually the value that
         # will be generated next, so we decrement to get the true "last value".
         if not is_called:
             last_value -= 1
 
         if max_stream_id > last_value:
+            # The sequence is lagging behind the tables. This is probably due to
+            # rolling back to a version before the sequence was used and then
+            # forwards again. We resolve this by setting the sequence to the
+            # right value.
             logger.warning(
-                "Postgres sequence %s is behind table %s: %d < %d",
+                "Postgres sequence %s is behind table %s: %d < %d. Updating sequence.",
                 self._sequence_name,
                 table,
                 last_value,
                 max_stream_id,
             )
-            raise IncorrectDatabaseSetup(
-                _INCONSISTENT_SEQUENCE_ERROR
-                % {"seq": self._sequence_name, "table": table, "max_id_sql": table_sql}
-            )
+
+            sql = f"""
+                SELECT setval('{self._sequence_name}', GREATEST(
+                    (SELECT last_value FROM {self._sequence_name}),
+                    ({table_sql})
+                ));
+            """
+            txn.execute(sql)
+
+        txn.close()
 
         # If we have values in the stream positions table then they have to be
         # less than or equal to `last_value`

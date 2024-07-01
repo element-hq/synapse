@@ -18,19 +18,48 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, AbstractSet, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, Membership
+from synapse.api.constants import AccountDataTypes, EventTypes, Membership
 from synapse.events import EventBase
-from synapse.types import Requester, RoomStreamToken, StreamToken, UserID
+from synapse.storage.roommember import RoomsForUser
+from synapse.types import (
+    PersistedEventPosition,
+    Requester,
+    RoomStreamToken,
+    StreamToken,
+    UserID,
+)
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+def convert_event_to_rooms_for_user(event: EventBase) -> RoomsForUser:
+    """
+    Quick helper to convert an event to a `RoomsForUser` object.
+    """
+    # These fields should be present for all persisted events
+    assert event.internal_metadata.stream_ordering is not None
+    assert event.internal_metadata.instance_name is not None
+
+    return RoomsForUser(
+        room_id=event.room_id,
+        sender=event.sender,
+        membership=event.membership,
+        event_id=event.event_id,
+        event_pos=PersistedEventPosition(
+            event.internal_metadata.instance_name,
+            event.internal_metadata.stream_ordering,
+        ),
+        room_version_id=event.room_version.identifier,
+    )
 
 
 def filter_membership_for_sync(*, membership: str, user_id: str, sender: str) -> bool:
@@ -57,6 +86,7 @@ class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
         self.auth_blocking = hs.get_auth_blocking()
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
@@ -169,26 +199,28 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
-        # Get all of the room IDs that the user should be able to see in the sync
-        # response
-        room_id_set = await self.get_sync_room_ids_for_user(
-            sync_config.user,
-            from_token=from_token,
-            to_token=to_token,
-        )
-
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         if sync_config.lists:
+            # Get all of the room IDs that the user should be able to see in the sync
+            # response
+            sync_room_map = await self.get_sync_room_ids_for_user(
+                sync_config.user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+
             for list_key, list_config in sync_config.lists.items():
                 # Apply filters
-                filtered_room_ids = room_id_set
+                filtered_sync_room_map = sync_room_map
                 if list_config.filters is not None:
-                    filtered_room_ids = await self.filter_rooms(
-                        sync_config.user, room_id_set, list_config.filters, to_token
+                    filtered_sync_room_map = await self.filter_rooms(
+                        sync_config.user, sync_room_map, list_config.filters, to_token
                     )
-                # TODO: Apply sorts
-                sorted_room_ids = sorted(filtered_room_ids)
+
+                sorted_room_info = await self.sort_rooms(
+                    filtered_sync_room_map, to_token
+                )
 
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
@@ -197,12 +229,17 @@ class SlidingSyncHandler:
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=sorted_room_ids[range[0] : range[1]],
+                                room_ids=[
+                                    room_id
+                                    for room_id, _ in sorted_room_info[
+                                        range[0] : range[1]
+                                    ]
+                                ],
                             )
                         )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                    count=len(sorted_room_ids),
+                    count=len(sorted_room_info),
                     ops=ops,
                 )
 
@@ -219,7 +256,7 @@ class SlidingSyncHandler:
         user: UserID,
         to_token: StreamToken,
         from_token: Optional[StreamToken] = None,
-    ) -> AbstractSet[str]:
+    ) -> Dict[str, RoomsForUser]:
         """
         Fetch room IDs that should be listed for this user in the sync response (the
         full room list that will be filtered, sorted, and sliced).
@@ -237,11 +274,14 @@ class SlidingSyncHandler:
           to tell when a room was forgotten at the moment so we can't factor it into the
           from/to range.
 
-
         Args:
             user: User to fetch rooms for
             to_token: The token to fetch rooms up to.
             from_token: The point in the stream to sync from.
+
+        Returns:
+            A dictionary of room IDs that should be listed in the sync response along
+            with membership information in that room at the time of `to_token`.
         """
         user_id = user.to_string()
 
@@ -261,11 +301,11 @@ class SlidingSyncHandler:
 
         # If the user has never joined any rooms before, we can just return an empty list
         if not room_for_user_list:
-            return set()
+            return {}
 
         # Our working list of rooms that can show up in the sync response
         sync_room_id_set = {
-            room_for_user.room_id
+            room_for_user.room_id: room_for_user
             for room_for_user in room_for_user_list
             if filter_membership_for_sync(
                 membership=room_for_user.membership,
@@ -415,7 +455,9 @@ class SlidingSyncHandler:
                 not was_last_membership_already_included
                 and should_prev_membership_be_included
             ):
-                sync_room_id_set.add(room_id)
+                sync_room_id_set[room_id] = convert_event_to_rooms_for_user(
+                    last_membership_change_after_to_token
+                )
             # 1b) Remove rooms that the user joined (hasn't left) after the `to_token`
             #
             # For example, if the last membership event after the `to_token` is a "join"
@@ -426,7 +468,7 @@ class SlidingSyncHandler:
                 was_last_membership_already_included
                 and not should_prev_membership_be_included
             ):
-                sync_room_id_set.discard(room_id)
+                del sync_room_id_set[room_id]
 
         # 2) -----------------------------------------------------
         # We fix-up newly_left rooms after the first fixup because it may have removed
@@ -461,25 +503,32 @@ class SlidingSyncHandler:
             # include newly_left rooms because the last event that the user should see
             # is their own leave event
             if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
-                sync_room_id_set.add(room_id)
+                sync_room_id_set[room_id] = convert_event_to_rooms_for_user(
+                    last_membership_change_in_from_to_range
+                )
 
         return sync_room_id_set
 
     async def filter_rooms(
         self,
         user: UserID,
-        room_id_set: AbstractSet[str],
+        sync_room_map: Dict[str, RoomsForUser],
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
-    ) -> AbstractSet[str]:
+    ) -> Dict[str, RoomsForUser]:
         """
         Filter rooms based on the sync request.
 
         Args:
             user: User to filter rooms for
-            room_id_set: Set of room IDs to filter down
+            sync_room_map: Dictionary of room IDs to sort along with membership
+                information in the room at the time of `to_token`.
             filters: Filters to apply
             to_token: We filter based on the state of the room at this token
+
+        Returns:
+            A filtered dictionary of room IDs along with membership information in the
+            room at the time of `to_token`.
         """
         user_id = user.to_string()
 
@@ -488,7 +537,7 @@ class SlidingSyncHandler:
         # TODO: Exclude partially stated rooms unless the `required_state` has
         # `["m.room.member", "$LAZY"]`
 
-        filtered_room_id_set = set(room_id_set)
+        filtered_room_id_set = set(sync_room_map.keys())
 
         # Filter for Direct-Message (DM) rooms
         if filters.is_dm is not None:
@@ -505,7 +554,7 @@ class SlidingSyncHandler:
 
             # Flatten out the map
             dm_room_id_set = set()
-            if dm_map:
+            if isinstance(dm_map, dict):
                 for room_ids in dm_map.values():
                     # Account data should be a list of room IDs. Ignore anything else
                     if isinstance(room_ids, list):
@@ -523,11 +572,42 @@ class SlidingSyncHandler:
         if filters.spaces:
             raise NotImplementedError()
 
-        if filters.is_encrypted:
-            raise NotImplementedError()
+        # Filter for encrypted rooms
+        if filters.is_encrypted is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                state_at_to_token = await self.storage_controllers.state.get_state_at(
+                    room_id,
+                    to_token,
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.RoomEncryption, "")]
+                    ),
+                )
+                is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
 
-        if filters.is_invite:
-            raise NotImplementedError()
+                # If we're looking for encrypted rooms, filter out rooms that are not
+                # encrypted and vice versa
+                if (filters.is_encrypted and not is_encrypted) or (
+                    not filters.is_encrypted and is_encrypted
+                ):
+                    filtered_room_id_set.remove(room_id)
+
+        # Filter for rooms that the user has been invited to
+        if filters.is_invite is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                room_for_user = sync_room_map[room_id]
+                # If we're looking for invite rooms, filter out rooms that the user is
+                # not invited to and vice versa
+                if (
+                    filters.is_invite and room_for_user.membership != Membership.INVITE
+                ) or (
+                    not filters.is_invite
+                    and room_for_user.membership == Membership.INVITE
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.room_types:
             raise NotImplementedError()
@@ -544,4 +624,57 @@ class SlidingSyncHandler:
         if filters.not_tags:
             raise NotImplementedError()
 
-        return filtered_room_id_set
+        # Assemble a new sync room map but only with the `filtered_room_id_set`
+        return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
+
+    async def sort_rooms(
+        self,
+        sync_room_map: Dict[str, RoomsForUser],
+        to_token: StreamToken,
+    ) -> List[Tuple[str, RoomsForUser]]:
+        """
+        Sort by `stream_ordering` of the last event that the user should see in the
+        room. `stream_ordering` is unique so we get a stable sort.
+
+        Args:
+            sync_room_map: Dictionary of room IDs to sort along with membership
+                information in the room at the time of `to_token`.
+            to_token: We sort based on the events in the room at this token (<= `to_token`)
+
+        Returns:
+            A sorted list of room IDs by `stream_ordering` along with membership information.
+        """
+
+        # Assemble a map of room ID to the `stream_ordering` of the last activity that the
+        # user should see in the room (<= `to_token`)
+        last_activity_in_room_map: Dict[str, int] = {}
+        for room_id, room_for_user in sync_room_map.items():
+            # If they are fully-joined to the room, let's find the latest activity
+            # at/before the `to_token`.
+            if room_for_user.membership == Membership.JOIN:
+                last_event_result = (
+                    await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                        room_id, to_token.room_key
+                    )
+                )
+
+                # If the room has no events at/before the `to_token`, this is probably a
+                # mistake in the code that generates the `sync_room_map` since that should
+                # only give us rooms that the user had membership in during the token range.
+                assert last_event_result is not None
+
+                _, event_pos = last_event_result
+
+                last_activity_in_room_map[room_id] = event_pos.stream
+            else:
+                # Otherwise, if the user has left/been invited/knocked/been banned from
+                # a room, they shouldn't see anything past that point.
+                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
+
+        return sorted(
+            sync_room_map.items(),
+            # Sort by the last activity (stream_ordering) in the room
+            key=lambda room_info: last_activity_in_room_map[room_info[0]],
+            # We want descending order
+            reverse=True,
+        )

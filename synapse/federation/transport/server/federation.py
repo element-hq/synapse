@@ -793,7 +793,7 @@ class FederationAccountStatusServlet(BaseFederationServerServlet):
 class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
     """
     Implementation of new federation media `/download` endpoint outlined in MSC3916. Returns
-    a multipart/form-data response consisting of a JSON object and the requested media
+    a multipart/mixed response consisting of a JSON object and the requested media
     item. This endpoint only returns local media.
     """
 

@@ -435,10 +435,6 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
             True,
             channel.json_body["features"]["msc3881"],
         )
-        self.assertEqual(
-            False,
-            channel.json_body["features"]["msc3967"],
-        )
 
         # test nothing blows up if you try to disable a feature that isn't already enabled
         url = f"{self.url}/{self.other_user}"

@@ -19,7 +19,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import inspect
 import logging
 from typing import TYPE_CHECKING, Dict, Iterable, List, Optional, Tuple, Type
 
@@ -322,21 +321,6 @@ def register_servlets(
                     not hs.config.server.enable_media_repo
                     or not hs.config.experimental.msc3916_authenticated_media_enabled
                 ):
-                    continue
-
-                # don't load the endpoint if the storage provider is incompatible
-                media_repo = hs.get_media_repository()
-                load_download_endpoint = True
-                for provider in media_repo.media_storage.storage_providers:
-                    signature = inspect.signature(provider.backend.fetch)
-                    if "federation" not in signature.parameters:
-                        logger.warning(
-                            f"Federation media `/download` endpoint will not be enabled as storage provider {provider.backend} is not compatible with this endpoint."
-                        )
-                        load_download_endpoint = False
-                        break
-
-                if not load_download_endpoint:
                     continue
 
             servletclass(
