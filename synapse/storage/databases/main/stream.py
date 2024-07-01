@@ -125,12 +125,17 @@ class CurrentStateDeltaMembership:
         sender: The person who sent the membership event
     """
 
+    room_id: str
+    # Event
     event_id: Optional[str]
     event_pos: PersistedEventPosition
-    prev_event_id: Optional[str]
-    room_id: str
     membership: str
     sender: Optional[str]
+    # Prev event
+    prev_event_id: Optional[str]
+    prev_event_pos: Optional[PersistedEventPosition]
+    prev_membership: Optional[str]
+    prev_sender: Optional[str]
 
 
 def generate_pagination_where_clause(
@@ -865,18 +870,22 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # was added) and uses the *minimum* stream position for batches of events.
             sql = """
                 SELECT
-                    e.event_id,
-                    s.prev_event_id,
                     s.room_id,
+                    e.event_id,
                     s.instance_name,
                     s.stream_id,
                     m.membership,
                     e.sender,
-                    m_prev.membership AS prev_membership
+                    s.prev_event_id,
+                    e_prev.instance_name AS prev_instance_name,
+                    e_prev.stream_ordering AS prev_stream_ordering,
+                    m_prev.membership AS prev_membership,
+                    e_prev.sender AS prev_sender
                 FROM current_state_delta_stream AS s
                     LEFT JOIN events AS e ON e.event_id = s.event_id
                     LEFT JOIN room_memberships AS m ON m.event_id = s.event_id
-                    LEFT JOIN room_memberships AS m_prev ON s.prev_event_id = m_prev.event_id
+                    LEFT JOIN events AS e_prev ON e_prev.event_id = s.prev_event_id
+                    LEFT JOIN room_memberships AS m_prev ON m_prev.event_id = s.prev_event_id
                 WHERE s.stream_id > ? AND s.stream_id <= ?
                     AND s.type = ?
                     AND s.state_key = ?
@@ -887,14 +896,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
             membership_changes: List[CurrentStateDeltaMembership] = []
             for (
-                event_id,
-                prev_event_id,
                 room_id,
+                event_id,
                 instance_name,
                 stream_ordering,
                 membership,
                 sender,
+                prev_event_id,
+                prev_instance_name,
+                prev_stream_ordering,
                 prev_membership,
+                prev_sender,
             ) in txn:
                 assert room_id is not None
                 assert instance_name is not None
@@ -916,17 +928,36 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         continue
 
                     membership_change = CurrentStateDeltaMembership(
+                        room_id=room_id,
+                        # Event
                         event_id=event_id,
                         event_pos=PersistedEventPosition(
                             instance_name=instance_name,
                             stream=stream_ordering,
                         ),
-                        prev_event_id=prev_event_id,
-                        room_id=room_id,
                         membership=(
                             membership if membership is not None else Membership.LEAVE
                         ),
                         sender=sender,
+                        # Prev event
+                        prev_event_id=prev_event_id,
+                        prev_event_pos=(
+                            PersistedEventPosition(
+                                instance_name=prev_instance_name,
+                                stream=prev_stream_ordering,
+                            )
+                            if (
+                                prev_instance_name is not None
+                                and prev_stream_ordering is not None
+                            )
+                            else None
+                        ),
+                        prev_membership=(
+                            prev_membership
+                            if prev_membership is not None
+                            else Membership.LEAVE
+                        ),
+                        prev_sender=prev_sender,
                     )
 
                     membership_changes.append(membership_change)
