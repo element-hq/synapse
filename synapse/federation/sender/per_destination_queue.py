@@ -317,7 +317,6 @@ class PerDestinationQueue:
         )
 
     async def _transaction_transmission_loop(self) -> None:
-        pending_pdus: List[EventBase] = []
         try:
             self.transmission_loop_running = True
 
@@ -333,7 +332,6 @@ class PerDestinationQueue:
                     # not caught up yet
                     return
 
-            pending_pdus = []
             while True:
                 self._new_data_to_send = False
 

@@ -43,6 +43,7 @@ target-version = ['py38', 'py39', 'py310', 'py311']
 [tool.ruff]
 line-length = 88
 
+[tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
 # for error codes. The ones we ignore are:
 #  E501: Line too long (black enforces this for us)

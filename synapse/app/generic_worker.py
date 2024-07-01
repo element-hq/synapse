@@ -163,7 +163,7 @@ class GenericWorkerStore(
 
 
 class GenericWorkerServer(HomeServer):
-    DATASTORE_CLASS = GenericWorkerStore  # type: ignore
+    DATASTORE_CLASS = GenericWorkerStore
 
     def _listen_http(self, listener_config: ListenerConfig) -> None:
         assert listener_config.http_options is not None
