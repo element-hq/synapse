@@ -437,10 +437,6 @@ class ExperimentalConfig(Config):
             "msc3823_account_suspension", False
         )
 
-        self.msc3916_authenticated_media_enabled = experimental.get(
-            "msc3916_authenticated_media_enabled", False
-        )
-
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
 
