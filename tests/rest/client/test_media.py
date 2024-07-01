@@ -23,10 +23,15 @@ import io
 import json
 import os
 import re
+import shutil
 from typing import Any, BinaryIO, Dict, List, Optional, Sequence, Tuple, Type
 from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 from urllib.parse import quote, urlencode
+
+from parameterized import parameterized, parameterized_class
+from PIL import Image as Image
+from typing_extensions import ClassVar
 
 from twisted.internet import defer
 from twisted.internet._resolver import HostResolution
@@ -38,7 +43,6 @@ from twisted.python.failure import Failure
 from twisted.test.proto_helpers import AccumulatingProtocol, MemoryReactor
 from twisted.web.http_headers import Headers
 from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
-from twisted.web.resource import Resource
 
 from synapse.api.errors import HttpResponseException
 from synapse.api.ratelimiting import Ratelimiter
@@ -46,7 +50,8 @@ from synapse.config.oembed import OEmbedEndpointConfig
 from synapse.http.client import MultipartResponse
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
-from synapse.media._base import FileInfo
+from synapse.media._base import FileInfo, ThumbnailInfo
+from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.media.url_previewer import IMAGE_CACHE_EXPIRY_MS
 from synapse.rest import admin
 from synapse.rest.client import login, media
@@ -58,6 +63,7 @@ from synapse.util.stringutils import parse_and_validate_mxc_uri
 from tests import unittest
 from tests.media.test_media_storage import (
     SVG,
+    TestImage,
     empty_file,
     small_lossless_webp,
     small_png,
@@ -73,7 +79,7 @@ except ImportError:
     lxml = None  # type: ignore[assignment]
 
 
-class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
+class MediaDomainBlockingTests(unittest.HomeserverTestCase):
     remote_media_id = "doesnotmatter"
     remote_server_name = "evil.com"
     servlets = [
@@ -141,7 +147,6 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
             # Should result in a 404.
             "prevent_media_downloads_from": ["evil.com"],
             "dynamic_thumbnails": True,
-            "experimental_features": {"msc3916_authenticated_media_enabled": True},
         }
     )
     def test_cannot_download_blocked_media_thumbnail(self) -> None:
@@ -150,7 +155,7 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
         """
         response = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
+            f"/_matrix/client/v1/media/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
             shorthand=False,
             content={"width": 100, "height": 100},
             access_token=self.tok,
@@ -163,7 +168,6 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
             # This proves we haven't broken anything.
             "prevent_media_downloads_from": ["not-listed.com"],
             "dynamic_thumbnails": True,
-            "experimental_features": {"msc3916_authenticated_media_enabled": True},
         }
     )
     def test_remote_media_thumbnail_normally_unblocked(self) -> None:
@@ -172,14 +176,14 @@ class UnstableMediaDomainBlockingTests(unittest.HomeserverTestCase):
         """
         response = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
+            f"/_matrix/client/v1/media/thumbnail/evil.com/{self.remote_media_id}?width=100&height=100",
             shorthand=False,
             access_token=self.tok,
         )
         self.assertEqual(response.code, 200)
 
 
-class UnstableURLPreviewTests(unittest.HomeserverTestCase):
+class URLPreviewTests(unittest.HomeserverTestCase):
     if not lxml:
         skip = "url preview feature requires lxml"
 
@@ -195,7 +199,6 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         config = self.default_config()
-        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
         config["url_preview_enabled"] = True
         config["max_spider_size"] = 9999999
         config["url_preview_ip_range_blacklist"] = (
@@ -281,17 +284,17 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         self.reactor.nameResolver = Resolver()  # type: ignore[assignment]
 
-    def create_resource_dict(self) -> Dict[str, Resource]:
-        """Create a resource tree for the test server
-
-        A resource tree is a mapping from path to twisted.web.resource.
-
-        The default implementation creates a JsonResource and calls each function in
-        `servlets` to register servlets against it.
-        """
-        resources = super().create_resource_dict()
-        resources["/_matrix/media"] = self.hs.get_media_repository_resource()
-        return resources
+    # def create_resource_dict(self) -> Dict[str, Resource]:
+    #     """Create a resource tree for the test server
+    #
+    #     A resource tree is a mapping from path to twisted.web.resource.
+    #
+    #     The default implementation creates a JsonResource and calls each function in
+    #     `servlets` to register servlets against it.
+    #     """
+    #     resources = super().create_resource_dict()
+    #     resources["/_matrix/media"] = self.hs.get_media_repository_resource()
+    #     return resources
 
     def _assert_small_png(self, json_body: JsonDict) -> None:
         """Assert properties from the SMALL_PNG test image."""
@@ -306,7 +309,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -331,7 +334,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         # Check the cache returns the correct response
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
         )
 
@@ -349,7 +352,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         # Check the database cache returns the correct response
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
         )
 
@@ -372,7 +375,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -402,7 +405,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -438,7 +441,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -479,7 +482,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -514,7 +517,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -547,7 +550,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
             await_result=False,
         )
@@ -577,7 +580,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
 
@@ -600,7 +603,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
 
@@ -619,7 +622,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://192.168.1.1",
+            "/_matrix/client/v1/media/preview_url?url=http://192.168.1.1",
             shorthand=False,
         )
 
@@ -637,7 +640,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://1.1.1.2",
+            "/_matrix/client/v1/media/preview_url?url=http://1.1.1.2",
             shorthand=False,
         )
 
@@ -656,7 +659,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
             await_result=False,
         )
@@ -693,7 +696,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
         self.assertEqual(channel.code, 502)
@@ -715,7 +718,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
 
@@ -738,7 +741,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
 
@@ -757,7 +760,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         """
         channel = self.make_request(
             "OPTIONS",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
         )
         self.assertEqual(channel.code, 204)
@@ -771,7 +774,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         # Build and make a request to the server
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://example.com",
+            "/_matrix/client/v1/media/preview_url?url=http://example.com",
             shorthand=False,
             await_result=False,
         )
@@ -824,7 +827,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -874,7 +877,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -916,7 +919,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -956,7 +959,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -997,7 +1000,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?{query_params}",
+            f"/_matrix/client/v1/media/preview_url?{query_params}",
             shorthand=False,
         )
         self.pump()
@@ -1018,7 +1021,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://matrix.org",
+            "/_matrix/client/v1/media/preview_url?url=http://matrix.org",
             shorthand=False,
             await_result=False,
         )
@@ -1055,7 +1058,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1115,7 +1118,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1164,7 +1167,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://www.hulu.com/watch/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://www.hulu.com/watch/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1209,7 +1212,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://twitter.com/matrixdotorg/status/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1238,7 +1241,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://www.twitter.com/matrixdotorg/status/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://www.twitter.com/matrixdotorg/status/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1330,7 +1333,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://www.twitter.com/matrixdotorg/status/12345",
+            "/_matrix/client/v1/media/preview_url?url=http://www.twitter.com/matrixdotorg/status/12345",
             shorthand=False,
             await_result=False,
         )
@@ -1371,7 +1374,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url=http://cdn.twitter.com/matrixdotorg",
+            "/_matrix/client/v1/media/preview_url?url=http://cdn.twitter.com/matrixdotorg",
             shorthand=False,
             await_result=False,
         )
@@ -1413,7 +1416,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/media/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
         )
@@ -1426,7 +1429,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{host}/{media_id}",
+            f"/_matrix/client/v1/download/{host}/{media_id}",
             shorthand=False,
             await_result=False,
         )
@@ -1461,7 +1464,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         # Check fetching
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
+            f"/_matrix/client/v1/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
             shorthand=False,
             await_result=False,
         )
@@ -1479,7 +1482,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
+            f"/_matrix/client/v1/media/thumbnail/{host}/{media_id}?width=32&height=32&method=scale",
             shorthand=False,
             await_result=False,
         )
@@ -1529,8 +1532,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url="
-            + bad_url,
+            "/_matrix/client/v1/media/preview_url?url=" + bad_url,
             shorthand=False,
             await_result=False,
         )
@@ -1539,8 +1541,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url="
-            + good_url,
+            "/_matrix/client/v1/media/preview_url?url=" + good_url,
             shorthand=False,
             await_result=False,
         )
@@ -1572,8 +1573,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/preview_url?url="
-            + bad_url,
+            "/_matrix/client/v1/media/preview_url?url=" + bad_url,
             shorthand=False,
             await_result=False,
         )
@@ -1581,7 +1581,7 @@ class UnstableURLPreviewTests(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 403, channel.result)
 
 
-class UnstableMediaConfigTest(unittest.HomeserverTestCase):
+class MediaConfigTest(unittest.HomeserverTestCase):
     servlets = [
         media.register_servlets,
         admin.register_servlets,
@@ -1592,7 +1592,6 @@ class UnstableMediaConfigTest(unittest.HomeserverTestCase):
         self, reactor: ThreadedMemoryReactorClock, clock: Clock
     ) -> HomeServer:
         config = self.default_config()
-        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
 
         self.storage_path = self.mktemp()
         self.media_store_path = self.mktemp()
@@ -1619,7 +1618,7 @@ class UnstableMediaConfigTest(unittest.HomeserverTestCase):
     def test_media_config(self) -> None:
         channel = self.make_request(
             "GET",
-            "/_matrix/client/unstable/org.matrix.msc3916/media/config",
+            "/_matrix/client/v1/media/config",
             shorthand=False,
             access_token=self.tok,
         )
@@ -1895,10 +1894,10 @@ test_images = [
 input_values = [(x,) for x in test_images]
 
 
-# @parameterized_class(("test_image",), input_values)
-class DownloadTestCase(unittest.HomeserverTestCase):
-    # test_image: ClassVar[TestImage]
-    test_image = SVG
+@parameterized_class(("test_image",), input_values)
+class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
+    test_image: ClassVar[TestImage]
+    # test_image = small_png
     servlets = [
         media.register_servlets,
         login.register_servlets,
@@ -2003,7 +2002,6 @@ class DownloadTestCase(unittest.HomeserverTestCase):
             "config": {"directory": self.storage_path},
         }
         config["media_storage_providers"] = [provider_config]
-        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
 
         hs = self.setup_test_homeserver(config=config, federation_http_client=client)
 
@@ -2162,7 +2160,7 @@ class DownloadTestCase(unittest.HomeserverTestCase):
 
     def test_unknown_federation_endpoint(self) -> None:
         """
-        Test that if the downloadd request to remote federation endpoint returns a 404
+        Test that if the download request to remote federation endpoint returns a 404
         we fall back to the _matrix/media endpoint
         """
         channel = self.make_request(
@@ -2208,3 +2206,236 @@ class DownloadTestCase(unittest.HomeserverTestCase):
 
         self.pump()
         self.assertEqual(channel.code, 200)
+
+    def test_thumbnail_crop(self) -> None:
+        """Test that a cropped remote thumbnail is available."""
+        self._test_thumbnail(
+            "crop",
+            self.test_image.expected_cropped,
+            expected_found=self.test_image.expected_found,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+    def test_thumbnail_scale(self) -> None:
+        """Test that a scaled remote thumbnail is available."""
+        self._test_thumbnail(
+            "scale",
+            self.test_image.expected_scaled,
+            expected_found=self.test_image.expected_found,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+    def test_invalid_type(self) -> None:
+        """An invalid thumbnail type is never available."""
+        self._test_thumbnail(
+            "invalid",
+            None,
+            expected_found=False,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+    @unittest.override_config(
+        {"thumbnail_sizes": [{"width": 32, "height": 32, "method": "scale"}]}
+    )
+    def test_no_thumbnail_crop(self) -> None:
+        """
+        Override the config to generate only scaled thumbnails, but request a cropped one.
+        """
+        self._test_thumbnail(
+            "crop",
+            None,
+            expected_found=False,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+    @unittest.override_config(
+        {"thumbnail_sizes": [{"width": 32, "height": 32, "method": "crop"}]}
+    )
+    def test_no_thumbnail_scale(self) -> None:
+        """
+        Override the config to generate only cropped thumbnails, but request a scaled one.
+        """
+        self._test_thumbnail(
+            "scale",
+            None,
+            expected_found=False,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+    def test_thumbnail_repeated_thumbnail(self) -> None:
+        """Test that fetching the same thumbnail works, and deleting the on disk
+        thumbnail regenerates it.
+        """
+        self._test_thumbnail(
+            "scale",
+            self.test_image.expected_scaled,
+            expected_found=self.test_image.expected_found,
+            unable_to_thumbnail=self.test_image.unable_to_thumbnail,
+        )
+
+        if not self.test_image.expected_found:
+            return
+
+        # Fetching again should work, without re-requesting the image from the
+        # remote.
+        params = "?width=32&height=32&method=scale"
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.remote}/{self.media_id}{params}",
+            shorthand=False,
+            await_result=False,
+            access_token=self.tok,
+        )
+        self.pump()
+
+        self.assertEqual(channel.code, 200)
+        if self.test_image.expected_scaled:
+            self.assertEqual(
+                channel.result["body"],
+                self.test_image.expected_scaled,
+                channel.result["body"],
+            )
+
+        # Deleting the thumbnail on disk then re-requesting it should work as
+        # Synapse should regenerate missing thumbnails.
+        info = self.get_success(
+            self.store.get_cached_remote_media(self.remote, self.media_id)
+        )
+        assert info is not None
+        file_id = info.filesystem_id
+
+        thumbnail_dir = self.media_repo.filepaths.remote_media_thumbnail_dir(
+            self.remote, file_id
+        )
+        shutil.rmtree(thumbnail_dir, ignore_errors=True)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.remote}/{self.media_id}{params}",
+            shorthand=False,
+            await_result=False,
+            access_token=self.tok,
+        )
+        self.pump()
+
+        self.assertEqual(channel.code, 200)
+        if self.test_image.expected_scaled:
+            self.assertEqual(
+                channel.result["body"],
+                self.test_image.expected_scaled,
+                channel.result["body"],
+            )
+
+    def _test_thumbnail(
+        self,
+        method: str,
+        expected_body: Optional[bytes],
+        expected_found: bool,
+        unable_to_thumbnail: bool = False,
+    ) -> None:
+        """Test the given thumbnailing method works as expected.
+
+        Args:
+            method: The thumbnailing method to use (crop, scale).
+            expected_body: The expected bytes from thumbnailing, or None if
+                test should just check for a valid image.
+            expected_found: True if the file should exist on the server, or False if
+                a 404/400 is expected.
+            unable_to_thumbnail: True if we expect the thumbnailing to fail (400), or
+                False if the thumbnailing should succeed or a normal 404 is expected.
+        """
+
+        params = "?width=32&height=32&method=" + method
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v1/media/thumbnail/{self.remote}/{self.media_id}{params}",
+            shorthand=False,
+            await_result=False,
+            access_token=self.tok,
+        )
+        self.pump()
+        headers = {
+            b"Content-Length": [b"%d" % (len(self.test_image.data))],
+            b"Content-Type": [self.test_image.content_type],
+        }
+        self.fetches[0][0].callback(
+            (self.test_image.data, (len(self.test_image.data), headers))
+        )
+        self.pump()
+        if expected_found:
+            self.assertEqual(channel.code, 200)
+
+            self.assertEqual(
+                channel.headers.getRawHeaders(b"Cross-Origin-Resource-Policy"),
+                [b"cross-origin"],
+            )
+
+            if expected_body is not None:
+                self.assertEqual(
+                    channel.result["body"], expected_body, channel.result["body"]
+                )
+            else:
+                # ensure that the result is at least some valid image
+                Image.open(io.BytesIO(channel.result["body"]))
+        elif unable_to_thumbnail:
+            # A 400 with a JSON body.
+            self.assertEqual(channel.code, 400)
+            self.assertEqual(
+                channel.json_body,
+                {
+                    "errcode": "M_UNKNOWN",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/client/v1/media/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                },
+            )
+        else:
+            # A 404 with a JSON body.
+            self.assertEqual(channel.code, 404)
+            self.assertEqual(
+                channel.json_body,
+                {
+                    "errcode": "M_NOT_FOUND",
+                    "error": "Not found '/_matrix/client/v1/media/thumbnail/example.com/12345'",
+                },
+            )
+
+    @parameterized.expand([("crop", 16), ("crop", 64), ("scale", 16), ("scale", 64)])
+    def test_same_quality(self, method: str, desired_size: int) -> None:
+        """Test that choosing between thumbnails with the same quality rating succeeds.
+
+        We are not particular about which thumbnail is chosen."""
+
+        content_type = self.test_image.content_type.decode()
+        media_repo = self.hs.get_media_repository()
+        thumbnail_provider = ThumbnailProvider(
+            self.hs, media_repo, media_repo.media_storage
+        )
+
+        self.assertIsNotNone(
+            thumbnail_provider._select_thumbnail(
+                desired_width=desired_size,
+                desired_height=desired_size,
+                desired_method=method,
+                desired_type=content_type,
+                # Provide two identical thumbnails which are guaranteed to have the same
+                # quality rating.
+                thumbnail_infos=[
+                    ThumbnailInfo(
+                        width=32,
+                        height=32,
+                        method=method,
+                        type=content_type,
+                        length=256,
+                    ),
+                    ThumbnailInfo(
+                        width=32,
+                        height=32,
+                        method=method,
+                        type=content_type,
+                        length=256,
+                    ),
+                ],
+                file_id=f"image{self.test_image.extension.decode()}",
+                url_cache=False,
+                server_name=None,
+            )
+        )

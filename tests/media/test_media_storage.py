@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import itertools
 import os
 import shutil
 import tempfile
@@ -227,19 +226,15 @@ test_images = [
     empty_file,
     SVG,
 ]
-urls = [
-    "_matrix/media/r0/thumbnail",
-    "_matrix/client/unstable/org.matrix.msc3916/media/thumbnail",
-]
+input_values = [(x,) for x in test_images]
 
 
-@parameterized_class(("test_image", "url"), itertools.product(test_images, urls))
+@parameterized_class(("test_image",), input_values)
 class MediaRepoTests(unittest.HomeserverTestCase):
     servlets = [media.register_servlets]
     test_image: ClassVar[TestImage]
     hijack_auth = True
     user_id = "@test:user"
-    url: ClassVar[str]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.fetches: List[
@@ -304,7 +299,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             "config": {"directory": self.storage_path},
         }
         config["media_storage_providers"] = [provider_config]
-        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
 
         hs = self.setup_test_homeserver(config=config, federation_http_client=client)
 
@@ -509,7 +503,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=scale"
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -537,7 +531,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -573,7 +567,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=" + method
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -608,7 +602,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": f"Cannot find any thumbnails for the requested media ('/{self.url}/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/media/r0/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
@@ -618,7 +612,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_NOT_FOUND",
-                    "error": f"Not found '/{self.url}/example.com/12345'",
+                    "error": "Not found '/_matrix/media/r0/thumbnail/example.com/12345'",
                 },
             )
 
