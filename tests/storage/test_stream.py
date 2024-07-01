@@ -609,12 +609,15 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_response["event_id"],
                     event_pos=join_pos,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 )
             ],
         )
@@ -710,20 +713,26 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_response1["event_id"],
                     event_pos=join_pos1,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=leave_response1["event_id"],
                     event_pos=leave_pos1,
-                    prev_event_id=join_response1["event_id"],
-                    room_id=room_id1,
                     membership="leave",
                     sender=user1_id,
+                    prev_event_id=join_response1["event_id"],
+                    prev_event_pos=join_pos1,
+                    prev_membership="join",
+                    prev_sender=user1_id,
                 ),
             ],
         )
@@ -876,20 +885,26 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_response1["event_id"],
                     event_pos=join_pos1,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=None,  # leave_response1["event_id"],
                     event_pos=leave_pos1,
-                    prev_event_id=join_response1["event_id"],
-                    room_id=room_id1,
                     membership="leave",
                     sender=None,  # user1_id,
+                    prev_event_id=join_response1["event_id"],
+                    prev_event_pos=join_pos1,
+                    prev_membership="join",
+                    prev_sender=user1_id,
                 ),
             ],
         )
@@ -998,16 +1013,19 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_event1.event_id,
                     # Ideally, this would be `join_pos1` (to match the `event_id`) but
                     # when events are persisted in a batch, they are all stored in the
                     # `current_state_delta_stream` table with the minimum
                     # `stream_ordering` from the batch.
                     event_pos=join_pos3,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
             ],
         )
@@ -1024,6 +1042,9 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_pos1 = self.get_success(
+            self.store.get_position_for_event(join_response1["event_id"])
+        )
 
         before_reset_token = self.event_sources.get_current_token()
 
@@ -1089,12 +1110,15 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=None,
                     event_pos=dummy_state_pos,
-                    prev_event_id=join_response1["event_id"],
-                    room_id=room_id1,
                     membership="leave",
                     sender=None,  # user1_id,
+                    prev_event_id=join_response1["event_id"],
+                    prev_event_pos=join_pos1,
+                    prev_membership="join",
+                    prev_sender=user1_id,
                 ),
             ],
         )
@@ -1139,20 +1163,26 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_response1["event_id"],
                     event_pos=join_pos1,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
                 CurrentStateDeltaMembership(
+                    room_id=room_id2,
                     event_id=join_response2["event_id"],
                     event_pos=join_pos2,
-                    prev_event_id=None,
-                    room_id=room_id2,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
             ],
         )
@@ -1173,12 +1203,15 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=room_id1,
                     event_id=join_response1["event_id"],
                     event_pos=join_pos1,
-                    prev_event_id=None,
-                    room_id=room_id1,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 )
             ],
         )
@@ -1366,12 +1399,15 @@ class GetCurrentStateDeltaMembershipChangesForUserFederationTestCase(
             membership_changes,
             [
                 CurrentStateDeltaMembership(
+                    room_id=intially_unjoined_room_id,
                     event_id=join_event.event_id,
                     event_pos=join_pos,
-                    prev_event_id=None,
-                    room_id=intially_unjoined_room_id,
                     membership="join",
                     sender=user1_id,
+                    prev_event_id=None,
+                    prev_event_pos=None,
+                    prev_membership=None,
+                    prev_sender=None,
                 ),
             ],
         )

@@ -918,12 +918,13 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     instance_name,
                     stream_ordering,
                 ):
-                    # When the server leaves a room, it will insert new rows with
-                    # `event_id = null` for all current state. This means we might
-                    # already have a row for the leave event and then another for the
-                    # same leave where the `event_id=null` but the `prev_event_id` is
-                    # pointing back at the earlier leave event. We don't want to report
-                    # the leave, if we already have a leave event.
+                    # When the server leaves a room, it will insert new rows into the
+                    # `current_state_delta_stream` table with `event_id = null` for all
+                    # current state. This means we might already have a row for the
+                    # leave event and then another for the same leave where the
+                    # `event_id=null` but the `prev_event_id` is pointing back at the
+                    # earlier leave event. We don't want to report the leave, if we
+                    # already have a leave event.
                     if event_id is None and prev_membership == Membership.LEAVE:
                         continue
 
@@ -935,6 +936,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                             instance_name=instance_name,
                             stream=stream_ordering,
                         ),
+                        # When `s.event_id = null`, we won't be able to get respective
+                        # `room_membership` but can assume the user has left the room
+                        # because this only happens when the server leaves a room
+                        # (meaning everyone locally left) or a state reset which removed
+                        # the person from the room.
                         membership=(
                             membership if membership is not None else Membership.LEAVE
                         ),
@@ -952,11 +958,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                             )
                             else None
                         ),
-                        prev_membership=(
-                            prev_membership
-                            if prev_membership is not None
-                            else Membership.LEAVE
-                        ),
+                        prev_membership=prev_membership,
                         prev_sender=prev_sender,
                     )
 
