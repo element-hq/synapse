@@ -22,6 +22,7 @@ from tests.unittest import (
     override_config,
 )
 
+from http import HTTPStatus
 
 class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
     servlets = [
@@ -382,6 +383,25 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
     def test_forget_when_not_left(self) -> None:
         """Tests that a user cannot not forgets a room that has not left."""
         self.get_failure(self.handler.forget(self.alice_ID, self.room_id), SynapseError)
+
+    def test_nonlocal_room_user_action(self) -> None:
+        """Test that nonlocal user ids can not perform room actions."""
+        alien_user_id = UserID.from_string("@cheeky_monkey:matrix.org")
+
+        self.get_failure(
+            self.handler.update_membership(
+                create_requester(self.alice), alien_user_id, self.room_id, "ban"
+            ),
+            SynapseError,
+        )
+
+        # self.helper.ban(
+        #     room=self.room_id,
+        #     src=str(self.alice_ID),
+        #     targ=str(alien_user_id),
+        #     expect_code=HTTPStatus.OK,
+        #     tok=self.alice_token
+        # )
 
     def test_rejoin_forgotten_by_user(self) -> None:
         """Test that a user that has forgotten a room can do a re-join.
