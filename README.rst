@@ -1,5 +1,11 @@
-.. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
-   :height: 60px
+.. raw:: html
+    <p align="left">
+        <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="https://github.com/element-hq/product/assets/87339233/68c5c277-226a-445b-aa41-6c1a29756b82" width="400px">
+            <source media="(prefers-color-scheme: light)" srcset="https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7" width="400px">
+            <img alt="Element logo" src="https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7" width="400px">
+        </picture>
+    </p>
 
 **Element Synapse - Matrix homeserver implementation**
 
