@@ -37,8 +37,10 @@ from typing import (
 )
 
 import attr
+from http import HTTPStatus
 
 from synapse.api.constants import EventTypes, Membership
+from synapse.api.errors import Codes, SynapseError
 from synapse.metrics import LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -586,10 +588,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
         # Paranoia check.
         if not self.hs.is_mine_id(user_id):
-            raise Exception(
-                "Cannot call 'get_local_current_membership_for_user_in_room' on "
-                "non-local user %s" % (user_id,),
-            )
+            message = f"Provided user_id {user_id} is a non-local user"
+            raise SynapseError(HTTPStatus.BAD_REQUEST, message, errcode=Codes.BAD_JSON)
 
         results = cast(
             Optional[Tuple[str, str]],
