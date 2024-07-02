@@ -12,7 +12,7 @@ cp -aT /synapse/source /synapse/build
 cd /synapse/build
 
 # Delete any existing `.so` files to ensure a clean build.
-rm /synapse/build/synapse/*.so
+rm -f /synapse/build/synapse/*.so
 
 # if this is a prerelease, set the Section accordingly.
 #
