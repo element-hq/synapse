@@ -130,7 +130,8 @@ class Ratelimiter:
                 Overrides the value set during instantiation if set.
             burst_count: How many actions that can be performed before being limited.
                 Overrides the value set during instantiation if set.
-            update: Whether to count this check as performing the action
+            update: Whether to count this check as performing the action. If the action
+                cannot be performed, the user's action count is not incremented at all.
             n_actions: The number of times the user wants to do this action. If the user
                 cannot do all of the actions, the user's action count is not incremented
                 at all.

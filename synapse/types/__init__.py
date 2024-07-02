@@ -536,6 +536,16 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
 
         return True
 
+    def bound_stream_token(self, max_stream: int) -> "Self":
+        """Bound the stream positions to a maximum value"""
+
+        return type(self)(
+            stream=min(self.stream, max_stream),
+            instance_map=immutabledict(
+                {k: min(s, max_stream) for k, s in self.instance_map.items()}
+            ),
+        )
+
 
 @attr.s(frozen=True, slots=True, order=False)
 class RoomStreamToken(AbstractMultiWriterStreamToken):
@@ -721,6 +731,14 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
             return f"m{self.stream}~{encoded_map}"
         else:
             return "s%d" % (self.stream,)
+
+    def bound_stream_token(self, max_stream: int) -> "RoomStreamToken":
+        """See super class"""
+
+        # This only makes sense for stream tokens.
+        assert self.topological is None
+
+        return super().bound_stream_token(max_stream)
 
 
 @attr.s(frozen=True, slots=True, order=False)

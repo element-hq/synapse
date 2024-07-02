@@ -641,6 +641,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return RoomStreamToken(stream=min_pos, instance_map=immutabledict(positions))
 
+    def get_events_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._stream_id_gen
+
     async def get_room_events_stream_for_rooms(
         self,
         room_ids: Collection[str],
