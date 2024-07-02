@@ -1192,8 +1192,8 @@ class SlidingSyncHandler:
 
             state_filter = StateFilter.from_types(required_state_types)
 
-            # We can return the full state that was requested if we're doing an initial
-            # sync
+            # We can return all of the state that was requested if we're doing an
+            # initial sync
             if initial:
                 # People shouldn't see past their leave/ban event
                 if rooms_membership_for_user_at_to_token.membership in (
@@ -1227,7 +1227,7 @@ class SlidingSyncHandler:
             # TODO: Dummy value
             heroes=None,
             initial=initial,
-            required_state=list(room_state.values()),
+            required_state=list(room_state.values()) if room_state else None,
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
             # TODO: Dummy value
