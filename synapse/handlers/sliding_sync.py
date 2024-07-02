@@ -848,12 +848,14 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in list(filtered_room_id_set):
-                state_at_to_token = await self.storage_controllers.state.get_state_at(
-                    room_id,
-                    to_token,
-                    state_filter=StateFilter.from_types(
-                        [(EventTypes.RoomEncryption, "")]
-                    ),
+                state_at_to_token = (
+                    await self.storage_controllers.state.get_state_ids_at(
+                        room_id,
+                        to_token,
+                        state_filter=StateFilter.from_types(
+                            [(EventTypes.RoomEncryption, "")]
+                        ),
+                    )
                 )
                 is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
 
@@ -1200,7 +1202,7 @@ class SlidingSyncHandler:
                     Membership.LEAVE,
                     Membership.BAN,
                 ):
-                    room_state = await self.storage_controllers.state.get_state_at(
+                    room_state = await self.storage_controllers.state.get_state_ids_at(
                         room_id,
                         stream_position=rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
                         state_filter=state_filter,

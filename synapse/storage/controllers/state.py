@@ -409,7 +409,7 @@ class StateStorageController:
 
         return state_ids
 
-    async def get_state_at(
+    async def get_state_ids_at(
         self,
         room_id: str,
         stream_position: StreamToken,
