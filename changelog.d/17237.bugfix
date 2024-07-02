@@ -1,0 +1,1 @@
+Fixed `include_leave` flag being ignored on sync. Contributed by @frastefanini.

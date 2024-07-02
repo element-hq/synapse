@@ -2706,10 +2706,15 @@ class SyncHandler:
         since_token = sync_result_builder.since_token
         now_token = sync_result_builder.now_token
         sync_config = sync_result_builder.sync_config
+        membership_list = [Membership.INVITE, Membership.JOIN, Membership.KNOCK]
+
+        if sync_config.filter_collection.include_leave:
+            membership_list.append(Membership.LEAVE)
+            membership_list.append(Membership.BAN)
 
         room_list = await self.store.get_rooms_for_local_user_where_membership_is(
             user_id=user_id,
-            membership_list=Membership.LIST,
+            membership_list=membership_list,
             excluded_rooms=sync_result_builder.excluded_room_ids,
         )
 
@@ -2743,12 +2748,6 @@ class SyncHandler:
                 knock = await self.store.get_event(event.event_id)
                 knocked.append(KnockedSyncResult(room_id=event.room_id, knock=knock))
             elif event.membership in (Membership.LEAVE, Membership.BAN):
-                # Always send down rooms we were banned from or kicked from.
-                if not sync_config.filter_collection.include_leave:
-                    if event.membership == Membership.LEAVE:
-                        if user_id == event.sender:
-                            continue
-
                 leave_token = now_token.copy_and_replace(
                     StreamKeyType.ROOM, RoomStreamToken(stream=event.event_pos.stream)
                 )
