@@ -56,11 +56,14 @@ class RoomSyncConfigTestCase(TestCase):
         self.assertEqual(actual.timeline_limit, expected.timeline_limit)
 
         # `self.assertEqual(...)` works fine to catch differences but the output is
-        # almost impossible to read because of the way it truncates the output
+        # almost impossible to read because of the way it truncates the output and the
+        # order doesn't actually matter.
         self.assertCountEqual(actual.required_state_map, expected.required_state_map)
         for event_type, expected_state_keys in expected.required_state_map.items():
             self.assertCountEqual(
-                actual.required_state_map[event_type], expected_state_keys
+                actual.required_state_map[event_type],
+                expected_state_keys,
+                f"Mismatch for {event_type}",
             )
 
     def test_from_list_config(self) -> None:
@@ -134,7 +137,81 @@ class RoomSyncConfigTestCase(TestCase):
 
     def test_from_room_config_wildcard(self) -> None:
         """
-        Test that a wildcard (*) will override all other values for the same event type.
+        Test that a wildcard (*) for both the `event_type` and `state_key` will override
+        all other values.
+
+        Note: MSC3575 describes different behavior to how we're handling things here but
+        since it's not wrong to return more state than requested (`required_state` is
+        just the minimum requested), it doesn't matter if we include things that the
+        client wanted excluded. This complexity is also under scrutiny, see
+        https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
+
+        > One unique exception is when you request all state events via ["*", "*"]. When used,
+        > all state events are returned by default, and additional entries FILTER OUT the returned set
+        > of state events. These additional entries cannot use '*' themselves.
+        > For example, ["*", "*"], ["m.room.member", "@alice:example.com"] will _exclude_ every m.room.member
+        > event _except_ for @alice:example.com, and include every other state event.
+        > In addition, ["*", "*"], ["m.space.child", "*"] is an error, the m.space.child filter is not
+        > required as it would have been returned anyway.
+        >
+        > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)},
+                },
+            ),
+        )
+
+    def test_from_room_config_wildcard_type(self) -> None:
+        """
+        Test that a wildcard (*) as a `event_type` will override all other values for the
+        same `state_key`.
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (StateKeys.WILDCARD, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, "@foo"),
+                    },
+                },
+            ),
+        )
+
+    def test_from_room_config_wildcard_state_key(self) -> None:
+        """
+        Test that a wildcard (*) as a `state_key` will override all other values for the
+        same `event_type`.
         """
         list_config = SlidingSyncConfig.SlidingSyncList(
             timeline_limit=10,
@@ -161,6 +238,68 @@ class RoomSyncConfigTestCase(TestCase):
                         (EventTypes.Member, "*"),
                     },
                     EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
+                },
+            ),
+        )
+
+    def test_from_room_config_wildcard_merge(self) -> None:
+        """
+        Test that a wildcard (*) entries for the `event_type` and another one for
+        `state_key` will play together.
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (StateKeys.WILDCARD, ""),
+                (EventTypes.Member, "@foo"),
+                (EventTypes.Member, StateKeys.WILDCARD),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, "")},
+                    EventTypes.Member: {
+                        (EventTypes.Member, StateKeys.WILDCARD),
+                    },
+                },
+            ),
+        )
+
+    def test_from_room_config_wildcard_merge2(self) -> None:
+        """
+        Test that an all wildcard ("*", "*") entry will override any other values (including other wildcards).
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (StateKeys.WILDCARD, ""),
+                (EventTypes.Member, StateKeys.WILDCARD),
+                (EventTypes.Member, "@foo"),
+                # One of these should take precedence over everything else
+                (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)},
                 },
             ),
         )

@@ -138,7 +138,20 @@ class RoomSyncConfig:
             state_type,
             state_key,
         ) in room_params.required_state:
-            # If we already have a wildcard, we don't need to add anything else
+            # We assume that if a wildcard is present, it's the only thing in the set.
+            wildcard_type_entry = get_first_item_in_set(
+                required_state_map.get(StateKeys.WILDCARD)
+            )
+            # If we already have a wildcard for *any* `state_key` or this specific
+            # `state_key`, we don't need to add anything else
+            if wildcard_type_entry == (
+                StateKeys.WILDCARD,
+                StateKeys.WILDCARD,
+            ) or wildcard_type_entry == (StateKeys.WILDCARD, state_key):
+                continue
+
+            # If we already have a wildcard `state_key` for this `state_type`, we don't need
+            # to add anything else
             if (
                 # We assume that if a wildcard is present, it's the only thing in the
                 # set.
@@ -147,8 +160,38 @@ class RoomSyncConfig:
             ):
                 continue
 
-            # If we're getting a wildcard, that's all that matters so get rid of any
-            # other state keys
+            # If we're getting wildcards for the `state_type` and `state_key`, that's
+            # all that matters so get rid of any other entries
+            if state_type == StateKeys.WILDCARD and state_key == StateKeys.WILDCARD:
+                required_state_map = {state_type: {(state_type, state_key)}}
+            # If we're getting a wildcard for the `state_type`, get rid of any other
+            # entries with the same `state_key`, since the wildcard will cover it already.
+            elif state_type == StateKeys.WILDCARD:
+                # Get rid of any entries that match the `state_key`
+                for (
+                    existing_state_type,
+                    existing_state_key_set,
+                ) in list(required_state_map.items()):
+                    # Make a copy so we don't run into an error: `Set changed size during
+                    # iteration`, when we filter out and remove items
+                    for (
+                        _existing_state_type,
+                        existing_state_key,
+                    ) in existing_state_key_set.copy():
+                        if existing_state_key == state_key:
+                            existing_state_key_set.remove(
+                                (existing_state_type, state_key)
+                            )
+
+                    if existing_state_key_set == set():
+                        required_state_map.pop(existing_state_type, None)
+
+                # Add our wildcard entry to the map after we remove things so we don't
+                # have to iterate over it and accidentally remove it.
+                required_state_map[state_type] = {(state_type, state_key)}
+
+            # If we're getting a wildcard `state_key`, get rid of any other state_keys
+            # for this `state_type` since the wildcard will cover it already.
             if state_key == StateKeys.WILDCARD:
                 required_state_map[state_type] = {(state_type, state_key)}
             # Otherwise, just add it to the set
@@ -853,7 +896,7 @@ class SlidingSyncHandler:
         if filters.is_encrypted is not None:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
-            for room_id in list(filtered_room_id_set):
+            for room_id in filtered_room_id_set.copy():
                 state_at_to_token = await self.storage_controllers.state.get_state_at(
                     room_id,
                     to_token,
@@ -880,7 +923,7 @@ class SlidingSyncHandler:
         if filters.is_invite is not None:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
-            for room_id in list(filtered_room_id_set):
+            for room_id in filtered_room_id_set.copy():
                 room_for_user = sync_room_map[room_id]
                 # If we're looking for invite rooms, filter out rooms that the user is
                 # not invited to and vice versa
@@ -898,7 +941,7 @@ class SlidingSyncHandler:
         if filters.room_types is not None or filters.not_room_types is not None:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
-            for room_id in list(filtered_room_id_set):
+            for room_id in filtered_room_id_set.copy():
                 create_event = await self.store.get_create_event_for_room(room_id)
                 room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
                 if (
