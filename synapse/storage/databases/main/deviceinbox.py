@@ -50,10 +50,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
-from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
-    MultiWriterIdGenerator,
-)
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict
 from synapse.util import json_encoder
 from synapse.util.caches.expiringcache import ExpiringCache
@@ -92,7 +89,7 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             self._instance_name in hs.config.worker.writers.to_device
         )
 
-        self._to_device_msg_id_gen: AbstractStreamIdGenerator = MultiWriterIdGenerator(
+        self._to_device_msg_id_gen: MultiWriterIdGenerator = MultiWriterIdGenerator(
             db_conn=db_conn,
             db=database,
             notifier=hs.get_replication_notifier(),
@@ -168,6 +165,9 @@ class DeviceInboxWorkerStore(SQLBaseStore):
 
     def get_to_device_stream_token(self) -> int:
         return self._to_device_msg_id_gen.get_current_token()
+
+    def get_to_device_id_generator(self) -> MultiWriterIdGenerator:
+        return self._to_device_msg_id_gen
 
     async def get_messages_for_user_devices(
         self,
@@ -825,14 +825,13 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # Check if we've already inserted a matching message_id for that
             # origin. This can happen if the origin doesn't receive our
             # acknowledgement from the first time we received the message.
-            already_inserted = self.db_pool.simple_select_one_txn(
+            already_inserted = self.db_pool.simple_select_list_txn(
                 txn,
                 table="device_federation_inbox",
                 keyvalues={"origin": origin, "message_id": message_id},
                 retcols=("message_id",),
-                allow_none=True,
             )
-            if already_inserted is not None:
+            if already_inserted:
                 return
 
             # Add an entry for this message_id so that we know we've processed

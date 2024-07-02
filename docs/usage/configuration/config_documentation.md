@@ -1976,9 +1976,10 @@ This will not prevent the listed domains from accessing media themselves.
 It simply prevents users on this server from downloading media originating
 from the listed servers.
 
-This will have no effect on media originating from the local server.
-This only affects media downloaded from other Matrix servers, to
-block domains from URL previews see [`url_preview_url_blacklist`](#url_preview_url_blacklist).
+This will have no effect on media originating from the local server. This only
+affects media downloaded from other Matrix servers, to control URL previews see
+[`url_preview_ip_range_blacklist`](#url_preview_ip_range_blacklist) or
+[`url_preview_url_blacklist`](#url_preview_url_blacklist).
 
 Defaults to an empty list (nothing blocked).
 
@@ -2130,12 +2131,14 @@ url_preview_ip_range_whitelist:
 ---
 ### `url_preview_url_blacklist`
 
-Optional list of URL matches that the URL preview spider is
-denied from accessing.  You should use `url_preview_ip_range_blacklist`
-in preference to this, otherwise someone could define a public DNS
-entry that points to a private IP address and circumvent the blacklist.
-This is more useful if you know there is an entire shape of URL that
-you know that will never want synapse to try to spider.
+Optional list of URL matches that the URL preview spider is denied from
+accessing.  This is a usability feature, not a security one. You should use
+`url_preview_ip_range_blacklist` in preference to this, otherwise someone could
+define a public DNS entry that points to a private IP address and circumvent
+the blacklist. Applications that perform redirects or serve different content
+when detecting that Synapse is accessing them can also bypass the blacklist.
+This is more useful if you know there is an entire shape of URL that you know
+that you do not want Synapse to preview.
 
 Each list entry is a dictionary of url component attributes as returned
 by urlparse.urlsplit as applied to the absolute form of the URL.  See
