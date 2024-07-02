@@ -117,6 +117,19 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.111.0
+
+## New worker endpoints for authenticated client media
+
+[Media repository workers](./workers.md#synapseappmedia_repository) handling
+Media APIs can now handle the following endpoint pattern:
+
+```
+^/_matrix/client/v1/media/.*$
+```
+
+Please update your reverse proxy configuration.
+
 # Upgrading to v1.106.0
 
 ## Minimum supported Rust version

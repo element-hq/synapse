@@ -129,7 +129,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class _TestImage:
+class TestImage:
     """An image for testing thumbnailing with the expected results
 
     Attributes:
@@ -158,7 +158,7 @@ class _TestImage:
     is_inline: bool = True
 
 
-small_png = _TestImage(
+small_png = TestImage(
     SMALL_PNG,
     b"image/png",
     b".png",
@@ -175,7 +175,7 @@ small_png = _TestImage(
     ),
 )
 
-small_png_with_transparency = _TestImage(
+small_png_with_transparency = TestImage(
     unhexlify(
         b"89504e470d0a1a0a0000000d49484452000000010000000101000"
         b"00000376ef9240000000274524e5300010194fdae0000000a4944"
@@ -188,7 +188,7 @@ small_png_with_transparency = _TestImage(
     # different versions of Pillow.
 )
 
-small_lossless_webp = _TestImage(
+small_lossless_webp = TestImage(
     unhexlify(
         b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
     ),
@@ -196,7 +196,7 @@ small_lossless_webp = _TestImage(
     b".webp",
 )
 
-empty_file = _TestImage(
+empty_file = TestImage(
     b"",
     b"image/gif",
     b".gif",
@@ -204,7 +204,7 @@ empty_file = _TestImage(
     unable_to_thumbnail=True,
 )
 
-SVG = _TestImage(
+SVG = TestImage(
     b"""<?xml version="1.0"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
@@ -236,7 +236,7 @@ urls = [
 @parameterized_class(("test_image", "url"), itertools.product(test_images, urls))
 class MediaRepoTests(unittest.HomeserverTestCase):
     servlets = [media.register_servlets]
-    test_image: ClassVar[_TestImage]
+    test_image: ClassVar[TestImage]
     hijack_auth = True
     user_id = "@test:user"
     url: ClassVar[str]

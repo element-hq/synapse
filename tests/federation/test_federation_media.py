@@ -36,10 +36,9 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
-from tests.unittest import override_config
 
 
-class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
+class FederationMediaDownloadsTest(unittest.FederatingHomeserverTestCase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         super().prepare(reactor, clock, hs)
@@ -65,9 +64,6 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         )
         self.media_repo = hs.get_media_repository()
 
-    @override_config(
-        {"experimental_features": {"msc3916_authenticated_media_enabled": True}}
-    )
     def test_file_download(self) -> None:
         content = io.BytesIO(b"file_to_stream")
         content_uri = self.get_success(
@@ -82,7 +78,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # test with a text file
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
         )
         self.pump()
         self.assertEqual(200, channel.code)
@@ -106,7 +102,8 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
 
         # check that the text file and expected value exist
         found_file = any(
-            "\r\nContent-Type: text/plain\r\n\r\nfile_to_stream" in field
+            "\r\nContent-Type: text/plain\r\nContent-Disposition: inline; filename=test_upload\r\n\r\nfile_to_stream"
+            in field
             for field in stripped
         )
         self.assertTrue(found_file)
@@ -124,7 +121,7 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # test with an image file
         channel = self.make_signed_federation_request(
             "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
+            f"/_matrix/federation/v1/media/download/{content_uri.media_id}",
         )
         self.pump()
         self.assertEqual(200, channel.code)
@@ -149,25 +146,3 @@ class FederationUnstableMediaDownloadsTest(unittest.FederatingHomeserverTestCase
         # check that the png file exists and matches what was uploaded
         found_file = any(SMALL_PNG in field for field in stripped_bytes)
         self.assertTrue(found_file)
-
-    @override_config(
-        {"experimental_features": {"msc3916_authenticated_media_enabled": False}}
-    )
-    def test_disable_config(self) -> None:
-        content = io.BytesIO(b"file_to_stream")
-        content_uri = self.get_success(
-            self.media_repo.create_content(
-                "text/plain",
-                "test_upload",
-                content,
-                46,
-                UserID.from_string("@user_id:whatever.org"),
-            )
-        )
-        channel = self.make_signed_federation_request(
-            "GET",
-            f"/_matrix/federation/unstable/org.matrix.msc3916/media/download/{content_uri.media_id}",
-        )
-        self.pump()
-        self.assertEqual(404, channel.code)
-        self.assertEqual(channel.json_body.get("errcode"), "M_UNRECOGNIZED")

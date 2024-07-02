@@ -1,3 +1,17 @@
+# Synapse 1.110.0rc3 (2024-07-02)
+
+### Bugfixes
+
+- Fix bug where `/sync` requests could get blocked indefinitely after an upgrade from Synapse versions before v1.109.0. ([\#17386](https://github.com/element-hq/synapse/issues/17386), [\#17391](https://github.com/element-hq/synapse/issues/17391))
+
+### Internal Changes
+
+- Limit size of presence EDUs to 50 entries. ([\#17371](https://github.com/element-hq/synapse/issues/17371))
+- Fix building debian package for debian sid. ([\#17389](https://github.com/element-hq/synapse/issues/17389))
+
+
+
+
 # Synapse 1.110.0rc2 (2024-06-26)
 
 ### Internal Changes
