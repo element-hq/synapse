@@ -53,6 +53,7 @@ class KnockRoomAliasServlet(RestServlet):
         super().__init__()
         self.room_member_handler = hs.get_room_member_handler()
         self.auth = hs.get_auth()
+        self._support_via = hs.config.experimental.msc4156_enabled
 
     async def on_POST(
         self,
@@ -74,6 +75,13 @@ class KnockRoomAliasServlet(RestServlet):
             remote_room_hosts = parse_strings_from_args(
                 args, "server_name", required=False
             )
+            if self._support_via:
+                remote_room_hosts = parse_strings_from_args(
+                    args,
+                    "org.matrix.msc4156.via",
+                    default=remote_room_hosts,
+                    required=False,
+                )
         elif RoomAlias.is_valid(room_identifier):
             handler = self.room_member_handler
             room_alias = RoomAlias.from_string(room_identifier)

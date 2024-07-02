@@ -721,7 +721,6 @@ class Notifier:
                         user.to_string(),
                         new_events,
                         is_peeking=is_peeking,
-                        msc4115_membership_on_events=self.hs.config.experimental.msc4115_membership_on_events,
                     )
                 elif keyname == StreamKeyType.PRESENCE:
                     now = self.clock.time_msec()
@@ -765,6 +764,13 @@ class Notifier:
 
     async def wait_for_stream_token(self, stream_token: StreamToken) -> bool:
         """Wait for this worker to catch up with the given stream token."""
+        current_token = self.event_sources.get_current_token()
+        if stream_token.is_before_or_eq(current_token):
+            return True
+
+        # Work around a bug where older Synapse versions gave out tokens "from
+        # the future", i.e. that are ahead of the tokens persisted in the DB.
+        stream_token = await self.event_sources.bound_future_token(stream_token)
 
         start = self.clock.time_msec()
         while True:

@@ -19,6 +19,8 @@ class EventInternalMetadata:
 
     stream_ordering: Optional[int]
     """the stream ordering of this event. None, until it has been persisted."""
+    instance_name: Optional[str]
+    """the instance name of the server that persisted this event. None, until it has been persisted."""
 
     outlier: bool
     """whether this event is an outlier (ie, whether we have the state at that

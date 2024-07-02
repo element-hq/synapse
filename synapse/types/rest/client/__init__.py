@@ -152,14 +152,7 @@ class SlidingSyncBody(RequestBodyModel):
                 anyway.
             timeline_limit: The maximum number of timeline events to return per response.
                 (Max 1000 messages)
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
         """
-
-        class IncludeOldRooms(RequestBodyModel):
-            timeline_limit: StrictInt
-            required_state: List[Tuple[StrictStr, StrictStr]]
 
         required_state: List[Tuple[StrictStr, StrictStr]]
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
@@ -167,7 +160,6 @@ class SlidingSyncBody(RequestBodyModel):
             timeline_limit: int
         else:
             timeline_limit: conint(le=1000, strict=True)  # type: ignore[valid-type]
-        include_old_rooms: Optional[IncludeOldRooms] = None
 
     class SlidingSyncList(CommonRoomParameters):
         """
@@ -175,22 +167,8 @@ class SlidingSyncBody(RequestBodyModel):
             ranges: Sliding window ranges. If this field is missing, no sliding window
                 is used and all rooms are returned in this list. Integers are
                 *inclusive*.
-            sort: How the list should be sorted on the server. The first value is
-                applied first, then tiebreaks are performed with each subsequent sort
-                listed.
-
-                    FIXME: Furthermore, it's not currently defined how servers should behave
-                    if they encounter a filter or sort operation they do not recognise. If
-                    the server rejects the request with an HTTP 400 then that will break
-                    backwards compatibility with new clients vs old servers. However, the
-                    client would be otherwise unaware that only some of the sort/filter
-                    operations have taken effect. We may need to include a "warnings"
-                    section to indicate which sort/filter operations are unrecognised,
-                    allowing for some form of graceful degradation of service.
-                    -- https://github.com/matrix-org/matrix-spec-proposals/blob/kegan/sync-v3/proposals/3575-sync.md#filter-and-sort-extensions
-
             slow_get_all_rooms: Just get all rooms (for clients that don't want to deal with
-                sliding windows). When true, the `ranges` and `sort` fields are ignored.
+                sliding windows). When true, the `ranges` field is ignored.
             required_state: Required state for each room returned. An array of event
                 type and state key tuples. Elements in this array are ORd together to
                 produce the final set of state events to return.
@@ -222,28 +200,66 @@ class SlidingSyncBody(RequestBodyModel):
                     }
 
             timeline_limit: The maximum number of timeline events to return per response.
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
             include_heroes: Return a stripped variant of membership events (containing
                 `user_id` and optionally `avatar_url` and `displayname`) for the users used
                 to calculate the room name.
             filters: Filters to apply to the list before sorting.
-            bump_event_types: Allowlist of event types which should be considered recent activity
-                when sorting `by_recency`. By omitting event types from this field,
-                clients can ensure that uninteresting events (e.g. a profile rename) do
-                not cause a room to jump to the top of its list(s). Empty or omitted
-                `bump_event_types` have no effect—all events in a room will be
-                considered recent activity.
         """
 
         class Filters(RequestBodyModel):
+            """
+            All fields are applied with AND operators, hence if `is_dm: True` and
+            `is_encrypted: True` then only Encrypted DM rooms will be returned. The
+            absence of fields implies no filter on that criteria: it does NOT imply
+            `False`. These fields may be expanded through use of extensions.
+
+            Attributes:
+                is_dm: Flag which only returns rooms present (or not) in the DM section
+                    of account data. If unset, both DM rooms and non-DM rooms are returned.
+                    If False, only non-DM rooms are returned. If True, only DM rooms are
+                    returned.
+                spaces: Filter the room based on the space they belong to according to
+                    `m.space.child` state events. If multiple spaces are present, a room can
+                    be part of any one of the listed spaces (OR'd). The server will inspect
+                    the `m.space.child` state events for the JOINED space room IDs given.
+                    Servers MUST NOT navigate subspaces. It is up to the client to give a
+                    complete list of spaces to navigate. Only rooms directly mentioned as
+                    `m.space.child` events in these spaces will be returned. Unknown spaces
+                    or spaces the user is not joined to will be ignored.
+                is_encrypted: Flag which only returns rooms which have an
+                    `m.room.encryption` state event. If unset, both encrypted and
+                    unencrypted rooms are returned. If `False`, only unencrypted rooms are
+                    returned. If `True`, only encrypted rooms are returned.
+                is_invite: Flag which only returns rooms the user is currently invited
+                    to. If unset, both invited and joined rooms are returned. If `False`, no
+                    invited rooms are returned. If `True`, only invited rooms are returned.
+                room_types: If specified, only rooms where the `m.room.create` event has
+                    a `type` matching one of the strings in this array will be returned. If
+                    this field is unset, all rooms are returned regardless of type. This can
+                    be used to get the initial set of spaces for an account. For rooms which
+                    do not have a room type, use `null`/`None` to include them.
+                not_room_types: Same as `room_types` but inverted. This can be used to
+                    filter out spaces from the room list. If a type is in both `room_types`
+                    and `not_room_types`, then `not_room_types` wins and they are not included
+                    in the result.
+                room_name_like: Filter the room name. Case-insensitive partial matching
+                    e.g 'foo' matches 'abFooab'. The term 'like' is inspired by SQL 'LIKE',
+                    and the text here is similar to '%foo%'.
+                tags: Filter the room based on its room tags. If multiple tags are
+                    present, a room can have any one of the listed tags (OR'd).
+                not_tags: Filter the room based on its room tags. Takes priority over
+                    `tags`. For example, a room with tags A and B with filters `tags: [A]`
+                    `not_tags: [B]` would NOT be included because `not_tags` takes priority over
+                    `tags`. This filter is useful if your rooms list does NOT include the
+                    list of favourite rooms again.
+            """
+
             is_dm: Optional[StrictBool] = None
             spaces: Optional[List[StrictStr]] = None
             is_encrypted: Optional[StrictBool] = None
             is_invite: Optional[StrictBool] = None
             room_types: Optional[List[Union[StrictStr, None]]] = None
-            not_room_types: Optional[List[StrictStr]] = None
+            not_room_types: Optional[List[Union[StrictStr, None]]] = None
             room_name_like: Optional[StrictStr] = None
             tags: Optional[List[StrictStr]] = None
             not_tags: Optional[List[StrictStr]] = None
@@ -253,11 +269,9 @@ class SlidingSyncBody(RequestBodyModel):
             ranges: Optional[List[Tuple[int, int]]] = None
         else:
             ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
-        sort: Optional[List[StrictStr]] = None
         slow_get_all_rooms: Optional[StrictBool] = False
         include_heroes: Optional[StrictBool] = False
         filters: Optional[Filters] = None
-        bump_event_types: Optional[List[StrictStr]] = None
 
     class RoomSubscription(CommonRoomParameters):
         pass

@@ -431,6 +431,7 @@ class EventChainStoreTestCase(HomeserverTestCase):
 
         for e in events:
             e.internal_metadata.stream_ordering = self._next_stream_ordering
+            e.internal_metadata.instance_name = self.hs.get_instance_name()
             self._next_stream_ordering += 1
 
         def _persist(txn: LoggingTransaction) -> None:
@@ -446,7 +447,14 @@ class EventChainStoreTestCase(HomeserverTestCase):
             )
 
             # Actually call the function that calculates the auth chain stuff.
-            persist_events_store._persist_event_auth_chain_txn(txn, events)
+            new_event_links = (
+                persist_events_store.calculate_chain_cover_index_for_events_txn(
+                    txn, events[0].room_id, [e for e in events if e.is_state()]
+                )
+            )
+            persist_events_store._persist_event_auth_chain_txn(
+                txn, events, new_event_links
+            )
 
         self.get_success(
             persist_events_store.db_pool.runInteraction(

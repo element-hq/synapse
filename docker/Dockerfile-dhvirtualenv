@@ -73,6 +73,8 @@ RUN apt-get update -qq -o Acquire::Languages=none \
     curl \
     debhelper \
     devscripts \
+    # Required for building cffi from source.
+    libffi-dev \
     libsystemd-dev \
     lsb-release \
     pkg-config \

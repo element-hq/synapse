@@ -55,7 +55,7 @@ from synapse.api.room_versions import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.events.utils import prune_event
+from synapse.events.utils import prune_event, strip_event
 from synapse.logging.context import (
     PreserveLoggingContext,
     current_context,
@@ -156,6 +156,7 @@ class _EventRow:
 
     event_id: str
     stream_ordering: int
+    instance_name: str
     json: str
     internal_metadata: str
     format_version: Optional[int]
@@ -191,8 +192,8 @@ class EventsWorkerStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self._stream_id_gen: AbstractStreamIdGenerator
-        self._backfill_id_gen: AbstractStreamIdGenerator
+        self._stream_id_gen: MultiWriterIdGenerator
+        self._backfill_id_gen: MultiWriterIdGenerator
 
         self._stream_id_gen = MultiWriterIdGenerator(
             db_conn=db_conn,
@@ -1024,15 +1025,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         state_to_include = await self.get_events(selected_state_ids.values())
 
-        return [
-            {
-                "type": e.type,
-                "state_key": e.state_key,
-                "content": e.content,
-                "sender": e.sender,
-            }
-            for e in state_to_include.values()
-        ]
+        return [strip_event(e) for e in state_to_include.values()]
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""
@@ -1354,6 +1347,7 @@ class EventsWorkerStore(SQLBaseStore):
                 rejected_reason=rejected_reason,
             )
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
+            original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
 
             # Consistency check: if the content of the event has been modified in the
@@ -1439,6 +1433,7 @@ class EventsWorkerStore(SQLBaseStore):
                 SELECT
                   e.event_id,
                   e.stream_ordering,
+                  e.instance_name,
                   ej.internal_metadata,
                   ej.json,
                   ej.format_version,
@@ -1462,13 +1457,14 @@ class EventsWorkerStore(SQLBaseStore):
                 event_dict[event_id] = _EventRow(
                     event_id=event_id,
                     stream_ordering=row[1],
-                    internal_metadata=row[2],
-                    json=row[3],
-                    format_version=row[4],
-                    room_version_id=row[5],
-                    rejected_reason=row[6],
+                    instance_name=row[2],
+                    internal_metadata=row[3],
+                    json=row[4],
+                    format_version=row[5],
+                    room_version_id=row[6],
+                    rejected_reason=row[7],
                     redactions=[],
-                    outlier=bool(row[7]),  # This is an int in SQLite3
+                    outlier=bool(row[8]),  # This is an int in SQLite3
                 )
 
             # check for redactions

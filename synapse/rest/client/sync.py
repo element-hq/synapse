@@ -761,7 +761,6 @@ class SlidingSyncRestServlet(RestServlet):
             "lists": {
                 "foo-list": {
                     "ranges": [ [0, 99] ],
-                    "sort": [ "by_notification_level", "by_recency", "by_name" ],
                     "required_state": [
                         ["m.room.join_rules", ""],
                         ["m.room.history_visibility", ""],
@@ -771,7 +770,6 @@ class SlidingSyncRestServlet(RestServlet):
                     "filters": {
                         "is_dm": true
                     },
-                    "bump_event_types": [ "m.room.message", "m.room.encrypted" ],
                 }
             },
             // Room Subscriptions API
@@ -779,10 +777,6 @@ class SlidingSyncRestServlet(RestServlet):
                 "!sub1:bar": {
                     "required_state": [ ["*","*"] ],
                     "timeline_limit": 10,
-                    "include_old_rooms": {
-                        "timeline_limit": 1,
-                        "required_state": [ ["m.room.tombstone", ""], ["m.room.create", ""] ],
-                    }
                 }
             },
             // Extensions API
@@ -791,7 +785,7 @@ class SlidingSyncRestServlet(RestServlet):
 
     Response JSON::
         {
-            "next_pos": "s58_224_0_13_10_1_1_16_0_1",
+            "pos": "s58_224_0_13_10_1_1_16_0_1",
             "lists": {
                 "foo-list": {
                     "count": 1337,
@@ -830,7 +824,8 @@ class SlidingSyncRestServlet(RestServlet):
                     "joined_count": 41,
                     "invited_count": 1,
                     "notification_count": 1,
-                    "highlight_count": 0
+                    "highlight_count": 0,
+                    "num_live": 2"
                 },
                 // rooms from list
                 "!foo:bar": {
@@ -855,7 +850,8 @@ class SlidingSyncRestServlet(RestServlet):
                     "joined_count": 4,
                     "invited_count": 0,
                     "notification_count": 54,
-                    "highlight_count": 3
+                    "highlight_count": 3,
+                    "num_live": 1,
                 },
                  // ... 99 more items
             },
@@ -864,17 +860,18 @@ class SlidingSyncRestServlet(RestServlet):
     """
 
     PATTERNS = client_patterns(
-        "/org.matrix.msc3575/sync$", releases=[], v1=False, unstable=True
+        "/org.matrix.simplified_msc3575/sync$", releases=[], v1=False, unstable=True
     )
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        self.clock = hs.get_clock()
         self.filtering = hs.get_filtering()
         self.sliding_sync_handler = hs.get_sliding_sync_handler()
+        self.event_serializer = hs.get_event_client_serializer()
 
-    # TODO: Update this to `on_GET` once we figure out how we want to handle params
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user = requester.user
@@ -920,22 +917,25 @@ class SlidingSyncRestServlet(RestServlet):
             logger.info("Client has disconnected; not serializing response.")
             return 200, {}
 
-        response_content = await self.encode_response(sliding_sync_results)
+        response_content = await self.encode_response(requester, sliding_sync_results)
 
         return 200, response_content
 
     # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
+        requester: Requester,
         sliding_sync_result: SlidingSyncResult,
     ) -> JsonDict:
         response: JsonDict = defaultdict(dict)
 
-        response["next_pos"] = await sliding_sync_result.next_pos.to_string(self.store)
+        response["pos"] = await sliding_sync_result.next_pos.to_string(self.store)
         serialized_lists = self.encode_lists(sliding_sync_result.lists)
         if serialized_lists:
             response["lists"] = serialized_lists
-        response["rooms"] = {}  # TODO: sliding_sync_result.rooms
+        response["rooms"] = await self.encode_rooms(
+            requester, sliding_sync_result.rooms
+        )
         response["extensions"] = {}  # TODO: sliding_sync_result.extensions
 
         return response
@@ -960,6 +960,92 @@ class SlidingSyncRestServlet(RestServlet):
             }
 
         return serialized_lists
+
+    async def encode_rooms(
+        self,
+        requester: Requester,
+        rooms: Dict[str, SlidingSyncResult.RoomResult],
+    ) -> JsonDict:
+        time_now = self.clock.time_msec()
+
+        serialize_options = SerializeEventConfig(
+            event_format=format_event_for_client_v2_without_room_id,
+            requester=requester,
+        )
+
+        serialized_rooms: Dict[str, JsonDict] = {}
+        for room_id, room_result in rooms.items():
+            serialized_rooms[room_id] = {
+                "joined_count": room_result.joined_count,
+                "invited_count": room_result.invited_count,
+                "notification_count": room_result.notification_count,
+                "highlight_count": room_result.highlight_count,
+            }
+
+            if room_result.name:
+                serialized_rooms[room_id]["name"] = room_result.name
+
+            if room_result.avatar:
+                serialized_rooms[room_id]["avatar"] = room_result.avatar
+
+            if room_result.heroes:
+                serialized_rooms[room_id]["heroes"] = room_result.heroes
+
+            # We should only include the `initial` key if it's `True` to save bandwidth.
+            # The absense of this flag means `False`.
+            if room_result.initial:
+                serialized_rooms[room_id]["initial"] = room_result.initial
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.required_state is not None:
+                serialized_required_state = (
+                    await self.event_serializer.serialize_events(
+                        room_result.required_state,
+                        time_now,
+                        config=serialize_options,
+                    )
+                )
+                serialized_rooms[room_id]["required_state"] = serialized_required_state
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.timeline_events is not None:
+                serialized_timeline = await self.event_serializer.serialize_events(
+                    room_result.timeline_events,
+                    time_now,
+                    config=serialize_options,
+                    bundle_aggregations=room_result.bundled_aggregations,
+                )
+                serialized_rooms[room_id]["timeline"] = serialized_timeline
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.limited is not None:
+                serialized_rooms[room_id]["limited"] = room_result.limited
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.prev_batch is not None:
+                serialized_rooms[room_id]["prev_batch"] = (
+                    await room_result.prev_batch.to_string(self.store)
+                )
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.num_live is not None:
+                serialized_rooms[room_id]["num_live"] = room_result.num_live
+
+            # Field should be absent on non-DM rooms
+            if room_result.is_dm:
+                serialized_rooms[room_id]["is_dm"] = room_result.is_dm
+
+            # Stripped state only applies to invite/knock rooms
+            if room_result.stripped_state is not None:
+                # TODO: `knocked_state` but that isn't specced yet.
+                #
+                # TODO: Instead of adding `knocked_state`, it would be good to rename
+                # this to `stripped_state` so it can be shared between invite and knock
+                # rooms, see
+                # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1117629919
+                serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
+
+        return serialized_rooms
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

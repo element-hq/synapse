@@ -35,6 +35,7 @@ from synapse.http.servlet import (
     ResolveRoomIdMixin,
     RestServlet,
     assert_params_in_dict,
+    parse_boolean,
     parse_enum,
     parse_integer,
     parse_json,
@@ -242,13 +243,23 @@ class ListRoomRestServlet(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
+        public_rooms = parse_boolean(request, "public_rooms")
+        empty_rooms = parse_boolean(request, "empty_rooms")
+
         direction = parse_enum(request, "dir", Direction, default=Direction.FORWARDS)
         reverse_order = True if direction == Direction.BACKWARDS else False
 
         # Return list of rooms according to parameters
         rooms, total_rooms = await self.store.get_rooms_paginate(
-            start, limit, order_by, reverse_order, search_term
+            start,
+            limit,
+            order_by,
+            reverse_order,
+            search_term,
+            public_rooms,
+            empty_rooms,
         )
+
         response = {
             # next_token should be opaque, so return a value the client can parse
             "offset": start,

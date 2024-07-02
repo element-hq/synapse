@@ -1,21 +1,34 @@
-=========================================================================
-Synapse |support| |development| |documentation| |license| |pypi| |python|
-=========================================================================
+.. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
+   :height: 60px
 
-Synapse is an open-source `Matrix <https://matrix.org/>`_ homeserver written and
-maintained by the Matrix.org Foundation. We began rapid development in 2014,
-reaching v1.0.0 in 2019. Development on Synapse and the Matrix protocol itself continues
-in earnest today.
+**Element Synapse - Matrix homeserver implementation**
 
-Briefly, Matrix is an open standard for communications on the internet, supporting
-federation, encryption and VoIP. Matrix.org has more to say about the `goals of the
-Matrix project <https://matrix.org/docs/guides/introduction>`_, and the `formal specification
-<https://spec.matrix.org/>`_ describes the technical details.
+|support| |development| |documentation| |license| |pypi| |python|
+
+Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
+implementation, written and maintained by `Element <https://element.io>`_.
+`Matrix <https://github.com/matrix-org>`__ is the open standard for
+secure and interoperable real time communications. You can directly run
+and manage the source code in this repository, available under an AGPL
+license. There is no support provided from Element unless you have a
+subscription.
+
+Subscription alternative
+========================
+
+Alternatively, for those that need an enterprise-ready solution, Element
+Server Suite (ESS) is `available as a subscription <https://element.io/pricing>`_.
+ESS builds on Synapse to offer a complete Matrix-based backend including the full
+`Admin Console product <https://element.io/enterprise-functionality/admin-console>`_,
+giving admins the power to easily manage an organization-wide
+deployment. It includes advanced identity management, auditing,
+moderation and data retention options as well as Long Term Support and
+SLAs. ESS can be used to support any Matrix-based frontend client.
 
 .. contents::
 
-Installing and configuration
-============================
+🛠️ Installing and configuration
+===============================
 
 The Synapse documentation describes `how to install Synapse <https://element-hq.github.io/synapse/latest/setup/installation.html>`_. We recommend using
 `Docker images <https://element-hq.github.io/synapse/latest/setup/installation.html#docker-images-and-ansible-playbooks>`_ or `Debian packages from Matrix.org
@@ -105,8 +118,8 @@ Following this advice ensures that even if an XSS is found in Synapse, the
 impact to other applications will be minimal.
 
 
-Testing a new installation
-==========================
+🧪 Testing a new installation
+=============================
 
 The easiest way to try out your new Synapse installation is by connecting to it
 from a web client.
@@ -159,8 +172,20 @@ the form of::
 As when logging in, you will need to specify a "Custom server".  Specify your
 desired ``localpart`` in the 'User name' box.
 
-Troubleshooting and support
-===========================
+🎯 Troubleshooting and support
+==============================
+
+🚀 Professional support
+-----------------------
+
+Enterprise quality support for Synapse including SLAs is available as part of an
+`Element Server Suite (ESS) <https://element.io/pricing>` subscription.
+
+If you are an existing ESS subscriber then you can raise a `support request <https://ems.element.io/support>`
+and access the `knowledge base <https://ems-docs.element.io>`.
+
+🤝 Community support
+--------------------
 
 The `Admin FAQ <https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html>`_
 includes tips on dealing with some common problems. For more details, see
@@ -176,8 +201,8 @@ issues for support requests, only for bug reports and feature requests.
 .. |docs| replace:: ``docs``
 .. _docs: docs
 
-Identity Servers
-================
+🪪 Identity Servers
+===================
 
 Identity servers have the job of mapping email addresses and other 3rd Party
 IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
@@ -206,8 +231,8 @@ an email address with your account, or send an invite to another user via their
 email address.
 
 
-Development
-===========
+🛠️ Development
+==============
 
 We welcome contributions to Synapse from the community!
 The best place to get started is our
@@ -225,8 +250,8 @@ Alongside all that, join our developer community on Matrix:
 `#synapse-dev:matrix.org <https://matrix.to/#/#synapse-dev:matrix.org>`_, featuring real humans!
 
 
-.. |support| image:: https://img.shields.io/matrix/synapse:matrix.org?label=support&logo=matrix
-  :alt: (get support on #synapse:matrix.org)
+.. |support| image:: https://img.shields.io/badge/matrix-community%20support-success
+  :alt: (get community support in #synapse:matrix.org)
   :target: https://matrix.to/#/#synapse:matrix.org
 
 .. |development| image:: https://img.shields.io/matrix/synapse-dev:matrix.org?label=development&logo=matrix
