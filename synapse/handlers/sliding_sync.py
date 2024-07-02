@@ -119,34 +119,34 @@ class RoomSyncConfig:
             # If we already have a wildcard for everything, we don't need to add
             # anything else
             wildcard_set: Set[Tuple[str, str]] = required_state_map.get(
-                StateKeys.WILDCARD, set()
+                StateValues.WILDCARD, set()
             )
-            if (StateKeys.WILDCARD, StateKeys.WILDCARD) in wildcard_set:
+            if (StateValues.WILDCARD, StateValues.WILDCARD) in wildcard_set:
                 break
 
             # If we already have a wildcard for this specific `state_key`, we don't need
             # to add it since the wildcard already covers it.
-            if (StateKeys.WILDCARD, state_key) in wildcard_set:
+            if (StateValues.WILDCARD, state_key) in wildcard_set:
                 continue
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
             # to add anything else
-            if (state_type, StateKeys.WILDCARD) in required_state_map.get(
+            if (state_type, StateValues.WILDCARD) in required_state_map.get(
                 state_type, set()
             ):
                 continue
 
             # If we're getting wildcards for the `state_type` and `state_key`, that's
             # all that matters so get rid of any other entries
-            if state_type == StateKeys.WILDCARD and state_key == StateKeys.WILDCARD:
+            if state_type == StateValues.WILDCARD and state_key == StateValues.WILDCARD:
                 required_state_map = {
-                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)}
+                    StateValues.WILDCARD: {(StateValues.WILDCARD, StateValues.WILDCARD)}
                 }
                 # We can break, since we don't need to add anything else
                 break
             # If we're getting a wildcard for the `state_type`, get rid of any other
             # entries with the same `state_key`, since the wildcard will cover it already.
-            elif state_type == StateKeys.WILDCARD:
+            elif state_type == StateValues.WILDCARD:
                 # Get rid of any entries that match the `state_key`
                 #
                 # Make a copy so we don't run into an error: `dictionary changed size
@@ -172,7 +172,7 @@ class RoomSyncConfig:
 
             # If we're getting a wildcard `state_key`, get rid of any other state_keys
             # for this `state_type` since the wildcard will cover it already.
-            if state_key == StateKeys.WILDCARD:
+            if state_key == StateValues.WILDCARD:
                 required_state_map[state_type] = {(state_type, state_key)}
             # Otherwise, just add it to the set
             else:
@@ -215,14 +215,15 @@ class RoomSyncConfig:
         ) in other_room_sync_config.required_state_map.items():
             # If we already have a wildcard for everything, we don't need to add
             # anything else
-            if (StateKeys.WILDCARD, StateKeys.WILDCARD) in self.required_state_map.get(
-                StateKeys.WILDCARD, set()
-            ):
+            if (
+                StateValues.WILDCARD,
+                StateValues.WILDCARD,
+            ) in self.required_state_map.get(StateValues.WILDCARD, set()):
                 break
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
             # to add anything else
-            if (state_type, StateKeys.WILDCARD) in self.required_state_map.get(
+            if (state_type, StateValues.WILDCARD) in self.required_state_map.get(
                 state_type, set()
             ):
                 continue
@@ -230,11 +231,11 @@ class RoomSyncConfig:
             # If we're getting wildcards for the `state_type` and `state_key`, that's
             # all that matters so get rid of any other entries
             if (
-                state_type == StateKeys.WILDCARD
-                and (StateKeys.WILDCARD, StateKeys.WILDCARD) in state_key_set
+                state_type == StateValues.WILDCARD
+                and (StateValues.WILDCARD, StateValues.WILDCARD) in state_key_set
             ):
                 self.required_state_map = {
-                    state_type: {(StateKeys.WILDCARD, StateKeys.WILDCARD)}
+                    state_type: {(StateValues.WILDCARD, StateValues.WILDCARD)}
                 }
                 # We can break, since we don't need to add anything else
                 break
@@ -242,14 +243,14 @@ class RoomSyncConfig:
             for _state_type, state_key in state_key_set:
                 # If we already have a wildcard for this specific `state_key`, we don't need
                 # to add it since the wildcard already covers it.
-                if (StateKeys.WILDCARD, state_key) in self.required_state_map.get(
-                    StateKeys.WILDCARD, set()
+                if (StateValues.WILDCARD, state_key) in self.required_state_map.get(
+                    StateValues.WILDCARD, set()
                 ):
                     continue
 
                 # If we're getting a wildcard for the `state_type`, get rid of any other
                 # entries with the same `state_key`, since the wildcard will cover it already.
-                if state_type == StateKeys.WILDCARD:
+                if state_type == StateValues.WILDCARD:
                     # Get rid of any entries that match the `state_key`
                     #
                     # Make a copy so we don't run into an error: `dictionary changed size
@@ -275,7 +276,7 @@ class RoomSyncConfig:
 
                 # If we're getting a wildcard `state_key`, get rid of any other state_keys
                 # for this `state_type` since the wildcard will cover it already.
-                if state_key == StateKeys.WILDCARD:
+                if state_key == StateValues.WILDCARD:
                     self.required_state_map[state_type] = {(state_type, state_key)}
                     break
                 # Otherwise, just add it to the set
@@ -286,16 +287,16 @@ class RoomSyncConfig:
                         self.required_state_map[state_type].add((state_type, state_key))
 
 
-class StateKeys:
+class StateValues:
     """
-    Understood values of the `state_key` part of the tuple (type, state_key) in
-    `required_state`.
+    Understood values of the (type, state_key) tuple in `required_state`.
     """
 
     # Include all state events of the given type
     WILDCARD: Final = "*"
     # Lazy-load room membership events (include room membership events for any event
-    # `sender` in the timeline)
+    # `sender` in the timeline). We only give special meaning to this value when it's a
+    # `state_key`.
     LAZY: Final = "$LAZY"
 
 
@@ -505,7 +506,7 @@ class SlidingSyncHandler:
                                 partial_state_room_map.get(room_id)
                                 and membership_state_keys is not None
                                 and len(membership_state_keys) == 1
-                                and (EventTypes.Member, StateKeys.LAZY)
+                                and (EventTypes.Member, StateValues.LAZY)
                                 in membership_state_keys
                             ):
                                 # Since we're skipping this room, we need to allow
@@ -1270,16 +1271,17 @@ class SlidingSyncHandler:
             # If we have a double wildcard ("*", "*") in the `required_state`, we need
             # to fetch all state for the room
             if (
-                StateKeys.WILDCARD,
-                StateKeys.WILDCARD,
-            ) in room_sync_config.required_state_map.get(StateKeys.WILDCARD, set()):
+                StateValues.WILDCARD,
+                StateValues.WILDCARD,
+            ) in room_sync_config.required_state_map.get(StateValues.WILDCARD, set()):
                 state_filter = StateFilter.all()
             # TODO: `StateFilter` currently doesn't support wildcard event types. We're
             # currently working around this by returning all state to the client but it
             # would be nice to fetch less from the database and return just what the
             # client wanted.
             elif (
-                room_sync_config.required_state_map.get(StateKeys.WILDCARD) is not None
+                room_sync_config.required_state_map.get(StateValues.WILDCARD)
+                is not None
             ):
                 state_filter = StateFilter.all()
             else:
@@ -1289,13 +1291,13 @@ class SlidingSyncHandler:
                     state_key_set,
                 ) in room_sync_config.required_state_map.items():
                     for _state_type, state_key in state_key_set:
-                        if state_key == StateKeys.WILDCARD:
+                        if state_key == StateValues.WILDCARD:
                             # `None` is a wildcard in the `StateFilter`
                             required_state_types.append((state_type, None))
                         # We need to fetch all relevant people when we're lazy-loading membership
                         if (
                             state_type == EventTypes.Member
-                            and state_key == StateKeys.LAZY
+                            and state_key == StateValues.LAZY
                         ):
                             # Everyone in the timeline is relevant
                             timeline_membership: Set[str] = set()

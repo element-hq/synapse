@@ -35,7 +35,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.handlers.sliding_sync import RoomSyncConfig, StateKeys
+from synapse.handlers.sliding_sync import RoomSyncConfig, StateValues
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -163,7 +163,7 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state=[
                         (EventTypes.Name, ""),
-                        (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
                         (EventTypes.Member, "@foo"),
                         (EventTypes.CanonicalAlias, ""),
                     ],
@@ -172,7 +172,9 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)},
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, StateValues.WILDCARD)
+                        },
                     },
                 ),
             ),
@@ -187,7 +189,7 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state=[
                         (EventTypes.Name, ""),
-                        (StateKeys.WILDCARD, ""),
+                        (StateValues.WILDCARD, ""),
                         (EventTypes.Member, "@foo"),
                         (EventTypes.CanonicalAlias, ""),
                     ],
@@ -196,7 +198,7 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, "")},
+                        StateValues.WILDCARD: {(StateValues.WILDCARD, "")},
                         EventTypes.Member: {
                             (EventTypes.Member, "@foo"),
                         },
@@ -214,9 +216,9 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state=[
                         (EventTypes.Name, ""),
-                        (StateKeys.WILDCARD, ""),
+                        (StateValues.WILDCARD, ""),
                         (EventTypes.Member, "@foo"),
-                        (StateKeys.WILDCARD, "@foo"),
+                        (StateValues.WILDCARD, "@foo"),
                         ("org.matrix.personal_count", "@foo"),
                         (EventTypes.Member, "@bar"),
                         (EventTypes.CanonicalAlias, ""),
@@ -226,9 +228,9 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@foo"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@foo"),
                         },
                         EventTypes.Member: {
                             (EventTypes.Member, "@bar"),
@@ -248,9 +250,9 @@ class RoomSyncConfigTestCase(TestCase):
                     required_state=[
                         (EventTypes.Name, ""),
                         (EventTypes.Member, "@foo"),
-                        (EventTypes.Member, StateKeys.WILDCARD),
+                        (EventTypes.Member, StateValues.WILDCARD),
                         (EventTypes.Member, "@bar"),
-                        (EventTypes.Member, StateKeys.LAZY),
+                        (EventTypes.Member, StateValues.LAZY),
                         (EventTypes.Member, "@baz"),
                         (EventTypes.CanonicalAlias, ""),
                     ],
@@ -261,7 +263,7 @@ class RoomSyncConfigTestCase(TestCase):
                     required_state_map={
                         EventTypes.Name: {(EventTypes.Name, "")},
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                         EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                     },
@@ -278,9 +280,9 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state=[
                         (EventTypes.Name, ""),
-                        (StateKeys.WILDCARD, ""),
+                        (StateValues.WILDCARD, ""),
                         (EventTypes.Member, "@foo"),
-                        (EventTypes.Member, StateKeys.WILDCARD),
+                        (EventTypes.Member, StateValues.WILDCARD),
                         (EventTypes.Member, "@bar"),
                         (EventTypes.CanonicalAlias, ""),
                     ],
@@ -289,9 +291,9 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, "")},
+                        StateValues.WILDCARD: {(StateValues.WILDCARD, "")},
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                     },
                 ),
@@ -307,12 +309,12 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state=[
                         (EventTypes.Name, ""),
-                        (StateKeys.WILDCARD, ""),
-                        (EventTypes.Member, StateKeys.WILDCARD),
+                        (StateValues.WILDCARD, ""),
+                        (EventTypes.Member, StateValues.WILDCARD),
                         (EventTypes.Member, "@foo"),
                         # One of these should take precedence over everything else
-                        (StateKeys.WILDCARD, StateKeys.WILDCARD),
-                        (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
                         (EventTypes.CanonicalAlias, ""),
                     ],
                 ),
@@ -320,7 +322,9 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)},
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, StateValues.WILDCARD)
+                        },
                     },
                 ),
             ),
@@ -337,7 +341,7 @@ class RoomSyncConfigTestCase(TestCase):
                         (EventTypes.Name, ""),
                         (EventTypes.Member, "@foo"),
                         (EventTypes.Member, "@bar"),
-                        (EventTypes.Member, StateKeys.LAZY),
+                        (EventTypes.Member, StateValues.LAZY),
                         (EventTypes.Member, "@baz"),
                         (EventTypes.CanonicalAlias, ""),
                     ],
@@ -350,7 +354,7 @@ class RoomSyncConfigTestCase(TestCase):
                         EventTypes.Member: {
                             (EventTypes.Member, "@foo"),
                             (EventTypes.Member, "@bar"),
-                            (EventTypes.Member, StateKeys.LAZY),
+                            (EventTypes.Member, StateValues.LAZY),
                             (EventTypes.Member, "@baz"),
                         },
                         EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
@@ -396,7 +400,7 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state_map={
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.LAZY),
+                            (EventTypes.Member, StateValues.LAZY),
                             (EventTypes.Member, "@baz"),
                         },
                         EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
@@ -410,7 +414,7 @@ class RoomSyncConfigTestCase(TestCase):
                         EventTypes.Member: {
                             (EventTypes.Member, "@foo"),
                             (EventTypes.Member, "@bar"),
-                            (EventTypes.Member, StateKeys.LAZY),
+                            (EventTypes.Member, StateValues.LAZY),
                             (EventTypes.Member, "@baz"),
                         },
                         EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
@@ -423,8 +427,8 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, StateValues.WILDCARD),
                         },
                     },
                 ),
@@ -432,8 +436,8 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=9,
                     required_state_map={
-                        EventTypes.Dummy: {(EventTypes.Dummy, StateKeys.WILDCARD)},
-                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, "@bar")},
+                        EventTypes.Dummy: {(EventTypes.Dummy, StateValues.WILDCARD)},
+                        StateValues.WILDCARD: {(StateValues.WILDCARD, "@bar")},
                         EventTypes.Member: {
                             (EventTypes.Member, "@foo"),
                         },
@@ -443,8 +447,8 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, StateValues.WILDCARD),
                         },
                     },
                 ),
@@ -456,9 +460,9 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@foo"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@foo"),
                         },
                         EventTypes.Member: {
                             (EventTypes.Member, "@bar"),
@@ -470,9 +474,9 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=9,
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "dummy2")},
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@bar"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@bar"),
                         },
                         EventTypes.Member: {
                             (EventTypes.Member, "@foo"),
@@ -487,10 +491,10 @@ class RoomSyncConfigTestCase(TestCase):
                             (EventTypes.Dummy, "dummy"),
                             (EventTypes.Dummy, "dummy2"),
                         },
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@foo"),
-                            (StateKeys.WILDCARD, "@bar"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@foo"),
+                            (StateValues.WILDCARD, "@bar"),
                         },
                     },
                 ),
@@ -503,10 +507,10 @@ class RoomSyncConfigTestCase(TestCase):
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                         "org.matrix.flowers": {
-                            ("org.matrix.flowers", StateKeys.WILDCARD)
+                            ("org.matrix.flowers", StateValues.WILDCARD)
                         },
                     },
                 ),
@@ -514,9 +518,9 @@ class RoomSyncConfigTestCase(TestCase):
                 RoomSyncConfig(
                     timeline_limit=9,
                     required_state_map={
-                        EventTypes.Dummy: {(EventTypes.Dummy, StateKeys.WILDCARD)},
+                        EventTypes.Dummy: {(EventTypes.Dummy, StateValues.WILDCARD)},
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                         "org.matrix.flowers": {("org.matrix.flowers", "tulips")},
                     },
@@ -526,13 +530,13 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state_map={
                         EventTypes.Dummy: {
-                            (EventTypes.Dummy, StateKeys.WILDCARD),
+                            (EventTypes.Dummy, StateValues.WILDCARD),
                         },
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                         "org.matrix.flowers": {
-                            ("org.matrix.flowers", StateKeys.WILDCARD)
+                            ("org.matrix.flowers", StateValues.WILDCARD)
                         },
                     },
                 ),
@@ -544,9 +548,9 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@foo"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@foo"),
                         },
                         EventTypes.Member: {
                             (EventTypes.Member, "@bar"),
@@ -558,11 +562,11 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=9,
                     required_state_map={
                         EventTypes.Dummy: {(EventTypes.Dummy, "dummy2")},
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
                         },
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                     },
                 ),
@@ -574,12 +578,12 @@ class RoomSyncConfigTestCase(TestCase):
                             (EventTypes.Dummy, "dummy"),
                             (EventTypes.Dummy, "dummy2"),
                         },
-                        StateKeys.WILDCARD: {
-                            (StateKeys.WILDCARD, ""),
-                            (StateKeys.WILDCARD, "@foo"),
+                        StateValues.WILDCARD: {
+                            (StateValues.WILDCARD, ""),
+                            (StateValues.WILDCARD, "@foo"),
                         },
                         EventTypes.Member: {
-                            (EventTypes.Member, StateKeys.WILDCARD),
+                            (EventTypes.Member, StateValues.WILDCARD),
                         },
                     },
                 ),
