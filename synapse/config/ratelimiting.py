@@ -124,6 +124,13 @@ class RatelimitConfig(Config):
             defaults={"per_second": 0.1, "burst_count": 5},
         )
 
+        # Ratelimit requests to send/cancel/refresh futures (MSC4140):
+        self.rc_future_token_validity = RatelimitSettings.parse(
+            config,
+            "rc_future_token_validity",
+            defaults={"per_second": 0.1, "burst_count": 5},
+        )
+
         # It is reasonable to login with a bunch of devices at once (i.e. when
         # setting up an account), but it is *not* valid to continually be
         # logging into new devices.

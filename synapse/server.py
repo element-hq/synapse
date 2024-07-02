@@ -76,6 +76,7 @@ from synapse.handlers.event_auth import EventAuthHandler
 from synapse.handlers.events import EventHandler, EventStreamHandler
 from synapse.handlers.federation import FederationHandler
 from synapse.handlers.federation_event import FederationEventHandler
+from synapse.handlers.futures import FuturesHandler
 from synapse.handlers.identity import IdentityHandler
 from synapse.handlers.initial_sync import InitialSyncHandler
 from synapse.handlers.message import EventCreationHandler, MessageHandler
@@ -248,6 +249,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         "account_validity",
         "auth",
         "deactivate_account",
+        "futures",
         "message",
         "pagination",
         "profile",
@@ -936,3 +938,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_task_scheduler(self) -> TaskScheduler:
         return TaskScheduler(self)
+
+    @cache_in_self
+    def get_futures_handler(self) -> FuturesHandler:
+        return FuturesHandler(self)

@@ -54,6 +54,7 @@ from .events_bg_updates import EventsBackgroundUpdatesStore
 from .events_forward_extremities import EventForwardExtremitiesStore
 from .experimental_features import ExperimentalFeaturesStore
 from .filtering import FilteringWorkerStore
+from .futures import FuturesStore
 from .keys import KeyStore
 from .lock import LockStore
 from .media_repository import MediaRepositoryStore
@@ -156,6 +157,7 @@ class DataStore(
     LockStore,
     SessionStore,
     TaskSchedulerWorkerStore,
+    FuturesStore,
 ):
     def __init__(
         self,
