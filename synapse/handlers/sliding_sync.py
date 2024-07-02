@@ -44,6 +44,7 @@ from synapse.types import (
     PersistedEventPosition,
     Requester,
     RoomStreamToken,
+    StateMap,
     StreamKeyType,
     StreamToken,
     UserID,
@@ -133,8 +134,8 @@ class RoomSyncConfig:
         ) in room_params.required_state:
             # If we already have a wildcard, we don't need to add anything else
             if (
-                # This is just a tricky way to grab the first element of the set. We
-                # assume that if a wildcard is present, it's the only thing in the set.
+                # We assume that if a wildcard is present, it's the only thing in the
+                # set.
                 get_first_item_in_set(required_state_map.get(state_type))
                 == (state_type, StateKeys.WILDCARD)
             ):
@@ -184,10 +185,9 @@ class RoomSyncConfig:
             state_key_set,
         ) in other_room_sync_config.required_state_map.items():
             # If we already have a wildcard, we don't need to add anything else
-            if (
-                # This is just a tricky way to grab the first element of the set
-                get_first_item_in_set(self.required_state_map.get(state_type))
-                == (state_type, StateKeys.WILDCARD)
+            if get_first_item_in_set(self.required_state_map.get(state_type)) == (
+                state_type,
+                StateKeys.WILDCARD,
             ):
                 continue
 
@@ -977,7 +977,7 @@ class SlidingSyncHandler:
 
         # Assemble the list of timeline events
         #
-        # It would be nice to make the `rooms` response more uniform regardless of
+        # FIXME: It would be nice to make the `rooms` response more uniform regardless of
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
@@ -1151,39 +1151,73 @@ class SlidingSyncHandler:
         initial = True
 
         # Fetch the required state for the room
-        required_state_types: List[Tuple[str, Optional[str]]] = []
-        for state_type, state_key_set in room_sync_config.required_state_map.items():
-            for _state_type, state_key in state_key_set:
-                if state_key == StateKeys.WILDCARD:
-                    # `None` is a wildcard in the `StateFilter`
-                    required_state_types.append((state_type, None))
-                # We need to fetch all relevant people when we're lazy-loading membership
-                if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
-                    # Everyone in the timeline is relevant
-                    timeline_membership: Set[str] = set()
-                    if timeline_events is not None:
-                        for timeline_event in timeline_events:
-                            timeline_membership.add(timeline_event.sender)
+        #
+        # No `required_state` for invite/knock rooms (just `stripped_state`)
+        #
+        # FIXME: It would be nice to make the `rooms` response more uniform regardless
+        # of membership. Currently, we have to make this optional because
+        # `invite`/`knock` rooms only have `stripped_state`. See
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
+        room_state: Optional[StateMap[EventBase]] = None
+        if rooms_membership_for_user_at_to_token.membership not in (
+            Membership.INVITE,
+            Membership.KNOCK,
+        ):
+            # Calculate the required state for the room and make it into the form of a
+            # `StateFilter`
+            required_state_types: List[Tuple[str, Optional[str]]] = []
+            for (
+                state_type,
+                state_key_set,
+            ) in room_sync_config.required_state_map.items():
+                for _state_type, state_key in state_key_set:
+                    if state_key == StateKeys.WILDCARD:
+                        # `None` is a wildcard in the `StateFilter`
+                        required_state_types.append((state_type, None))
+                    # We need to fetch all relevant people when we're lazy-loading membership
+                    if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
+                        # Everyone in the timeline is relevant
+                        timeline_membership: Set[str] = set()
+                        if timeline_events is not None:
+                            for timeline_event in timeline_events:
+                                timeline_membership.add(timeline_event.sender)
 
-                    for user_id in timeline_membership:
-                        required_state_types.append((EventTypes.Member, user_id))
+                        for user_id in timeline_membership:
+                            required_state_types.append((EventTypes.Member, user_id))
 
-                    # TODO: We probably also care about invite, ban, kick, targets, etc
-                    # but the spec only mentions "senders".
+                        # TODO: We probably also care about invite, ban, kick, targets, etc
+                        # but the spec only mentions "senders".
+                    else:
+                        required_state_types.append((state_type, state_key))
+
+            state_filter = StateFilter.from_types(required_state_types)
+
+            # We can return the full state that was requested if we're doing an initial
+            # sync
+            if initial:
+                # People shouldn't see past their leave/ban event
+                if rooms_membership_for_user_at_to_token.membership in (
+                    Membership.LEAVE,
+                    Membership.BAN,
+                ):
+                    room_state = await self.storage_controllers.state.get_state_at(
+                        room_id,
+                        stream_position=rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                        state_filter=state_filter,
+                        await_full_state=False,
+                    )
                 else:
-                    required_state_types.append((state_type, state_key))
-
-        if initial:
-            room_state = await self.storage_controllers.state.get_current_state(
-                room_id,
-                StateFilter.from_types(required_state_types),
-                await_full_state=False,
-            )
-            # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
-        else:
-            # TODO: Once we can figure out if we've sent a room down this connection before,
-            # we can return updates instead of the full required state.
-            raise NotImplementedError()
+                    # Otherwise, we can get the latest current state in the room
+                    room_state = await self.storage_controllers.state.get_current_state(
+                        room_id,
+                        state_filter,
+                        await_full_state=False,
+                    )
+                    # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+            else:
+                # TODO: Once we can figure out if we've sent a room down this connection before,
+                # we can return updates instead of the full required state.
+                raise NotImplementedError()
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
