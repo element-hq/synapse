@@ -821,13 +821,15 @@ def run_in_background(
     d: "defer.Deferred[R]"
     if isinstance(res, typing.Coroutine):
         # Wrap the coroutine in a `Deferred`.
-        d = defer.ensureDeferred(res)
+        d = defer.ensureDeferred(measure_coroutine(current.name, res))
     elif isinstance(res, defer.Deferred):
         d = res
     elif isinstance(res, Awaitable):
         # `res` is probably some kind of completed awaitable, such as a `DoneAwaitable`
         # or `Future` from `make_awaitable`.
-        d = defer.ensureDeferred(_unwrap_awaitable(res))
+        d = defer.ensureDeferred(
+            measure_coroutine(current.name, _unwrap_awaitable(res))
+        )
     else:
         # `res` is a plain value. Wrap it in a `Deferred`.
         d = defer.succeed(res)
