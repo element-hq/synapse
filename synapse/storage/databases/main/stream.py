@@ -1827,7 +1827,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             and to_key is not None
             and to_key.is_before_or_eq(from_key)
         ):
-            return [], from_key
+            # Token selection matches what we do in `_paginate_room_events_txn` if there
+            # are no rows
+            return [], to_key if to_key else from_key
         # Or vice-versa, if we're looking backwards and our `from_key` is already before
         # our `to_key`.
         elif (
@@ -1835,7 +1837,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             and to_key is not None
             and from_key.is_before_or_eq(to_key)
         ):
-            return [], from_key
+            # Token selection matches what we do in `_paginate_room_events_txn` if there
+            # are no rows
+            return [], to_key if to_key else from_key
 
         rows, token = await self.db_pool.runInteraction(
             "paginate_room_events",
