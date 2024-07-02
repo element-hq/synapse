@@ -2718,7 +2718,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        state_map = self.get_success(
+        state_ids_map = self.get_success(
             self.storage_controllers.state.get_current_state_ids(room_id1)
         )
 
@@ -2730,8 +2730,67 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 ]
             ],
             [
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
+                state_ids_map[(EventTypes.Create, "")],
+                state_ids_map[(EventTypes.RoomHistoryVisibility, "")],
+            ],
+            channel.json_body["rooms"][room_id1]["required_state"],
+        )
+
+    def test_rooms_required_state_incremental_sync(self) -> None:
+        """
+        Test `rooms.required_state` returns requested state events in the room during an
+        incremental sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room_token = self.event_sources.get_current_token()
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(after_room_token.to_string(self.store))}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.RoomHistoryVisibility, ""],
+                            # This one doesn't exist in the room
+                            [EventTypes.Tombstone, ""],
+                        ],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_ids_map = self.get_success(
+            self.storage_controllers.state.get_current_state_ids(room_id1)
+        )
+
+        # The returned state doesn't change from initial to incremental sync. In the
+        # future, we will only return updates but only if we've sent the room down the
+        # connection before.
+        self.assertEqual(
+            [
+                state_event["event_id"]
+                for state_event in channel.json_body["rooms"][room_id1][
+                    "required_state"
+                ]
+            ],
+            [
+                state_ids_map[(EventTypes.Create, "")],
+                state_ids_map[(EventTypes.RoomHistoryVisibility, "")],
             ],
             channel.json_body["rooms"][room_id1]["required_state"],
         )

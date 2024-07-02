@@ -1231,15 +1231,16 @@ class SlidingSyncHandler:
             avatar=None,
             # TODO: Dummy value
             heroes=None,
+            # TODO: Dummy value
+            is_dm=False,
             initial=initial,
             required_state=list(room_state.values()) if room_state else None,
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
-            # TODO: Dummy value
-            is_dm=False,
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
+            num_live=num_live,
             # TODO: Dummy values
             joined_count=0,
             invited_count=0,
@@ -1248,5 +1249,4 @@ class SlidingSyncHandler:
             # (encrypted rooms).
             notification_count=0,
             highlight_count=0,
-            num_live=num_live,
         )
