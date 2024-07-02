@@ -140,7 +140,7 @@ class EventSources:
                     ].get_max_allocated_token()
 
                     token = token.copy_and_replace(
-                        key, token.room_key.bound_stream_token(max_token)
+                        key, token_value.bound_stream_token(max_token)
                     )
             else:
                 assert isinstance(current_value, int)
