@@ -18,7 +18,18 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    Any,
+    Dict,
+    Final,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+)
 
 import attr
 from immutabledict import immutabledict
@@ -33,6 +44,7 @@ from synapse.types import (
     PersistedEventPosition,
     Requester,
     RoomStreamToken,
+    StateMap,
     StreamKeyType,
     StreamToken,
     UserID,
@@ -75,6 +87,17 @@ def filter_membership_for_sync(
     return membership != Membership.LEAVE or sender not in (user_id, None)
 
 
+R = TypeVar("R")
+
+
+def get_first_item_in_set(target_set: Optional[AbstractSet[R]]) -> Optional[R]:
+    """
+    Helper to grab the "first" item in a set. A set is an unordered collection so this
+    is just a way to grab some item in the set.
+    """
+    return next(iter(target_set or []), None)
+
+
 # We can't freeze this class because we want to update it in place with the
 # de-duplicated data.
 @attr.s(slots=True, auto_attribs=True)
@@ -84,14 +107,115 @@ class RoomSyncConfig:
 
     Attributes:
         timeline_limit: The maximum number of events to return in the timeline.
-        required_state: The set of state events requested for the room. The
-            values are close to `StateKey` but actually use a syntax where you can
-            provide `*` wildcard and `$LAZY` for lazy room members as the `state_key` part
-            of the tuple (type, state_key).
+        required_state_map: Map from state type to a set of state (type, state_key)
+            tuples requested for the room. The values are close to `StateKey` but actually
+            use a syntax where you can provide `*` wildcard and `$LAZY` for lazy room
+            members as the `state_key` part of the tuple (type, state_key).
     """
 
     timeline_limit: int
-    required_state: Set[Tuple[str, str]]
+    required_state_map: Dict[str, Set[Tuple[str, str]]]
+
+    @classmethod
+    def from_room_config(
+        cls,
+        room_params: SlidingSyncConfig.CommonRoomParameters,
+    ) -> "RoomSyncConfig":
+        """
+        Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
+
+        Args:
+            room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
+        """
+        required_state_map: Dict[str, Set[Tuple[str, str]]] = {}
+        for (
+            state_type,
+            state_key,
+        ) in room_params.required_state:
+            # If we already have a wildcard, we don't need to add anything else
+            if (
+                # We assume that if a wildcard is present, it's the only thing in the
+                # set.
+                get_first_item_in_set(required_state_map.get(state_type))
+                == (state_type, StateKeys.WILDCARD)
+            ):
+                continue
+
+            # If we're getting a wildcard, that's all that matters so get rid of any
+            # other state keys
+            if state_key == StateKeys.WILDCARD:
+                required_state_map[state_type] = {(state_type, state_key)}
+            # Otherwise, just add it to the set
+            else:
+                if required_state_map.get(state_type) is None:
+                    required_state_map[state_type] = {(state_type, state_key)}
+                else:
+                    required_state_map[state_type].add((state_type, state_key))
+
+        return cls(
+            timeline_limit=room_params.timeline_limit,
+            required_state_map=required_state_map,
+        )
+
+    def deep_copy(self) -> "RoomSyncConfig":
+        required_state_map: Dict[str, Set[Tuple[str, str]]] = {
+            state_type: state_key_set.copy()
+            for state_type, state_key_set in self.required_state_map.items()
+        }
+
+        return RoomSyncConfig(
+            timeline_limit=self.timeline_limit,
+            required_state_map=required_state_map,
+        )
+
+    def combine_room_sync_config(
+        self, other_room_sync_config: "RoomSyncConfig"
+    ) -> None:
+        """
+        Combine this `RoomSyncConfig` with another `RoomSyncConfig` and take the
+        superset union of the two.
+        """
+        # Take the highest timeline limit
+        if self.timeline_limit < other_room_sync_config.timeline_limit:
+            self.timeline_limit = other_room_sync_config.timeline_limit
+
+        # Union the required state
+        for (
+            state_type,
+            state_key_set,
+        ) in other_room_sync_config.required_state_map.items():
+            # If we already have a wildcard, we don't need to add anything else
+            if get_first_item_in_set(self.required_state_map.get(state_type)) == (
+                state_type,
+                StateKeys.WILDCARD,
+            ):
+                continue
+
+            for _state_type, state_key in state_key_set:
+                # If we're getting a wildcard, that's all that matters so get rid of any
+                # other state keys
+                if state_key == StateKeys.WILDCARD:
+                    self.required_state_map[state_type] = {(state_type, state_key)}
+                    break
+                # Otherwise, just add it to the set
+                else:
+                    if self.required_state_map.get(state_type) is None:
+                        self.required_state_map[state_type] = {(state_type, state_key)}
+                    else:
+                        self.required_state_map[state_type].add((state_type, state_key))
+
+
+class StateKeys:
+    """
+    Understood values of the `state_key` part of the tuple (type, state_key) in
+    `required_state`.
+    """
+
+    # Include all state events of the given type
+    WILDCARD: Final = "*"
+    # Lazy-load room membership events (include room membership events for any event
+    # `sender` in the timeline)
+    LAZY: Final = "$LAZY"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -236,6 +360,8 @@ class SlidingSyncHandler:
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        # Keep track of the rooms that we're going to display and need to fetch more
+        # info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
         if sync_config.lists:
             # Get all of the room IDs that the user should be able to see in the sync
@@ -254,48 +380,84 @@ class SlidingSyncHandler:
                         sync_config.user, sync_room_map, list_config.filters, to_token
                     )
 
+                # Sort the list
                 sorted_room_info = await self.sort_rooms(
                     filtered_sync_room_map, to_token
                 )
 
+                # Find which rooms are partially stated and may need to be filtered out
+                # depending on the `required_state` requested (see below).
+                partial_state_room_map = await self.store.is_partial_state_room_batched(
+                    filtered_sync_room_map.keys()
+                )
+
+                # Since creating the `RoomSyncConfig` takes some work, let's just do it
+                # once and make a copy whenever we need it.
+                room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
-                        sliced_room_ids = [
-                            room_id
-                            # Both sides of range are inclusive
-                            for room_id, _ in sorted_room_info[range[0] : range[1] + 1]
-                        ]
+                        room_ids_in_list = []
+
+                        # We're going to loop through the sorted list of rooms starting
+                        # at the range start index and keep adding rooms until we fill
+                        # up the range or run out of rooms.
+                        #
+                        # Both sides of range are inclusive
+                        current_range_index = range[0]
+                        range_end_index = range[1]
+                        while (
+                            current_range_index <= range_end_index
+                            and current_range_index <= len(sorted_room_info) - 1
+                        ):
+                            room_id, _ = sorted_room_info[current_range_index]
+
+                            membership_state_keys = (
+                                room_sync_config.required_state_map.get(
+                                    EventTypes.Member
+                                )
+                            )
+                            # Exclude partially stated rooms unless the `required_state`
+                            # only has `["m.room.member", "$LAZY"]` for membership.
+                            if (
+                                partial_state_room_map.get(room_id)
+                                and membership_state_keys is not None
+                                and len(membership_state_keys) == 1
+                                and get_first_item_in_set(membership_state_keys)
+                                == (EventTypes.Member, StateKeys.LAZY)
+                            ):
+                                # Since we're skipping this room, we need to allow
+                                # for the next room to take its place in the list
+                                range_end_index += 1
+                                continue
+
+                            # Take the superset of the `RoomSyncConfig` for each room.
+                            #
+                            # Update our `relevant_room_map` with the room we're going
+                            # to display and need to fetch more info about.
+                            existing_room_sync_config = relevant_room_map.get(room_id)
+                            if existing_room_sync_config is not None:
+                                existing_room_sync_config.combine_room_sync_config(
+                                    room_sync_config
+                                )
+                            else:
+                                # Make a copy so if we modify it later, it doesn't
+                                # affect all references.
+                                relevant_room_map[room_id] = (
+                                    room_sync_config.deep_copy()
+                                )
+
+                            room_ids_in_list.append(room_id)
+                            current_range_index += 1
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=sliced_room_ids,
+                                room_ids=room_ids_in_list,
                             )
                         )
-
-                        # Take the superset of the `RoomSyncConfig` for each room
-                        for room_id in sliced_room_ids:
-                            if relevant_room_map.get(room_id) is not None:
-                                # Take the highest timeline limit
-                                if (
-                                    relevant_room_map[room_id].timeline_limit
-                                    < list_config.timeline_limit
-                                ):
-                                    relevant_room_map[room_id].timeline_limit = (
-                                        list_config.timeline_limit
-                                    )
-
-                                # Union the required state
-                                relevant_room_map[room_id].required_state.update(
-                                    list_config.required_state
-                                )
-                            else:
-                                relevant_room_map[room_id] = RoomSyncConfig(
-                                    timeline_limit=list_config.timeline_limit,
-                                    required_state=set(list_config.required_state),
-                                )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
                     count=len(sorted_room_info),
@@ -645,9 +807,6 @@ class SlidingSyncHandler:
         user_id = user.to_string()
 
         # TODO: Apply filters
-        #
-        # TODO: Exclude partially stated rooms unless the `required_state` has
-        # `["m.room.member", "$LAZY"]`
 
         filtered_room_id_set = set(sync_room_map.keys())
 
@@ -818,7 +977,7 @@ class SlidingSyncHandler:
 
         # Assemble the list of timeline events
         #
-        # It would be nice to make the `rooms` response more uniform regardless of
+        # FIXME: It would be nice to make the `rooms` response more uniform regardless of
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
@@ -985,6 +1144,81 @@ class SlidingSyncHandler:
         # state reset happened. Perhaps we should indicate this by setting `initial:
         # True` and empty `required_state`.
 
+        # TODO: Since we can't determine whether we've already sent a room down this
+        # Sliding Sync connection before (we plan to add this optimization in the
+        # future), we're always returning the requested room state instead of
+        # updates.
+        initial = True
+
+        # Fetch the required state for the room
+        #
+        # No `required_state` for invite/knock rooms (just `stripped_state`)
+        #
+        # FIXME: It would be nice to make the `rooms` response more uniform regardless
+        # of membership. Currently, we have to make this optional because
+        # `invite`/`knock` rooms only have `stripped_state`. See
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
+        room_state: Optional[StateMap[EventBase]] = None
+        if rooms_membership_for_user_at_to_token.membership not in (
+            Membership.INVITE,
+            Membership.KNOCK,
+        ):
+            # Calculate the required state for the room and make it into the form of a
+            # `StateFilter`
+            required_state_types: List[Tuple[str, Optional[str]]] = []
+            for (
+                state_type,
+                state_key_set,
+            ) in room_sync_config.required_state_map.items():
+                for _state_type, state_key in state_key_set:
+                    if state_key == StateKeys.WILDCARD:
+                        # `None` is a wildcard in the `StateFilter`
+                        required_state_types.append((state_type, None))
+                    # We need to fetch all relevant people when we're lazy-loading membership
+                    if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
+                        # Everyone in the timeline is relevant
+                        timeline_membership: Set[str] = set()
+                        if timeline_events is not None:
+                            for timeline_event in timeline_events:
+                                timeline_membership.add(timeline_event.sender)
+
+                        for user_id in timeline_membership:
+                            required_state_types.append((EventTypes.Member, user_id))
+
+                        # TODO: We probably also care about invite, ban, kick, targets, etc
+                        # but the spec only mentions "senders".
+                    else:
+                        required_state_types.append((state_type, state_key))
+
+            state_filter = StateFilter.from_types(required_state_types)
+
+            # We can return all of the state that was requested if we're doing an
+            # initial sync
+            if initial:
+                # People shouldn't see past their leave/ban event
+                if rooms_membership_for_user_at_to_token.membership in (
+                    Membership.LEAVE,
+                    Membership.BAN,
+                ):
+                    room_state = await self.storage_controllers.state.get_state_at(
+                        room_id,
+                        stream_position=rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                        state_filter=state_filter,
+                        await_full_state=False,
+                    )
+                else:
+                    # Otherwise, we can get the latest current state in the room
+                    room_state = await self.storage_controllers.state.get_current_state(
+                        room_id,
+                        state_filter,
+                        await_full_state=False,
+                    )
+                    # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+            else:
+                # TODO: Once we can figure out if we've sent a room down this connection before,
+                # we can return updates instead of the full required state.
+                raise NotImplementedError()
+
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
             name=None,
@@ -992,13 +1226,8 @@ class SlidingSyncHandler:
             avatar=None,
             # TODO: Dummy value
             heroes=None,
-            # TODO: Since we can't determine whether we've already sent a room down this
-            # Sliding Sync connection before (we plan to add this optimization in the
-            # future), we're always returning the requested room state instead of
-            # updates.
-            initial=True,
-            # TODO: Dummy value
-            required_state=[],
+            initial=initial,
+            required_state=list(room_state.values()) if room_state else None,
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
             # TODO: Dummy value
