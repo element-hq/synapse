@@ -19,10 +19,10 @@
 #
 import logging
 from copy import deepcopy
+from typing import Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
-from typing import Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 

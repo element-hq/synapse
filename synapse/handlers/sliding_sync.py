@@ -18,18 +18,7 @@
 #
 #
 import logging
-from typing import (
-    TYPE_CHECKING,
-    AbstractSet,
-    Any,
-    Dict,
-    Final,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    TypeVar,
-)
+from typing import TYPE_CHECKING, Any, Dict, Final, List, Optional, Set, Tuple
 
 import attr
 from immutabledict import immutabledict
@@ -93,17 +82,6 @@ def filter_membership_for_sync(
     return membership != Membership.LEAVE or sender not in (user_id, None)
 
 
-R = TypeVar("R")
-
-
-def get_first_item_in_set(target_set: Optional[AbstractSet[R]]) -> Optional[R]:
-    """
-    Helper to grab the "first" item in a set. A set is an unordered collection so this
-    is just a way to grab some item in the set.
-    """
-    return next(iter(target_set or []), None)
-
-
 # We can't freeze this class because we want to update it in place with the
 # de-duplicated data.
 @attr.s(slots=True, auto_attribs=True)
@@ -140,7 +118,9 @@ class RoomSyncConfig:
         ) in room_params.required_state:
             # If we already have a wildcard for everything, we don't need to add
             # anything else
-            wildcard_set = required_state_map.get(StateKeys.WILDCARD, {})
+            wildcard_set: Set[Tuple[str, str]] = required_state_map.get(
+                StateKeys.WILDCARD, set()
+            )
             if (StateKeys.WILDCARD, StateKeys.WILDCARD) in wildcard_set:
                 break
 
@@ -151,11 +131,8 @@ class RoomSyncConfig:
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
             # to add anything else
-            if (
-                # We assume that if a wildcard is present, it's the only thing in the
-                # set.
-                get_first_item_in_set(required_state_map.get(state_type))
-                == (state_type, StateKeys.WILDCARD)
+            if (state_type, StateKeys.WILDCARD) in required_state_map.get(
+                state_type, set()
             ):
                 continue
 
@@ -239,17 +216,14 @@ class RoomSyncConfig:
             # If we already have a wildcard for everything, we don't need to add
             # anything else
             if (StateKeys.WILDCARD, StateKeys.WILDCARD) in self.required_state_map.get(
-                StateKeys.WILDCARD, {}
+                StateKeys.WILDCARD, set()
             ):
                 break
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
             # to add anything else
-            if (
-                # We assume that if a wildcard is present, it's the only thing in the
-                # set.
-                get_first_item_in_set(self.required_state_map.get(state_type))
-                == (state_type, StateKeys.WILDCARD)
+            if (state_type, StateKeys.WILDCARD) in self.required_state_map.get(
+                state_type, set()
             ):
                 continue
 
@@ -269,7 +243,7 @@ class RoomSyncConfig:
                 # If we already have a wildcard for this specific `state_key`, we don't need
                 # to add it since the wildcard already covers it.
                 if (StateKeys.WILDCARD, state_key) in self.required_state_map.get(
-                    StateKeys.WILDCARD, {}
+                    StateKeys.WILDCARD, set()
                 ):
                     continue
 
@@ -531,8 +505,8 @@ class SlidingSyncHandler:
                                 partial_state_room_map.get(room_id)
                                 and membership_state_keys is not None
                                 and len(membership_state_keys) == 1
-                                and get_first_item_in_set(membership_state_keys)
-                                == (EventTypes.Member, StateKeys.LAZY)
+                                and (EventTypes.Member, StateKeys.LAZY)
+                                in membership_state_keys
                             ):
                                 # Since we're skipping this room, we need to allow
                                 # for the next room to take its place in the list
