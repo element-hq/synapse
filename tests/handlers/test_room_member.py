@@ -390,18 +390,11 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
 
         self.get_failure(
             self.handler.update_membership(
-                create_requester(self.alice), alien_user_id, self.room_id, "ban"
+                create_requester(self.alice), alien_user_id, self.room_id+"BAD_ID", "unban"
             ),
             SynapseError,
         )
 
-        # self.helper.ban(
-        #     room=self.room_id,
-        #     src=str(self.alice_ID),
-        #     targ=str(alien_user_id),
-        #     expect_code=HTTPStatus.OK,
-        #     tok=self.alice_token
-        # )
 
     def test_rejoin_forgotten_by_user(self) -> None:
         """Test that a user that has forgotten a room can do a re-join.
