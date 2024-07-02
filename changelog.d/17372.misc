@@ -1,0 +1,1 @@
+Migrate the nix flake to a separate repo ([element-hq/nix-flakes](https://github.com/element-hq/nix-flakes)).
