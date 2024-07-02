@@ -259,7 +259,7 @@ class SlidingSyncBody(RequestBodyModel):
             is_encrypted: Optional[StrictBool] = None
             is_invite: Optional[StrictBool] = None
             room_types: Optional[List[Union[StrictStr, None]]] = None
-            not_room_types: Optional[List[StrictStr]] = None
+            not_room_types: Optional[List[Union[StrictStr, None]]] = None
             room_name_like: Optional[StrictStr] = None
             tags: Optional[List[StrictStr]] = None
             not_tags: Optional[List[StrictStr]] = None

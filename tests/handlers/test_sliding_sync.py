@@ -25,7 +25,14 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventContentFields,
+    EventTypes,
+    JoinRules,
+    Membership,
+    RoomTypes,
+)
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import RoomSyncConfig, StateKeys
 from synapse.rest import admin
@@ -2307,6 +2314,211 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
+    def test_filter_room_types(self) -> None:
+        """
+        Test `filter.room_types` for different room types
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        # Create an arbitrarily typed room
+        foo_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {
+                    EventContentFields.ROOM_TYPE: "org.matrix.foobarbaz"
+                }
+            },
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Try finding only normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
+
+        # Try finding normal rooms and spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    room_types=[None, RoomTypes.SPACE]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {room_id, space_room_id})
+
+        # Try finding an arbitrary room type
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    room_types=["org.matrix.foobarbaz"]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {foo_room_id})
+
+    def test_filter_not_room_types(self) -> None:
+        """
+        Test `filter.not_room_types` for different room types
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        # Create an arbitrarily typed room
+        foo_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {
+                    EventContentFields.ROOM_TYPE: "org.matrix.foobarbaz"
+                }
+            },
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Try finding *NOT* normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(not_room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {space_room_id, foo_room_id})
+
+        # Try finding *NOT* spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    not_room_types=[RoomTypes.SPACE]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {room_id, foo_room_id})
+
+        # Try finding *NOT* normal rooms or spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    not_room_types=[None, RoomTypes.SPACE]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {foo_room_id})
+
+        # Test how it behaves when we have both `room_types` and `not_room_types`.
+        # `not_room_types` should win.
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    room_types=[None], not_room_types=[None]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        # Nothing matches because nothing is both a normal room and not a normal room
+        self.assertEqual(filtered_room_map.keys(), set())
+
+        # Test how it behaves when we have both `room_types` and `not_room_types`.
+        # `not_room_types` should win.
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    room_types=[None, RoomTypes.SPACE], not_room_types=[None]
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
 
 class SortRoomsTestCase(HomeserverTestCase):

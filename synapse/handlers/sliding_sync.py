@@ -34,7 +34,13 @@ from typing import (
 import attr
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    Direction,
+    EventContentFields,
+    EventTypes,
+    Membership,
+)
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -418,7 +424,7 @@ class SlidingSyncHandler:
                                     EventTypes.Member
                                 )
                             )
-                            # Exclude partially stated rooms unless the `required_state`
+                            # Exclude partially-stated rooms unless the `required_state`
                             # only has `["m.room.member", "$LAZY"]` for membership.
                             if (
                                 partial_state_room_map.get(room_id)
@@ -848,14 +854,18 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in list(filtered_room_id_set):
-                state_at_to_token = (
-                    await self.storage_controllers.state.get_state_ids_at(
-                        room_id,
-                        to_token,
-                        state_filter=StateFilter.from_types(
-                            [(EventTypes.RoomEncryption, "")]
-                        ),
-                    )
+                state_at_to_token = await self.storage_controllers.state.get_state_at(
+                    room_id,
+                    to_token,
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.RoomEncryption, "")]
+                    ),
+                    # Partially-stated rooms should have all state events except for the
+                    # membership events so we don't need to wait because we only care
+                    # about retrieving the `EventTypes.RoomEncryption` state event here.
+                    # Plus we don't want to block the whole sync waiting for this one
+                    # room.
+                    await_full_state=False,
                 )
                 is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
 
@@ -882,11 +892,26 @@ class SlidingSyncHandler:
                 ):
                     filtered_room_id_set.remove(room_id)
 
-        if filters.room_types:
-            raise NotImplementedError()
+        # Filter by room type (space vs room, etc). A room must match one of the types
+        # provided in the list. `None` is a valid type for rooms which do not have a
+        # room type.
+        if filters.room_types is not None or filters.not_room_types is not None:
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in list(filtered_room_id_set):
+                create_event = await self.store.get_create_event_for_room(room_id)
+                room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
+                if (
+                    filters.room_types is not None
+                    and room_type not in filters.room_types
+                ):
+                    filtered_room_id_set.remove(room_id)
 
-        if filters.not_room_types:
-            raise NotImplementedError()
+                if (
+                    filters.not_room_types is not None
+                    and room_type in filters.not_room_types
+                ):
+                    filtered_room_id_set.remove(room_id)
 
         if filters.room_name_like:
             raise NotImplementedError()
@@ -1209,6 +1234,12 @@ class SlidingSyncHandler:
                             rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
                         ),
                         state_filter=state_filter,
+                        # Partially-stated rooms should have all state events except for
+                        # the membership events and since we've already excluded
+                        # partially-stated rooms unless `required_state` only has
+                        # `["m.room.member", "$LAZY"]` for membership, we should be able
+                        # to retrieve everything requested. Plus we don't want to block
+                        # the whole sync waiting for this one room.
                         await_full_state=False,
                     )
                 # Otherwise, we can get the latest current state in the room
@@ -1216,6 +1247,12 @@ class SlidingSyncHandler:
                     room_state = await self.storage_controllers.state.get_current_state(
                         room_id,
                         state_filter,
+                        # Partially-stated rooms should have all state events except for
+                        # the membership events and since we've already excluded
+                        # partially-stated rooms unless `required_state` only has
+                        # `["m.room.member", "$LAZY"]` for membership, we should be able
+                        # to retrieve everything requested. Plus we don't want to block
+                        # the whole sync waiting for this one room.
                         await_full_state=False,
                     )
                     # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
