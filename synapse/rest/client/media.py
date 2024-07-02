@@ -22,6 +22,7 @@
 
 import logging
 import re
+from typing import Optional
 
 from synapse.http.server import (
     HttpServer,
@@ -46,7 +47,7 @@ from synapse.util.stringutils import parse_and_validate_server_name
 logger = logging.getLogger(__name__)
 
 
-class UnstablePreviewURLServlet(RestServlet):
+class PreviewURLServlet(RestServlet):
     """
     Same as `GET /_matrix/media/r0/preview_url`, this endpoint provides a generic preview API
     for URLs which outputs Open Graph (https://ogp.me/) responses (with some Matrix
@@ -64,9 +65,7 @@ class UnstablePreviewURLServlet(RestServlet):
       * Matrix cannot be used to distribute the metadata between homeservers.
     """
 
-    PATTERNS = [
-        re.compile(r"^/_matrix/client/unstable/org.matrix.msc3916/media/preview_url$")
-    ]
+    PATTERNS = [re.compile(r"^/_matrix/client/v1/media/preview_url$")]
 
     def __init__(
         self,
@@ -94,10 +93,8 @@ class UnstablePreviewURLServlet(RestServlet):
         respond_with_json_bytes(request, 200, og, send_cors=True)
 
 
-class UnstableMediaConfigResource(RestServlet):
-    PATTERNS = [
-        re.compile(r"^/_matrix/client/unstable/org.matrix.msc3916/media/config$")
-    ]
+class MediaConfigResource(RestServlet):
+    PATTERNS = [re.compile(r"^/_matrix/client/v1/media/config$")]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__()
@@ -111,10 +108,10 @@ class UnstableMediaConfigResource(RestServlet):
         respond_with_json(request, 200, self.limits_dict, send_cors=True)
 
 
-class UnstableThumbnailResource(RestServlet):
+class ThumbnailResource(RestServlet):
     PATTERNS = [
         re.compile(
-            "/_matrix/client/unstable/org.matrix.msc3916/media/thumbnail/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
+            "/_matrix/client/v1/media/thumbnail/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)$"
         )
     ]
 
@@ -158,11 +155,25 @@ class UnstableThumbnailResource(RestServlet):
         if self._is_mine_server_name(server_name):
             if self.dynamic_thumbnails:
                 await self.thumbnailer.select_or_generate_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             else:
                 await self.thumbnailer.respond_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -190,18 +201,79 @@ class UnstableThumbnailResource(RestServlet):
                 m_type,
                 max_timeout_ms,
                 ip_address,
+                True,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
 
 
+class DownloadResource(RestServlet):
+    PATTERNS = [
+        re.compile(
+            "/_matrix/client/v1/media/download/(?P<server_name>[^/]*)/(?P<media_id>[^/]*)(/(?P<file_name>[^/]*))?$"
+        )
+    ]
+
+    def __init__(self, hs: "HomeServer", media_repo: "MediaRepository"):
+        super().__init__()
+        self.media_repo = media_repo
+        self._is_mine_server_name = hs.is_mine_server_name
+        self.auth = hs.get_auth()
+
+    async def on_GET(
+        self,
+        request: SynapseRequest,
+        server_name: str,
+        media_id: str,
+        file_name: Optional[str] = None,
+    ) -> None:
+        # Validate the server name, raising if invalid
+        parse_and_validate_server_name(server_name)
+
+        await self.auth.get_user_by_req(request)
+
+        set_cors_headers(request)
+        set_corp_headers(request)
+        request.setHeader(
+            b"Content-Security-Policy",
+            b"sandbox;"
+            b" default-src 'none';"
+            b" script-src 'none';"
+            b" plugin-types application/pdf;"
+            b" style-src 'unsafe-inline';"
+            b" media-src 'self';"
+            b" object-src 'self';",
+        )
+        # Limited non-standard form of CSP for IE11
+        request.setHeader(b"X-Content-Security-Policy", b"sandbox;")
+        request.setHeader(b"Referrer-Policy", b"no-referrer")
+        max_timeout_ms = parse_integer(
+            request, "timeout_ms", default=DEFAULT_MAX_TIMEOUT_MS
+        )
+        max_timeout_ms = min(max_timeout_ms, MAXIMUM_ALLOWED_MAX_TIMEOUT_MS)
+
+        if self._is_mine_server_name(server_name):
+            await self.media_repo.get_local_media(
+                request, media_id, file_name, max_timeout_ms
+            )
+        else:
+            ip_address = request.getClientAddress().host
+            await self.media_repo.get_remote_media(
+                request,
+                server_name,
+                media_id,
+                file_name,
+                max_timeout_ms,
+                ip_address,
+                True,
+            )
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if hs.config.experimental.msc3916_authenticated_media_enabled:
-        media_repo = hs.get_media_repository()
-        if hs.config.media.url_preview_enabled:
-            UnstablePreviewURLServlet(
-                hs, media_repo, media_repo.media_storage
-            ).register(http_server)
-        UnstableMediaConfigResource(hs).register(http_server)
-        UnstableThumbnailResource(hs, media_repo, media_repo.media_storage).register(
+    media_repo = hs.get_media_repository()
+    if hs.config.media.url_preview_enabled:
+        PreviewURLServlet(hs, media_repo, media_repo.media_storage).register(
             http_server
         )
+    MediaConfigResource(hs).register(http_server)
+    ThumbnailResource(hs, media_repo, media_repo.media_storage).register(http_server)
+    DownloadResource(hs, media_repo).register(http_server)

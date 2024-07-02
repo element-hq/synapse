@@ -221,6 +221,7 @@ def add_file_headers(
     # select private. don't bother setting Expires as all our
     # clients are smart enough to be happy with Cache-Control
     request.setHeader(b"Cache-Control", b"public,max-age=86400,s-maxage=86400")
+
     if file_size is not None:
         request.setHeader(b"Content-Length", b"%d" % (file_size,))
 
@@ -302,12 +303,37 @@ async def respond_with_multipart_responder(
             )
             return
 
+        if media_info.media_type.lower().split(";", 1)[0] in INLINE_CONTENT_TYPES:
+            disposition = "inline"
+        else:
+            disposition = "attachment"
+
+        def _quote(x: str) -> str:
+            return urllib.parse.quote(x.encode("utf-8"))
+
+        if media_info.upload_name:
+            if _can_encode_filename_as_token(media_info.upload_name):
+                disposition = "%s; filename=%s" % (
+                    disposition,
+                    media_info.upload_name,
+                )
+            else:
+                disposition = "%s; filename*=utf-8''%s" % (
+                    disposition,
+                    _quote(media_info.upload_name),
+                )
+
         from synapse.media.media_storage import MultipartFileConsumer
 
         # note that currently the json_object is just {}, this will change when linked media
         # is implemented
         multipart_consumer = MultipartFileConsumer(
-            clock, request, media_info.media_type, {}, media_info.media_length
+            clock,
+            request,
+            media_info.media_type,
+            {},
+            disposition,
+            media_info.media_length,
         )
 
         logger.debug("Responding to media request with responder %s", responder)

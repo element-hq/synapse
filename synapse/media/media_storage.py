@@ -401,13 +401,14 @@ class MultipartFileConsumer:
         wrapped_consumer: interfaces.IConsumer,
         file_content_type: str,
         json_object: JsonDict,
-        content_length: Optional[int] = None,
+        disposition: str,
+        content_length: Optional[int],
     ) -> None:
         self.clock = clock
         self.wrapped_consumer = wrapped_consumer
         self.json_field = json_object
         self.json_field_written = False
-        self.content_type_written = False
+        self.file_headers_written = False
         self.file_content_type = file_content_type
         self.boundary = uuid4().hex.encode("ascii")
 
@@ -420,6 +421,7 @@ class MultipartFileConsumer:
         self.paused = False
 
         self.length = content_length
+        self.disposition = disposition
 
     ### IConsumer APIs ###
 
@@ -488,11 +490,13 @@ class MultipartFileConsumer:
             self.json_field_written = True
 
         # if we haven't written the content type yet, do so
-        if not self.content_type_written:
+        if not self.file_headers_written:
             type = self.file_content_type.encode("utf-8")
             content_type = Header(b"Content-Type", type)
-            self.wrapped_consumer.write(bytes(content_type) + CRLF + CRLF)
-            self.content_type_written = True
+            self.wrapped_consumer.write(bytes(content_type) + CRLF)
+            disp_header = Header(b"Content-Disposition", self.disposition)
+            self.wrapped_consumer.write(bytes(disp_header) + CRLF + CRLF)
+            self.file_headers_written = True
 
         self.wrapped_consumer.write(data)
 
@@ -506,7 +510,6 @@ class MultipartFileConsumer:
         producing data for good.
         """
         assert self.producer is not None
-
         self.paused = True
         self.producer.stopProducing()
 
@@ -518,7 +521,6 @@ class MultipartFileConsumer:
         the time being, and to stop until C{resumeProducing()} is called.
         """
         assert self.producer is not None
-
         self.paused = True
 
         if self.streaming:
@@ -549,7 +551,7 @@ class MultipartFileConsumer:
         """
         if not self.length:
             return None
-        # calculate length of json field and content-type header
+        # calculate length of json field and content-type, disposition headers
         json_field = json.dumps(self.json_field)
         json_bytes = json_field.encode("utf-8")
         json_length = len(json_bytes)
@@ -558,9 +560,13 @@ class MultipartFileConsumer:
         content_type = Header(b"Content-Type", type)
         type_length = len(bytes(content_type))
 
-        # 154 is the length of the elements that aren't variable, ie
+        disp = self.disposition.encode("utf-8")
+        disp_header = Header(b"Content-Disposition", disp)
+        disp_length = len(bytes(disp_header))
+
+        # 156 is the length of the elements that aren't variable, ie
         # CRLFs and boundary strings, etc
-        self.length += json_length + type_length + 154
+        self.length += json_length + type_length + disp_length + 156
 
         return self.length
 
@@ -569,7 +575,6 @@ class MultipartFileConsumer:
     async def _resumeProducingRepeatedly(self) -> None:
         assert self.producer is not None
         assert not self.streaming
-
         producer = cast("interfaces.IPullProducer", self.producer)
 
         self.paused = False

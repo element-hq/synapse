@@ -1871,6 +1871,52 @@ class FederationClient(FederationBase):
 
         return filtered_statuses, filtered_failures
 
+    async def federation_download_media(
+        self,
+        destination: str,
+        media_id: str,
+        output_stream: BinaryIO,
+        max_size: int,
+        max_timeout_ms: int,
+        download_ratelimiter: Ratelimiter,
+        ip_address: str,
+    ) -> Union[
+        Tuple[int, Dict[bytes, List[bytes]], bytes],
+        Tuple[int, Dict[bytes, List[bytes]]],
+    ]:
+        try:
+            return await self.transport_layer.federation_download_media(
+                destination,
+                media_id,
+                output_stream=output_stream,
+                max_size=max_size,
+                max_timeout_ms=max_timeout_ms,
+                download_ratelimiter=download_ratelimiter,
+                ip_address=ip_address,
+            )
+        except HttpResponseException as e:
+            # If an error is received that is due to an unrecognised endpoint,
+            # fallback to the _matrix/media/v3/download endpoint. Otherwise, consider it a legitimate error
+            # and raise.
+            if not is_unknown_endpoint(e):
+                raise
+
+        logger.debug(
+            "Couldn't download media %s/%s over _matrix/federation/v1/media/download, falling back to _matrix/media/v3/download path",
+            destination,
+            media_id,
+        )
+
+        return await self.transport_layer.download_media_v3(
+            destination,
+            media_id,
+            output_stream=output_stream,
+            max_size=max_size,
+            max_timeout_ms=max_timeout_ms,
+            download_ratelimiter=download_ratelimiter,
+            ip_address=ip_address,
+        )
+
     async def download_media(
         self,
         destination: str,
