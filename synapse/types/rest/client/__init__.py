@@ -152,14 +152,7 @@ class SlidingSyncBody(RequestBodyModel):
                 anyway.
             timeline_limit: The maximum number of timeline events to return per response.
                 (Max 1000 messages)
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
         """
-
-        class IncludeOldRooms(RequestBodyModel):
-            timeline_limit: StrictInt
-            required_state: List[Tuple[StrictStr, StrictStr]]
 
         required_state: List[Tuple[StrictStr, StrictStr]]
         # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
@@ -167,7 +160,6 @@ class SlidingSyncBody(RequestBodyModel):
             timeline_limit: int
         else:
             timeline_limit: conint(le=1000, strict=True)  # type: ignore[valid-type]
-        include_old_rooms: Optional[IncludeOldRooms] = None
 
     class SlidingSyncList(CommonRoomParameters):
         """
@@ -208,9 +200,6 @@ class SlidingSyncBody(RequestBodyModel):
                     }
 
             timeline_limit: The maximum number of timeline events to return per response.
-            include_old_rooms: Determines if `predecessor` rooms are included in the
-                `rooms` response. The user MUST be joined to old rooms for them to show up
-                in the response.
             include_heroes: Return a stripped variant of membership events (containing
                 `user_id` and optionally `avatar_url` and `displayname`) for the users used
                 to calculate the room name.

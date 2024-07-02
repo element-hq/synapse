@@ -1096,6 +1096,9 @@ class PersistedPosition:
     stream: int
 
     def persisted_after(self, token: AbstractMultiWriterStreamToken) -> bool:
+        """
+        Checks whether this position happened after the token
+        """
         return token.get_stream_pos_for_instance(self.instance_name) < self.stream
 
 

@@ -31,8 +31,11 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.types import JsonMapping, StreamToken, UserID
+from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
 from synapse.types.rest.client import SlidingSyncBody
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 
 
 class ShutdownRoomParams(TypedDict):
@@ -159,11 +162,16 @@ class SlidingSyncResult:
                 entirely and NOT send "initial":false as this is wasteful on bandwidth. The
                 absence of this flag means 'false'.
             required_state: The current state of the room
-            timeline: Latest events in the room. The last event is the most recent
+            timeline: Latest events in the room. The last event is the most recent.
+            bundled_aggregations: A mapping of event ID to the bundled aggregations for
+                the timeline events above. This allows clients to show accurate reaction
+                counts (or edits, threads), even if some of the reaction events were skipped
+                over in a gappy sync.
             is_dm: Flag to specify whether the room is a direct-message room (most likely
                 between two people).
-            invite_state: Stripped state events. Same as `rooms.invite.$room_id.invite_state`
-                in sync v2, absent on joined/left rooms
+            stripped_state: Stripped state events (for rooms where the usre is
+                invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
+                absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
             limited: True if their are more events than fit between the given position and now.
@@ -185,21 +193,28 @@ class SlidingSyncResult:
                 (with potentially other old events in the timeline).
         """
 
-        name: str
+        name: Optional[str]
         avatar: Optional[str]
         heroes: Optional[List[EventBase]]
         initial: bool
-        required_state: List[EventBase]
-        timeline: List[EventBase]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        required_state: Optional[List[EventBase]]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        timeline_events: Optional[List[EventBase]]
+        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
         is_dm: bool
-        invite_state: List[EventBase]
-        prev_batch: StreamToken
-        limited: bool
+        # Optional because it's only relevant to invite/knock rooms
+        stripped_state: Optional[List[JsonDict]]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        prev_batch: Optional[StreamToken]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        limited: Optional[bool]
         joined_count: int
         invited_count: int
         notification_count: int
         highlight_count: int
-        num_live: int
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        num_live: Optional[int]
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:

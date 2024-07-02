@@ -261,9 +261,9 @@ class RestHelper:
         targ: str,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
-    ) -> None:
+    ) -> JsonDict:
         """A convenience helper: `change_membership` with `membership` preset to "ban"."""
-        self.change_membership(
+        return self.change_membership(
             room=room,
             src=src,
             targ=targ,
