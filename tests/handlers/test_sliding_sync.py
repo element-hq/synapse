@@ -1671,7 +1671,8 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self,
     ) -> None:
         """
-        Test that `newly_joined` TODO
+        Test that even though we're joined before the token range, if we leave and join
+        within the token range, it's still counted as `newly_joined`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
