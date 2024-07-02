@@ -433,6 +433,10 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
+        self.msc3823_account_suspension = experimental.get(
+            "msc3823_account_suspension", False
+        )
+
         self.msc3916_authenticated_media_enabled = experimental.get(
             "msc3916_authenticated_media_enabled", False
         )

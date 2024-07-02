@@ -1,1 +1,0 @@
-Remove unused `expire_access_token` option in the Synapse Docker config file. Contributed by @AaronDewes.

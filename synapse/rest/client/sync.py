@@ -973,31 +973,13 @@ class SlidingSyncRestServlet(RestServlet):
             requester=requester,
         )
 
-        serialized_rooms = {}
+        serialized_rooms: Dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
-            serialized_timeline = await self.event_serializer.serialize_events(
-                room_result.timeline_events,
-                time_now,
-                config=serialize_options,
-                bundle_aggregations=room_result.bundled_aggregations,
-            )
-
-            serialized_required_state = await self.event_serializer.serialize_events(
-                room_result.required_state,
-                time_now,
-                config=serialize_options,
-            )
-
             serialized_rooms[room_id] = {
-                "required_state": serialized_required_state,
-                "timeline": serialized_timeline,
-                "prev_batch": await room_result.prev_batch.to_string(self.store),
-                "limited": room_result.limited,
                 "joined_count": room_result.joined_count,
                 "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
-                "num_live": room_result.num_live,
             }
 
             if room_result.name:
@@ -1014,12 +996,47 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.required_state is not None:
+                serialized_required_state = (
+                    await self.event_serializer.serialize_events(
+                        room_result.required_state,
+                        time_now,
+                        config=serialize_options,
+                    )
+                )
+                serialized_rooms[room_id]["required_state"] = serialized_required_state
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.timeline_events is not None:
+                serialized_timeline = await self.event_serializer.serialize_events(
+                    room_result.timeline_events,
+                    time_now,
+                    config=serialize_options,
+                    bundle_aggregations=room_result.bundled_aggregations,
+                )
+                serialized_rooms[room_id]["timeline"] = serialized_timeline
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.limited is not None:
+                serialized_rooms[room_id]["limited"] = room_result.limited
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.prev_batch is not None:
+                serialized_rooms[room_id]["prev_batch"] = (
+                    await room_result.prev_batch.to_string(self.store)
+                )
+
+            # This will omitted for invite/knock rooms with `stripped_state`
+            if room_result.num_live is not None:
+                serialized_rooms[room_id]["num_live"] = room_result.num_live
+
             # Field should be absent on non-DM rooms
             if room_result.is_dm:
                 serialized_rooms[room_id]["is_dm"] = room_result.is_dm
 
             # Stripped state only applies to invite/knock rooms
-            if room_result.stripped_state:
+            if room_result.stripped_state is not None:
                 # TODO: `knocked_state` but that isn't specced yet.
                 #
                 # TODO: Instead of adding `knocked_state`, it would be good to rename

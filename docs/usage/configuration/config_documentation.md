@@ -1759,8 +1759,9 @@ rc_3pid_validation:
 ### `rc_invites`
 
 This option sets ratelimiting how often invites can be sent in a room or to a
-specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10` and
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`.
+specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
 room](https://spec.matrix.org/v1.2/client-server-api/#post_matrixclientv3createroom)
@@ -1975,9 +1976,10 @@ This will not prevent the listed domains from accessing media themselves.
 It simply prevents users on this server from downloading media originating
 from the listed servers.
 
-This will have no effect on media originating from the local server.
-This only affects media downloaded from other Matrix servers, to
-block domains from URL previews see [`url_preview_url_blacklist`](#url_preview_url_blacklist).
+This will have no effect on media originating from the local server. This only
+affects media downloaded from other Matrix servers, to control URL previews see
+[`url_preview_ip_range_blacklist`](#url_preview_ip_range_blacklist) or
+[`url_preview_url_blacklist`](#url_preview_url_blacklist).
 
 Defaults to an empty list (nothing blocked).
 
@@ -2129,12 +2131,14 @@ url_preview_ip_range_whitelist:
 ---
 ### `url_preview_url_blacklist`
 
-Optional list of URL matches that the URL preview spider is
-denied from accessing.  You should use `url_preview_ip_range_blacklist`
-in preference to this, otherwise someone could define a public DNS
-entry that points to a private IP address and circumvent the blacklist.
-This is more useful if you know there is an entire shape of URL that
-you know that will never want synapse to try to spider.
+Optional list of URL matches that the URL preview spider is denied from
+accessing.  This is a usability feature, not a security one. You should use
+`url_preview_ip_range_blacklist` in preference to this, otherwise someone could
+define a public DNS entry that points to a private IP address and circumvent
+the blacklist. Applications that perform redirects or serve different content
+when detecting that Synapse is accessing them can also bypass the blacklist.
+This is more useful if you know there is an entire shape of URL that you know
+that you do not want Synapse to preview.
 
 Each list entry is a dictionary of url component attributes as returned
 by urlparse.urlsplit as applied to the absolute form of the URL.  See
@@ -2718,7 +2722,7 @@ Example configuration:
 session_lifetime: 24h
 ```
 ---
-### `refresh_access_token_lifetime`
+### `refreshable_access_token_lifetime`
 
 Time that an access token remains valid for, if the session is using refresh tokens.
 
@@ -3806,7 +3810,8 @@ This setting defines options related to the user directory.
 This option has the following sub-options:
 * `enabled`:  Defines whether users can search the user directory. If false then
    empty responses are returned to all queries. Defaults to true.
-* `search_all_users`: Defines whether to search all users visible to your HS at the time the search is performed. If set to true, will return all users who share a room with the user from the homeserver.
+* `search_all_users`: Defines whether to search all users visible to your homeserver at the time the search is performed.
+   If set to true, will return all users known to the homeserver matching the search query.
    If false, search results will only contain users
     visible in public rooms and users sharing a room with the requester.
     Defaults to false.
