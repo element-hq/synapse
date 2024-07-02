@@ -138,13 +138,13 @@ class RoomSyncConfig:
             state_type,
             state_key,
         ) in room_params.required_state:
-            # If we already have a wildcard for *any* `state_type`, we don't need to add
+            # If we already have a wildcard for everything, we don't need to add
             # anything else
             wildcard_set = required_state_map.get(StateKeys.WILDCARD, {})
             if (StateKeys.WILDCARD, StateKeys.WILDCARD) in wildcard_set:
                 break
 
-            # If we already have a wildcard for this specific `state_type`, we don't need
+            # If we already have a wildcard for this specific `state_key`, we don't need
             # to add it since the wildcard already covers it.
             if (StateKeys.WILDCARD, state_key) in wildcard_set:
                 continue
@@ -169,6 +169,9 @@ class RoomSyncConfig:
             # entries with the same `state_key`, since the wildcard will cover it already.
             elif state_type == StateKeys.WILDCARD:
                 # Get rid of any entries that match the `state_key`
+                #
+                # Make a copy so we don't run into an error: `dictionary changed size
+                # during iteration`, when we remove items
                 for (
                     existing_state_type,
                     existing_state_key_set,
