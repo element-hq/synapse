@@ -1,4 +1,4 @@
-.. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
+.. image:: ./docs/element_logo_white_bg.svg
    :height: 60px
 
 **Element Synapse - Matrix homeserver implementation**
