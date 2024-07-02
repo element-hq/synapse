@@ -1202,14 +1202,17 @@ class SlidingSyncHandler:
                     Membership.LEAVE,
                     Membership.BAN,
                 ):
-                    room_state = await self.storage_controllers.state.get_state_ids_at(
+                    room_state = await self.storage_controllers.state.get_state_at(
                         room_id,
-                        stream_position=rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                        stream_position=to_token.copy_and_replace(
+                            StreamKeyType.ROOM,
+                            rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                        ),
                         state_filter=state_filter,
                         await_full_state=False,
                     )
+                # Otherwise, we can get the latest current state in the room
                 else:
-                    # Otherwise, we can get the latest current state in the room
                     room_state = await self.storage_controllers.state.get_current_state(
                         room_id,
                         state_filter,

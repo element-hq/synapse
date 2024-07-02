@@ -459,6 +459,30 @@ class StateStorageController:
 
     @trace
     @tag_args
+    async def get_state_at(
+        self,
+        room_id: str,
+        stream_position: StreamToken,
+        state_filter: Optional[StateFilter] = None,
+        await_full_state: bool = True,
+    ) -> StateMap[EventBase]:
+        """Same as `get_state_ids_at` but also fetches the events"""
+        state_map_ids = await self.get_state_ids_at(
+            room_id, stream_position, state_filter, await_full_state
+        )
+
+        event_map = await self.stores.main.get_events(list(state_map_ids.values()))
+
+        state_map = {}
+        for key, event_id in state_map_ids.items():
+            event = event_map.get(event_id)
+            if event:
+                state_map[key] = event
+
+        return state_map
+
+    @trace
+    @tag_args
     async def get_state_for_groups(
         self, groups: Iterable[int], state_filter: Optional[StateFilter] = None
     ) -> Dict[int, MutableStateMap[str]]:
