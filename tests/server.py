@@ -946,7 +946,7 @@ def connect_client(
 
 
 class TestHomeServer(HomeServer):
-    DATASTORE_CLASS = DataStore  # type: ignore[assignment]
+    DATASTORE_CLASS = DataStore
 
 
 def setup_test_homeserver(

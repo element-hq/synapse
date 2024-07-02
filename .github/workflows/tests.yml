@@ -73,7 +73,7 @@ jobs:
             - 'pyproject.toml'
             - 'poetry.lock'
             - '.github/workflows/tests.yml'
-          
+
           linting_readme:
             - 'README.rst'
 
@@ -139,7 +139,7 @@ jobs:
 
       - name: Semantic checks (ruff)
         # --quiet suppresses the update check.
-        run: poetry run ruff --quiet .
+        run: poetry run ruff check --quiet .
 
   lint-mypy:
     runs-on: ubuntu-latest
