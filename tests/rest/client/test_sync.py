@@ -1386,10 +1386,12 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Create a future token that will cause us to wait. Since we never send a new
         # event to reach that future stream_ordering, the worker will wait until the
         # full timeout.
+        stream_id_gen = self.store.get_events_stream_id_generator()
+        stream_id = self.get_success(stream_id_gen.get_next().__aenter__())
         current_token = self.event_sources.get_current_token()
         future_position_token = current_token.copy_and_replace(
             StreamKeyType.ROOM,
-            RoomStreamToken(stream=current_token.room_key.stream + 1),
+            RoomStreamToken(stream=stream_id),
         )
 
         future_position_token_serialized = self.get_success(

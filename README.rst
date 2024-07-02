@@ -5,9 +5,9 @@
 
 |support| |development| |documentation| |license| |pypi| |python|
 
-Synapse is an open source `Matrix <https://matrix.org>`_ homeserver
+Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
 implementation, written and maintained by `Element <https://element.io>`_.
-`Matrix <https://github.com/matrix-org>`_ is the open standard for
+`Matrix <https://github.com/matrix-org>`__ is the open standard for
 secure and interoperable real time communications. You can directly run
 and manage the source code in this repository, available under an AGPL
 license. There is no support provided from Element unless you have a
@@ -119,7 +119,7 @@ impact to other applications will be minimal.
 
 
 🧪 Testing a new installation
-============================
+=============================
 
 The easiest way to try out your new Synapse installation is by connecting to it
 from a web client.
@@ -173,10 +173,10 @@ As when logging in, you will need to specify a "Custom server".  Specify your
 desired ``localpart`` in the 'User name' box.
 
 🎯 Troubleshooting and support
-=============================
+==============================
 
 🚀 Professional support
-----------------------
+-----------------------
 
 Enterprise quality support for Synapse including SLAs is available as part of an
 `Element Server Suite (ESS) <https://element.io/pricing>` subscription.
@@ -185,7 +185,7 @@ If you are an existing ESS subscriber then you can raise a `support request <htt
 and access the `knowledge base <https://ems-docs.element.io>`.
 
 🤝 Community support
--------------------
+--------------------
 
 The `Admin FAQ <https://element-hq.github.io/synapse/latest/usage/administration/admin_faq.html>`_
 includes tips on dealing with some common problems. For more details, see
@@ -202,7 +202,7 @@ issues for support requests, only for bug reports and feature requests.
 .. _docs: docs
 
 🪪 Identity Servers
-==================
+===================
 
 Identity servers have the job of mapping email addresses and other 3rd Party
 IDs (3PIDs) to Matrix user IDs, as well as verifying the ownership of 3PIDs
