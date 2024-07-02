@@ -162,7 +162,9 @@ class RoomSyncConfig:
             # If we're getting wildcards for the `state_type` and `state_key`, that's
             # all that matters so get rid of any other entries
             if state_type == StateKeys.WILDCARD and state_key == StateKeys.WILDCARD:
-                required_state_map = {state_type: {(state_type, state_key)}}
+                required_state_map = {
+                    StateKeys.WILDCARD: {(StateKeys.WILDCARD, StateKeys.WILDCARD)}
+                }
                 # We can break, since we don't need to add anything else
                 break
             # If we're getting a wildcard for the `state_type`, get rid of any other
@@ -234,16 +236,71 @@ class RoomSyncConfig:
             state_type,
             state_key_set,
         ) in other_room_sync_config.required_state_map.items():
-            # If we already have a wildcard, we don't need to add anything else
-            if get_first_item_in_set(self.required_state_map.get(state_type)) == (
-                state_type,
-                StateKeys.WILDCARD,
+            # If we already have a wildcard for everything, we don't need to add
+            # anything else
+            if (StateKeys.WILDCARD, StateKeys.WILDCARD) in self.required_state_map.get(
+                StateKeys.WILDCARD, {}
+            ):
+                break
+
+            # If we already have a wildcard `state_key` for this `state_type`, we don't need
+            # to add anything else
+            if (
+                # We assume that if a wildcard is present, it's the only thing in the
+                # set.
+                get_first_item_in_set(self.required_state_map.get(state_type))
+                == (state_type, StateKeys.WILDCARD)
             ):
                 continue
 
+            # If we're getting wildcards for the `state_type` and `state_key`, that's
+            # all that matters so get rid of any other entries
+            if (
+                state_type == StateKeys.WILDCARD
+                and (StateKeys.WILDCARD, StateKeys.WILDCARD) in state_key_set
+            ):
+                self.required_state_map = {
+                    state_type: {(StateKeys.WILDCARD, StateKeys.WILDCARD)}
+                }
+                # We can break, since we don't need to add anything else
+                break
+
             for _state_type, state_key in state_key_set:
-                # If we're getting a wildcard, that's all that matters so get rid of any
-                # other state keys
+                # If we already have a wildcard for this specific `state_key`, we don't need
+                # to add it since the wildcard already covers it.
+                if (StateKeys.WILDCARD, state_key) in self.required_state_map.get(
+                    StateKeys.WILDCARD, {}
+                ):
+                    continue
+
+                # If we're getting a wildcard for the `state_type`, get rid of any other
+                # entries with the same `state_key`, since the wildcard will cover it already.
+                if state_type == StateKeys.WILDCARD:
+                    # Get rid of any entries that match the `state_key`
+                    #
+                    # Make a copy so we don't run into an error: `dictionary changed size
+                    # during iteration`, when we remove items
+                    for (
+                        existing_state_type,
+                        existing_state_key_set,
+                    ) in list(self.required_state_map.items()):
+                        # Make a copy so we don't run into an error: `Set changed size during
+                        # iteration`, when we filter out and remove items
+                        for (
+                            _existing_state_type,
+                            existing_state_key,
+                        ) in existing_state_key_set.copy():
+                            if existing_state_key == state_key:
+                                existing_state_key_set.remove(
+                                    (existing_state_type, state_key)
+                                )
+
+                        # If we've the left the `set()` empty, remove it from the map
+                        if existing_state_key_set == set():
+                            self.required_state_map.pop(existing_state_type, None)
+
+                # If we're getting a wildcard `state_key`, get rid of any other state_keys
+                # for this `state_type` since the wildcard will cover it already.
                 if state_key == StateKeys.WILDCARD:
                     self.required_state_map[state_type] = {(state_type, state_key)}
                     break

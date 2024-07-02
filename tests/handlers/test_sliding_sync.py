@@ -22,6 +22,7 @@ from copy import deepcopy
 from unittest.mock import patch
 
 from parameterized import parameterized
+from typing import Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -51,19 +52,24 @@ logger = logging.getLogger(__name__)
 
 class RoomSyncConfigTestCase(TestCase):
     def _assert_room_config_equal(
-        self, actual: RoomSyncConfig, expected: RoomSyncConfig
+        self,
+        actual: RoomSyncConfig,
+        expected: RoomSyncConfig,
+        message_prefix: Optional[str] = None,
     ) -> None:
-        self.assertEqual(actual.timeline_limit, expected.timeline_limit)
+        self.assertEqual(actual.timeline_limit, expected.timeline_limit, message_prefix)
 
         # `self.assertEqual(...)` works fine to catch differences but the output is
         # almost impossible to read because of the way it truncates the output and the
         # order doesn't actually matter.
-        self.assertCountEqual(actual.required_state_map, expected.required_state_map)
+        self.assertCountEqual(
+            actual.required_state_map, expected.required_state_map, message_prefix
+        )
         for event_type, expected_state_keys in expected.required_state_map.items():
             self.assertCountEqual(
                 actual.required_state_map[event_type],
                 expected_state_keys,
-                f"Mismatch for {event_type}",
+                f"{message_prefix}: Mismatch for {event_type}",
             )
 
     @parameterized.expand(
@@ -373,7 +379,7 @@ class RoomSyncConfigTestCase(TestCase):
     @parameterized.expand(
         [
             (
-                "No direct overlap",
+                "no_direct_overlap",
                 # A
                 RoomSyncConfig(
                     timeline_limit=9,
@@ -412,23 +418,106 @@ class RoomSyncConfigTestCase(TestCase):
                 ),
             ),
             (
-                "Wildcard overlap",
+                "wildcard_overlap",
                 # A
                 RoomSyncConfig(
                     timeline_limit=10,
                     required_state_map={
-                        EventTypes.Dummy: {(EventTypes.Dummy, "foo")},
-                        EventTypes.Member: {
-                            (EventTypes.Member, "*"),
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, StateKeys.WILDCARD),
                         },
-                        "org.matrix.flowers": {("org.matrix.flowers", "*")},
                     },
                 ),
                 # B
                 RoomSyncConfig(
                     timeline_limit=9,
                     required_state_map={
-                        EventTypes.Dummy: {(EventTypes.Dummy, "*")},
+                        EventTypes.Dummy: {(EventTypes.Dummy, StateKeys.WILDCARD)},
+                        StateKeys.WILDCARD: {(StateKeys.WILDCARD, "@bar")},
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@foo"),
+                        },
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, StateKeys.WILDCARD),
+                        },
+                    },
+                ),
+            ),
+            (
+                "state_type_wildcard_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                            (StateKeys.WILDCARD, "@foo"),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@bar"),
+                        },
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "dummy2")},
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                            (StateKeys.WILDCARD, "@bar"),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@foo"),
+                        },
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {
+                            (EventTypes.Dummy, "dummy"),
+                            (EventTypes.Dummy, "dummy2"),
+                        },
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                            (StateKeys.WILDCARD, "@foo"),
+                            (StateKeys.WILDCARD, "@bar"),
+                        },
+                    },
+                ),
+            ),
+            (
+                "state_key_wildcard_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
+                        EventTypes.Member: {
+                            (EventTypes.Member, StateKeys.WILDCARD),
+                        },
+                        "org.matrix.flowers": {
+                            ("org.matrix.flowers", StateKeys.WILDCARD)
+                        },
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, StateKeys.WILDCARD)},
+                        EventTypes.Member: {
+                            (EventTypes.Member, StateKeys.WILDCARD),
+                        },
                         "org.matrix.flowers": {("org.matrix.flowers", "tulips")},
                     },
                 ),
@@ -437,12 +526,61 @@ class RoomSyncConfigTestCase(TestCase):
                     timeline_limit=10,
                     required_state_map={
                         EventTypes.Dummy: {
-                            (EventTypes.Dummy, "*"),
+                            (EventTypes.Dummy, StateKeys.WILDCARD),
                         },
                         EventTypes.Member: {
-                            (EventTypes.Member, "*"),
+                            (EventTypes.Member, StateKeys.WILDCARD),
                         },
-                        "org.matrix.flowers": {("org.matrix.flowers", "*")},
+                        "org.matrix.flowers": {
+                            ("org.matrix.flowers", StateKeys.WILDCARD)
+                        },
+                    },
+                ),
+            ),
+            (
+                "state_type_and_state_key_wildcard_merge",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "dummy")},
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                            (StateKeys.WILDCARD, "@foo"),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, "@bar"),
+                        },
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {(EventTypes.Dummy, "dummy2")},
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, StateKeys.WILDCARD),
+                        },
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {
+                            (EventTypes.Dummy, "dummy"),
+                            (EventTypes.Dummy, "dummy2"),
+                        },
+                        StateKeys.WILDCARD: {
+                            (StateKeys.WILDCARD, ""),
+                            (StateKeys.WILDCARD, "@foo"),
+                        },
+                        EventTypes.Member: {
+                            (EventTypes.Member, StateKeys.WILDCARD),
+                        },
                     },
                 ),
             ),
@@ -465,7 +603,7 @@ class RoomSyncConfigTestCase(TestCase):
         # Combine B into A
         room_sync_config_a.combine_room_sync_config(room_sync_config_b)
 
-        self._assert_room_config_equal(room_sync_config_a, expected)
+        self._assert_room_config_equal(room_sync_config_a, expected, "B into A")
 
         # Since we're mutating these in place, make a copy for each of our trials
         room_sync_config_a = deepcopy(a)
@@ -474,7 +612,7 @@ class RoomSyncConfigTestCase(TestCase):
         # Combine A into B
         room_sync_config_b.combine_room_sync_config(room_sync_config_a)
 
-        self._assert_room_config_equal(room_sync_config_b, expected)
+        self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
