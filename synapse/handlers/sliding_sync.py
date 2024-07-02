@@ -474,13 +474,26 @@ class SlidingSyncHandler:
             # 1b) 1c) From the first membership event after the `to_token`, step backward to the
             # previous membership that would apply to the from/to range.
             else:
-                sync_room_id_set[room_id] = _RoomMembershipForUser(
-                    event_id=first_membership_change_after_to_token.prev_event_id,
-                    event_pos=first_membership_change_after_to_token.prev_event_pos,
-                    membership=first_membership_change_after_to_token.prev_membership,
-                    sender=first_membership_change_after_to_token.prev_sender,
-                    newly_joined=False,
-                )
+                # We don't expect these fields to be `None` if we have a `prev_event_id`
+                # but we're being defensive since it's possible that the prev event was
+                # culled from the database.
+                if (
+                    first_membership_change_after_to_token.prev_event_pos is not None
+                    and first_membership_change_after_to_token.prev_membership
+                    is not None
+                ):
+                    sync_room_id_set[room_id] = _RoomMembershipForUser(
+                        event_id=first_membership_change_after_to_token.prev_event_id,
+                        event_pos=first_membership_change_after_to_token.prev_event_pos,
+                        membership=first_membership_change_after_to_token.prev_membership,
+                        sender=first_membership_change_after_to_token.prev_sender,
+                        newly_joined=False,
+                    )
+                else:
+                    # If we can't find the previous membership event, we shouldn't
+                    # include the room in the sync response since we can't determine the
+                    # exact membership state and shouldn't rely on the current snapshot.
+                    sync_room_id_set.pop(room_id, None)
 
         # Filter the rooms that that we have updated room membership events to the point
         # in time of the `to_token` (from the "1)" fixups)
