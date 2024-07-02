@@ -1,38 +1,38 @@
 [tool.towncrier]
-package = "synapse"
-filename = "CHANGES.md"
-directory = "changelog.d"
-issue_format = "[\\#{issue}](https://github.com/element-hq/synapse/issues/{issue})"
+    package = "synapse"
+    filename = "CHANGES.md"
+    directory = "changelog.d"
+    issue_format = "[\\#{issue}](https://github.com/element-hq/synapse/issues/{issue})"
 
-[[tool.towncrier.type]]
-directory = "feature"
-name = "Features"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "feature"
+        name = "Features"
+        showcontent = true
 
-[[tool.towncrier.type]]
-directory = "bugfix"
-name = "Bugfixes"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "bugfix"
+        name = "Bugfixes"
+        showcontent = true
 
-[[tool.towncrier.type]]
-directory = "docker"
-name = "Updates to the Docker image"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "docker"
+        name = "Updates to the Docker image"
+        showcontent = true
 
-[[tool.towncrier.type]]
-directory = "doc"
-name = "Improved Documentation"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "doc"
+        name = "Improved Documentation"
+        showcontent = true
 
-[[tool.towncrier.type]]
-directory = "removal"
-name = "Deprecations and Removals"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "removal"
+        name = "Deprecations and Removals"
+        showcontent = true
 
-[[tool.towncrier.type]]
-directory = "misc"
-name = "Internal Changes"
-showcontent = true
+    [[tool.towncrier.type]]
+        directory = "misc"
+        name = "Internal Changes"
+        showcontent = true
 
 [tool.black]
 target-version = ['py38', 'py39', 'py310', 'py311']
@@ -51,7 +51,11 @@ line-length = 88
 # flake8-bugbear compatible checks. Its error codes are described at
 # https://beta.ruff.rs/docs/rules/#flake8-bugbear-b
 #  B023: Functions defined inside a loop must not use variables redefined in the loop
-ignore = ["B023", "E501", "E731"]
+ignore = [
+    "B023",
+    "E501",
+    "E731",
+]
 select = [
     # pycodestyle
     "E",
@@ -76,15 +80,7 @@ select = [
 
 [tool.isort]
 line_length = 88
-sections = [
-    "FUTURE",
-    "STDLIB",
-    "THIRDPARTY",
-    "TWISTED",
-    "FIRSTPARTY",
-    "TESTS",
-    "LOCALFOLDER",
-]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "TWISTED", "FIRSTPARTY", "TESTS", "LOCALFOLDER"]
 default_section = "THIRDPARTY"
 known_first_party = ["synapse"]
 known_tests = ["tests"]
@@ -106,7 +102,9 @@ authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later"
 readme = "README.rst"
 repository = "https://github.com/element-hq/synapse"
-packages = [{ include = "synapse" }]
+packages = [
+    { include = "synapse" },
+]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Topic :: Communications :: Chat",
@@ -122,7 +120,7 @@ include = [
     { path = "INSTALL.md", format = "sdist" },
     { path = "mypy.ini", format = "sdist" },
     { path = "scripts-dev", format = "sdist" },
-    { path = "synmark", format = "sdist" },
+    { path = "synmark", format="sdist" },
     { path = "sytest-blacklist", format = "sdist" },
     { path = "tests", format = "sdist" },
     { path = "UPGRADE.rst", format = "sdist" },
@@ -132,7 +130,9 @@ include = [
     { path = "rust/build.rs", format = "sdist" },
     { path = "rust/src/**", format = "sdist" },
 ]
-exclude = [{ path = "synapse/*.so", format = "sdist" }]
+exclude = [
+    { path = "synapse/*.so", format = "sdist"}
+]
 
 [tool.poetry.build]
 script = "build_rust.py"
@@ -291,9 +291,7 @@ all = [
     # matrix-synapse-ldap3
     "matrix-synapse-ldap3",
     # postgres
-    "psycopg2",
-    "psycopg2cffi",
-    "psycopg2cffi-compat",
+    "psycopg2", "psycopg2cffi", "psycopg2cffi-compat",
     # saml2
     "pysaml2",
     # oidc and jwt
@@ -303,11 +301,9 @@ all = [
     # sentry
     "sentry-sdk",
     # opentracing
-    "jaeger-client",
-    "opentracing",
+    "jaeger-client", "opentracing",
     # redis
-    "txredisapi",
-    "hiredis",
+    "txredisapi", "hiredis",
     # cache-memory
     "pympler",
     # improved user search
@@ -391,8 +387,8 @@ build-backend = "poetry.core.masonry.api"
 skip = "cp36* cp37* pp37* *-musllinux_i686 pp*aarch64 *-musllinux_aarch64"
 
 # We need a rust compiler
-before-all = "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y --profile minimal"
-environment = { PATH = "$PATH:$HOME/.cargo/bin" }
+before-all =  "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y --profile minimal"
+environment= { PATH = "$PATH:$HOME/.cargo/bin" }
 
 # For some reason if we don't manually clean the build directory we
 # can end up polluting the next build with a .so that is for the wrong
