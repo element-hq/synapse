@@ -739,6 +739,7 @@ An example for a federation sender instance:
 Handles the media repository. It can handle all endpoints starting with:
 
     /_matrix/media/
+    /_matrix/client/v1/media/
 
 ... and the following regular expressions matching media-specific administration APIs:
 

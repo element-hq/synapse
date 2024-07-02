@@ -790,7 +790,7 @@ class FederationAccountStatusServlet(BaseFederationServerServlet):
         return 200, {"account_statuses": statuses, "failures": failures}
 
 
-class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
+class FederationMediaDownloadServlet(BaseFederationServerServlet):
     """
     Implementation of new federation media `/download` endpoint outlined in MSC3916. Returns
     a multipart/mixed response consisting of a JSON object and the requested media
@@ -798,7 +798,6 @@ class FederationUnstableMediaDownloadServlet(BaseFederationServerServlet):
     """
 
     PATH = "/media/download/(?P<media_id>[^/]*)"
-    PREFIX = FEDERATION_UNSTABLE_PREFIX + "/org.matrix.msc3916"
     RATELIMIT = True
 
     def __init__(
@@ -858,5 +857,5 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
-    FederationUnstableMediaDownloadServlet,
+    FederationMediaDownloadServlet,
 )

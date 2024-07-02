@@ -45,10 +45,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.engines._base import IsolationLevel
-from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
-    MultiWriterIdGenerator,
-)
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import (
     JsonDict,
     JsonMapping,
@@ -76,7 +73,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
         # In the worker store this is an ID tracker which we overwrite in the non-worker
         # class below that is used on the main process.
-        self._receipts_id_gen: AbstractStreamIdGenerator
+        self._receipts_id_gen: MultiWriterIdGenerator
 
         self._can_write_to_receipts = (
             self._instance_name in hs.config.worker.writers.receipts
@@ -135,6 +132,9 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
     def get_receipt_stream_id_for_instance(self, instance_name: str) -> int:
         return self._receipts_id_gen.get_current_token_for_writer(instance_name)
+
+    def get_receipts_stream_id_gen(self) -> MultiWriterIdGenerator:
+        return self._receipts_id_gen
 
     def get_last_unthreaded_receipt_for_user_txn(
         self,
