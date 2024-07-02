@@ -208,6 +208,42 @@ class RoomSyncConfigTestCase(TestCase):
             ),
         )
 
+    def test_from_room_config_multiple_wildcard_type(self) -> None:
+        """
+        Test that multiple wildcard (*) as a `event_type` will override all other values
+        for the same `state_key`.
+        """
+        list_config = SlidingSyncConfig.SlidingSyncList(
+            timeline_limit=10,
+            required_state=[
+                (EventTypes.Name, ""),
+                (StateKeys.WILDCARD, ""),
+                (EventTypes.Member, "@foo"),
+                (StateKeys.WILDCARD, "@foo"),
+                ("org.matrix.personal_count", "@foo"),
+                (EventTypes.Member, "@bar"),
+                (EventTypes.CanonicalAlias, ""),
+            ],
+        )
+
+        room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            RoomSyncConfig(
+                timeline_limit=10,
+                required_state_map={
+                    StateKeys.WILDCARD: {
+                        (StateKeys.WILDCARD, ""),
+                        (StateKeys.WILDCARD, "@foo"),
+                    },
+                    EventTypes.Member: {
+                        (EventTypes.Member, "@bar"),
+                    },
+                },
+            ),
+        )
+
     def test_from_room_config_wildcard_state_key(self) -> None:
         """
         Test that a wildcard (*) as a `state_key` will override all other values for the
@@ -235,7 +271,7 @@ class RoomSyncConfigTestCase(TestCase):
                 required_state_map={
                     EventTypes.Name: {(EventTypes.Name, "")},
                     EventTypes.Member: {
-                        (EventTypes.Member, "*"),
+                        (EventTypes.Member, StateKeys.WILDCARD),
                     },
                     EventTypes.CanonicalAlias: {(EventTypes.CanonicalAlias, "")},
                 },
