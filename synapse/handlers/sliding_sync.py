@@ -1265,76 +1265,99 @@ class SlidingSyncHandler:
             Membership.INVITE,
             Membership.KNOCK,
         ):
-            # Calculate the required state for the room and make it into the form of a
-            # `StateFilter`
-            required_state_types: List[Tuple[str, Optional[str]]] = []
-            for (
-                state_type,
-                state_key_set,
-            ) in room_sync_config.required_state_map.items():
-                for _state_type, state_key in state_key_set:
-                    if state_key == StateKeys.WILDCARD:
-                        # `None` is a wildcard in the `StateFilter`
-                        required_state_types.append((state_type, None))
-                    # We need to fetch all relevant people when we're lazy-loading membership
-                    if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
-                        # Everyone in the timeline is relevant
-                        timeline_membership: Set[str] = set()
-                        if timeline_events is not None:
-                            for timeline_event in timeline_events:
-                                timeline_membership.add(timeline_event.sender)
-
-                        for user_id in timeline_membership:
-                            required_state_types.append((EventTypes.Member, user_id))
-
-                        # TODO: We probably also care about invite, ban, kick, targets, etc
-                        # but the spec only mentions "senders".
-                    else:
-                        required_state_types.append((state_type, state_key))
-
-            state_filter = StateFilter.from_types(required_state_types)
-
-            # We can return all of the state that was requested if we're doing an
-            # initial sync
-            if initial:
-                # People shouldn't see past their leave/ban event
-                if rooms_membership_for_user_at_to_token.membership in (
-                    Membership.LEAVE,
-                    Membership.BAN,
-                ):
-                    room_state = await self.storage_controllers.state.get_state_at(
-                        room_id,
-                        stream_position=to_token.copy_and_replace(
-                            StreamKeyType.ROOM,
-                            rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
-                        ),
-                        state_filter=state_filter,
-                        # Partially-stated rooms should have all state events except for
-                        # the membership events and since we've already excluded
-                        # partially-stated rooms unless `required_state` only has
-                        # `["m.room.member", "$LAZY"]` for membership, we should be able
-                        # to retrieve everything requested. Plus we don't want to block
-                        # the whole sync waiting for this one room.
-                        await_full_state=False,
-                    )
-                # Otherwise, we can get the latest current state in the room
-                else:
-                    room_state = await self.storage_controllers.state.get_current_state(
-                        room_id,
-                        state_filter,
-                        # Partially-stated rooms should have all state events except for
-                        # the membership events and since we've already excluded
-                        # partially-stated rooms unless `required_state` only has
-                        # `["m.room.member", "$LAZY"]` for membership, we should be able
-                        # to retrieve everything requested. Plus we don't want to block
-                        # the whole sync waiting for this one room.
-                        await_full_state=False,
-                    )
-                    # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+            # Calculate the `StateFilter` based on the `required_state` for the room
+            state_filter: Optional[StateFilter] = StateFilter.none()
+            # If we have a double wildcard ("*", "*") in the `required_state`, we need
+            # to fetch all state for the room
+            if (
+                StateKeys.WILDCARD,
+                StateKeys.WILDCARD,
+            ) in room_sync_config.required_state_map.get(StateKeys.WILDCARD, set()):
+                state_filter = StateFilter.all()
+            # TODO: `StateFilter` currently doesn't support wildcard event types. We're
+            # currently working around this by returning all state to the client but it
+            # would be nice to fetch less from the database and return just what the
+            # client wanted.
+            elif (
+                room_sync_config.required_state_map.get(StateKeys.WILDCARD) is not None
+            ):
+                state_filter = StateFilter.all()
             else:
-                # TODO: Once we can figure out if we've sent a room down this connection before,
-                # we can return updates instead of the full required state.
-                raise NotImplementedError()
+                required_state_types: List[Tuple[str, Optional[str]]] = []
+                for (
+                    state_type,
+                    state_key_set,
+                ) in room_sync_config.required_state_map.items():
+                    for _state_type, state_key in state_key_set:
+                        if state_key == StateKeys.WILDCARD:
+                            # `None` is a wildcard in the `StateFilter`
+                            required_state_types.append((state_type, None))
+                        # We need to fetch all relevant people when we're lazy-loading membership
+                        if (
+                            state_type == EventTypes.Member
+                            and state_key == StateKeys.LAZY
+                        ):
+                            # Everyone in the timeline is relevant
+                            timeline_membership: Set[str] = set()
+                            if timeline_events is not None:
+                                for timeline_event in timeline_events:
+                                    timeline_membership.add(timeline_event.sender)
+
+                            for user_id in timeline_membership:
+                                required_state_types.append(
+                                    (EventTypes.Member, user_id)
+                                )
+
+                            # TODO: We probably also care about invite, ban, kick, targets, etc
+                            # but the spec only mentions "senders".
+                        else:
+                            required_state_types.append((state_type, state_key))
+
+                state_filter = StateFilter.from_types(required_state_types)
+
+            # We can skip fetching state if we don't need any
+            if state_filter != StateFilter.none():
+                # We can return all of the state that was requested if we're doing an
+                # initial sync
+                if initial:
+                    # People shouldn't see past their leave/ban event
+                    if rooms_membership_for_user_at_to_token.membership in (
+                        Membership.LEAVE,
+                        Membership.BAN,
+                    ):
+                        room_state = await self.storage_controllers.state.get_state_at(
+                            room_id,
+                            stream_position=to_token.copy_and_replace(
+                                StreamKeyType.ROOM,
+                                rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                            ),
+                            state_filter=state_filter,
+                            # Partially-stated rooms should have all state events except for
+                            # the membership events and since we've already excluded
+                            # partially-stated rooms unless `required_state` only has
+                            # `["m.room.member", "$LAZY"]` for membership, we should be able
+                            # to retrieve everything requested. Plus we don't want to block
+                            # the whole sync waiting for this one room.
+                            await_full_state=False,
+                        )
+                    # Otherwise, we can get the latest current state in the room
+                    else:
+                        room_state = await self.storage_controllers.state.get_current_state(
+                            room_id,
+                            state_filter,
+                            # Partially-stated rooms should have all state events except for
+                            # the membership events and since we've already excluded
+                            # partially-stated rooms unless `required_state` only has
+                            # `["m.room.member", "$LAZY"]` for membership, we should be able
+                            # to retrieve everything requested. Plus we don't want to block
+                            # the whole sync waiting for this one room.
+                            await_full_state=False,
+                        )
+                        # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+                else:
+                    # TODO: Once we can figure out if we've sent a room down this connection before,
+                    # we can return updates instead of the full required state.
+                    raise NotImplementedError()
 
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
