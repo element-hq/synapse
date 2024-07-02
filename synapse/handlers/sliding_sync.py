@@ -1161,8 +1161,9 @@ class SlidingSyncHandler:
                 if state_type == EventTypes.Member and state_key == StateKeys.LAZY:
                     # Everyone in the timeline is relevant
                     timeline_membership: Set[str] = set()
-                    for timeline_event in timeline_events:
-                        timeline_membership.add(timeline_event.sender)
+                    if timeline_events is not None:
+                        for timeline_event in timeline_events:
+                            timeline_membership.add(timeline_event.sender)
 
                     for user_id in timeline_membership:
                         required_state_types.append((EventTypes.Member, user_id))
