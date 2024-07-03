@@ -466,23 +466,16 @@ class SlidingSyncHandler:
                         # at the range start index and keep adding rooms until we fill
                         # up the range or run out of rooms.
                         #
-                        # Both sides of range are inclusive
-                        current_range_index = range[0]
-                        range_end_index = range[1]
-                        while (
-                            current_range_index <= range_end_index
-                            and current_range_index <= len(sorted_room_info) - 1
-                        ):
-                            room_id, _ = sorted_room_info[current_range_index]
+                        # Both sides of range are inclusive so we `+ 1`
+                        max_num_rooms = range[1] - range[0] + 1
+                        for room_id, _ in sorted_room_info[range[0] :]:
+                            if len(room_ids_in_list) >= max_num_rooms:
+                                break
 
                             # Exclude partially-stated rooms unless the `required_state`
                             # only has `["m.room.member", "$LAZY"]` for membership
                             # (lazy-loading room members).
                             if partial_state_room_map.get(room_id) and not lazy_loading:
-                                current_range_index += 1
-                                # Since we're skipping this room, we need to allow
-                                # for the next room to take its place in the list
-                                range_end_index += 1
                                 continue
 
                             # Take the superset of the `RoomSyncConfig` for each room.
@@ -502,7 +495,6 @@ class SlidingSyncHandler:
                                 )
 
                             room_ids_in_list.append(room_id)
-                            current_range_index += 1
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
