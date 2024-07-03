@@ -1313,7 +1313,7 @@ class SlidingSyncHandler:
                             # `None` is a wildcard in the `StateFilter`
                             required_state_types.append((state_type, None))
                         # We need to fetch all relevant people when we're lazy-loading membership
-                        if (
+                        elif (
                             state_type == EventTypes.Member
                             and state_key == StateValues.LAZY
                         ):
