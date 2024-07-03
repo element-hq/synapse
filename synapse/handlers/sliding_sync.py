@@ -454,7 +454,7 @@ class SlidingSyncHandler:
                 lazy_loading = (
                     membership_state_keys is not None
                     and len(membership_state_keys) == 1
-                    and (EventTypes.Member, StateValues.LAZY) in membership_state_keys
+                    and StateValues.LAZY in membership_state_keys
                 )
 
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
@@ -1258,10 +1258,9 @@ class SlidingSyncHandler:
             # > required as it would have been returned anyway.
             # >
             # > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
-            if (
-                StateValues.WILDCARD,
-                StateValues.WILDCARD,
-            ) in room_sync_config.required_state_map.get(StateValues.WILDCARD, set()):
+            if StateValues.WILDCARD in room_sync_config.required_state_map.get(
+                StateValues.WILDCARD, set()
+            ):
                 state_filter = StateFilter.all()
             # TODO: `StateFilter` currently doesn't support wildcard event types. We're
             # currently working around this by returning all state to the client but it
@@ -1278,7 +1277,7 @@ class SlidingSyncHandler:
                     state_type,
                     state_key_set,
                 ) in room_sync_config.required_state_map.items():
-                    for _state_type, state_key in state_key_set:
+                    for state_key in state_key_set:
                         if state_key == StateValues.WILDCARD:
                             # `None` is a wildcard in the `StateFilter`
                             required_state_types.append((state_type, None))
