@@ -20,7 +20,7 @@
 #
 import json
 import logging
-from typing import Dict, List
+from typing import AbstractSet, Dict, List, Optional, Iterable
 
 from parameterized import parameterized, parameterized_class
 
@@ -35,6 +35,7 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
+from synapse.events import EventBase
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken, UserID
@@ -2710,7 +2711,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                             # This one doesn't exist in the room
                             [EventTypes.Tombstone, ""],
                         ],
-                        "timeline_limit": 3,
+                        "timeline_limit": 0,
                     }
                 }
             },
@@ -2718,22 +2719,16 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        state_ids_map = self.get_success(
-            self.storage_controllers.state.get_current_state_ids(room_id1)
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
         )
 
-        self.assertEqual(
-            [
-                state_event["event_id"]
-                for state_event in channel.json_body["rooms"][room_id1][
-                    "required_state"
-                ]
-            ],
-            [
-                state_ids_map[(EventTypes.Create, "")],
-                state_ids_map[(EventTypes.RoomHistoryVisibility, "")],
-            ],
+        self._assertRequiredStateIncludes(
             channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
         )
 
     def test_rooms_required_state_incremental_sync(self) -> None:
@@ -2766,7 +2761,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                             # This one doesn't exist in the room
                             [EventTypes.Tombstone, ""],
                         ],
-                        "timeline_limit": 3,
+                        "timeline_limit": 0,
                     }
                 }
             },
@@ -2774,29 +2769,201 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        state_ids_map = self.get_success(
-            self.storage_controllers.state.get_current_state_ids(room_id1)
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
         )
 
         # The returned state doesn't change from initial to incremental sync. In the
         # future, we will only return updates but only if we've sent the room down the
         # connection before.
-        self.assertEqual(
-            [
-                state_event["event_id"]
-                for state_event in channel.json_body["rooms"][room_id1][
-                    "required_state"
-                ]
-            ],
-            [
-                state_ids_map[(EventTypes.Create, "")],
-                state_ids_map[(EventTypes.RoomHistoryVisibility, "")],
-            ],
+        self._assertRequiredStateIncludes(
             channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
         )
 
+    def test_rooms_required_state_wildcard(self) -> None:
+        """
+        Test `rooms.required_state` returns all state events when using wildcard `["*", "*"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="namespaced",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with wildcards for the `event_type` and `state_key`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            ["*", "*"],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            # We should see all the state events in the room
+            state_map.values(),
+        )
+
+    def test_rooms_required_state_wildcard_event_type(self) -> None:
+        """
+        Test `rooms.required_state` returns all state events when using wildcard in the
+        event type `["*", "foobarbaz"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="namespaced",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with wildcards for the `event_type` and `state_key`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            ["*", user1_id],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # We expect at-least any state event with the `user1_id` as the `state_key`
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+        )
+
+    def _assertRequiredStateIncludes(
+        self,
+        actual_required_state: JsonDict,
+        expected_state_events: Iterable[EventBase],
+    ) -> None:
+        """
+        Wrapper around `_assertIncludes` to give slightly better looking diff error
+        messages that include some context "$event_id (type, state_key)".
+        """
+
+        self._assertIncludes(
+            {
+                f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
+                for event in actual_required_state
+            },
+            {
+                f'{event.event_id} ("{event.type}", "{event.state_key}")'
+                for event in expected_state_events
+            },
+            # Message to help understand the diff in context
+            actual_required_state,
+        )
+
+    def _assertIncludes(
+        self,
+        actual_items: AbstractSet[str],
+        expected_items: AbstractSet[str],
+        msg: Optional[str] = None,
+    ) -> None:
+        """
+        Assert that all of the `expected_items` are included in the `actual_items`.
+
+        This assert could also be called `assertContains`, `assertItemsInSet`
+        """
+        # Check for a superset
+        if actual_items >= expected_items:
+            return
+
+        expected_lines: List[str] = []
+        for expected_item in expected_items:
+            is_expected_in_actual = expected_item in actual_items
+            expected_lines.append(
+                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
+            )
+
+        actual_lines: List[str] = []
+        for actual_item in actual_items:
+            is_actual_in_expected = actual_item in expected_items
+            actual_lines.append(
+                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
+            )
+
+        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{'\n'.join(expected_lines)}\n }}"
+        actual_string = (
+            f"Actual ('+' = found expected items):\n {{\n{'\n'.join(actual_lines)}\n }}"
+        )
+        diff_message = (
+            f"Some expected items are missing.\n{expected_string}\n{actual_string}"
+        )
+
+        self.fail(f"{diff_message}\n{msg}")
+
     # TODO: Add more `required_state` tests
-    # TODO: Add test for `"required_state": [ ["*","*"] ],`
     # TODO: Add test for `"required_state": [ ["*","foobarbaz"] ],`
+    # TODO: Add test for `"required_state": [ ["foobarbaz","*"] ],`
+    # TODO: Add test for `"required_state": [ ["m.room.member","$LAZY"] ],`
 
     # TODO: Add tests for partially-stated rooms being excluded
