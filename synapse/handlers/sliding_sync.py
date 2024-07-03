@@ -460,7 +460,7 @@ class SlidingSyncHandler:
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
-                        room_ids_in_list = []
+                        room_ids_in_list: List[str] = []
 
                         # We're going to loop through the sorted list of rooms starting
                         # at the range start index and keep adding rooms until we fill
