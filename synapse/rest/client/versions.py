@@ -45,6 +45,7 @@ class VersionsRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.config = hs.config
+        self.auth = hs.get_auth()
 
         # Calculate these once since they shouldn't change after start-up.
         self.e2ee_forced_public = (
@@ -60,7 +61,11 @@ class VersionsRestServlet(RestServlet):
             in self.config.room.encryption_enabled_by_default_for_room_presets
         )
 
-    def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+        requester = None
+        if self.auth.has_access_token(request):
+            requester = await self.auth.get_user_by_req(request)
+
         return (
             200,
             {
