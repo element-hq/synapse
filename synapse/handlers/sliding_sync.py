@@ -1263,22 +1263,14 @@ class SlidingSyncHandler:
             state_filter: Optional[StateFilter] = StateFilter.none()
             # If we have a double wildcard ("*", "*") in the `required_state`, we need
             # to fetch all state for the room
-            if (
-                StateValues.WILDCARD,
-                StateValues.WILDCARD,
-            ) in room_sync_config.required_state_map.get(StateValues.WILDCARD, set()):
-                state_filter = StateFilter.all()
-            # TODO: `StateFilter` currently doesn't support wildcard event types. We're
-            # currently working around this by returning all state to the client but it
-            # would be nice to fetch less from the database and return just what the
-            # client wanted.
             #
-            # Note: MSC3575 describes different behavior to how we're handling things here but
-            # since it's not wrong to return more state than requested (`required_state` is
-            # just the minimum requested), it doesn't matter if we include things that the
-            # client wanted excluded. This complexity is also under scrutiny, see
+            # Note: MSC3575 describes different behavior to how we're handling things
+            # here but since it's not wrong to return more state than requested
+            # (`required_state` is just the minimum requested), it doesn't matter if we
+            # include more than client wanted. This complexity is also under scrutiny,
+            # see
             # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
-
+            #
             # > One unique exception is when you request all state events via ["*", "*"]. When used,
             # > all state events are returned by default, and additional entries FILTER OUT the returned set
             # > of state events. These additional entries cannot use '*' themselves.
@@ -1288,6 +1280,15 @@ class SlidingSyncHandler:
             # > required as it would have been returned anyway.
             # >
             # > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
+            if (
+                StateValues.WILDCARD,
+                StateValues.WILDCARD,
+            ) in room_sync_config.required_state_map.get(StateValues.WILDCARD, set()):
+                state_filter = StateFilter.all()
+            # TODO: `StateFilter` currently doesn't support wildcard event types. We're
+            # currently working around this by returning all state to the client but it
+            # would be nice to fetch less from the database and return just what the
+            # client wanted.
             elif (
                 room_sync_config.required_state_map.get(StateValues.WILDCARD)
                 is not None
