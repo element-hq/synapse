@@ -500,15 +500,17 @@ class SlidingSyncHandler:
                                     EventTypes.Member
                                 )
                             )
-                            # Exclude partially-stated rooms unless the `required_state`
-                            # only has `["m.room.member", "$LAZY"]` for membership.
-                            if (
-                                partial_state_room_map.get(room_id)
-                                and membership_state_keys is not None
+                            lazy_loading = (
+                                membership_state_keys is not None
                                 and len(membership_state_keys) == 1
                                 and (EventTypes.Member, StateValues.LAZY)
                                 in membership_state_keys
-                            ):
+                            )
+                            # Exclude partially-stated rooms unless the `required_state`
+                            # only has `["m.room.member", "$LAZY"]` for membership
+                            # (lazy-loading room members).
+                            if partial_state_room_map.get(room_id) and not lazy_loading:
+                                current_range_index += 1
                                 # Since we're skipping this room, we need to allow
                                 # for the next room to take its place in the list
                                 range_end_index += 1
