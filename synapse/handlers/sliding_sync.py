@@ -476,6 +476,14 @@ class SlidingSyncHandler:
                 # Since creating the `RoomSyncConfig` takes some work, let's just do it
                 # once and make a copy whenever we need it.
                 room_sync_config = RoomSyncConfig.from_room_config(list_config)
+                membership_state_keys = room_sync_config.required_state_map.get(
+                    EventTypes.Member
+                )
+                lazy_loading = (
+                    membership_state_keys is not None
+                    and len(membership_state_keys) == 1
+                    and (EventTypes.Member, StateValues.LAZY) in membership_state_keys
+                )
 
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
@@ -495,17 +503,6 @@ class SlidingSyncHandler:
                         ):
                             room_id, _ = sorted_room_info[current_range_index]
 
-                            membership_state_keys = (
-                                room_sync_config.required_state_map.get(
-                                    EventTypes.Member
-                                )
-                            )
-                            lazy_loading = (
-                                membership_state_keys is not None
-                                and len(membership_state_keys) == 1
-                                and (EventTypes.Member, StateValues.LAZY)
-                                in membership_state_keys
-                            )
                             # Exclude partially-stated rooms unless the `required_state`
                             # only has `["m.room.member", "$LAZY"]` for membership
                             # (lazy-loading room members).
