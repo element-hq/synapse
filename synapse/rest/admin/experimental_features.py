@@ -31,7 +31,9 @@ from synapse.rest.admin import admin_patterns, assert_requester_is_admin
 from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
-    from synapse.server import HomeServer
+    from typing_extensions import assert_never
+
+    from synapse.server import HomeServer, HomeServerConfig
 
 
 class ExperimentalFeature(str, Enum):
@@ -41,6 +43,14 @@ class ExperimentalFeature(str, Enum):
 
     MSC3026 = "msc3026"
     MSC3881 = "msc3881"
+
+    def is_globally_enabled(self, config: "HomeServerConfig") -> bool:
+        if self is ExperimentalFeature.MSC3026:
+            return config.experimental.msc3026_enabled
+        if self is ExperimentalFeature.MSC3881:
+            return config.experimental.msc3881_enabled
+
+        assert_never(self)
 
 
 class ExperimentalFeaturesRestServlet(RestServlet):
