@@ -2795,6 +2795,42 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1],
         )
 
+    def test_rooms_no_required_state(self) -> None:
+        """
+        Empty `rooms.required_state` should not return any state events in the room
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        # Empty `required_state`
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # No `required_state` in response
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
+            channel.json_body["rooms"][room_id1],
+        )
+
     def test_rooms_required_state_initial_sync(self) -> None:
         """
         Test `rooms.required_state` returns requested state events in the room during an
