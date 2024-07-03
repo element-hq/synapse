@@ -123,6 +123,7 @@ class _RoomMembershipForUser:
             range
     """
 
+    room_id: str
     event_id: Optional[str]
     event_pos: PersistedEventPosition
     membership: str
@@ -327,7 +328,7 @@ class SlidingSyncHandler:
                         sync_config.user, sync_room_map, list_config.filters, to_token
                     )
 
-                sorted_room_info = await self.sort_rooms(
+                sorted_sync_rooms = await self.sort_rooms(
                     filtered_sync_room_map, to_token
                 )
 
@@ -335,19 +336,24 @@ class SlidingSyncHandler:
                 if list_config.ranges:
                     for range in list_config.ranges:
                         # Both sides of range are inclusive
-                        sliced_room_info = sorted_room_info[range[0] : range[1] + 1]
+                        sliced_sync_rooms = sorted_sync_rooms[range[0] : range[1] + 1]
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=[room_id for room_id, _ in sliced_room_info],
+                                room_ids=[
+                                    room_membership.room_id
+                                    for room_membership in sliced_sync_rooms
+                                ],
                             )
                         )
 
                         # Take the superset of the `RoomSyncConfig` for each room
-                        for room_id, room_membership_for_user in sliced_room_info:
-                            relevant_room_entry = relevant_room_map.get(room_id)
+                        for room_membership_for_user in sliced_sync_rooms:
+                            relevant_room_entry = relevant_room_map.get(
+                                room_membership_for_user.room_id
+                            )
                             if relevant_room_entry is not None:
                                 existing_room_sync_config = (
                                     relevant_room_entry.room_sync_config
@@ -367,16 +373,20 @@ class SlidingSyncHandler:
                                     list_config.required_state
                                 )
                             else:
-                                relevant_room_map[room_id] = _RelevantRoomEntry(
-                                    room_sync_config=RoomSyncConfig(
-                                        timeline_limit=list_config.timeline_limit,
-                                        required_state=set(list_config.required_state),
-                                    ),
-                                    room_membership_for_user=room_membership_for_user,
+                                relevant_room_map[room_membership_for_user.room_id] = (
+                                    _RelevantRoomEntry(
+                                        room_sync_config=RoomSyncConfig(
+                                            timeline_limit=list_config.timeline_limit,
+                                            required_state=set(
+                                                list_config.required_state
+                                            ),
+                                        ),
+                                        room_membership_for_user=room_membership_for_user,
+                                    )
                                 )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                    count=len(sorted_room_info),
+                    count=len(sorted_sync_rooms),
                     ops=ops,
                 )
 
@@ -461,6 +471,7 @@ class SlidingSyncHandler:
             # (below) because they are potentially from the current snapshot time
             # instead from the time of the `to_token`.
             room_for_user.room_id: _RoomMembershipForUser(
+                room_id=room_for_user.room_id,
                 event_id=room_for_user.event_id,
                 event_pos=room_for_user.event_pos,
                 membership=room_for_user.membership,
@@ -561,6 +572,7 @@ class SlidingSyncHandler:
                     is not None
                 ):
                     sync_room_id_set[room_id] = _RoomMembershipForUser(
+                        room_id=room_id,
                         event_id=first_membership_change_after_to_token.prev_event_id,
                         event_pos=first_membership_change_after_to_token.prev_event_pos,
                         membership=first_membership_change_after_to_token.prev_membership,
@@ -655,6 +667,7 @@ class SlidingSyncHandler:
             # is their own leave event
             if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
                 filtered_sync_room_id_set[room_id] = _RoomMembershipForUser(
+                    room_id=room_id,
                     event_id=last_membership_change_in_from_to_range.event_id,
                     event_pos=last_membership_change_in_from_to_range.event_pos,
                     membership=last_membership_change_in_from_to_range.membership,
@@ -840,7 +853,7 @@ class SlidingSyncHandler:
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
         to_token: StreamToken,
-    ) -> List[Tuple[str, _SortedRoomMembershipForUser]]:
+    ) -> List[_SortedRoomMembershipForUser]:
         """
         Sort by `stream_ordering` of the last event that the user should see in the
         room. `stream_ordering` is unique so we get a stable sort.
@@ -854,7 +867,7 @@ class SlidingSyncHandler:
             A sorted list of room IDs by `stream_ordering` along with membership information.
         """
 
-        sorted_sync_rooms: List[Tuple[str, _SortedRoomMembershipForUser]] = []
+        sorted_sync_rooms: List[_SortedRoomMembershipForUser] = []
 
         # Assemble a map of room ID to the `stream_ordering` of the last activity that the
         # user should see in the room (<= `to_token`)
@@ -877,29 +890,23 @@ class SlidingSyncHandler:
                 _, event_pos = last_event_result
 
                 sorted_sync_rooms.append(
-                    (
-                        room_id,
-                        _SortedRoomMembershipForUser.from_room_membership_for_user(
-                            room_for_user, bump_stamp=event_pos.stream
-                        ),
+                    _SortedRoomMembershipForUser.from_room_membership_for_user(
+                        room_for_user, bump_stamp=event_pos.stream
                     )
                 )
             else:
                 # Otherwise, if the user has left/been invited/knocked/been banned from
                 # a room, they shouldn't see anything past that point.
                 sorted_sync_rooms.append(
-                    (
-                        room_id,
-                        _SortedRoomMembershipForUser.from_room_membership_for_user(
-                            room_for_user, bump_stamp=room_for_user.event_pos.stream
-                        ),
+                    _SortedRoomMembershipForUser.from_room_membership_for_user(
+                        room_for_user, bump_stamp=room_for_user.event_pos.stream
                     )
                 )
 
         return sorted(
             sorted_sync_rooms,
             # Sort by the last activity (stream_ordering) in the room
-            key=lambda room_info: room_info[1].bump_stamp,
+            key=lambda room_info: room_info.bump_stamp,
             # We want descending order
             reverse=True,
         )

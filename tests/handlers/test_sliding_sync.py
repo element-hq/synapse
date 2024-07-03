@@ -2312,7 +2312,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         # Sort the rooms (what we're testing)
-        sorted_room_info = self.get_success(
+        sorted_sync_rooms = self.get_success(
             self.sliding_sync_handler.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
@@ -2320,7 +2320,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            [room_id for room_id, _ in sorted_room_info],
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
             [room_id2, room_id1],
         )
 
@@ -2395,7 +2395,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         # Sort the rooms (what we're testing)
-        sorted_room_info = self.get_success(
+        sorted_sync_rooms = self.get_success(
             self.sliding_sync_handler.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
@@ -2403,7 +2403,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            [room_id for room_id, _ in sorted_room_info],
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
             [room_id2, room_id1, room_id3],
             "Corresponding map to disambiguate the opaque room IDs: "
             + str(
