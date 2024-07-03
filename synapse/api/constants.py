@@ -128,8 +128,12 @@ class EventTypes:
     SpaceParent: Final = "m.space.parent"
 
     Reaction: Final = "m.reaction"
+    Sticker: Final = "m.sticker"
+    LocationShare: Final = "m.location"
 
     CallInvite: Final = "m.call.invite"
+
+    PollStart: Final = "m.poll.start"
 
 
 class ToDeviceEventTypes:

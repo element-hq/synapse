@@ -1207,9 +1207,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_stream = end_token.stream
             max_stream = end_token.get_max_stream_pos()
 
-            # We use `union all` because we don't need any of the deduplication logic
-            # (`union` is really a union + distinct). `UNION ALL` does preserve the
-            # ordering of the operand queries but there is no actual gurantee that it
+            # We use `UNION ALL` because we don't need any of the deduplication logic
+            # (`UNION` is really a `UNION` + `DISTINCT`). `UNION ALL` does preserve the
+            # ordering of the operand queries but there is no actual guarantee that it
             # has this behavior in all scenarios so we need the extra `ORDER BY` at the
             # bottom.
             sql = """

@@ -53,6 +53,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# The event types that we should consider when sorting the rooms in the sync response.
+DEFAULT_BUMP_EVENT_TYPES = {
+    EventTypes.Message,
+    EventTypes.Encrypted,
+    EventTypes.Sticker,
+    EventTypes.LocationShare,
+    EventTypes.CallInvite,
+    EventTypes.PollStart,
+}
+
+
 def filter_membership_for_sync(
     *, membership: str, user_id: str, sender: Optional[str]
 ) -> bool:
@@ -120,6 +131,62 @@ class _RoomMembershipForUser:
 
     def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
         return attr.evolve(self, **kwds)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _SortedRoomMembershipForUser(_RoomMembershipForUser):
+    """
+    Same as `_RoomMembershipForUser` but with an additional `bump_stamp` attribute.
+
+    Attributes:
+        event_id: The event ID of the membership event
+        event_pos: The stream position of the membership event
+        membership: The membership state of the user in the room
+        sender: The person who sent the membership event
+        newly_joined: Whether the user newly joined the room during the given token
+            range
+        bump_stamp: The `stream_ordering` of the last event according to the
+            `bump_event_types`. This helps clients sort more readily without them needing to
+            pull in a bunch of the timeline to determine the last activity.
+            `bump_event_types` is a thing because for example, we don't want display name
+            changes to mark the room as unread and bump it to the top. For encrypted rooms,
+            we just have to consider any activity as a bump because we can't see the content
+            and the client has to figure it out for themselves.
+    """
+
+    bump_stamp: int
+
+    @classmethod
+    def from_room_membership_for_user(
+        cls,
+        rooms_membership_for_user: _RoomMembershipForUser,
+        *,
+        bump_stamp: int,
+    ) -> "_SortedRoomMembershipForUser":
+        """
+        Copy from the given `_RoomMembershipForUser`, sprinkle on the specific
+        `_SortedRoomMembershipForUser` fields to create a new
+        `_SortedRoomMembershipForUser`.
+        """
+
+        # Based on `attr.evolve(...)` but we can copy from a child class to a parent
+        child_kwargs: Dict[str, Any] = {}
+        attrs = attr.fields(rooms_membership_for_user.__class__)
+        for a in attrs:
+            attr_name = a.name  # To deal with private attributes.
+            init_name = a.alias
+            child_kwargs[init_name] = getattr(rooms_membership_for_user, attr_name)
+
+        return cls(bump_stamp=bump_stamp, **child_kwargs)
+
+    def copy_and_replace(self, **kwds: Any) -> "_SortedRoomMembershipForUser":
+        return attr.evolve(self, **kwds)
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _RelevantRoomEntry:
+    room_sync_config: RoomSyncConfig
+    room_membership_for_user: _SortedRoomMembershipForUser
 
 
 class SlidingSyncHandler:
@@ -242,7 +309,7 @@ class SlidingSyncHandler:
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
-        relevant_room_map: Dict[str, RoomSyncConfig] = {}
+        relevant_room_map: Dict[str, _RelevantRoomEntry] = {}
         if sync_config.lists:
             # Get all of the room IDs that the user should be able to see in the sync
             # response
@@ -267,40 +334,45 @@ class SlidingSyncHandler:
                 ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                 if list_config.ranges:
                     for range in list_config.ranges:
-                        sliced_room_ids = [
-                            room_id
-                            # Both sides of range are inclusive
-                            for room_id, _ in sorted_room_info[range[0] : range[1] + 1]
-                        ]
+                        # Both sides of range are inclusive
+                        sliced_room_info = sorted_room_info[range[0] : range[1] + 1]
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=sliced_room_ids,
+                                room_ids=[room_id for room_id, _ in sliced_room_info],
                             )
                         )
 
                         # Take the superset of the `RoomSyncConfig` for each room
-                        for room_id in sliced_room_ids:
-                            if relevant_room_map.get(room_id) is not None:
+                        for room_id, room_membership_for_user in sliced_room_info:
+                            relevant_room_entry = relevant_room_map.get(room_id)
+                            if relevant_room_entry is not None:
+                                existing_room_sync_config = (
+                                    relevant_room_entry.room_sync_config
+                                )
+
                                 # Take the highest timeline limit
                                 if (
-                                    relevant_room_map[room_id].timeline_limit
+                                    existing_room_sync_config.timeline_limit
                                     < list_config.timeline_limit
                                 ):
-                                    relevant_room_map[room_id].timeline_limit = (
+                                    existing_room_sync_config.timeline_limit = (
                                         list_config.timeline_limit
                                     )
 
                                 # Union the required state
-                                relevant_room_map[room_id].required_state.update(
+                                existing_room_sync_config.required_state.update(
                                     list_config.required_state
                                 )
                             else:
-                                relevant_room_map[room_id] = RoomSyncConfig(
-                                    timeline_limit=list_config.timeline_limit,
-                                    required_state=set(list_config.required_state),
+                                relevant_room_map[room_id] = _RelevantRoomEntry(
+                                    room_sync_config=RoomSyncConfig(
+                                        timeline_limit=list_config.timeline_limit,
+                                        required_state=set(list_config.required_state),
+                                    ),
+                                    room_membership_for_user=room_membership_for_user,
                                 )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
@@ -312,12 +384,12 @@ class SlidingSyncHandler:
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
-        for room_id, room_sync_config in relevant_room_map.items():
+        for room_id, relevant_room_entry in relevant_room_map.items():
             room_sync_result = await self.get_room_sync_data(
                 user=sync_config.user,
                 room_id=room_id,
-                room_sync_config=room_sync_config,
-                rooms_membership_for_user_at_to_token=sync_room_map[room_id],
+                room_sync_config=relevant_room_entry.room_sync_config,
+                room_membership_for_user_at_to_token=relevant_room_entry.room_membership_for_user,
                 from_token=from_token,
                 to_token=to_token,
             )
@@ -768,7 +840,7 @@ class SlidingSyncHandler:
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
         to_token: StreamToken,
-    ) -> List[Tuple[str, _RoomMembershipForUser]]:
+    ) -> List[Tuple[str, _SortedRoomMembershipForUser]]:
         """
         Sort by `stream_ordering` of the last event that the user should see in the
         room. `stream_ordering` is unique so we get a stable sort.
@@ -782,13 +854,15 @@ class SlidingSyncHandler:
             A sorted list of room IDs by `stream_ordering` along with membership information.
         """
 
+        sorted_sync_rooms: List[Tuple[str, _SortedRoomMembershipForUser]] = []
+
         # Assemble a map of room ID to the `stream_ordering` of the last activity that the
         # user should see in the room (<= `to_token`)
-        last_activity_in_room_map: Dict[str, int] = {}
         for room_id, room_for_user in sync_room_map.items():
             # If they are fully-joined to the room, let's find the latest activity
             # at/before the `to_token`.
             if room_for_user.membership == Membership.JOIN:
+                # TODO: Take `DEFAULT_BUMP_EVENT_TYPES` into account
                 last_event_result = (
                     await self.store.get_last_event_pos_in_room_before_stream_ordering(
                         room_id, to_token.room_key
@@ -802,16 +876,30 @@ class SlidingSyncHandler:
 
                 _, event_pos = last_event_result
 
-                last_activity_in_room_map[room_id] = event_pos.stream
+                sorted_sync_rooms.append(
+                    (
+                        room_id,
+                        _SortedRoomMembershipForUser.from_room_membership_for_user(
+                            room_for_user, bump_stamp=event_pos.stream
+                        ),
+                    )
+                )
             else:
                 # Otherwise, if the user has left/been invited/knocked/been banned from
                 # a room, they shouldn't see anything past that point.
-                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
+                sorted_sync_rooms.append(
+                    (
+                        room_id,
+                        _SortedRoomMembershipForUser.from_room_membership_for_user(
+                            room_for_user, bump_stamp=room_for_user.event_pos.stream
+                        ),
+                    )
+                )
 
         return sorted(
-            sync_room_map.items(),
+            sorted_sync_rooms,
             # Sort by the last activity (stream_ordering) in the room
-            key=lambda room_info: last_activity_in_room_map[room_info[0]],
+            key=lambda room_info: room_info[1].bump_stamp,
             # We want descending order
             reverse=True,
         )
@@ -821,7 +909,7 @@ class SlidingSyncHandler:
         user: UserID,
         room_id: str,
         room_sync_config: RoomSyncConfig,
-        rooms_membership_for_user_at_to_token: _RoomMembershipForUser,
+        room_membership_for_user_at_to_token: _SortedRoomMembershipForUser,
         from_token: Optional[StreamToken],
         to_token: StreamToken,
     ) -> SlidingSyncResult.RoomResult:
@@ -835,7 +923,7 @@ class SlidingSyncHandler:
             room_id: The room ID to fetch data for
             room_sync_config: Config for what data we should fetch for a room in the
                 sync response.
-            rooms_membership_for_user_at_to_token: Membership information for the user
+            room_membership_for_user_at_to_token: Membership information for the user
                 in the room at the time of `to_token`.
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
@@ -855,7 +943,7 @@ class SlidingSyncHandler:
         if (
             room_sync_config.timeline_limit > 0
             # No timeline for invite/knock rooms (just `stripped_state`)
-            and rooms_membership_for_user_at_to_token.membership
+            and room_membership_for_user_at_to_token.membership
             not in (Membership.INVITE, Membership.KNOCK)
         ):
             limited = False
@@ -868,12 +956,12 @@ class SlidingSyncHandler:
             # We're going to paginate backwards from the `to_token`
             from_bound = to_token.room_key
             # People shouldn't see past their leave/ban event
-            if rooms_membership_for_user_at_to_token.membership in (
+            if room_membership_for_user_at_to_token.membership in (
                 Membership.LEAVE,
                 Membership.BAN,
             ):
                 from_bound = (
-                    rooms_membership_for_user_at_to_token.event_pos.to_room_stream_token()
+                    room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
             # Determine whether we should limit the timeline to the token range.
@@ -888,7 +976,7 @@ class SlidingSyncHandler:
             to_bound = (
                 from_token.room_key
                 if from_token is not None
-                and not rooms_membership_for_user_at_to_token.newly_joined
+                and not room_membership_for_user_at_to_token.newly_joined
                 else None
             )
 
@@ -925,7 +1013,7 @@ class SlidingSyncHandler:
                 self.storage_controllers,
                 user.to_string(),
                 timeline_events,
-                is_peeking=rooms_membership_for_user_at_to_token.membership
+                is_peeking=room_membership_for_user_at_to_token.membership
                 != Membership.JOIN,
                 filter_send_to_client=True,
             )
@@ -980,16 +1068,16 @@ class SlidingSyncHandler:
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
         stripped_state: List[JsonDict] = []
-        if rooms_membership_for_user_at_to_token.membership in (
+        if room_membership_for_user_at_to_token.membership in (
             Membership.INVITE,
             Membership.KNOCK,
         ):
             # This should never happen. If someone is invited/knocked on room, then
             # there should be an event for it.
-            assert rooms_membership_for_user_at_to_token.event_id is not None
+            assert room_membership_for_user_at_to_token.event_id is not None
 
             invite_or_knock_event = await self.store.get_event(
-                rooms_membership_for_user_at_to_token.event_id
+                room_membership_for_user_at_to_token.event_id
             )
 
             stripped_state = []
@@ -1005,7 +1093,7 @@ class SlidingSyncHandler:
             stripped_state.append(strip_event(invite_or_knock_event))
 
         # TODO: Handle state resets. For example, if we see
-        # `rooms_membership_for_user_at_to_token.membership = Membership.LEAVE` but
+        # `room_membership_for_user_at_to_token.membership = Membership.LEAVE` but
         # `required_state` doesn't include it, we should indicate to the client that a
         # state reset happened. Perhaps we should indicate this by setting `initial:
         # True` and empty `required_state`.
@@ -1031,6 +1119,7 @@ class SlidingSyncHandler:
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
+            bump_stamp=room_membership_for_user_at_to_token.bump_stamp,
             # TODO: Dummy values
             joined_count=0,
             invited_count=0,

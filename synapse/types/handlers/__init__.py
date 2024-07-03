@@ -176,6 +176,13 @@ class SlidingSyncResult:
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
             limited: True if their are more events than fit between the given position and now.
                 Sync again to get more.
+            bump_stamp: The `stream_ordering` of the last event according to the
+                `bump_event_types`. This helps clients sort more readily without them
+                needing to pull in a bunch of the timeline to determine the last activity.
+                `bump_event_types` is a thing because for example, we don't want display
+                name changes to mark the room as unread and bump it to the top. For
+                encrypted rooms, we just have to consider any activity as a bump because we
+                can't see the content and the client has to figure it out for themselves.
             joined_count: The number of users with membership of join, including the client's
                 own user ID. (same as sync `v2 m.joined_member_count`)
             invited_count: The number of users with membership of invite. (same as sync v2
@@ -209,6 +216,7 @@ class SlidingSyncResult:
         prev_batch: Optional[StreamToken]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         limited: Optional[bool]
+        bump_stamp: int
         joined_count: int
         invited_count: int
         notification_count: int
