@@ -1320,10 +1320,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
             )
 
-        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{'\n'.join(expected_lines)}\n }}"
-        actual_string = (
-            f"Actual ('+' = found expected items):\n {{\n{'\n'.join(actual_lines)}\n }}"
-        )
+        newline = "\n"
+        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{newline.join(expected_lines)}\n }}"
+        actual_string = f"Actual ('+' = found expected items):\n {{\n{newline.join(actual_lines)}\n }}"
         first_message = (
             "Items must match exactly" if exact else "Some expected items are missing."
         )
