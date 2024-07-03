@@ -116,17 +116,11 @@ class RoomSyncConfig:
             state_type,
             state_key,
         ) in room_params.required_state:
-            # If we already have a wildcard for everything, we don't need to add
-            # anything else
-            wildcard_set: Set[Tuple[str, str]] = required_state_map.get(
-                StateValues.WILDCARD, set()
-            )
-            if (StateValues.WILDCARD, StateValues.WILDCARD) in wildcard_set:
-                break
-
             # If we already have a wildcard for this specific `state_key`, we don't need
             # to add it since the wildcard already covers it.
-            if (StateValues.WILDCARD, state_key) in wildcard_set:
+            if (StateValues.WILDCARD, state_key) in required_state_map.get(
+                StateValues.WILDCARD, set()
+            ):
                 continue
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
