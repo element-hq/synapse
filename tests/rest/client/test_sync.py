@@ -20,7 +20,7 @@
 #
 import json
 import logging
-from typing import AbstractSet, Dict, List, Optional, Iterable
+from typing import AbstractSet, Any, Dict, Iterable, List, Optional
 
 from parameterized import parameterized, parameterized_class
 
@@ -37,10 +37,10 @@ from synapse.api.constants import (
     RelationTypes,
 )
 from synapse.events import EventBase
+from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken, UserID
-from synapse.handlers.sliding_sync import StateValues
 from synapse.util import Clock
 
 from tests import unittest
@@ -1245,7 +1245,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
     def _assertRequiredStateIncludes(
         self,
-        actual_required_state: JsonDict,
+        actual_required_state: Any,
         expected_state_events: Iterable[EventBase],
         exact: bool = False,
     ) -> None:
@@ -1262,6 +1262,10 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 state (no extras).
         """
 
+        assert isinstance(actual_required_state, list)
+        for event in actual_required_state:
+            assert isinstance(event, dict)
+
         self._assertIncludes(
             {
                 f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
@@ -1273,7 +1277,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=exact,
             # Message to help understand the diff in context
-            message=actual_required_state,
+            message=str(actual_required_state),
         )
 
     def _assertIncludes(

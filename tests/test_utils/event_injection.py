@@ -128,7 +128,7 @@ async def mark_event_as_partial_state(
     # Use the store helper to insert into the database so the caches are busted
     await store.store_partial_state_room(
         room_id=room_id,
-        servers=[hs.hostname],
+        servers={hs.hostname},
         device_lists_stream_id=0,
         joined_via=hs.hostname,
     )
