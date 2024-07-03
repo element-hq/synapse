@@ -1178,7 +1178,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         end_token: RoomStreamToken,
-        event_types: Optional[Iterable[str]] = None,
+        event_types: Optional[Collection[str]] = None,
     ) -> Optional[Tuple[str, PersistedEventPosition]]:
         """
         Returns the ID and event position of the last event in a room at or before a
@@ -1210,7 +1210,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             max_stream = end_token.get_max_stream_pos()
 
             event_type_clause = ""
-            event_type_args = []
+            event_type_args: List[str] = []
             if event_types is not None and len(event_types) > 0:
                 event_type_clause, event_type_args = make_in_list_sql_clause(
                     txn.database_engine, "type", event_types
