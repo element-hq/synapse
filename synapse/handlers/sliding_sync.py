@@ -875,19 +875,17 @@ class SlidingSyncHandler:
             # If they are fully-joined to the room, let's find the latest activity
             # at/before the `to_token`.
             if room_for_user.membership == Membership.JOIN:
-                # TODO: Take `DEFAULT_BUMP_EVENT_TYPES` into account
                 last_event_result = (
                     await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                        room_id, to_token.room_key
+                        room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
                     )
                 )
 
-                # If the room has no events at/before the `to_token`, this is probably a
-                # mistake in the code that generates the `sync_room_map` since that should
-                # only give us rooms that the user had membership in during the token range.
-                assert last_event_result is not None
-
-                _, event_pos = last_event_result
+                # By default, just choose the membership event position
+                event_pos = room_for_user.event_pos
+                # But if we found a bump event, use that instead
+                if last_event_result is not None:
+                    _, event_pos = last_event_result
 
                 sorted_sync_rooms.append(
                     _SortedRoomMembershipForUser.from_room_membership_for_user(
@@ -897,6 +895,11 @@ class SlidingSyncHandler:
             else:
                 # Otherwise, if the user has left/been invited/knocked/been banned from
                 # a room, they shouldn't see anything past that point.
+                #
+                # FIXME: It's possible that people should see beyond this point in
+                # invited/knocked cases if for example the room has
+                # `invite`/`world_readable` history visibility, see
+                # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
                 sorted_sync_rooms.append(
                     _SortedRoomMembershipForUser.from_room_membership_for_user(
                         room_for_user, bump_stamp=room_for_user.event_pos.stream

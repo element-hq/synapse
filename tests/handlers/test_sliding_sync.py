@@ -2414,3 +2414,61 @@ class SortRoomsTestCase(HomeserverTestCase):
                 }
             ),
         )
+
+    def test_default_bump_event_types(self) -> None:
+        """
+        Test that we only consider `bump_event_types` when sorting rooms.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        message_response = self.helper.send(room_id1, "message in room1", tok=user1_tok)
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        self.helper.send(room_id2, "message in room2", tok=user1_tok)
+
+        # Send a reaction in room1 but it shouldn't affect the sort order
+        # because reactions are not part of the `DEFAULT_BUMP_EVENT_TYPES`
+        self.helper.send_event(
+            room_id1,
+            type=EventTypes.Reaction,
+            content={
+                "m.relates_to": {
+                    "event_id": message_response["event_id"],
+                    "key": "👍",
+                    "rel_type": "m.annotation",
+                }
+            },
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Sort the rooms (what we're testing)
+        sorted_sync_rooms = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
+            # room2 sorts before room1 because reactions don't bump the room
+            [room_id2, room_id1],
+        )
