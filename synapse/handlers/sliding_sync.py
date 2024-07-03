@@ -1279,6 +1279,22 @@ class SlidingSyncHandler:
             # currently working around this by returning all state to the client but it
             # would be nice to fetch less from the database and return just what the
             # client wanted.
+            #
+            # Note: MSC3575 describes different behavior to how we're handling things here but
+            # since it's not wrong to return more state than requested (`required_state` is
+            # just the minimum requested), it doesn't matter if we include things that the
+            # client wanted excluded. This complexity is also under scrutiny, see
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
+
+            # > One unique exception is when you request all state events via ["*", "*"]. When used,
+            # > all state events are returned by default, and additional entries FILTER OUT the returned set
+            # > of state events. These additional entries cannot use '*' themselves.
+            # > For example, ["*", "*"], ["m.room.member", "@alice:example.com"] will _exclude_ every m.room.member
+            # > event _except_ for @alice:example.com, and include every other state event.
+            # > In addition, ["*", "*"], ["m.space.child", "*"] is an error, the m.space.child filter is not
+            # > required as it would have been returned anyway.
+            # >
+            # > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
             elif (
                 room_sync_config.required_state_map.get(StateValues.WILDCARD)
                 is not None
