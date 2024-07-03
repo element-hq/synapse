@@ -40,6 +40,7 @@ from synapse.api.errors import (
     OAuthInsufficientScopeError,
     StoreError,
     SynapseError,
+    UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
@@ -48,6 +49,7 @@ from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 
 if TYPE_CHECKING:
+    from synapse.rest.admin.experimental_features import ExperimentalFeature
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -244,6 +246,32 @@ class MSC3861DelegatedAuth(BaseAuth):
         request.requester = requester
 
         return requester
+
+    async def get_user_by_req_experimental_feature(
+        self,
+        request: SynapseRequest,
+        feature: "ExperimentalFeature",
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        try:
+            requester = await self.get_user_by_req(
+                request,
+                allow_guest=allow_guest,
+                allow_expired=allow_expired,
+                allow_locked=allow_locked,
+            )
+            if await self.store.is_feature_enabled(requester.user.to_string(), feature):
+                return requester
+
+            raise UnrecognizedRequestError(code=404)
+        except (AuthError, InvalidClientTokenError):
+            if feature.is_globally_enabled(self.hs.config):
+                # If its globally enabled then return the auth error
+                raise
+
+            raise UnrecognizedRequestError(code=404)
 
     async def get_user_by_access_token(
         self,

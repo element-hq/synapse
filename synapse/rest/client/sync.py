@@ -53,6 +53,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
@@ -673,7 +674,9 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req_experimental_feature(
+            request, allow_guest=True, feature=ExperimentalFeature.MSC3575
+        )
         user = requester.user
         device_id = requester.device_id
 
@@ -873,7 +876,10 @@ class SlidingSyncRestServlet(RestServlet):
         self.event_serializer = hs.get_event_client_serializer()
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req_experimental_feature(
+            request, allow_guest=True, feature=ExperimentalFeature.MSC3575
+        )
+
         user = requester.user
         device_id = requester.device_id
 
@@ -1051,6 +1057,5 @@ class SlidingSyncRestServlet(RestServlet):
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
-    if hs.config.experimental.msc3575_enabled:
-        SlidingSyncRestServlet(hs).register(http_server)
-        SlidingSyncE2eeRestServlet(hs).register(http_server)
+    SlidingSyncRestServlet(hs).register(http_server)
+    SlidingSyncE2eeRestServlet(hs).register(http_server)
