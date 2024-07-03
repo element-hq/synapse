@@ -230,8 +230,8 @@ do so!</p>
 </li>
 </ul>
 <h2 id="reporting-a-security-vulnerability"><a class="header" href="#reporting-a-security-vulnerability">Reporting a security vulnerability</a></h2>
-<p>If you've found a security issue in Synapse or any other Matrix.org Foundation
-project, please report it to us in accordance with our <a href="https://www.matrix.org/security-disclosure-policy/">Security Disclosure
+<p>If you've found a security issue in Synapse or any other Element project,
+please report it to us in accordance with our <a href="https://element.io/security/security-disclosure-policy">Security Disclosure
 Policy</a>. Thank you!</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="installation-instructions"><a class="header" href="#installation-instructions">Installation Instructions</a></h1>
 <h2 id="choosing-your-server-name"><a class="header" href="#choosing-your-server-name">Choosing your server name</a></h2>
@@ -1834,7 +1834,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.109.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.110.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -5289,8 +5289,9 @@ Defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>.</p>
 <hr />
 <h3 id="rc_invites"><a class="header" href="#rc_invites"><code>rc_invites</code></a></h3>
 <p>This option sets ratelimiting how often invites can be sent in a room or to a
-specific user. <code>per_room</code> defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code> and
-<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>.</p>
+specific user. <code>per_room</code> defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>,
+<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>, and <code>per_issuer</code> 
+defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>.</p>
 <p>Client requests that invite user(s) when <a href="https://spec.matrix.org/v1.2/client-server-api/#post_matrixclientv3createroom">creating a
 room</a>
 will count against the <code>rc_invites.per_room</code> limit, whereas
@@ -5433,6 +5434,18 @@ See <a href="usage/configuration/../../reverse_proxy.html">here</a> for more on 
 <p>Maximum number of pixels that will be thumbnailed. Defaults to 32M.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">max_image_pixels: 35M
+</code></pre>
+<hr />
+<h3 id="remote_media_download_burst_count"><a class="header" href="#remote_media_download_burst_count"><code>remote_media_download_burst_count</code></a></h3>
+<p>Remote media downloads are ratelimited using a <a href="https://en.wikipedia.org/wiki/Leaky_bucket">leaky bucket algorithm</a>, where a given &quot;bucket&quot; is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also <code>remote_media_download_per_second</code> which determines the rate at which the &quot;bucket&quot; is emptied and thus has available space to authorize new requests.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">remote_media_download_burst_count: 200M
+</code></pre>
+<hr />
+<h3 id="remote_media_download_per_second"><a class="header" href="#remote_media_download_per_second"><code>remote_media_download_per_second</code></a></h3>
+<p>Works in conjunction with <code>remote_media_download_burst_count</code> to ratelimit remote media downloads - this configuration option determines the rate at which the &quot;bucket&quot; (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has &quot;drained&quot; from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also <code>remote_media_download_burst_count</code>.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">remote_media_download_per_second: 40K
 </code></pre>
 <hr />
 <h3 id="prevent_media_downloads_from"><a class="header" href="#prevent_media_downloads_from"><code>prevent_media_downloads_from</code></a></h3>
@@ -6002,7 +6015,7 @@ logged in.</p>
 <pre><code class="language-yaml">session_lifetime: 24h
 </code></pre>
 <hr />
-<h3 id="refresh_access_token_lifetime"><a class="header" href="#refresh_access_token_lifetime"><code>refresh_access_token_lifetime</code></a></h3>
+<h3 id="refreshable_access_token_lifetime"><a class="header" href="#refreshable_access_token_lifetime"><code>refreshable_access_token_lifetime</code></a></h3>
 <p>Time that an access token remains valid for, if the session is using refresh tokens.</p>
 <p>For more information about refresh tokens, please see the <a href="usage/configuration/user_authentication/refresh_tokens.html">manual</a>.</p>
 <p>Note that this only applies to clients which advertise support for refresh tokens.</p>
@@ -7031,7 +7044,8 @@ will also not affect rooms created by other servers.</p>
 empty responses are returned to all queries. Defaults to true.</p>
 </li>
 <li>
-<p><code>search_all_users</code>: Defines whether to search all users visible to your HS at the time the search is performed. If set to true, will return all users who share a room with the user from the homeserver.
+<p><code>search_all_users</code>: Defines whether to search all users visible to your homeserver at the time the search is performed.
+If set to true, will return all users known to the homeserver matching the search query.
 If false, search results will only contain users
 visible in public rooms and users sharing a room with the requester.
 Defaults to false.</p>
@@ -7324,7 +7338,7 @@ to see it from their client.</p>
 <p>By default, no room is excluded.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">exclude_rooms_from_sync:
-    - !foo:example.com
+    - &quot;!foo:example.com&quot;
 </code></pre>
 <hr />
 <h2 id="opentracing"><a class="header" href="#opentracing">Opentracing</a></h2>
@@ -13203,6 +13217,14 @@ Specifically, rooms are selected if the search term is contained in</p>
 <li>the local part of the room's canonical alias, or</li>
 <li>the complete (local and server part) room's id (case sensitive).</li>
 </ul>
+</li>
+<li>
+<p><code>public_rooms</code> - Optional flag to filter public rooms. If <code>true</code>, only public rooms are queried. If <code>false</code>, public rooms are excluded from
+the query. When the flag is absent (the default), <strong>both</strong> public and non-public rooms are included in the search results.</p>
+</li>
+<li>
+<p><code>empty_rooms</code> - Optional flag to filter empty rooms. A room is empty if joined_members is zero. If <code>true</code>, only empty rooms are queried. If <code>false</code>, empty rooms are excluded from
+the query. When the flag is absent (the default), <strong>both</strong> empty and non-empty rooms are included in the search results.</p>
 <p>Defaults to no filtering.</p>
 </li>
 </ul>

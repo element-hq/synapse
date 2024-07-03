@@ -206,6 +206,14 @@ Specifically, rooms are selected if the search term is contained in</p>
 <li>the local part of the room's canonical alias, or</li>
 <li>the complete (local and server part) room's id (case sensitive).</li>
 </ul>
+</li>
+<li>
+<p><code>public_rooms</code> - Optional flag to filter public rooms. If <code>true</code>, only public rooms are queried. If <code>false</code>, public rooms are excluded from
+the query. When the flag is absent (the default), <strong>both</strong> public and non-public rooms are included in the search results.</p>
+</li>
+<li>
+<p><code>empty_rooms</code> - Optional flag to filter empty rooms. A room is empty if joined_members is zero. If <code>true</code>, only empty rooms are queried. If <code>false</code>, empty rooms are excluded from
+the query. When the flag is absent (the default), <strong>both</strong> empty and non-empty rooms are included in the search results.</p>
 <p>Defaults to no filtering.</p>
 </li>
 </ul>
