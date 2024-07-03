@@ -170,15 +170,15 @@ class _SortedRoomMembershipForUser(_RoomMembershipForUser):
         `_SortedRoomMembershipForUser`.
         """
 
-        # Based on `attr.evolve(...)` but we can copy from a child class to a parent
-        child_kwargs: Dict[str, Any] = {}
-        attrs = attr.fields(rooms_membership_for_user.__class__)
-        for a in attrs:
-            attr_name = a.name  # To deal with private attributes.
-            init_name = a.alias
-            child_kwargs[init_name] = getattr(rooms_membership_for_user, attr_name)
-
-        return cls(bump_stamp=bump_stamp, **child_kwargs)
+        return cls(
+            room_id=rooms_membership_for_user.room_id,
+            event_id=rooms_membership_for_user.event_id,
+            event_pos=rooms_membership_for_user.event_pos,
+            membership=rooms_membership_for_user.membership,
+            sender=rooms_membership_for_user.sender,
+            newly_joined=rooms_membership_for_user.newly_joined,
+            bump_stamp=bump_stamp,
+        )
 
     def copy_and_replace(self, **kwds: Any) -> "_SortedRoomMembershipForUser":
         return attr.evolve(self, **kwds)
