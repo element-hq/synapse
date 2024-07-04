@@ -129,7 +129,7 @@ class EventTypes:
 
     Reaction: Final = "m.reaction"
     Sticker: Final = "m.sticker"
-    LocationShare: Final = "m.location"
+    LiveLocationShareStart: Final = "m.beacon_info"
 
     CallInvite: Final = "m.call.invite"
 

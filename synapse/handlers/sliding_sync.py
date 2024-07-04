@@ -58,9 +58,9 @@ DEFAULT_BUMP_EVENT_TYPES = {
     EventTypes.Message,
     EventTypes.Encrypted,
     EventTypes.Sticker,
-    EventTypes.LocationShare,
     EventTypes.CallInvite,
     EventTypes.PollStart,
+    EventTypes.LiveLocationShareStart,
 }
 
 
