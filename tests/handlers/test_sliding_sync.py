@@ -18,6 +18,8 @@
 #
 #
 import logging
+from copy import deepcopy
+from typing import Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -33,18 +35,548 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.handlers.sliding_sync import SlidingSyncConfig
+from synapse.handlers.sliding_sync import RoomSyncConfig, StateValues
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, UserID
+from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
-from tests.unittest import HomeserverTestCase
+from tests.unittest import HomeserverTestCase, TestCase
 
 logger = logging.getLogger(__name__)
+
+
+class RoomSyncConfigTestCase(TestCase):
+    def _assert_room_config_equal(
+        self,
+        actual: RoomSyncConfig,
+        expected: RoomSyncConfig,
+        message_prefix: Optional[str] = None,
+    ) -> None:
+        self.assertEqual(actual.timeline_limit, expected.timeline_limit, message_prefix)
+
+        # `self.assertEqual(...)` works fine to catch differences but the output is
+        # almost impossible to read because of the way it truncates the output and the
+        # order doesn't actually matter.
+        self.assertCountEqual(
+            actual.required_state_map, expected.required_state_map, message_prefix
+        )
+        for event_type, expected_state_keys in expected.required_state_map.items():
+            self.assertCountEqual(
+                actual.required_state_map[event_type],
+                expected_state_keys,
+                f"{message_prefix}: Mismatch for {event_type}",
+            )
+
+    @parameterized.expand(
+        [
+            (
+                "from_list_config",
+                """
+                Test that we can convert a `SlidingSyncConfig.SlidingSyncList` to a
+                `RoomSyncConfig`.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, "@baz"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            "@foo",
+                            "@bar",
+                            "@baz",
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+            ),
+            (
+                "from_room_subscription",
+                """
+                Test that we can convert a `SlidingSyncConfig.RoomSubscription` to a
+                `RoomSyncConfig`.
+                """,
+                # Input
+                SlidingSyncConfig.RoomSubscription(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, "@baz"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            "@foo",
+                            "@bar",
+                            "@baz",
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+            ),
+            (
+                "wildcard",
+                """
+                Test that a wildcard (*) for both the `event_type` and `state_key` will override
+                all other values.
+
+                Note: MSC3575 describes different behavior to how we're handling things here but
+                since it's not wrong to return more state than requested (`required_state` is
+                just the minimum requested), it doesn't matter if we include things that the
+                client wanted excluded. This complexity is also under scrutiny, see
+                https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1185109050
+
+                > One unique exception is when you request all state events via ["*", "*"]. When used,
+                > all state events are returned by default, and additional entries FILTER OUT the returned set
+                > of state events. These additional entries cannot use '*' themselves.
+                > For example, ["*", "*"], ["m.room.member", "@alice:example.com"] will _exclude_ every m.room.member
+                > event _except_ for @alice:example.com, and include every other state event.
+                > In addition, ["*", "*"], ["m.space.child", "*"] is an error, the m.space.child filter is not
+                > required as it would have been returned anyway.
+                >
+                > -- MSC3575 (https://github.com/matrix-org/matrix-spec-proposals/pull/3575)
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+            (
+                "wildcard_type",
+                """
+                Test that a wildcard (*) as a `event_type` will override all other values for the
+                same `state_key`.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (StateValues.WILDCARD, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {""},
+                        EventTypes.Member: {"@foo"},
+                    },
+                ),
+            ),
+            (
+                "multiple_wildcard_type",
+                """
+                Test that multiple wildcard (*) as a `event_type` will override all other values
+                for the same `state_key`.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (StateValues.WILDCARD, ""),
+                        (EventTypes.Member, "@foo"),
+                        (StateValues.WILDCARD, "@foo"),
+                        ("org.matrix.personal_count", "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {
+                            "",
+                            "@foo",
+                        },
+                        EventTypes.Member: {"@bar"},
+                    },
+                ),
+            ),
+            (
+                "wildcard_state_key",
+                """
+                Test that a wildcard (*) as a `state_key` will override all other values for the
+                same `event_type`.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, StateValues.WILDCARD),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, StateValues.LAZY),
+                        (EventTypes.Member, "@baz"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            StateValues.WILDCARD,
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+            ),
+            (
+                "wildcard_merge",
+                """
+                Test that a wildcard (*) entries for the `event_type` and another one for
+                `state_key` will play together.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (StateValues.WILDCARD, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, StateValues.WILDCARD),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {""},
+                        EventTypes.Member: {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+            (
+                "wildcard_merge2",
+                """
+                Test that an all wildcard ("*", "*") entry will override any other
+                values (including other wildcards).
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (StateValues.WILDCARD, ""),
+                        (EventTypes.Member, StateValues.WILDCARD),
+                        (EventTypes.Member, "@foo"),
+                        # One of these should take precedence over everything else
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
+                        (StateValues.WILDCARD, StateValues.WILDCARD),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+            (
+                "lazy_members",
+                """
+                `$LAZY` room members should just be another additional key next to other
+                explicit keys. We will unroll the special `$LAZY` meaning later.
+                """,
+                # Input
+                SlidingSyncConfig.SlidingSyncList(
+                    timeline_limit=10,
+                    required_state=[
+                        (EventTypes.Name, ""),
+                        (EventTypes.Member, "@foo"),
+                        (EventTypes.Member, "@bar"),
+                        (EventTypes.Member, StateValues.LAZY),
+                        (EventTypes.Member, "@baz"),
+                        (EventTypes.CanonicalAlias, ""),
+                    ],
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            "@foo",
+                            "@bar",
+                            StateValues.LAZY,
+                            "@baz",
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+            ),
+        ]
+    )
+    def test_from_room_config(
+        self,
+        _test_label: str,
+        _test_description: str,
+        room_params: SlidingSyncConfig.CommonRoomParameters,
+        expected_room_sync_config: RoomSyncConfig,
+    ) -> None:
+        """
+        Test `RoomSyncConfig.from_room_config(room_params)` will result in the `expected_room_sync_config`.
+        """
+        room_sync_config = RoomSyncConfig.from_room_config(room_params)
+
+        self._assert_room_config_equal(
+            room_sync_config,
+            expected_room_sync_config,
+        )
+
+    @parameterized.expand(
+        [
+            (
+                "no_direct_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            "@foo",
+                            "@bar",
+                        },
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@baz",
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Name: {""},
+                        EventTypes.Member: {
+                            "@foo",
+                            "@bar",
+                            StateValues.LAZY,
+                            "@baz",
+                        },
+                        EventTypes.CanonicalAlias: {""},
+                    },
+                ),
+            ),
+            (
+                "wildcard_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD},
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {StateValues.WILDCARD},
+                        StateValues.WILDCARD: {"@bar"},
+                        EventTypes.Member: {"@foo"},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+            (
+                "state_type_wildcard_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {"dummy"},
+                        StateValues.WILDCARD: {
+                            "",
+                            "@foo",
+                        },
+                        EventTypes.Member: {"@bar"},
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {"dummy2"},
+                        StateValues.WILDCARD: {
+                            "",
+                            "@bar",
+                        },
+                        EventTypes.Member: {"@foo"},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {
+                            "dummy",
+                            "dummy2",
+                        },
+                        StateValues.WILDCARD: {
+                            "",
+                            "@foo",
+                            "@bar",
+                        },
+                    },
+                ),
+            ),
+            (
+                "state_key_wildcard_overlap",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {"dummy"},
+                        EventTypes.Member: {StateValues.WILDCARD},
+                        "org.matrix.flowers": {StateValues.WILDCARD},
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {StateValues.WILDCARD},
+                        EventTypes.Member: {StateValues.WILDCARD},
+                        "org.matrix.flowers": {"tulips"},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {StateValues.WILDCARD},
+                        EventTypes.Member: {StateValues.WILDCARD},
+                        "org.matrix.flowers": {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+            (
+                "state_type_and_state_key_wildcard_merge",
+                # A
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {"dummy"},
+                        StateValues.WILDCARD: {
+                            "",
+                            "@foo",
+                        },
+                        EventTypes.Member: {"@bar"},
+                    },
+                ),
+                # B
+                RoomSyncConfig(
+                    timeline_limit=9,
+                    required_state_map={
+                        EventTypes.Dummy: {"dummy2"},
+                        StateValues.WILDCARD: {""},
+                        EventTypes.Member: {StateValues.WILDCARD},
+                    },
+                ),
+                # Expected
+                RoomSyncConfig(
+                    timeline_limit=10,
+                    required_state_map={
+                        EventTypes.Dummy: {
+                            "dummy",
+                            "dummy2",
+                        },
+                        StateValues.WILDCARD: {
+                            "",
+                            "@foo",
+                        },
+                        EventTypes.Member: {StateValues.WILDCARD},
+                    },
+                ),
+            ),
+        ]
+    )
+    def test_combine_room_sync_config(
+        self,
+        _test_label: str,
+        a: RoomSyncConfig,
+        b: RoomSyncConfig,
+        expected: RoomSyncConfig,
+    ) -> None:
+        """
+        Combine A into B and B into A to make sure we get the same result.
+        """
+        # Since we're mutating these in place, make a copy for each of our trials
+        room_sync_config_a = deepcopy(a)
+        room_sync_config_b = deepcopy(b)
+
+        # Combine B into A
+        room_sync_config_a.combine_room_sync_config(room_sync_config_b)
+
+        self._assert_room_config_equal(room_sync_config_a, expected, "B into A")
+
+        # Since we're mutating these in place, make a copy for each of our trials
+        room_sync_config_a = deepcopy(a)
+        room_sync_config_b = deepcopy(b)
+
+        # Combine A into B
+        room_sync_config_b.combine_room_sync_config(room_sync_config_a)
+
+        self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
 
 
 class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
