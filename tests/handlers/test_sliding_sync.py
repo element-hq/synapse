@@ -2417,7 +2417,8 @@ class SortRoomsTestCase(HomeserverTestCase):
 
     def test_default_bump_event_types(self) -> None:
         """
-        Test that we only consider `bump_event_types` when sorting rooms.
+        Test that we only consider the *latest* event in the room when sorting (not
+        `bump_event_types`).
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -2433,8 +2434,8 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
         self.helper.send(room_id2, "message in room2", tok=user1_tok)
 
-        # Send a reaction in room1 but it shouldn't affect the sort order
-        # because reactions are not part of the `DEFAULT_BUMP_EVENT_TYPES`
+        # Send a reaction in room1 which isn't in `DEFAULT_BUMP_EVENT_TYPES` but we only
+        # care about sorting by the *latest* event in the room.
         self.helper.send_event(
             room_id1,
             type=EventTypes.Reaction,
@@ -2469,6 +2470,7 @@ class SortRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(
             [room_membership.room_id for room_membership in sorted_sync_rooms],
-            # room2 sorts before room1 because reactions don't bump the room
-            [room_id2, room_id1],
+            # room1 sorts before room2 because it has the latest event (the reaction).
+            # We only care about the *latest* event in the room.
+            [room_id1, room_id2],
         )

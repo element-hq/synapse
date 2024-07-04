@@ -135,53 +135,9 @@ class _RoomMembershipForUser:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class _SortedRoomMembershipForUser(_RoomMembershipForUser):
-    """
-    Same as `_RoomMembershipForUser` but with an additional `bump_stamp` attribute.
-
-    Attributes:
-        bump_stamp: The `stream_ordering` of the last event according to the
-            `bump_event_types`. This helps clients sort more readily without them needing to
-            pull in a bunch of the timeline to determine the last activity.
-            `bump_event_types` is a thing because for example, we don't want display name
-            changes to mark the room as unread and bump it to the top. For encrypted rooms,
-            we just have to consider any activity as a bump because we can't see the content
-            and the client has to figure it out for themselves.
-    """
-
-    bump_stamp: int
-
-    @classmethod
-    def from_room_membership_for_user(
-        cls,
-        rooms_membership_for_user: _RoomMembershipForUser,
-        *,
-        bump_stamp: int,
-    ) -> "_SortedRoomMembershipForUser":
-        """
-        Copy from the given `_RoomMembershipForUser`, sprinkle on the specific
-        `_SortedRoomMembershipForUser` fields to create a new
-        `_SortedRoomMembershipForUser`.
-        """
-
-        return cls(
-            room_id=rooms_membership_for_user.room_id,
-            event_id=rooms_membership_for_user.event_id,
-            event_pos=rooms_membership_for_user.event_pos,
-            membership=rooms_membership_for_user.membership,
-            sender=rooms_membership_for_user.sender,
-            newly_joined=rooms_membership_for_user.newly_joined,
-            bump_stamp=bump_stamp,
-        )
-
-    def copy_and_replace(self, **kwds: Any) -> "_SortedRoomMembershipForUser":
-        return attr.evolve(self, **kwds)
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
 class _RelevantRoomEntry:
     room_sync_config: RoomSyncConfig
-    room_membership_for_user: _SortedRoomMembershipForUser
+    room_membership_for_user: _RoomMembershipForUser
 
 
 class SlidingSyncHandler:
@@ -847,7 +803,7 @@ class SlidingSyncHandler:
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
         to_token: StreamToken,
-    ) -> List[_SortedRoomMembershipForUser]:
+    ) -> List[_RoomMembershipForUser]:
         """
         Sort by `stream_ordering` of the last event that the user should see in the
         room. `stream_ordering` is unique so we get a stable sort.
@@ -861,31 +817,27 @@ class SlidingSyncHandler:
             A sorted list of room IDs by `stream_ordering` along with membership information.
         """
 
-        sorted_sync_rooms: List[_SortedRoomMembershipForUser] = []
-
         # Assemble a map of room ID to the `stream_ordering` of the last activity that the
         # user should see in the room (<= `to_token`)
+        last_activity_in_room_map: Dict[str, int] = {}
         for room_id, room_for_user in sync_room_map.items():
             # If they are fully-joined to the room, let's find the latest activity
             # at/before the `to_token`.
             if room_for_user.membership == Membership.JOIN:
                 last_event_result = (
                     await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                        room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+                        room_id, to_token.room_key
                     )
                 )
 
-                # By default, just choose the membership event position
-                event_pos = room_for_user.event_pos
-                # But if we found a bump event, use that instead
-                if last_event_result is not None:
-                    _, event_pos = last_event_result
+                # If the room has no events at/before the `to_token`, this is probably a
+                # mistake in the code that generates the `sync_room_map` since that should
+                # only give us rooms that the user had membership in during the token range.
+                assert last_event_result is not None
 
-                sorted_sync_rooms.append(
-                    _SortedRoomMembershipForUser.from_room_membership_for_user(
-                        room_for_user, bump_stamp=event_pos.stream
-                    )
-                )
+                _, event_pos = last_event_result
+
+                last_activity_in_room_map[room_id] = event_pos.stream
             else:
                 # Otherwise, if the user has left/been invited/knocked/been banned from
                 # a room, they shouldn't see anything past that point.
@@ -894,16 +846,12 @@ class SlidingSyncHandler:
                 # invited/knocked cases if for example the room has
                 # `invite`/`world_readable` history visibility, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-                sorted_sync_rooms.append(
-                    _SortedRoomMembershipForUser.from_room_membership_for_user(
-                        room_for_user, bump_stamp=room_for_user.event_pos.stream
-                    )
-                )
+                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
 
         return sorted(
-            sorted_sync_rooms,
+            sync_room_map.values(),
             # Sort by the last activity (stream_ordering) in the room
-            key=lambda room_info: room_info.bump_stamp,
+            key=lambda room_info: last_activity_in_room_map[room_info.room_id],
             # We want descending order
             reverse=True,
         )
@@ -913,7 +861,7 @@ class SlidingSyncHandler:
         user: UserID,
         room_id: str,
         room_sync_config: RoomSyncConfig,
-        room_membership_for_user_at_to_token: _SortedRoomMembershipForUser,
+        room_membership_for_user_at_to_token: _RoomMembershipForUser,
         from_token: Optional[StreamToken],
         to_token: StreamToken,
     ) -> SlidingSyncResult.RoomResult:
@@ -1102,6 +1050,20 @@ class SlidingSyncHandler:
         # state reset happened. Perhaps we should indicate this by setting `initial:
         # True` and empty `required_state`.
 
+        # Figure out the last bump event in the room
+        last_bump_event_result = (
+            await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+            )
+        )
+
+        # By default, just choose the membership event position
+        bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+        # But if we found a bump event, use that instead
+        if last_bump_event_result:
+            _, bump_event_pos = last_bump_event_result
+            bump_stamp = bump_event_pos.stream
+
         return SlidingSyncResult.RoomResult(
             # TODO: Dummy value
             name=None,
@@ -1123,7 +1085,7 @@ class SlidingSyncHandler:
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
-            bump_stamp=room_membership_for_user_at_to_token.bump_stamp,
+            bump_stamp=bump_stamp,
             # TODO: Dummy values
             joined_count=0,
             invited_count=0,

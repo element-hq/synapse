@@ -2010,25 +2010,27 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 {
                     "op": "SYNC",
                     "range": [0, 1],
-                    # room2 sorts before room1 because reactions don't bump the room
-                    "room_ids": [room_id2, room_id1],
+                    # room1 sorts before room2 because it has the latest event (the
+                    # reaction)
+                    "room_ids": [room_id1, room_id2],
                 }
             ],
             channel.json_body["lists"]["foo-list"],
         )
 
-        # Make sure the `bump_stamp` for room2 is correct
-        self.assertEqual(
-            channel.json_body["rooms"][room_id2]["bump_stamp"],
-            event_pos2.stream,
-            channel.json_body["rooms"][room_id2],
-        )
-
-        # Make sure the `bump_stamp` for room2 is correct
+        # The `bump_stamp` for room1 should point at the latest message (not the
+        # reaction since it's not one of the `DEFAULT_BUMP_EVENT_TYPES`)
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["bump_stamp"],
             event_pos1.stream,
             channel.json_body["rooms"][room_id1],
+        )
+
+        # The `bump_stamp` for room2 should point at the latest message
+        self.assertEqual(
+            channel.json_body["rooms"][room_id2]["bump_stamp"],
+            event_pos2.stream,
+            channel.json_body["rooms"][room_id2],
         )
 
     def test_rooms_newly_joined_incremental_sync(self) -> None:
