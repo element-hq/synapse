@@ -936,7 +936,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         # Event
                         event_id=event_id,
                         event_pos=PersistedEventPosition(
-                            instance_name=instance_name,
+                            # If instance_name is null we default to "master"
+                            instance_name=instance_name or "master",
                             stream=stream_ordering,
                         ),
                         # When `s.event_id = null`, we won't be able to get respective
@@ -952,7 +953,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         prev_event_id=prev_event_id,
                         prev_event_pos=(
                             PersistedEventPosition(
-                                instance_name=prev_instance_name,
+                                # If instance_name is null we default to "master"
+                                instance_name=prev_instance_name or "master",
                                 stream=prev_stream_ordering,
                             )
                             if (
@@ -1257,7 +1259,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     stream_ordering=stream_ordering,
                 ):
                     return event_id, PersistedEventPosition(
-                        instance_name, stream_ordering
+                        # If instance_name is null we default to "master"
+                        instance_name or "master",
+                        stream_ordering,
                     )
 
             return None

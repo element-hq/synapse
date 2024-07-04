@@ -494,7 +494,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 sender=sender,
                 membership=membership,
                 event_id=event_id,
-                event_pos=PersistedEventPosition(instance_name, stream_ordering),
+                event_pos=PersistedEventPosition(
+                    # If instance_name is null we default to "master"
+                    instance_name or "master",
+                    stream_ordering,
+                ),
                 room_version_id=room_version,
             )
             for room_id, sender, membership, event_id, instance_name, stream_ordering, room_version in txn
