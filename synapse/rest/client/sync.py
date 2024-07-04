@@ -997,7 +997,7 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.required_state is not None:
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
@@ -1008,7 +1008,7 @@ class SlidingSyncRestServlet(RestServlet):
                 )
                 serialized_rooms[room_id]["required_state"] = serialized_required_state
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.timeline_events is not None:
                 serialized_timeline = await self.event_serializer.serialize_events(
                     room_result.timeline_events,
@@ -1018,17 +1018,17 @@ class SlidingSyncRestServlet(RestServlet):
                 )
                 serialized_rooms[room_id]["timeline"] = serialized_timeline
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.limited is not None:
                 serialized_rooms[room_id]["limited"] = room_result.limited
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
                 serialized_rooms[room_id]["prev_batch"] = (
                     await room_result.prev_batch.to_string(self.store)
                 )
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:
                 serialized_rooms[room_id]["num_live"] = room_result.num_live
 
