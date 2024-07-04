@@ -1457,7 +1457,7 @@ class EventsWorkerStore(SQLBaseStore):
                 event_dict[event_id] = _EventRow(
                     event_id=event_id,
                     stream_ordering=row[1],
-                    instance_name=row[2],
+                    instance_name=row[2] or "master",
                     internal_metadata=row[3],
                     json=row[4],
                     format_version=row[5],
