@@ -51,7 +51,6 @@ from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.roommember import (
-    GetRoomsForUserWithStreamOrdering,
     MemberSummary,
     ProfileInfo,
     RoomsForUser,
@@ -610,53 +609,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return results
 
-    @cached(max_entries=500000, iterable=True)
-    async def get_rooms_for_user_with_stream_ordering(
-        self, user_id: str
-    ) -> FrozenSet[GetRoomsForUserWithStreamOrdering]:
-        """Returns a set of room_ids the user is currently joined to.
-
-        If a remote user only returns rooms this server is currently
-        participating in.
-
-        Args:
-            user_id
-
-        Returns:
-            Returns the rooms the user is in currently, along with the stream
-            ordering of the most recent join for that user and room, along with
-            the room version of the room.
-        """
-        return await self.db_pool.runInteraction(
-            "get_rooms_for_user_with_stream_ordering",
-            self._get_rooms_for_user_with_stream_ordering_txn,
-            user_id,
-        )
-
-    def _get_rooms_for_user_with_stream_ordering_txn(
-        self, txn: LoggingTransaction, user_id: str
-    ) -> FrozenSet[GetRoomsForUserWithStreamOrdering]:
-        # We use `current_state_events` here and not `local_current_membership`
-        # as a) this gets called with remote users and b) this only gets called
-        # for rooms the server is participating in.
-        sql = """
-            SELECT room_id, e.instance_name, e.stream_ordering
-            FROM current_state_events AS c
-            INNER JOIN events AS e USING (room_id, event_id)
-            WHERE
-                c.type = 'm.room.member'
-                AND c.state_key = ?
-                AND c.membership = ?
-        """
-
-        txn.execute(sql, (user_id, Membership.JOIN))
-        return frozenset(
-            GetRoomsForUserWithStreamOrdering(
-                room_id, PersistedEventPosition(instance, stream_id)
-            )
-            for room_id, instance, stream_id in txn
-        )
-
     async def get_users_server_still_shares_room_with(
         self, user_ids: Collection[str]
     ) -> Set[str]:
@@ -705,13 +657,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         If a remote user only returns rooms this server is currently
         participating in.
         """
-        rooms = self.get_rooms_for_user_with_stream_ordering.cache.get_immediate(
-            (user_id,),
-            None,
-            update_metrics=False,
-        )
-        if rooms:
-            return frozenset(r.room_id for r in rooms)
 
         room_ids = await self.db_pool.simple_select_onecol(
             table="current_state_events",
