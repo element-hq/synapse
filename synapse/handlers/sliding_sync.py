@@ -1044,7 +1044,7 @@ class SlidingSyncHandler:
         # By default, just choose the membership event position
         bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
         # But if we found a bump event, use that instead
-        if last_bump_event_result:
+        if last_bump_event_result is not None:
             _, bump_event_pos = last_bump_event_result
             bump_stamp = bump_event_pos.stream
 
