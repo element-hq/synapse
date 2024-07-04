@@ -134,12 +134,6 @@ class _RoomMembershipForUser:
         return attr.evolve(self, **kwds)
 
 
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class _RelevantRoomEntry:
-    room_sync_config: RoomSyncConfig
-    room_membership_for_user: _RoomMembershipForUser
-
-
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
@@ -260,7 +254,7 @@ class SlidingSyncHandler:
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
-        relevant_room_map: Dict[str, _RelevantRoomEntry] = {}
+        relevant_room_map: Dict[str, RoomSyncConfig] = {}
         if sync_config.lists:
             # Get all of the room IDs that the user should be able to see in the sync
             # response
@@ -286,29 +280,26 @@ class SlidingSyncHandler:
                 if list_config.ranges:
                     for range in list_config.ranges:
                         # Both sides of range are inclusive
-                        sliced_sync_rooms = sorted_sync_rooms[range[0] : range[1] + 1]
+                        sliced_sync_room_ids = [
+                            room_membership.room_id
+                            # Both sides of range are inclusive
+                            for room_membership in sorted_sync_rooms[
+                                range[0] : range[1] + 1
+                            ]
+                        ]
 
                         ops.append(
                             SlidingSyncResult.SlidingWindowList.Operation(
                                 op=OperationType.SYNC,
                                 range=range,
-                                room_ids=[
-                                    room_membership.room_id
-                                    for room_membership in sliced_sync_rooms
-                                ],
+                                room_ids=sliced_sync_room_ids,
                             )
                         )
 
                         # Take the superset of the `RoomSyncConfig` for each room
-                        for room_membership_for_user in sliced_sync_rooms:
-                            relevant_room_entry = relevant_room_map.get(
-                                room_membership_for_user.room_id
-                            )
-                            if relevant_room_entry is not None:
-                                existing_room_sync_config = (
-                                    relevant_room_entry.room_sync_config
-                                )
-
+                        for room_id in sliced_sync_room_ids:
+                            existing_room_sync_config = relevant_room_map.get(room_id)
+                            if existing_room_sync_config is not None:
                                 # Take the highest timeline limit
                                 if (
                                     existing_room_sync_config.timeline_limit
@@ -323,16 +314,9 @@ class SlidingSyncHandler:
                                     list_config.required_state
                                 )
                             else:
-                                relevant_room_map[room_membership_for_user.room_id] = (
-                                    _RelevantRoomEntry(
-                                        room_sync_config=RoomSyncConfig(
-                                            timeline_limit=list_config.timeline_limit,
-                                            required_state=set(
-                                                list_config.required_state
-                                            ),
-                                        ),
-                                        room_membership_for_user=room_membership_for_user,
-                                    )
+                                relevant_room_map[room_id] = RoomSyncConfig(
+                                    timeline_limit=list_config.timeline_limit,
+                                    required_state=set(list_config.required_state),
                                 )
 
                 lists[list_key] = SlidingSyncResult.SlidingWindowList(
@@ -344,12 +328,12 @@ class SlidingSyncHandler:
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
-        for room_id, relevant_room_entry in relevant_room_map.items():
+        for room_id, room_sync_config in relevant_room_map.items():
             room_sync_result = await self.get_room_sync_data(
                 user=sync_config.user,
                 room_id=room_id,
-                room_sync_config=relevant_room_entry.room_sync_config,
-                room_membership_for_user_at_to_token=relevant_room_entry.room_membership_for_user,
+                room_sync_config=room_sync_config,
+                room_membership_for_user_at_to_token=sync_room_map[room_id],
                 from_token=from_token,
                 to_token=to_token,
             )
