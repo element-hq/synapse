@@ -19,6 +19,7 @@
 #
 #
 
+import logging
 import random
 from types import TracebackType
 from typing import (
@@ -47,6 +48,8 @@ from synapse.util.async_helpers import timeout_deferred
 if TYPE_CHECKING:
     from synapse.logging.opentracing import opentracing
     from synapse.server import HomeServer
+
+logger = logging.getLogger(__name__)
 
 
 # This lock is used to avoid creating an event while we are purging the room.
@@ -247,6 +250,8 @@ class WaitingLock:
                 except Exception:
                     pass
 
+        logger.warn(f"lock taken: {self.lock_name}, {self.lock_key}")
+
         return await self._inner_lock.__aenter__()
 
     async def __aexit__(
@@ -261,6 +266,7 @@ class WaitingLock:
 
         try:
             r = await self._inner_lock.__aexit__(exc_type, exc, tb)
+            logger.warn(f"lock released: {self.lock_name}, {self.lock_key}")
         finally:
             self._lock_span.__exit__(exc_type, exc, tb)
 
