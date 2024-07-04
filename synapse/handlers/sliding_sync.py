@@ -132,6 +132,7 @@ class RoomSyncConfig:
                 required_state_map = {StateValues.WILDCARD: {StateValues.WILDCARD}}
                 # We can break, since we don't need to add anything else
                 break
+
             # If we're getting a wildcard for the `state_type`, get rid of any other
             # entries with the same `state_key`, since the wildcard will cover it already.
             elif state_type == StateValues.WILDCARD:
