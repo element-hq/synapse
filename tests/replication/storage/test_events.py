@@ -40,7 +40,6 @@ from synapse.storage.roommember import RoomsForUser
 from synapse.types import PersistedEventPosition
 from synapse.util import Clock
 
-
 from ._base import BaseWorkerStoreTestCase
 
 USER_ID = "@feeling:test"
