@@ -140,12 +140,6 @@ class _SortedRoomMembershipForUser(_RoomMembershipForUser):
     Same as `_RoomMembershipForUser` but with an additional `bump_stamp` attribute.
 
     Attributes:
-        event_id: The event ID of the membership event
-        event_pos: The stream position of the membership event
-        membership: The membership state of the user in the room
-        sender: The person who sent the membership event
-        newly_joined: Whether the user newly joined the room during the given token
-            range
         bump_stamp: The `stream_ordering` of the last event according to the
             `bump_event_types`. This helps clients sort more readily without them needing to
             pull in a bunch of the timeline to determine the last activity.
