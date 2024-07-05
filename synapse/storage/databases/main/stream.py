@@ -426,7 +426,7 @@ def _filter_results(
 def _filter_results_by_stream(
     lower_token: Optional[RoomStreamToken],
     upper_token: Optional[RoomStreamToken],
-    instance_name: str,
+    instance_name: Optional[str],
     stream_ordering: int,
 ) -> bool:
     """
@@ -442,7 +442,14 @@ def _filter_results_by_stream(
     position maps, which we handle by fetching more than necessary from the DB
     and then filtering (rather than attempting to construct a complicated SQL
     query).
+
+    The `instance_name` arg is optional to handle historic rows, and is
+    interpreted as if it was "master".
     """
+
+    if instance_name is None:
+        instance_name = "master"
+
     if lower_token:
         assert lower_token.topological is None
 
