@@ -48,7 +48,7 @@ No significant changes since 1.110.0rc3.
   This is useful for scripts that bootstrap user accounts with initial passwords. ([\#17304](https://github.com/element-hq/synapse/issues/17304))
 - Add support for via query parameter from [MSC4156](https://github.com/matrix-org/matrix-spec-proposals/pull/4156). ([\#17322](https://github.com/element-hq/synapse/issues/17322))
 - Add `is_invite` filtering to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17335](https://github.com/element-hq/synapse/issues/17335))
-- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/rav/authentication-for-media/proposals/3916-authentication-for-media.md) by adding a federation /download endpoint. ([\#17350](https://github.com/element-hq/synapse/issues/17350))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding a federation /download endpoint. ([\#17350](https://github.com/element-hq/synapse/issues/17350))
 
 ### Bugfixes
 
