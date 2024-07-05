@@ -21,7 +21,11 @@
 
 from typing import TYPE_CHECKING, Dict, FrozenSet, List, Tuple, cast
 
-from synapse.storage.database import DatabasePool, LoggingDatabaseConnection
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+)
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
 from synapse.util.caches.descriptors import cached
 
@@ -73,12 +77,54 @@ class ExperimentalFeaturesStore(CacheInvalidationWorkerStore):
             features:
                 pairs of features and True/False for whether the feature should be enabled
         """
-        for feature, enabled in features.items():
-            await self.db_pool.simple_upsert(
-                table="per_user_experimental_features",
-                keyvalues={"feature": feature, "user_id": user},
-                values={"enabled": enabled},
-                insertion_values={"user_id": user, "feature": feature},
-            )
 
-            await self.invalidate_cache_and_stream("list_enabled_features", (user,))
+        def set_features_for_user_txn(txn: LoggingTransaction) -> None:
+            for feature, enabled in features.items():
+                self.db_pool.simple_upsert_txn(
+                    txn,
+                    table="per_user_experimental_features",
+                    keyvalues={"feature": feature, "user_id": user},
+                    values={"enabled": enabled},
+                    insertion_values={"user_id": user, "feature": feature},
+                )
+
+                self._invalidate_cache_and_stream(
+                    txn, self.is_feature_enabled, (user, feature)
+                )
+
+            self._invalidate_cache_and_stream(txn, self.list_enabled_features, (user,))
+
+        return await self.db_pool.runInteraction(
+            "set_features_for_user", set_features_for_user_txn
+        )
+
+    @cached()
+    async def is_feature_enabled(
+        self, user_id: str, feature: "ExperimentalFeature"
+    ) -> bool:
+        """
+        Checks to see if a given feature is enabled for the user
+        Args:
+            user_id: the user to be queried on
+            feature: the feature in question
+        Returns:
+                True if the feature is enabled, False if it is not or if the feature was
+                not found.
+        """
+
+        if feature.is_globally_enabled(self.hs.config):
+            return True
+
+        # if it's not enabled globally, check if it is enabled per-user
+        res = await self.db_pool.simple_select_one_onecol(
+            table="per_user_experimental_features",
+            keyvalues={"user_id": user_id, "feature": feature},
+            retcol="enabled",
+            allow_none=True,
+            desc="get_feature_enabled",
+        )
+
+        # None and false are treated the same
+        db_enabled = bool(res)
+
+        return db_enabled
