@@ -181,6 +181,18 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.warning("Failed to load metadata:", exc_info=True)
             return None
 
+    async def _introspection_endpoint(self) -> str:
+        """
+        Returns the introspection endpoint of the issuer
+
+        It uses the config option if set, otherwise it will use OIDC discovery to get it
+        """
+        if self._config.introspection_endpoint is not None:
+            return self._config.introspection_endpoint
+
+        metadata = await self._load_metadata()
+        return metadata.get("introspection_endpoint")
+
     async def _introspect_token(self, token: str) -> IntrospectionToken:
         """
         Send a token to the introspection endpoint and returns the introspection response
@@ -197,8 +209,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         Returns:
             The introspection response
         """
-        metadata = await self._issuer_metadata.get()
-        introspection_endpoint = metadata.get("introspection_endpoint")
+        introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": str(self._http_client.user_agent, "utf-8"),

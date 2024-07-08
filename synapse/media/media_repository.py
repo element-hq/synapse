@@ -542,7 +542,12 @@ class MediaRepository:
             respond_404(request)
 
     async def get_remote_media_info(
-        self, server_name: str, media_id: str, max_timeout_ms: int, ip_address: str
+        self,
+        server_name: str,
+        media_id: str,
+        max_timeout_ms: int,
+        ip_address: str,
+        use_federation: bool,
     ) -> RemoteMedia:
         """Gets the media info associated with the remote file, downloading
         if necessary.
@@ -553,6 +558,8 @@ class MediaRepository:
             max_timeout_ms: the maximum number of milliseconds to wait for the
                 media to be uploaded.
             ip_address: IP address of the requester
+            use_federation: if a download is necessary, whether to request the remote file
+                over the federation `/download` endpoint
 
         Returns:
             The media info of the file
@@ -573,7 +580,7 @@ class MediaRepository:
                 max_timeout_ms,
                 self.download_ratelimiter,
                 ip_address,
-                False,
+                use_federation,
             )
 
         # Ensure we actually use the responder so that it releases resources
