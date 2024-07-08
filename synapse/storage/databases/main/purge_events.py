@@ -22,6 +22,7 @@
 import logging
 from typing import Any, List, Set, Tuple, cast
 
+from synapse.api.constants import Membership
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main import CacheInvalidationWorkerStore
@@ -376,6 +377,20 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
                 (room_id,),
             )
 
+        server_in_room = self._check_host_room_membership_txn(  # type: ignore[attr-defined]
+            txn,
+            room_id,
+            host=self.hs.hostname,
+            membership=Membership.JOIN,
+        )
+        if not server_in_room:
+            server_in_room = self._check_host_room_membership_txn(  # type: ignore[attr-defined]
+                txn,
+                room_id,
+                host=self.hs.hostname,
+                membership=Membership.INVITE,
+            )
+
         # First, fetch all the state groups that should be deleted, before
         # we delete that information.
         txn.execute(
@@ -503,6 +518,6 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         #       index on them. In any case we should be clearing out 'stream' tables
         #       periodically anyway (https://github.com/matrix-org/synapse/issues/5888)
 
-        self._invalidate_caches_for_room_and_stream(txn, room_id)
+        self._invalidate_caches_for_room_and_stream(txn, room_id, server_in_room)
 
         return state_groups
