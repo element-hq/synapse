@@ -66,7 +66,12 @@ class VersionsRestServlet(RestServlet):
         msc3881_enabled = self.config.experimental.msc3881_enabled
 
         if self.auth.has_access_token(request):
-            requester = await self.auth.get_user_by_req(request)
+            requester = await self.auth.get_user_by_req(
+                request,
+                allow_guest=True,
+                allow_locked=True,
+                allow_expired=True,
+            )
             user_id = requester.user.to_string()
 
             msc3881_enabled = await self.store.is_feature_enabled(
