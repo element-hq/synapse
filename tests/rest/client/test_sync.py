@@ -2973,6 +2973,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_incremental_sync(self) -> None:
         """
@@ -3027,6 +3028,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_wildcard(self) -> None:
         """
@@ -3084,6 +3086,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             state_map.values(),
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_wildcard_event_type(self) -> None:
         """
@@ -3147,6 +3150,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             # events when the `event_type` is a wildcard.
             exact=False,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_wildcard_state_key(self) -> None:
         """
@@ -3192,6 +3196,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_lazy_loading_room_members(self) -> None:
         """
@@ -3247,6 +3252,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
     def test_rooms_required_state_leave_ban(self, stop_membership: str) -> None:
@@ -3329,6 +3335,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_combine_superset(self) -> None:
         """
@@ -3401,6 +3408,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             },
             exact=True,
         )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_partial_state(self) -> None:
         """
