@@ -556,6 +556,47 @@ class GetLastEventInRoomBeforeStreamOrderingTestCase(HomeserverTestCase):
             ),
         )
 
+    def test_restrict_event_types(self) -> None:
+        """
+        Test that we only consider given `event_types` when finding the last event
+        before a token.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
+        event_response = self.helper.send_event(
+            room_id1,
+            type="org.matrix.special_message",
+            content={"body": "before1, target!"},
+            tok=user1_tok,
+        )
+        self.helper.send(room_id1, "before2", tok=user1_tok)
+
+        after_room_token = self.event_sources.get_current_token()
+
+        # Send some events after the token
+        self.helper.send_event(
+            room_id1,
+            type="org.matrix.special_message",
+            content={"body": "after1"},
+            tok=user1_tok,
+        )
+        self.helper.send(room_id1, "after2", tok=user1_tok)
+
+        last_event_result = self.get_success(
+            self.store.get_last_event_pos_in_room_before_stream_ordering(
+                room_id=room_id1,
+                end_token=after_room_token.room_key,
+                event_types=["org.matrix.special_message"],
+            )
+        )
+        assert last_event_result is not None
+        last_event_id, _ = last_event_result
+
+        # Make sure it's the last event before the token
+        self.assertEqual(last_event_id, event_response["event_id"])
+
 
 class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
     """

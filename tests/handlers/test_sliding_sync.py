@@ -2844,7 +2844,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         # Sort the rooms (what we're testing)
-        sorted_room_info = self.get_success(
+        sorted_sync_rooms = self.get_success(
             self.sliding_sync_handler.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
@@ -2852,7 +2852,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            [room_id for room_id, _ in sorted_room_info],
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
             [room_id2, room_id1],
         )
 
@@ -2927,7 +2927,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         # Sort the rooms (what we're testing)
-        sorted_room_info = self.get_success(
+        sorted_sync_rooms = self.get_success(
             self.sliding_sync_handler.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
@@ -2935,7 +2935,7 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(
-            [room_id for room_id, _ in sorted_room_info],
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
             [room_id2, room_id1, room_id3],
             "Corresponding map to disambiguate the opaque room IDs: "
             + str(
@@ -2945,4 +2945,64 @@ class SortRoomsTestCase(HomeserverTestCase):
                     "room_id3": room_id3,
                 }
             ),
+        )
+
+    def test_default_bump_event_types(self) -> None:
+        """
+        Test that we only consider the *latest* event in the room when sorting (not
+        `bump_event_types`).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        message_response = self.helper.send(room_id1, "message in room1", tok=user1_tok)
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        self.helper.send(room_id2, "message in room2", tok=user1_tok)
+
+        # Send a reaction in room1 which isn't in `DEFAULT_BUMP_EVENT_TYPES` but we only
+        # care about sorting by the *latest* event in the room.
+        self.helper.send_event(
+            room_id1,
+            type=EventTypes.Reaction,
+            content={
+                "m.relates_to": {
+                    "event_id": message_response["event_id"],
+                    "key": "👍",
+                    "rel_type": "m.annotation",
+                }
+            },
+            tok=user1_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=None,
+                to_token=after_rooms_token,
+            )
+        )
+
+        # Sort the rooms (what we're testing)
+        sorted_sync_rooms = self.get_success(
+            self.sliding_sync_handler.sort_rooms(
+                sync_room_map=sync_room_map,
+                to_token=after_rooms_token,
+            )
+        )
+
+        self.assertEqual(
+            [room_membership.room_id for room_membership in sorted_sync_rooms],
+            # room1 sorts before room2 because it has the latest event (the reaction).
+            # We only care about the *latest* event in the room.
+            [room_id1, room_id2],
         )

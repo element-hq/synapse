@@ -2029,6 +2029,102 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1],
         )
 
+    def test_rooms_bump_stamp(self) -> None:
+        """
+        Test that `bump_stamp` is present and pointing to relevant events.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        event_response1 = message_response = self.helper.send(
+            room_id1, "message in room1", tok=user1_tok
+        )
+        event_pos1 = self.get_success(
+            self.store.get_position_for_event(event_response1["event_id"])
+        )
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        send_response2 = self.helper.send(room_id2, "message in room2", tok=user1_tok)
+        event_pos2 = self.get_success(
+            self.store.get_position_for_event(send_response2["event_id"])
+        )
+
+        # Send a reaction in room1 but it shouldn't affect the `bump_stamp`
+        # because reactions are not part of the `DEFAULT_BUMP_EVENT_TYPES`
+        self.helper.send_event(
+            room_id1,
+            type=EventTypes.Reaction,
+            content={
+                "m.relates_to": {
+                    "event_id": message_response["event_id"],
+                    "key": "👍",
+                    "rel_type": "m.annotation",
+                }
+            },
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        timeline_limit = 100
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": timeline_limit,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the rooms in the right order
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    # room1 sorts before room2 because it has the latest event (the
+                    # reaction)
+                    "room_ids": [room_id1, room_id2],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+        # The `bump_stamp` for room1 should point at the latest message (not the
+        # reaction since it's not one of the `DEFAULT_BUMP_EVENT_TYPES`)
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["bump_stamp"],
+            event_pos1.stream,
+            channel.json_body["rooms"][room_id1],
+        )
+
+        # The `bump_stamp` for room2 should point at the latest message
+        self.assertEqual(
+            channel.json_body["rooms"][room_id2]["bump_stamp"],
+            event_pos2.stream,
+            channel.json_body["rooms"][room_id2],
+        )
+
     def test_rooms_newly_joined_incremental_sync(self) -> None:
         """
         Test that when we make an incremental sync with a `newly_joined` `rooms`, we are
