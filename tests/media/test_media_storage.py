@@ -1086,10 +1086,29 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
             )
             assert channel2.code == 200
 
-        # eleventh will hit ratelimit
-        channel3 = self.make_request(
-            "GET",
-            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyx",
-            shorthand=False,
-        )
-        assert channel3.code == 429
+        # If the refund code is working correctly, there should be ~200MB of free space
+        # in the limit. This is because we're assuming each file is 50MB, but are only
+        # consuming 30MB files (per the @patch on this test). We should be able to get
+        # 6 more requests through now, before rate limiting on the 7th or 8th (we can
+        # expect that 6.667 requests will make it at 200MB / 30MB, which may be just
+        # enough for a slow test run to get an additional request through).
+        for i in range(6):
+            channel3 = self.make_request(
+                "GET",
+                f"/_matrix/media/v3/download/remote.org/abcd{i}",
+                shorthand=False,
+            )
+            assert channel3.code == 200
+
+        # Try the rate limit again, testing the eighth request fails. We discard the
+        # seventh request because it may or may not be rate limited (see above). The
+        # eighth request would *definitely* be rate limited though, so we test that.
+        for i in range(2):
+            channel4 = self.make_request(
+                "GET",
+                f"/_matrix/media/v3/download/remote.org/abcde{i}",
+                shorthand=False,
+            )
+            if i == 1:  # test for second request (which will be #8)
+                assert channel4.code == 429
+            # else, discard 7th request because it's unhelpful
