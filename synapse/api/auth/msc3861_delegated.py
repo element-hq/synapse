@@ -40,6 +40,7 @@ from synapse.api.errors import (
     OAuthInsufficientScopeError,
     StoreError,
     SynapseError,
+    UnrecognizedRequestError,
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
@@ -48,6 +49,7 @@ from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
 
 if TYPE_CHECKING:
+    from synapse.rest.admin.experimental_features import ExperimentalFeature
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
@@ -143,6 +145,18 @@ class MSC3861DelegatedAuth(BaseAuth):
         # metadata.validate_introspection_endpoint()
         return metadata
 
+    async def _introspection_endpoint(self) -> str:
+        """
+        Returns the introspection endpoint of the issuer
+
+        It uses the config option if set, otherwise it will use OIDC discovery to get it
+        """
+        if self._config.introspection_endpoint is not None:
+            return self._config.introspection_endpoint
+
+        metadata = await self._load_metadata()
+        return metadata.get("introspection_endpoint")
+
     async def _introspect_token(self, token: str) -> IntrospectionToken:
         """
         Send a token to the introspection endpoint and returns the introspection response
@@ -159,8 +173,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         Returns:
             The introspection response
         """
-        metadata = await self._issuer_metadata.get()
-        introspection_endpoint = metadata.get("introspection_endpoint")
+        introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
             "User-Agent": str(self._http_client.user_agent, "utf-8"),
@@ -244,6 +257,32 @@ class MSC3861DelegatedAuth(BaseAuth):
         request.requester = requester
 
         return requester
+
+    async def get_user_by_req_experimental_feature(
+        self,
+        request: SynapseRequest,
+        feature: "ExperimentalFeature",
+        allow_guest: bool = False,
+        allow_expired: bool = False,
+        allow_locked: bool = False,
+    ) -> Requester:
+        try:
+            requester = await self.get_user_by_req(
+                request,
+                allow_guest=allow_guest,
+                allow_expired=allow_expired,
+                allow_locked=allow_locked,
+            )
+            if await self.store.is_feature_enabled(requester.user.to_string(), feature):
+                return requester
+
+            raise UnrecognizedRequestError(code=404)
+        except (AuthError, InvalidClientTokenError):
+            if feature.is_globally_enabled(self.hs.config):
+                # If its globally enabled then return the auth error
+                raise
+
+            raise UnrecognizedRequestError(code=404)
 
     async def get_user_by_access_token(
         self,

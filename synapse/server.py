@@ -28,7 +28,7 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
 
 from typing_extensions import TypeAlias
 
@@ -161,6 +161,7 @@ if TYPE_CHECKING:
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
     from synapse.handlers.saml import SamlHandler
+    from synapse.storage._base import SQLBaseStore
 
 
 # The annotation for `cache_in_self` used to be
@@ -255,10 +256,13 @@ class HomeServer(metaclass=abc.ABCMeta):
         "stats",
     ]
 
-    # This is overridden in derived application classes
-    # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
-    # instantiated during setup() for future return by get_datastores()
-    DATASTORE_CLASS = abc.abstractproperty()
+    @property
+    @abc.abstractmethod
+    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+        # This is overridden in derived application classes
+        # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
+        # instantiated during setup() for future return by get_datastores()
+        pass
 
     def __init__(
         self,
