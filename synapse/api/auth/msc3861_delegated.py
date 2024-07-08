@@ -175,7 +175,7 @@ class MSC3861DelegatedAuth(BaseAuth):
 
         try:
             metadata = await self._load_metadata()
-            return metadata.account_management_uri
+            return metadata.get("account_management_uri", None)
         # We don't want to raise here if we can't load the metadata
         except Exception:
             logger.warning("Failed to load metadata:", exc_info=True)
