@@ -825,14 +825,13 @@ class DeviceInboxWorkerStore(SQLBaseStore):
             # Check if we've already inserted a matching message_id for that
             # origin. This can happen if the origin doesn't receive our
             # acknowledgement from the first time we received the message.
-            already_inserted = self.db_pool.simple_select_one_txn(
+            already_inserted = self.db_pool.simple_select_list_txn(
                 txn,
                 table="device_federation_inbox",
                 keyvalues={"origin": origin, "message_id": message_id},
                 retcols=("message_id",),
-                allow_none=True,
             )
-            if already_inserted is not None:
+            if already_inserted:
                 return
 
             # Add an entry for this message_id so that we know we've processed
