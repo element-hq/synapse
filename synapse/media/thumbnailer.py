@@ -332,14 +332,14 @@ class ThumbnailProvider:
 
                 responder = await self.media_storage.fetch_media(file_info)
                 if responder:
-                    if not for_federation:
-                        await respond_with_responder(
-                            request, responder, info.type, info.length
+                    if for_federation:
+                        await respond_with_multipart_responder(
+                            self.hs.get_clock(), request, responder, media_info
                         )
                         return
                     else:
-                        await respond_with_multipart_responder(
-                            self.hs.get_clock(), request, responder, media_info
+                        await respond_with_responder(
+                            request, responder, info.type, info.length
                         )
                         return
 
