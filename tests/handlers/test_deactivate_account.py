@@ -461,3 +461,25 @@ class DeactivateAccountTestCase(HomeserverTestCase):
         # Validate that there is no displayname in any of the events
         for event in events:
             self.assertTrue("displayname" not in event.content)
+
+    def test_rooms_forgotten_upon_deactivation(self) -> None:
+        """
+        Tests that the user 'forgets' the rooms they left upon deactivation.
+        """
+        # Create a room
+        room_id = self.helper.create_room_as(
+            self.user,
+            is_public=True,
+            tok=self.token,
+        )
+
+        # Deactivate the account
+        self._deactivate_my_account()
+
+        # Get all of the user's forgotten rooms
+        forgotten_rooms = self.get_success(
+            self._store.get_forgotten_rooms_for_user(self.user)
+        )
+
+        # Validate that the created room is forgotten
+        self.assertTrue(room_id in forgotten_rooms)

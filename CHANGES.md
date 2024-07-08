@@ -1,3 +1,24 @@
+# Synapse 1.110.0 (2024-07-03)
+
+No significant changes since 1.110.0rc3.
+
+
+
+
+# Synapse 1.110.0rc3 (2024-07-02)
+
+### Bugfixes
+
+- Fix bug where `/sync` requests could get blocked indefinitely after an upgrade from Synapse versions before v1.109.0. ([\#17386](https://github.com/element-hq/synapse/issues/17386), [\#17391](https://github.com/element-hq/synapse/issues/17391))
+
+### Internal Changes
+
+- Limit size of presence EDUs to 50 entries. ([\#17371](https://github.com/element-hq/synapse/issues/17371))
+- Fix building debian package for debian sid. ([\#17389](https://github.com/element-hq/synapse/issues/17389))
+
+
+
+
 # Synapse 1.110.0rc2 (2024-06-26)
 
 ### Internal Changes
@@ -27,7 +48,7 @@
   This is useful for scripts that bootstrap user accounts with initial passwords. ([\#17304](https://github.com/element-hq/synapse/issues/17304))
 - Add support for via query parameter from [MSC4156](https://github.com/matrix-org/matrix-spec-proposals/pull/4156). ([\#17322](https://github.com/element-hq/synapse/issues/17322))
 - Add `is_invite` filtering to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17335](https://github.com/element-hq/synapse/issues/17335))
-- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/rav/authentication-for-media/proposals/3916-authentication-for-media.md) by adding a federation /download endpoint. ([\#17350](https://github.com/element-hq/synapse/issues/17350))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding a federation /download endpoint. ([\#17350](https://github.com/element-hq/synapse/issues/17350))
 
 ### Bugfixes
 

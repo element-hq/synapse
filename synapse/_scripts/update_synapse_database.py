@@ -41,7 +41,7 @@ logger = logging.getLogger("update_database")
 
 
 class MockHomeserver(HomeServer):
-    DATASTORE_CLASS = DataStore  # type: ignore [assignment]
+    DATASTORE_CLASS = DataStore
 
     def __init__(self, config: HomeServerConfig):
         super().__init__(

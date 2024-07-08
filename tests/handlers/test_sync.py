@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 from parameterized import parameterized
 
+from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import AccountDataTypes, EventTypes, JoinRules
@@ -35,7 +36,14 @@ from synapse.handlers.sync import SyncConfig, SyncRequestKey, SyncResult, SyncVe
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    MultiWriterStreamToken,
+    RoomStreamToken,
+    StreamKeyType,
+    UserID,
+    create_requester,
+)
 from synapse.util import Clock
 
 import tests.unittest
@@ -958,6 +966,94 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 return
 
         self.fail("No push rules found")
+
+    def test_wait_for_future_sync_token(self) -> None:
+        """Test that if we receive a token that is ahead of our current token,
+        we'll wait until the stream position advances.
+
+        This can happen if replication streams start lagging, and the client's
+        previous sync request was serviced by a worker ahead of ours.
+        """
+        user = self.register_user("alice", "password")
+
+        # We simulate a lagging stream by getting a stream ID from the ID gen
+        # and then waiting to mark it as "persisted".
+        presence_id_gen = self.store.get_presence_stream_id_gen()
+        ctx_mgr = presence_id_gen.get_next()
+        stream_id = self.get_success(ctx_mgr.__aenter__())
+
+        # Create the new token based on the stream ID above.
+        current_token = self.hs.get_event_sources().get_current_token()
+        since_token = current_token.copy_and_advance(StreamKeyType.PRESENCE, stream_id)
+
+        sync_d = defer.ensureDeferred(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(user),
+                generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=since_token,
+                timeout=0,
+            )
+        )
+
+        # This should block waiting for the presence stream to update
+        self.pump()
+        self.assertFalse(sync_d.called)
+
+        # Marking the stream ID as persisted should unblock the request.
+        self.get_success(ctx_mgr.__aexit__(None, None, None))
+
+        self.get_success(sync_d, by=1.0)
+
+    @parameterized.expand(
+        [(key,) for key in StreamKeyType.__members__.values()],
+        name_func=lambda func, _, param: f"{func.__name__}_{param.args[0].name}",
+    )
+    def test_wait_for_invalid_future_sync_token(
+        self, stream_key: StreamKeyType
+    ) -> None:
+        """Like the previous test, except we give a token that has a stream
+        position ahead of what is in the DB, i.e. its invalid and we shouldn't
+        wait for the stream to advance (as it may never do so).
+
+        This can happen due to older versions of Synapse giving out stream
+        positions without persisting them in the DB, and so on restart the
+        stream would get reset back to an older position.
+        """
+        user = self.register_user("alice", "password")
+
+        # Create a token and advance one of the streams.
+        current_token = self.hs.get_event_sources().get_current_token()
+        token_value = current_token.get_field(stream_key)
+
+        # How we advance the streams depends on the type.
+        if isinstance(token_value, int):
+            since_token = current_token.copy_and_advance(stream_key, token_value + 1)
+        elif isinstance(token_value, MultiWriterStreamToken):
+            since_token = current_token.copy_and_advance(
+                stream_key, MultiWriterStreamToken(stream=token_value.stream + 1)
+            )
+        elif isinstance(token_value, RoomStreamToken):
+            since_token = current_token.copy_and_advance(
+                stream_key, RoomStreamToken(stream=token_value.stream + 1)
+            )
+        else:
+            raise Exception("Unreachable")
+
+        sync_d = defer.ensureDeferred(
+            self.sync_handler.wait_for_sync_for_user(
+                create_requester(user),
+                generate_sync_config(user),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=since_token,
+                timeout=0,
+            )
+        )
+
+        # We should return without waiting for the presence stream to advance.
+        self.get_success(sync_d)
 
 
 def generate_sync_config(
