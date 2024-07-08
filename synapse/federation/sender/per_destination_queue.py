@@ -322,6 +322,7 @@ class PerDestinationQueue:
         )
 
     async def _transaction_transmission_loop(self) -> None:
+        pending_pdus: List[EventBase] = []
         try:
             self.transmission_loop_running = True
 
@@ -337,11 +338,12 @@ class PerDestinationQueue:
                     # not caught up yet
                     return
 
+            pending_pdus = []
             while True:
                 self._new_data_to_send = False
 
                 async with _TransactionQueueManager(self) as (
-                    pending_pdus,
+                    pending_pdus,  # noqa: F811
                     pending_edus,
                 ):
                     if not pending_pdus and not pending_edus:
