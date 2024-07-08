@@ -276,10 +276,37 @@ class SlidingSyncBody(RequestBodyModel):
     class RoomSubscription(CommonRoomParameters):
         pass
 
-    class Extension(RequestBodyModel):
-        enabled: Optional[StrictBool] = False
-        lists: Optional[List[StrictStr]] = None
-        rooms: Optional[List[StrictStr]] = None
+    class Extensions(RequestBodyModel):
+        """The extensions section of the request."""
+
+        class ToDeviceExtension(RequestBodyModel):
+            """The to-device extension (MSC3885)
+
+            Args:
+                enabled
+                limit: Maximum number of to-device messages to return
+                since: The `next_batch` from the previous sync response
+            """
+
+            enabled: Optional[StrictBool] = False
+            limit: StrictInt = 100
+            since: Optional[StrictStr] = None
+
+            @validator("since")
+            def lists_length_check(
+                cls, value: Optional[StrictStr]
+            ) -> Optional[StrictStr]:
+                if value is None:
+                    return value
+
+                try:
+                    int(value)
+                except ValueError:
+                    raise ValueError("'extensions.to_device.since' is invalid")
+
+                return value
+
+        to_device: Optional[ToDeviceExtension] = None
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
@@ -287,7 +314,7 @@ class SlidingSyncBody(RequestBodyModel):
     else:
         lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = None  # type: ignore[valid-type]
     room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
-    extensions: Optional[Dict[StrictStr, Extension]] = None
+    extensions: Optional[Extensions] = None
 
     @validator("lists")
     def lists_length_check(
