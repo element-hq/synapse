@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# The event types that we should consider when sorting the rooms in the sync response.
+# The event types that clients should consider as new activity.
 DEFAULT_BUMP_EVENT_TYPES = {
     EventTypes.Message,
     EventTypes.Encrypted,
