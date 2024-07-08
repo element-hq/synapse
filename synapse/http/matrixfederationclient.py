@@ -1488,9 +1488,11 @@ class MatrixFederationHttpClient:
         headers = dict(response.headers.getAllRawHeaders())
 
         expected_size = response.length
+        using_max_size = False
         # if we don't get an expected length then use the max length
         if expected_size == UNKNOWN_LENGTH:
             expected_size = max_size
+            using_max_size = True
             logger.debug(
                 f"File size unknown, assuming file is max allowable size: {max_size}"
             )
@@ -1550,6 +1552,20 @@ class MatrixFederationHttpClient:
                 e,
             )
             raise
+
+        # We need to refund the bucket difference if the expected size was unknown
+        # at the start of the request.
+        if using_max_size:
+            excess_bytes = max_size - length
+            logger.debug(
+                f"File size now known: {length}. Refunding {excess_bytes} back to user."
+            )
+            download_ratelimiter.record_action(
+                requester=None,
+                key=ip_address,
+                n_actions=excess_bytes * -1,  # perform a refund
+            )
+
         logger.info(
             "{%s} [%s] Completed: %d %s [%d bytes] %s %s",
             request.txn_id,
@@ -1632,9 +1648,11 @@ class MatrixFederationHttpClient:
         headers = dict(response.headers.getAllRawHeaders())
 
         expected_size = response.length
+        using_max_size = False
         # if we don't get an expected length then use the max length
         if expected_size == UNKNOWN_LENGTH:
             expected_size = max_size
+            using_max_size = True
             logger.debug(
                 f"File size unknown, assuming file is max allowable size: {max_size}"
             )
@@ -1731,6 +1749,19 @@ class MatrixFederationHttpClient:
             )
             length, headers, _, _ = await self._simple_http_client.get_file(
                 str_url, output_stream, expected_size
+            )
+
+        # We need to refund the bucket difference if the expected size was unknown
+        # at the start of the request.
+        if using_max_size:
+            excess_bytes = max_size - length
+            logger.debug(
+                f"File size now known: {length}. Refunding {excess_bytes} back to user."
+            )
+            download_ratelimiter.record_action(
+                requester=None,
+                key=ip_address,
+                n_actions=excess_bytes * -1,  # perform a refund
             )
 
         logger.info(
