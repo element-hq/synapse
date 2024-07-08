@@ -1442,17 +1442,16 @@ files = [
 
 [[package]]
 name = "mypy-zope"
-version = "1.0.4"
+version = "1.0.5"
 description = "Plugin for mypy to support zope interfaces"
 optional = false
 python-versions = "*"
 files = [
-    {file = "mypy-zope-1.0.4.tar.gz", hash = "sha256:a9569e73ae85a65247787d98590fa6d4290e76f26aabe035d1c3e94a0b9ab6ee"},
-    {file = "mypy_zope-1.0.4-py3-none-any.whl", hash = "sha256:c7298f93963a84f2b145c2b5cc98709fc2a5be4adf54bfe23fa7fdd8fd19c975"},
+    {file = "mypy_zope-1.0.5.tar.gz", hash = "sha256:2440406d49c0e1199c1cd819c92a2c4957de65579c6abc8a081c927f4bdc8d49"},
 ]
 
 [package.dependencies]
-mypy = ">=1.0.0,<1.10.0"
+mypy = ">=1.0.0,<1.11.0"
 "zope.interface" = "*"
 "zope.schema" = "*"
 
