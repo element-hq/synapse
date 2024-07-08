@@ -1846,6 +1846,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
+        # Reflect the current state of the room
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["name"],
             "my super room",
@@ -1884,6 +1885,21 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
+        # Update the room name after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Update the room avatar URL after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://UPDATED_DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
@@ -1901,14 +1917,16 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
+        # This should still reflect the current state of the room even when the user is
+        # invited.
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["name"],
-            "my super room",
+            "my super duper room",
             channel.json_body["rooms"][room_id1],
         )
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["avatar"],
-            "mxc://DUMMY_MEDIA_ID",
+            "mxc://UPDATED_DUMMY_MEDIA_ID",
             channel.json_body["rooms"][room_id1],
         )
 
