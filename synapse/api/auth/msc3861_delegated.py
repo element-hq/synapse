@@ -145,6 +145,42 @@ class MSC3861DelegatedAuth(BaseAuth):
         # metadata.validate_introspection_endpoint()
         return metadata
 
+    async def issuer(self) -> str:
+        """
+        Get the configured issuer
+
+        This will use the issuer value set in the metadata,
+        falling back to the one set in the config in case the metadata can't be loaded
+        """
+        issuer: Optional[str] = None
+        try:
+            metadata = await self._load_metadata()
+            issuer = metadata.issuer
+        # We don't want to raise here if we can't load the metadata
+        except Exception:
+            logger.warning("Failed to load metadata:", exc_info=True)
+
+        # Fallback to the config value if the metadata can't be loaded
+        # or if the metadata doesn't have an issuer set
+        return issuer or self._config.issuer
+
+    async def account_management_url(self) -> Optional[str]:
+        """
+        Get the configured account management URL
+
+        This will discover the account management URL from the issuer if it's not set in the config
+        """
+        if self._config.account_management_url is not None:
+            return self._config.account_management_url
+
+        try:
+            metadata = await self._load_metadata()
+            return metadata.account_management_uri
+        # We don't want to raise here if we can't load the metadata
+        except Exception:
+            logger.warning("Failed to load metadata:", exc_info=True)
+            return None
+
     async def _introspect_token(self, token: str) -> IntrospectionToken:
         """
         Send a token to the introspection endpoint and returns the introspection response
