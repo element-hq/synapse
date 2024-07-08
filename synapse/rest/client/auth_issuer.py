@@ -13,9 +13,7 @@
 # limitations under the License.
 import logging
 import typing
-from typing import Tuple
-
-from typing_extensions import cast
+from typing import Tuple, cast
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
