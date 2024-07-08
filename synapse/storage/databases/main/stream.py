@@ -925,7 +925,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 prev_sender,
             ) in txn:
                 assert room_id is not None
-                assert instance_name is not None
                 assert stream_ordering is not None
 
                 if _filter_results_by_stream(
@@ -970,10 +969,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                                 instance_name=prev_instance_name or "master",
                                 stream=prev_stream_ordering,
                             )
-                            if (
-                                prev_instance_name is not None
-                                and prev_stream_ordering is not None
-                            )
+                            if (prev_stream_ordering is not None)
                             else None
                         ),
                         prev_membership=prev_membership,
