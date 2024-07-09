@@ -319,7 +319,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             for count, membership in txn:
                 res.setdefault(membership, MemberSummary([], count))
 
-            # Order by membership (joins -> invites/knocks -> everything else), then by
+            # Order by membership (joins -> invites -> leave -> everything else), then by
             # `stream_ordering` so the first members in the room show up first and to
             # make the sort stable (consistent heroes).
             #
@@ -331,14 +331,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 WHERE type = 'm.room.member' AND room_id = ?
                     AND membership IS NOT NULL
                 ORDER BY
-                    CASE membership WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 2 ELSE 3 END ASC,
+                    CASE membership WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 ELSE 4 END ASC,
                     event_stream_ordering ASC
                 LIMIT ?
             """
 
             # 6 is 5 (number of heroes) plus 1, in case one of them is the calling user.
             txn.execute(
-                sql, (room_id, Membership.JOIN, Membership.INVITE, Membership.KNOCK, 6)
+                sql, (room_id, Membership.JOIN, Membership.INVITE, Membership.LEAVE, 6)
             )
             for user_id, membership, event_id in txn:
                 summary = res[membership]
