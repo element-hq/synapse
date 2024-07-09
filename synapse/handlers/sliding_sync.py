@@ -1171,7 +1171,7 @@ class SlidingSyncHandler:
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-        timeline_events: Optional[List[EventBase]] = None
+        timeline_events: List[EventBase] = []
         bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
         limited: Optional[bool] = None
         prev_batch_token: Optional[StreamToken] = None
@@ -1303,7 +1303,7 @@ class SlidingSyncHandler:
 
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
-        stripped_state: Optional[List[JsonDict]] = None
+        stripped_state: List[JsonDict] = []
         if room_membership_for_user_at_to_token.membership in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -1361,8 +1361,18 @@ class SlidingSyncHandler:
             room_membership_summary = await self.store.get_room_summary(room_id)
             # TODO: Reverse/rewind back to the `to_token`
 
-        # `heroes` are required if the room name is not set
-        hero_user_ids: Optional[List[str]] = None
+        # `heroes` are required if the room name is not set.
+        #
+        # Note: When you're the first one on your server to be invited to a new room
+        # over federation, we only have access to some stripped state in
+        # `event.unsigned.invite_room_state` which currently doesn't include `heroes`,
+        # see https://github.com/matrix-org/matrix-spec/issues/380. This means that
+        # clients won't be able to calculate the room name when necessary and just a
+        # pitfall we have to deal with until that spec issue is resolved.
+        hero_user_ids: List[str] = []
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
         if name_event_id is None:
             hero_user_ids = extract_heroes_from_room_summary(
                 room_membership_summary, me=user.to_string()
@@ -1378,15 +1388,7 @@ class SlidingSyncHandler:
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
-        room_state: Optional[StateMap[EventBase]] = None
-        # Start off with the heroes of the room
-        required_state_filter = (
-            StateFilter.from_types(
-                [(EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids]
-            )
-            if hero_user_ids
-            else StateFilter.none()
-        )
+        required_state_filter = StateFilter.none()
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -1454,22 +1456,25 @@ class SlidingSyncHandler:
                         else:
                             required_state_types.append((state_type, state_key))
 
-                required_state_filter = StateFilter.from_types(
-                    chain(required_state_types, required_state_filter.to_types())
-                )
+                required_state_filter = StateFilter.from_types(required_state_types)
 
         # We need this base set of info for the response so let's just fetch it along
         # with the `required_state` for the room
-        meta_room_state = [(EventTypes.Name, ""), (EventTypes.RoomAvatar, "")]
-        state_filter = StateFilter(
-            types=StateFilter.from_types(
-                chain(meta_room_state, required_state_filter.to_types())
-            ).types,
-            include_others=required_state_filter.include_others,
-        )
+        meta_room_state = [(EventTypes.Name, ""), (EventTypes.RoomAvatar, "")] + [
+            (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
+        ]
+        state_filter = StateFilter.all()
+        if required_state_filter != StateFilter.all():
+            state_filter = StateFilter(
+                types=StateFilter.from_types(
+                    chain(meta_room_state, required_state_filter.to_types())
+                ).types,
+                include_others=required_state_filter.include_others,
+            )
 
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
+        room_state: StateMap[EventBase] = {}
         if initial:
             room_state = await self.get_current_state_at(
                 room_id=room_id,
@@ -1482,7 +1487,7 @@ class SlidingSyncHandler:
             # we can return updates instead of the full required state.
             raise NotImplementedError()
 
-        required_room_state: Optional[StateMap[EventBase]] = None
+        required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():
             required_room_state = required_state_filter.filter_state(room_state)
 
@@ -1490,6 +1495,9 @@ class SlidingSyncHandler:
         room_name: Optional[str] = None
         room_avatar: Optional[str] = None
         if room_state is not None:
+            # TODO: Should we also check for `EventTypes.CanonicalAlias`
+            # (`m.room.canonical_alias`) as a fallback for the room name? see
+            # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
             name_event = room_state.get((EventTypes.Name, ""))
             if name_event is not None:
                 room_name = name_event.content.get("name")
@@ -1497,6 +1505,19 @@ class SlidingSyncHandler:
             avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
             if avatar_event is not None:
                 room_avatar = avatar_event.content.get("url")
+
+        # Assemble heroes: extract the info from the state we just fetched
+        heroes: List[SlidingSyncResult.RoomResult.StrippedHero] = []
+        for hero_user_id in hero_user_ids:
+            member_event = room_state.get((EventTypes.Member, hero_user_id))
+            if member_event is not None:
+                heroes.append(
+                    SlidingSyncResult.RoomResult.StrippedHero(
+                        user_id=hero_user_id,
+                        display_name=member_event.content.get("displayname"),
+                        avatar_url=member_event.content.get("avatar_url"),
+                    )
+                )
 
         # Figure out the last bump event in the room
         last_bump_event_result = (
@@ -1515,13 +1536,11 @@ class SlidingSyncHandler:
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
-            heroes=hero_user_ids,
+            heroes=heroes,
             # TODO: Dummy value
             is_dm=False,
             initial=initial,
-            required_state=(
-                list(required_room_state.values()) if required_room_state else None
-            ),
+            required_state=list(required_room_state.values()),
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
             stripped_state=stripped_state,
