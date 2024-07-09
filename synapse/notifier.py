@@ -773,6 +773,7 @@ class Notifier:
         stream_token = await self.event_sources.bound_future_token(stream_token)
 
         start = self.clock.time_msec()
+        logged = False
         while True:
             current_token = self.event_sources.get_current_token()
             if stream_token.is_before_or_eq(current_token):
@@ -783,11 +784,13 @@ class Notifier:
             if now - start > 10_000:
                 return False
 
-            logger.info(
-                "Waiting for current token to reach %s; currently at %s",
-                stream_token,
-                current_token,
-            )
+            if not logged:
+                logger.info(
+                    "Waiting for current token to reach %s; currently at %s",
+                    stream_token,
+                    current_token,
+                )
+                logged = True
 
             # TODO: be better
             await self.clock.sleep(0.5)
