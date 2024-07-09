@@ -319,9 +319,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             for count, membership in txn:
                 res.setdefault(membership, MemberSummary([], count))
 
-            # Order by membership (joins -> invites -> leave -> everything else), then by
-            # `stream_ordering` so the first members in the room show up first and to
-            # make the sort stable (consistent heroes).
+            # Order by membership (joins -> invites -> leave (former insiders) -> everything else
+            # including knocks since they are outsiders), then by `stream_ordering` so
+            # the first members in the room show up first and to make the sort stable
+            # (consistent heroes).
             #
             # Note: rejected events will have a null membership field, so we we manually
             # filter them out.
