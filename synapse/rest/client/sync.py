@@ -998,13 +998,17 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.heroes is not None and len(room_result.heroes) > 0:
                 serialized_heroes = []
                 for hero in room_result.heroes:
-                    serialized_heroes.append(
-                        {
-                            "user_id": hero.user_id,
-                            "displayname": hero.display_name,
-                            "avatar_url": hero.avatar_url,
-                        }
-                    )
+                    serialized_hero = {
+                        "user_id": hero.user_id,
+                    }
+                    if hero.display_name is not None:
+                        # Not a typo, just how "displayname" is spelled in the spec
+                        serialized_hero["displayname"] = hero.display_name
+
+                    if hero.avatar_url is not None:
+                        serialized_hero["avatar_url"] = hero.avatar_url
+
+                    serialized_heroes.append(serialized_hero)
                 serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
