@@ -1,0 +1,1 @@
+Reduce volume of 'Waiting for current token' logs, which were introduced in v1.109.0.
