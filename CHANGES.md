@@ -30,7 +30,7 @@
 - Make the release script create a release branch for Complement as well. ([\#17318](https://github.com/element-hq/synapse/issues/17318))
 - Fix uploading packages to PyPi. ([\#17363](https://github.com/element-hq/synapse/issues/17363))
 - Add CI check for the README. ([\#17367](https://github.com/element-hq/synapse/issues/17367))
-- Fix linting errors from new `ruff` version. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
+- Fix linting errors from new `ruff` version. ([\#17381](https://github.com/element-hq/synapse/issues/17381), [\#17411](https://github.com/element-hq/synapse/issues/17411))
 - Fix building debian packages on non-clean checkouts. ([\#17390](https://github.com/element-hq/synapse/issues/17390))
 - Finish up work to allow per-user feature flags. ([\#17392](https://github.com/element-hq/synapse/issues/17392), [\#17410](https://github.com/element-hq/synapse/issues/17410))
 - Allow enabling sliding sync per-user. ([\#17393](https://github.com/element-hq/synapse/issues/17393))
@@ -48,7 +48,7 @@
 * Bump pydantic from 2.7.1 to 2.8.2. ([\#17415](https://github.com/element-hq/synapse/issues/17415))
 * Bump ruff from 0.3.7 to 0.5.0. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
 * Bump serde from 1.0.203 to 1.0.204. ([\#17409](https://github.com/element-hq/synapse/issues/17409))
-* Bump serde_json from 1.0.117 to 1.0.120. ([\#17385](https://github.com/element-hq/synapse/issues/17385)), ([\#17408](https://github.com/element-hq/synapse/issues/17408))
+* Bump serde_json from 1.0.117 to 1.0.120. ([\#17385](https://github.com/element-hq/synapse/issues/17385), [\#17408](https://github.com/element-hq/synapse/issues/17408))
 * Bump types-setuptools from 69.5.0.20240423 to 70.1.0.20240627. ([\#17380](https://github.com/element-hq/synapse/issues/17380))
 
 # Synapse 1.110.0 (2024-07-03)
