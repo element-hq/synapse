@@ -2125,9 +2125,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
         user3_id = self.register_user("user3", "pass")
-        user3_tok = self.login(user3_id, "pass")
+        _user3_tok = self.login(user3_id, "pass")
         user4_id = self.register_user("user4", "pass")
         user4_tok = self.login(user4_id, "pass")
+        user5_id = self.register_user("user5", "pass")
+        _user5_tok = self.login(user5_id, "pass")
 
         room_id1 = self.helper.create_room_as(
             user2_id,
@@ -2148,6 +2150,8 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         # User4 joins the room after user1 is banned
         self.helper.join(room_id1, user4_id, tok=user4_tok)
+        # User5 is invited after user1 is banned
+        self.helper.invite(room_id1, src=user2_id, targ=user5_id, tok=user2_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
@@ -2189,6 +2193,8 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["invited_count"],
+            # We shouldn't see user5 since they were invited after user1 was banned.
+            #
             # FIXME: The actual number should be "1" (user3) but we currently don't
             # support this for rooms where the user has left/been banned.
             0,
