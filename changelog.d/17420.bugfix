@@ -1,1 +1,1 @@
-Fix bug where using `synapse.app.media_repository` configuration would break the new media endpoints.
+Fix bug where using `synapse.app.media_repository` worker configuration would break the new media endpoints.
