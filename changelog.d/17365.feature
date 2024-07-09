@@ -1,1 +1,0 @@
-Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding _matrix/client/v1/media/download endpoint.

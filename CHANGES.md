@@ -1,3 +1,57 @@
+# Synapse 1.111.0rc1 (2024-07-09)
+
+### Features
+
+- Add `rooms` data to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17320](https://github.com/element-hq/synapse/issues/17320))
+- Add `room_types`/`not_room_types` filtering to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17337](https://github.com/element-hq/synapse/issues/17337))
+- Return "required state" in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17342](https://github.com/element-hq/synapse/issues/17342))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding _matrix/client/v1/media/download endpoint. ([\#17365](https://github.com/element-hq/synapse/issues/17365))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/rav/authentication-for-media/proposals/3916-authentication-for-media.md)
+  by adding `_matrix/client/v1/media/thumbnail`, `_matrix/federation/v1/media/thumbnail` endpoints and stabilizing the
+  remaining `_matrix/client/v1/media` endpoints. ([\#17388](https://github.com/element-hq/synapse/issues/17388))
+- Add `rooms.bump_stamp` for easier client-side sorting in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17395](https://github.com/element-hq/synapse/issues/17395))
+- Forget all of a user's rooms upon deactivation, enabling future purges. ([\#17400](https://github.com/element-hq/synapse/issues/17400))
+- Declare support for [Matrix 1.11](https://matrix.org/blog/2024/06/20/matrix-v1.11-release/). ([\#17403](https://github.com/element-hq/synapse/issues/17403))
+- [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861): allow overriding the introspection endpoint. ([\#17406](https://github.com/element-hq/synapse/issues/17406))
+
+### Bugfixes
+
+- Fix rare race which causes no new to-device messages to be received from remote server. ([\#17362](https://github.com/element-hq/synapse/issues/17362))
+- Fix bug in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint when using an old database. ([\#17398](https://github.com/element-hq/synapse/issues/17398))
+
+### Improved Documentation
+
+- Clarify `url_preview_url_blacklist` is a usability feature. ([\#17356](https://github.com/element-hq/synapse/issues/17356))
+- Fix broken links in README. ([\#17379](https://github.com/element-hq/synapse/issues/17379))
+- Clarify that changelog content *and file extension* need to match in order for entries to merge. ([\#17399](https://github.com/element-hq/synapse/issues/17399))
+
+### Internal Changes
+
+- Make the release script create a release branch for Complement as well. ([\#17318](https://github.com/element-hq/synapse/issues/17318))
+- Fix uploading packages to PyPi. ([\#17363](https://github.com/element-hq/synapse/issues/17363))
+- Add CI check for the README. ([\#17367](https://github.com/element-hq/synapse/issues/17367))
+- Fix linting errors from new `ruff` version. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
+- Fix building debian packages on non-clean checkouts. ([\#17390](https://github.com/element-hq/synapse/issues/17390))
+- Finish up work to allow per-user feature flags. ([\#17392](https://github.com/element-hq/synapse/issues/17392), [\#17410](https://github.com/element-hq/synapse/issues/17410))
+- Allow enabling sliding sync per-user. ([\#17393](https://github.com/element-hq/synapse/issues/17393))
+
+
+
+### Updates to locked dependencies
+
+* Bump certifi from 2023.7.22 to 2024.7.4. ([\#17404](https://github.com/element-hq/synapse/issues/17404))
+* Bump cryptography from 42.0.7 to 42.0.8. ([\#17382](https://github.com/element-hq/synapse/issues/17382))
+* Bump ijson from 3.2.3 to 3.3.0. ([\#17413](https://github.com/element-hq/synapse/issues/17413))
+* Bump log from 0.4.21 to 0.4.22. ([\#17384](https://github.com/element-hq/synapse/issues/17384))
+* Bump mypy-zope from 1.0.4 to 1.0.5. ([\#17414](https://github.com/element-hq/synapse/issues/17414))
+* Bump pillow from 10.3.0 to 10.4.0. ([\#17412](https://github.com/element-hq/synapse/issues/17412))
+* Bump pydantic from 2.7.1 to 2.8.2. ([\#17415](https://github.com/element-hq/synapse/issues/17415))
+* Bump ruff from 0.3.7 to 0.5.0. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
+* Bump serde from 1.0.203 to 1.0.204. ([\#17409](https://github.com/element-hq/synapse/issues/17409))
+* Bump serde_json from 1.0.117 to 1.0.119. ([\#17385](https://github.com/element-hq/synapse/issues/17385))
+* Bump serde_json from 1.0.119 to 1.0.120. ([\#17408](https://github.com/element-hq/synapse/issues/17408))
+* Bump types-setuptools from 69.5.0.20240423 to 70.1.0.20240627. ([\#17380](https://github.com/element-hq/synapse/issues/17380))
+
 # Synapse 1.110.0 (2024-07-03)
 
 No significant changes since 1.110.0rc3.
