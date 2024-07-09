@@ -1493,18 +1493,17 @@ class SlidingSyncHandler:
 
         # Find the room name and avatar from the state
         room_name: Optional[str] = None
-        room_avatar: Optional[str] = None
-        if room_state is not None:
-            # TODO: Should we also check for `EventTypes.CanonicalAlias`
-            # (`m.room.canonical_alias`) as a fallback for the room name? see
-            # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
-            name_event = room_state.get((EventTypes.Name, ""))
-            if name_event is not None:
-                room_name = name_event.content.get("name")
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        name_event = room_state.get((EventTypes.Name, ""))
+        if name_event is not None:
+            room_name = name_event.content.get("name")
 
-            avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
-            if avatar_event is not None:
-                room_avatar = avatar_event.content.get("url")
+        room_avatar: Optional[str] = None
+        avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
+        if avatar_event is not None:
+            room_avatar = avatar_event.content.get("url")
 
         # Assemble heroes: extract the info from the state we just fetched
         heroes: List[SlidingSyncResult.RoomResult.StrippedHero] = []
