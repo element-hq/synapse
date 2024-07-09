@@ -5,23 +5,23 @@
 - Add `rooms` data to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17320](https://github.com/element-hq/synapse/issues/17320))
 - Add `room_types`/`not_room_types` filtering to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17337](https://github.com/element-hq/synapse/issues/17337))
 - Return "required state" in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17342](https://github.com/element-hq/synapse/issues/17342))
-- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding _matrix/client/v1/media/download endpoint. ([\#17365](https://github.com/element-hq/synapse/issues/17365))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding [`_matrix/client/v1/media/download`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid) endpoint. ([\#17365](https://github.com/element-hq/synapse/issues/17365))
 - Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/rav/authentication-for-media/proposals/3916-authentication-for-media.md)
-  by adding `_matrix/client/v1/media/thumbnail`, `_matrix/federation/v1/media/thumbnail` endpoints and stabilizing the
-  remaining `_matrix/client/v1/media` endpoints. ([\#17388](https://github.com/element-hq/synapse/issues/17388))
+  by adding [`_matrix/client/v1/media/thumbnail`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediathumbnailservernamemediaid), [`_matrix/federation/v1/media/thumbnail`](https://spec.matrix.org/v1.11/server-server-api/#get_matrixfederationv1mediathumbnailmediaid) endpoints and stabilizing the
+  remaining [`_matrix/client/v1/media`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediaconfig) endpoints. ([\#17388](https://github.com/element-hq/synapse/issues/17388))
 - Add `rooms.bump_stamp` for easier client-side sorting in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17395](https://github.com/element-hq/synapse/issues/17395))
-- Forget all of a user's rooms upon deactivation, enabling future purges. ([\#17400](https://github.com/element-hq/synapse/issues/17400))
+- Forget all of a user's rooms upon deactivation, preventing local room purges from being blocked on deactivated users. ([\#17400](https://github.com/element-hq/synapse/issues/17400))
 - Declare support for [Matrix 1.11](https://matrix.org/blog/2024/06/20/matrix-v1.11-release/). ([\#17403](https://github.com/element-hq/synapse/issues/17403))
 - [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861): allow overriding the introspection endpoint. ([\#17406](https://github.com/element-hq/synapse/issues/17406))
 
 ### Bugfixes
 
-- Fix rare race which causes no new to-device messages to be received from remote server. ([\#17362](https://github.com/element-hq/synapse/issues/17362))
+- Fix rare race which caused no new to-device messages to be received from remote server. ([\#17362](https://github.com/element-hq/synapse/issues/17362))
 - Fix bug in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint when using an old database. ([\#17398](https://github.com/element-hq/synapse/issues/17398))
 
 ### Improved Documentation
 
-- Clarify `url_preview_url_blacklist` is a usability feature. ([\#17356](https://github.com/element-hq/synapse/issues/17356))
+- Clarify that `url_preview_url_blacklist` is a usability feature. ([\#17356](https://github.com/element-hq/synapse/issues/17356))
 - Fix broken links in README. ([\#17379](https://github.com/element-hq/synapse/issues/17379))
 - Clarify that changelog content *and file extension* need to match in order for entries to merge. ([\#17399](https://github.com/element-hq/synapse/issues/17399))
 
@@ -48,8 +48,7 @@
 * Bump pydantic from 2.7.1 to 2.8.2. ([\#17415](https://github.com/element-hq/synapse/issues/17415))
 * Bump ruff from 0.3.7 to 0.5.0. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
 * Bump serde from 1.0.203 to 1.0.204. ([\#17409](https://github.com/element-hq/synapse/issues/17409))
-* Bump serde_json from 1.0.117 to 1.0.119. ([\#17385](https://github.com/element-hq/synapse/issues/17385))
-* Bump serde_json from 1.0.119 to 1.0.120. ([\#17408](https://github.com/element-hq/synapse/issues/17408))
+* Bump serde_json from 1.0.117 to 1.0.120. ([\#17385](https://github.com/element-hq/synapse/issues/17385)), ([\#17408](https://github.com/element-hq/synapse/issues/17408))
 * Bump types-setuptools from 69.5.0.20240423 to 70.1.0.20240627. ([\#17380](https://github.com/element-hq/synapse/issues/17380))
 
 # Synapse 1.110.0 (2024-07-03)
