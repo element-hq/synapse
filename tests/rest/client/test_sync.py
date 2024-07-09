@@ -2039,7 +2039,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
         user3_id = self.register_user("user3", "pass")
-        user3_tok = self.login(user3_id, "pass")
+        _user3_tok = self.login(user3_id, "pass")
 
         room_id1 = self.helper.create_room_as(
             user2_id,
