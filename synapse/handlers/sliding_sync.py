@@ -30,6 +30,7 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     Membership,
+    HistoryVisibility,
 )
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
@@ -68,18 +69,47 @@ DEFAULT_BUMP_EVENT_TYPES = {
 }
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _RoomMembershipForUser:
+    """
+    Attributes:
+        event_id: The event ID of the membership event
+        event_pos: The stream position of the membership event
+        membership: The membership state of the user in the room
+        sender: The person who sent the membership event
+        newly_joined: Whether the user newly joined the room during the given token
+            range
+        is_dm: Whether this user considers this room as a direct-message (DM) room
+    """
+
+    room_id: str
+    event_id: Optional[str]
+    event_pos: PersistedEventPosition
+    membership: str
+    sender: Optional[str]
+    newly_joined: bool
+    is_dm: bool
+
+    def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
+        return attr.evolve(self, **kwds)
+
+
 def filter_membership_for_sync(
-    *, membership: str, user_id: str, sender: Optional[str]
+    *, user_id: str, room_membership_for_user: _RoomMembershipForUser
 ) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
     otherwise False.
 
     Attributes:
-        membership: The membership state of the user in the room.
         user_id: The user ID that the membership applies to
-        sender: The person who sent the membership event
+        room_membership_for_user: Membership information for the user in the room
     """
+
+    membership = room_membership_for_user.membership
+    sender = room_membership_for_user.sender
+    # TODO
+    newly_left = room_membership_for_user.newly_left
 
     # Everything except `Membership.LEAVE` because we want everything that's *still*
     # relevant to the user. There are few more things to include in the sync response
@@ -285,31 +315,6 @@ class StateValues:
     # `sender` in the timeline). We only give special meaning to this value when it's a
     # `state_key`.
     LAZY: Final = "$LAZY"
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class _RoomMembershipForUser:
-    """
-    Attributes:
-        event_id: The event ID of the membership event
-        event_pos: The stream position of the membership event
-        membership: The membership state of the user in the room
-        sender: The person who sent the membership event
-        newly_joined: Whether the user newly joined the room during the given token
-            range
-        is_dm: Whether this user considers this room as a direct-message (DM) room
-    """
-
-    room_id: str
-    event_id: Optional[str]
-    event_pos: PersistedEventPosition
-    membership: str
-    sender: Optional[str]
-    newly_joined: bool
-    is_dm: bool
-
-    def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
-        return attr.evolve(self, **kwds)
 
 
 class SlidingSyncHandler:
@@ -530,7 +535,34 @@ class SlidingSyncHandler:
                     ops=ops,
                 )
 
-        # TODO: if (sync_config.room_subscriptions):
+        # Handle room subscriptions
+        if sync_config.room_subscriptions is not None:
+            for room_id, room_subscription in sync_config.room_subscriptions.items():
+                # We can first check if they are already allowed to see the room based
+                # on our previous work to assemble the `sync_room_map`.
+                if sync_room_map.get(room_id) is None:
+                    # If not, we have to do some work to figure out if they should be
+                    # allowed to see the room.
+                    room_membership_for_user_at_to_token = (
+                        await self.check_room_subscription_allowed_for_user(
+                            user=sync_config.user, room_id=room_id
+                        )
+                    )
+
+                    # Skip this room if the user isn't allowed to see it
+                    if not room_membership_for_user_at_to_token:
+                        continue
+
+                # Take the superset of the `RoomSyncConfig` for each room.
+                #
+                # Update our `relevant_room_map` with the room we're going to display
+                # and need to fetch more info about.
+                room_sync_config = RoomSyncConfig.from_room_config(room_subscription)
+                existing_room_sync_config = relevant_room_map.get(room_id)
+                if existing_room_sync_config is not None:
+                    existing_room_sync_config.combine_room_sync_config(room_sync_config)
+                else:
+                    relevant_room_map[room_id] = room_sync_config
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
@@ -553,7 +585,7 @@ class SlidingSyncHandler:
             extensions={},
         )
 
-    async def get_sync_room_ids_for_user(
+    async def get_membership_for_user_at_to_token(
         self,
         user: UserID,
         to_token: StreamToken,
@@ -563,18 +595,13 @@ class SlidingSyncHandler:
         Fetch room IDs that should be listed for this user in the sync response (the
         full room list that will be filtered, sorted, and sliced).
 
-        We're looking for rooms where the user has the following state in the token
-        range (> `from_token` and <= `to_token`):
+        We're looking for rooms where the user has had any sort of membership in the
+        token range (> `from_token` and <= `to_token`):
 
-        - `invite`, `join`, `knock`, `ban` membership events
-        - Kicks (`leave` membership events where `sender` is different from the
-          `user_id`/`state_key`)
-        - `newly_left` (rooms that were left during the given token range)
-        - In order for bans/kicks to not show up in sync, you need to `/forget` those
-          rooms. This doesn't modify the event itself though and only adds the
-          `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
-          to tell when a room was forgotten at the moment so we can't factor it into the
-          from/to range.
+        - In order for bans/kicks to not show up, you need to `/forget` those rooms.
+          This doesn't modify the event itself though and only adds the `forgotten` flag
+          to the `room_memberships` table in Synapse. There isn't a way to tell when a
+          room was forgotten at the moment so we can't factor it into the token range.
 
         Args:
             user: User to fetch rooms for
@@ -582,8 +609,8 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from.
 
         Returns:
-            A dictionary of room IDs that should be listed in the sync response along
-            with membership information in that room at the time of `to_token`.
+            A dictionary of room IDs that the user has had membership in along with
+            membership information in that room at the time of `to_token`.
         """
         user_id = user.to_string()
 
@@ -594,9 +621,6 @@ class SlidingSyncHandler:
             # We want to fetch any kind of membership (joined and left rooms) in order
             # to get the `event_pos` of the latest room membership event for the
             # user.
-            #
-            # We will filter out the rooms that don't belong below (see
-            # `filter_membership_for_sync`)
             membership_list=Membership.LIST,
             excluded_rooms=self.rooms_to_exclude_globally,
         )
@@ -616,6 +640,7 @@ class SlidingSyncHandler:
                 event_pos=room_for_user.event_pos,
                 membership=room_for_user.membership,
                 sender=room_for_user.sender,
+                # We will update these fields below to be accurate
                 newly_joined=False,
                 is_dm=False,
             )
@@ -648,16 +673,15 @@ class SlidingSyncHandler:
             instance_map=immutabledict(instance_to_max_stream_ordering_map),
         )
 
-        # Since we fetched the users room list at some point in time after the from/to
-        # tokens, we need to revert/rewind some membership changes to match the point in
-        # time of the `to_token`. In particular, we need to make these fixups:
+        # Since we fetched the users room list at some point in time after `to_token`,
+        # we need to revert/rewind some membership changes to match the point in time of
+        # the `to_token`. In particular, we need to make these fixups:
         #
         # - 1a) Remove rooms that the user joined after the `to_token`
         # - 1b) Add back rooms that the user left after the `to_token`
         # - 1c) Update room membership events to the point in time of the `to_token`
-        # - 2) Add back newly_left rooms (> `from_token` and <= `to_token`)
-        # - 3) Figure out which rooms are `newly_joined`
-        # - 4) Figure out which rooms are DM's
+        # - 2) Figure out which rooms are `newly_joined`
+        # - 3) Figure out which rooms are DM's
 
         # 1) -----------------------------------------------------
 
@@ -728,22 +752,6 @@ class SlidingSyncHandler:
                     # exact membership state and shouldn't rely on the current snapshot.
                     sync_room_id_set.pop(room_id, None)
 
-        # Filter the rooms that that we have updated room membership events to the point
-        # in time of the `to_token` (from the "1)" fixups)
-        filtered_sync_room_id_set = {
-            room_id: room_membership_for_user
-            for room_id, room_membership_for_user in sync_room_id_set.items()
-            if filter_membership_for_sync(
-                membership=room_membership_for_user.membership,
-                user_id=user_id,
-                sender=room_membership_for_user.sender,
-            )
-        }
-
-        # 2) -----------------------------------------------------
-        # We fix-up newly_left rooms after the first fixup because it may have removed
-        # some left rooms that we can figure out are newly_left in the following code
-
         # 2) Fetch membership changes that fall in the range from `from_token` up to `to_token`
         current_state_delta_membership_changes_in_from_to_range = []
         if from_token:
@@ -789,9 +797,7 @@ class SlidingSyncHandler:
             if membership_change.membership != Membership.JOIN:
                 has_non_join_event_by_room_id_in_from_to_range[room_id] = True
 
-        # 2) Fixup
-        #
-        # 3) We also want to assemble a list of possibly newly joined rooms. Someone
+        # 2) We also want to assemble a list of possibly newly joined rooms. Someone
         # could have left and joined multiple times during the given range but we only
         # care about whether they are joined at the end of the token range so we are
         # working with the last membership even in the token range.
@@ -801,25 +807,11 @@ class SlidingSyncHandler:
         ) in last_membership_change_by_room_id_in_from_to_range.values():
             room_id = last_membership_change_in_from_to_range.room_id
 
-            # 3)
+            # 2)
             if last_membership_change_in_from_to_range.membership == Membership.JOIN:
                 possibly_newly_joined_room_ids.add(room_id)
 
-            # 2) Add back newly_left rooms (> `from_token` and <= `to_token`). We
-            # include newly_left rooms because the last event that the user should see
-            # is their own leave event
-            if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
-                filtered_sync_room_id_set[room_id] = _RoomMembershipForUser(
-                    room_id=room_id,
-                    event_id=last_membership_change_in_from_to_range.event_id,
-                    event_pos=last_membership_change_in_from_to_range.event_pos,
-                    membership=last_membership_change_in_from_to_range.membership,
-                    sender=last_membership_change_in_from_to_range.sender,
-                    newly_joined=False,
-                    is_dm=False,
-                )
-
-        # 3) Figure out `newly_joined`
+        # 2) Figure out `newly_joined`
         for room_id in possibly_newly_joined_room_ids:
             has_non_join_in_from_to_range = (
                 has_non_join_event_by_room_id_in_from_to_range.get(room_id, False)
@@ -828,9 +820,9 @@ class SlidingSyncHandler:
             # also some non-join in the range, we know they `newly_joined`.
             if has_non_join_in_from_to_range:
                 # We found a `newly_joined` room (we left and joined within the token range)
-                filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
-                    room_id
-                ].copy_and_replace(newly_joined=True)
+                sync_room_id_set[room_id] = sync_room_id_set[room_id].copy_and_replace(
+                    newly_joined=True
+                )
             else:
                 prev_event_id = first_membership_change_by_room_id_in_from_to_range[
                     room_id
@@ -842,7 +834,7 @@ class SlidingSyncHandler:
                 if prev_event_id is None:
                     # We found a `newly_joined` room (we are joining the room for the
                     # first time within the token range)
-                    filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
+                    sync_room_id_set[room_id] = sync_room_id_set[
                         room_id
                     ].copy_and_replace(newly_joined=True)
                 # Last resort, we need to step back to the previous membership event
@@ -850,11 +842,11 @@ class SlidingSyncHandler:
                 elif prev_membership != Membership.JOIN:
                     # We found a `newly_joined` room (we left before the token range
                     # and joined within the token range)
-                    filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
+                    sync_room_id_set[room_id] = sync_room_id_set[
                         room_id
                     ].copy_and_replace(newly_joined=True)
 
-        # 4) Figure out which rooms the user considers to be direct-message (DM) rooms
+        # 3) Figure out which rooms the user considers to be direct-message (DM) rooms
         #
         # We're using global account data (`m.direct`) instead of checking for
         # `is_direct` on membership events because that property only appears for
@@ -877,13 +869,121 @@ class SlidingSyncHandler:
                         if isinstance(room_id, str):
                             dm_room_id_set.add(room_id)
 
-        # 4) Fixup
-        for room_id in filtered_sync_room_id_set:
-            filtered_sync_room_id_set[room_id] = filtered_sync_room_id_set[
-                room_id
-            ].copy_and_replace(is_dm=room_id in dm_room_id_set)
+        # 3) Fixup
+        for room_id in sync_room_id_set:
+            sync_room_id_set[room_id] = sync_room_id_set[room_id].copy_and_replace(
+                is_dm=room_id in dm_room_id_set
+            )
+
+        return sync_room_id_set
+
+    async def get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken] = None,
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Fetch room IDs that should be listed for this user in the sync response (the
+        full room list that will be filtered, sorted, and sliced).
+
+        We're looking for rooms where the user has the following state in the token
+        range (> `from_token` and <= `to_token`):
+
+        - `invite`, `join`, `knock`, `ban` membership events
+        - Kicks (`leave` membership events where `sender` is different from the
+          `user_id`/`state_key`)
+        - `newly_left` (rooms that were left during the given token range)
+        - In order for bans/kicks to not show up in sync, you need to `/forget` those
+          rooms. This doesn't modify the event itself though and only adds the
+          `forgotten` flag to the `room_memberships` table in Synapse. There isn't a way
+          to tell when a room was forgotten at the moment so we can't factor it into the
+          from/to range.
+
+        Args:
+            user: User to fetch rooms for
+            to_token: The token to fetch rooms up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            A dictionary of room IDs that should be listed in the sync response along
+            with membership information in that room at the time of `to_token`.
+        """
+        user_id = user.to_string()
+
+        sync_room_id_set = await self.get_membership_for_user_at_to_token(
+            user=user,
+            to_token=to_token,
+        )
+
+        # Filter the rooms
+        filtered_sync_room_id_set = {
+            room_id: room_membership_for_user
+            for room_id, room_membership_for_user in sync_room_id_set.items()
+            if filter_membership_for_sync(
+                user_id=user_id,
+                room_membership_for_user=room_membership_for_user,
+            )
+        }
 
         return filtered_sync_room_id_set
+
+    async def check_room_subscription_allowed_for_user(
+        self, user: UserID, room_id: str
+    ) -> Optional[_RoomMembershipForUser]:
+        """
+        Check whether the user is allowed to see the room based on whether they have
+        ever had membership in the room or if the room is `world_readable`.
+
+        Similar to `check_user_in_room_or_world_readable(...)`
+
+        Args:
+            TODO
+
+        Returns:
+            TODO
+        """
+        user_id = user.to_string()
+
+        # If they have had any membership in the room over time, let them
+        # subscribe and see what they can.
+        (
+            membership,
+            member_event_id,
+        ) = await self.store.get_local_current_membership_for_user_in_room(
+            user_id=user_id,
+            room_id=room_id,
+        )
+        if membership is not None and member_event_id is not None:
+            return _RoomMembershipForUser(
+                room_id=room_id,
+                event_id=member_event_id,
+                event_pos=room_for_user.event_pos,
+                membership=membership,
+                sender=room_for_user.sender,
+                newly_joined=False,
+                is_dm=False,
+            )
+
+        # If the room is `world_readable`, it doesn't matter whether they can join,
+        # everyone can see the room.
+        visibility = await self.storage_controllers.state.get_current_state_event(
+            room_id, EventTypes.RoomHistoryVisibility, ""
+        )
+        if (
+            visibility
+            and visibility.content.get("history_visibility")
+            == HistoryVisibility.WORLD_READABLE
+        ):
+            return _RoomMembershipForUser(
+                room_id=room_id,
+                event_id=None,
+                event_pos=None,
+                membership=None,
+                sender=None,
+                newly_joined=False,
+                is_dm=False,
+            )
 
     async def filter_rooms(
         self,
