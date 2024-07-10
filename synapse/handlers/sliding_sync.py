@@ -1439,7 +1439,7 @@ class SlidingSyncHandler:
             )
 
             logger.debug(
-                "Deleted %d to-device messages up to %d", deleted, since_stream_id
+                "Deleted %d to-device messages up to %d for %s", deleted, since_stream_id, user_id
             )
 
         messages, stream_id = await self.store.get_messages_for_device(
