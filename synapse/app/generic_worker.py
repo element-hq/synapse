@@ -74,6 +74,9 @@ from synapse.storage.databases.main.event_push_actions import (
     EventPushActionsWorkerStore,
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.storage.databases.main.experimental_features import (
+    ExperimentalFeaturesStore,
+)
 from synapse.storage.databases.main.filtering import FilteringWorkerStore
 from synapse.storage.databases.main.keys import KeyStore
 from synapse.storage.databases.main.lock import LockStore
@@ -155,6 +158,7 @@ class GenericWorkerStore(
     LockStore,
     SessionStore,
     TaskSchedulerWorkerStore,
+    ExperimentalFeaturesStore,
 ):
     # Properties that multiple storage classes define. Tell mypy what the
     # expected type is.
@@ -163,7 +167,7 @@ class GenericWorkerStore(
 
 
 class GenericWorkerServer(HomeServer):
-    DATASTORE_CLASS = GenericWorkerStore  # type: ignore
+    DATASTORE_CLASS = GenericWorkerStore
 
     def _listen_http(self, listener_config: ListenerConfig) -> None:
         assert listener_config.http_options is not None

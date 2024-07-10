@@ -25,11 +25,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Tuple
 
-from twisted.web.server import Request
-
 from synapse.api.constants import RoomCreationPreset
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
+from synapse.http.site import SynapseRequest
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict
 
 if TYPE_CHECKING:
@@ -45,6 +45,8 @@ class VersionsRestServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self.config = hs.config
+        self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
 
         # Calculate these once since they shouldn't change after start-up.
         self.e2ee_forced_public = (
@@ -60,7 +62,22 @@ class VersionsRestServlet(RestServlet):
             in self.config.room.encryption_enabled_by_default_for_room_presets
         )
 
-    def on_GET(self, request: Request) -> Tuple[int, JsonDict]:
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        msc3881_enabled = self.config.experimental.msc3881_enabled
+
+        if self.auth.has_access_token(request):
+            requester = await self.auth.get_user_by_req(
+                request,
+                allow_guest=True,
+                allow_locked=True,
+                allow_expired=True,
+            )
+            user_id = requester.user.to_string()
+
+            msc3881_enabled = await self.store.is_feature_enabled(
+                user_id, ExperimentalFeature.MSC3881
+            )
+
         return (
             200,
             {
@@ -90,6 +107,7 @@ class VersionsRestServlet(RestServlet):
                     "v1.8",
                     "v1.9",
                     "v1.10",
+                    "v1.11",
                 ],
                 # as per MSC1497:
                 "unstable_features": {
@@ -124,7 +142,7 @@ class VersionsRestServlet(RestServlet):
                     # TODO: this is no longer needed once unstable MSC3882 does not need to be supported:
                     "org.matrix.msc3882": self.config.auth.login_via_existing_enabled,
                     # Adds support for remotely enabling/disabling pushers, as per MSC3881
-                    "org.matrix.msc3881": self.config.experimental.msc3881_enabled,
+                    "org.matrix.msc3881": msc3881_enabled,
                     # Adds support for filtering /messages by event relation.
                     "org.matrix.msc3874": self.config.experimental.msc3874_enabled,
                     # Adds support for simple HTTP rendezvous as per MSC3886

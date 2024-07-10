@@ -178,6 +178,9 @@ class PushRulesWorkerStore(
         """
         return self._push_rules_stream_id_gen.get_current_token()
 
+    def get_push_rules_stream_id_gen(self) -> MultiWriterIdGenerator:
+        return self._push_rules_stream_id_gen
+
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]
     ) -> None:
