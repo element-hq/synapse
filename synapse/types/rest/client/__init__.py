@@ -282,7 +282,7 @@ class SlidingSyncBody(RequestBodyModel):
         class ToDeviceExtension(RequestBodyModel):
             """The to-device extension (MSC3885)
 
-            Args:
+            Attributes:
                 enabled
                 limit: Maximum number of to-device messages to return
                 since: The `next_batch` from the previous sync response

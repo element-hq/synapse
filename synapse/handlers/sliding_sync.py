@@ -1413,7 +1413,7 @@ class SlidingSyncHandler:
             )
 
         since_stream_id = 0
-        if to_device_request.since:
+        if to_device_request.since is not None:
             # We've already validated this is an int.
             since_stream_id = int(to_device_request.since)
 

@@ -3474,7 +3474,7 @@ class SlidingSyncToDeviceExtensionTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("u2", "pass")
         user2_tok = self.login(user2_id, "pass", "d2")
 
-        # send the message
+        # Send the to-device message
         test_msg = {"foo": "bar"}
         chan = self.make_request(
             "PUT",
