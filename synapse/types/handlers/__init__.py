@@ -246,9 +246,21 @@ class SlidingSyncResult:
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class Extensions:
+        """Responses for extensions
+
+        Attributes:
+            to_device: The to-device extension (MSC3885)
+        """
+
         @attr.s(slots=True, frozen=True, auto_attribs=True)
         class ToDeviceExtension:
-            """The to-device extension (MSC3885)"""
+            """The to-device extension (MSC3885)
+
+            Attributes:
+                next_batch: The to-device stream token the client should use
+                    to get more results
+                events: A list of to-device messages for the client
+            """
 
             next_batch: str
             events: Sequence[JsonMapping]

@@ -1377,7 +1377,12 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         to_token: StreamToken,
     ) -> SlidingSyncResult.Extensions:
-        """Handle extension requests."""
+        """Handle extension requests.
+
+        Args:
+            sync_config: Sync configuration
+            to_token: The point in the stream to sync up to.
+        """
 
         if sync_config.extensions is None:
             return SlidingSyncResult.Extensions()
@@ -1398,7 +1403,13 @@ class SlidingSyncHandler:
         to_device_request: SlidingSyncConfig.Extensions.ToDeviceExtension,
         to_token: StreamToken,
     ) -> SlidingSyncResult.Extensions.ToDeviceExtension:
-        """Handle to-device extension (MSC3885)"""
+        """Handle to-device extension (MSC3885)
+
+        Args:
+            sync_config: Sync configuration
+            to_device_request: The to-device extension from the request
+            to_token: The point in the stream to sync up to.
+        """
 
         user_id = sync_config.user.to_string()
         device_id = sync_config.device_id
@@ -1439,7 +1450,10 @@ class SlidingSyncHandler:
             )
 
             logger.debug(
-                "Deleted %d to-device messages up to %d for %s", deleted, since_stream_id, user_id
+                "Deleted %d to-device messages up to %d for %s",
+                deleted,
+                since_stream_id,
+                user_id,
             )
 
         messages, stream_id = await self.store.get_messages_for_device(
