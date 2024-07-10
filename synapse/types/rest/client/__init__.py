@@ -277,7 +277,13 @@ class SlidingSyncBody(RequestBodyModel):
         pass
 
     class Extensions(RequestBodyModel):
-        """The extensions section of the request."""
+        """The extensions section of the request.
+
+        Extensions MUST have an `enabled` flag which defaults to `false`. If a client
+        sends an unknown extension name, the server MUST ignore it (or else backwards
+        compatibility between clients and servers is broken when a newer client tries to
+        communicate with an older server).
+        """
 
         class ToDeviceExtension(RequestBodyModel):
             """The to-device extension (MSC3885)
@@ -296,13 +302,18 @@ class SlidingSyncBody(RequestBodyModel):
             def since_token_check(
                 cls, value: Optional[StrictStr]
             ) -> Optional[StrictStr]:
+                # `since` comes in as an opaque string token but we know that it's just
+                # an integer representing the position in the device inbox stream. We
+                # want to pre-validate it to make sure it works fine in downstream code.
                 if value is None:
                     return value
 
                 try:
                     int(value)
                 except ValueError:
-                    raise ValueError("'extensions.to_device.since' is invalid")
+                    raise ValueError(
+                        "'extensions.to_device.since' is invalid (should look like an int)"
+                    )
 
                 return value
 
