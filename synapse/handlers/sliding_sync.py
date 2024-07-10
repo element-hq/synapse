@@ -1421,7 +1421,7 @@ class SlidingSyncHandler:
                 # The since token is ahead of our current token, so we return an
                 # empty response.
                 logger.warning(
-                    "Got to-device.since from the future. Next_batch: %r, current: %r",
+                    "Got to-device.since from the future. since token: %r is ahead of our current to_device stream position: %r",
                     since_stream_id,
                     to_token.to_device_key,
                 )
