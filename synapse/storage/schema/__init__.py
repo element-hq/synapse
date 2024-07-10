@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 85  # remember to update the list below when updating
+SCHEMA_VERSION = 86  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -139,6 +139,9 @@ Changes in SCHEMA_VERSION = 84
 
 Changes in SCHEMA_VERSION = 85
     - Add a column `suspended` to the `users` table
+
+Changes in SCHEMA_VERSION = 86
+    - Add a column `authenticated` to the tables `local_media_repository` and `remote_media_cache`
 """
 
 
