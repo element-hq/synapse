@@ -1,3 +1,20 @@
+# Synapse 1.111.0rc2 (2024-07-10)
+
+### Bugfixes
+
+- Fix bug where using `synapse.app.media_repository` worker configuration would break the new media endpoints. ([\#17420](https://github.com/element-hq/synapse/issues/17420))
+
+### Improved Documentation
+
+- Document the new federation media worker endpoints in the [upgrade notes](https://element-hq.github.io/synapse/v1.111/upgrade.html) and [worker docs](https://element-hq.github.io/synapse/v1.111/workers.html). ([\#17421](https://github.com/element-hq/synapse/issues/17421))
+
+### Internal Changes
+
+- Route authenticated federation media requests to media repository workers in Complement tests. ([\#17422](https://github.com/element-hq/synapse/issues/17422))
+
+
+
+
 # Synapse 1.111.0rc1 (2024-07-09)
 
 ### Features
