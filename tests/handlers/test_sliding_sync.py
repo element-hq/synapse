@@ -2123,6 +2123,107 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             },
         )
 
+    def test_state_reset(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # The room where the state reset will happen
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join another room so we don't hit the short-circuit and return early if they
+        # have no room membership
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event to make a position for the state reset to happen at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_events",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id1,
+                    "user_id": user1_id,
+                },
+                desc="state reset user in local_current_membership",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    "prev_event_id": join_response1["event_id"],
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        # The function under test
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_sync_room_ids_for_user(
+                UserID.from_string(user1_id),
+                from_token=before_reset_token,
+                to_token=after_reset_token,
+            )
+        )
+
+        # Room1 should show up because it was `newly_left` via state reset during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        # It should be pointing to no event because we were removed from the room
+        # without a corresponding leave event
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            None,
+        )
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        # We should be `newly_left` because we were removed via state reset during the from/to range
+        self.assertEqual(room_id_results[room_id1].newly_left, True)
+
 
 class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
     """
