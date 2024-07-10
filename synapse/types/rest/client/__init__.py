@@ -293,7 +293,7 @@ class SlidingSyncBody(RequestBodyModel):
             since: Optional[StrictStr] = None
 
             @validator("since")
-            def lists_length_check(
+            def since_token_check(
                 cls, value: Optional[StrictStr]
             ) -> Optional[StrictStr]:
                 if value is None:
