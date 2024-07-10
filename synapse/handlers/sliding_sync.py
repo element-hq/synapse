@@ -121,10 +121,10 @@ def filter_membership_for_sync(
     # the same user) and can be read as "anything that isn't a leave or newly_left or a
     # leave with a different sender".
     #
-    # When `sender=None` and `membership=Membership.LEAVE`, it means that a state reset
-    # happened that removed the user from the room, or the user was the last person
-    # locally to leave the room which caused the server to leave the room. In both
-    # cases, we can just remove the rooms since they are no longer relevant to the user.
+    # When `sender=None`, it means that a state reset happened that removed the user
+    # from the room without a corresponding leave event. We can just remove the rooms
+    # since they are no longer relevant to the user but will still appear if they are
+    # `newly_left`.
     return membership != Membership.LEAVE or newly_left or sender not in (user_id, None)
 
 
@@ -839,7 +839,8 @@ class SlidingSyncHandler:
                     )
                     # Even though a state reset happened which removed the person from
                     # the room, we still add it the list so the user knows they left the
-                    # room.
+                    # room. Downstream code can check for a state reset by looking for
+                    # `event_id=None and membership is not None`.
                     sync_room_id_set[room_id] = _RoomMembershipForUser(
                         room_id=room_id,
                         event_id=last_membership_change_in_from_to_range.event_id,
@@ -1494,10 +1495,10 @@ class SlidingSyncHandler:
             stripped_state.append(strip_event(invite_or_knock_event))
 
         # TODO: Handle state resets. For example, if we see
-        # `room_membership_for_user_at_to_token.membership = Membership.LEAVE` but
-        # `required_state` doesn't include it, we should indicate to the client that a
-        # state reset happened. Perhaps we should indicate this by setting `initial:
-        # True` and empty `required_state`.
+        # `room_membership_for_user_at_to_token.event_id=None and
+        # room_membership_for_user_at_to_token.membership is not None`, we should
+        # indicate to the client that a state reset happened. Perhaps we should indicate
+        # this by setting `initial: True` and empty `required_state`.
 
         # TODO: Since we can't determine whether we've already sent a room down this
         # Sliding Sync connection before (we plan to add this optimization in the
