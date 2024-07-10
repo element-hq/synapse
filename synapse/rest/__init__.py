@@ -145,7 +145,7 @@ class ClientRestResource(JsonResource):
         password_policy.register_servlets(hs, client_resource)
         knock.register_servlets(hs, client_resource)
         appservice_ping.register_servlets(hs, client_resource)
-        if hs.config.server.enable_media_repo:
+        if hs.config.media.can_load_media_repo:
             from synapse.rest.client import media
 
             media.register_servlets(hs, client_resource)

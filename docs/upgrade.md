@@ -119,13 +119,14 @@ stacking them up. You can monitor the currently running background updates with
 
 # Upgrading to v1.111.0
 
-## New worker endpoints for authenticated client media
+## New worker endpoints for authenticated client and federation media
 
 [Media repository workers](./workers.md#synapseappmedia_repository) handling
-Media APIs can now handle the following endpoint pattern:
+Media APIs can now handle the following endpoint patterns:
 
 ```
 ^/_matrix/client/v1/media/.*$
+^/_matrix/federation/v1/media/.*$
 ```
 
 Please update your reverse proxy configuration.
