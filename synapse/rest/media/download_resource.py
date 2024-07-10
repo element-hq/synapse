@@ -84,7 +84,7 @@ class DownloadResource(RestServlet):
 
         if self._is_mine_server_name(server_name):
             await self.media_repo.get_local_media(
-                request, media_id, file_name, max_timeout_ms
+                request, media_id, file_name, max_timeout_ms, allow_authenticated=False
             )
         else:
             allow_remote = parse_boolean(request, "allow_remote", default=True)
@@ -106,4 +106,5 @@ class DownloadResource(RestServlet):
                 max_timeout_ms,
                 ip_address,
                 False,
+                allow_authenticated=False,
             )
