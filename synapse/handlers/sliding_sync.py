@@ -72,6 +72,7 @@ DEFAULT_BUMP_EVENT_TYPES = {
 class _RoomMembershipForUser:
     """
     Attributes:
+        room_id: The room ID of the membership event
         event_id: The event ID of the membership event
         event_pos: The stream position of the membership event
         membership: The membership state of the user in the room
@@ -84,9 +85,21 @@ class _RoomMembershipForUser:
     """
 
     room_id: str
+    # Optional because you can view `world_readable` rooms without joining them
+    # AND because state resets can affect room membership without a corresponding event.
     event_id: Optional[str]
-    event_pos: PersistedEventPosition
-    membership: str
+    # Optional because you can view `world_readable` rooms without joining them. Even
+    # during a state reset which removes the user from the room, we expect this to be
+    # set because `current_state_delta_stream` will note the position that the reset
+    # happened.
+    event_pos: Optional[PersistedEventPosition]
+    # Optional because you can view `world_readable` rooms without joining them. Even
+    # during a state reset which removes the user from the room, we expect this to be
+    # set to `LEAVE` because we can make that assumption based on the situaton (see
+    # `get_current_state_delta_membership_changes_for_user(...)`)
+    membership: Optional[str]
+    # Optional because you can view `world_readable` rooms without joining them
+    # AND because state resets can affect room membership without a corresponding event.
     sender: Optional[str]
     newly_joined: bool
     newly_left: bool
@@ -963,8 +976,8 @@ class SlidingSyncHandler:
           from/to range.
 
         Args:
-            user: User to fetch rooms for
-            room_membership_for_user_map: TODO
+            user: User that is syncing
+            room_membership_for_user_map: Room membership for the user
 
         Returns:
             A dictionary of room IDs that should be listed in the sync response along
@@ -998,11 +1011,13 @@ class SlidingSyncHandler:
 
         Args:
             room_id: Room to check
-            room_membership_for_user_map: TODO
+            room_membership_for_user_map: Room membership for the user at the time of
+                the `to_token` (<= `to_token`).
             to_token: The token to fetch rooms up to.
 
         Returns:
-            TODO
+            The room membership for the user if they are allowed to subscribe to the
+            room else `None`.
         """
 
         # We can first check if they are already allowed to see the room based
