@@ -28,7 +28,6 @@ from synapse.api.constants import (
     AccountDataTypes,
     Direction,
     EventTypes,
-    HistoryVisibility,
     Membership,
 )
 from synapse.events import EventBase
@@ -85,21 +84,17 @@ class _RoomMembershipForUser:
     """
 
     room_id: str
-    # Optional because you can view `world_readable` rooms without joining them
-    # AND because state resets can affect room membership without a corresponding event.
+    # Optional because state resets can affect room membership without a corresponding event.
     event_id: Optional[str]
-    # Optional because you can view `world_readable` rooms without joining them. Even
-    # during a state reset which removes the user from the room, we expect this to be
-    # set because `current_state_delta_stream` will note the position that the reset
+    # Even during a state reset which removes the user from the room, we expect this to
+    # be set because `current_state_delta_stream` will note the position that the reset
     # happened.
-    event_pos: Optional[PersistedEventPosition]
-    # Optional because you can view `world_readable` rooms without joining them. Even
-    # during a state reset which removes the user from the room, we expect this to be
-    # set to `LEAVE` because we can make that assumption based on the situaton (see
+    event_pos: PersistedEventPosition
+    # Even during a state reset which removes the user from the room, we expect this to
+    # be set to `LEAVE` because we can make that assumption based on the situaton (see
     # `get_current_state_delta_membership_changes_for_user(...)`)
-    membership: Optional[str]
-    # Optional because you can view `world_readable` rooms without joining them
-    # AND because state resets can affect room membership without a corresponding event.
+    membership: str
+    # Optional because state resets can affect room membership without a corresponding event.
     sender: Optional[str]
     newly_joined: bool
     newly_left: bool
@@ -572,8 +567,6 @@ class SlidingSyncHandler:
         # Handle room subscriptions
         if has_room_subscriptions and sync_config.room_subscriptions is not None:
             for room_id, room_subscription in sync_config.room_subscriptions.items():
-                # If not, we have to do some work to figure out if they should be
-                # allowed to see the room.
                 room_membership_for_user_at_to_token = (
                     await self.check_room_subscription_allowed_for_user(
                         room_id=room_id,
@@ -1035,36 +1028,39 @@ class SlidingSyncHandler:
         if existing_membership_for_user is not None:
             return existing_membership_for_user
 
+        # TODO: Handle `world_readable` rooms
+        return None
+
         # If the room is `world_readable`, it doesn't matter whether they can join,
         # everyone can see the room.
-        not_in_room_membership_for_user = _RoomMembershipForUser(
-            room_id=room_id,
-            event_id=None,
-            event_pos=None,
-            membership=None,
-            sender=None,
-            newly_joined=False,
-            newly_left=False,
-            is_dm=False,
-        )
-        room_state = await self.get_current_state_at(
-            room_id=room_id,
-            room_membership_for_user_at_to_token=not_in_room_membership_for_user,
-            state_filter=StateFilter.from_types(
-                [(EventTypes.RoomHistoryVisibility, "")]
-            ),
-            to_token=to_token,
-        )
+        # not_in_room_membership_for_user = _RoomMembershipForUser(
+        #     room_id=room_id,
+        #     event_id=None,
+        #     event_pos=None,
+        #     membership=None,
+        #     sender=None,
+        #     newly_joined=False,
+        #     newly_left=False,
+        #     is_dm=False,
+        # )
+        # room_state = await self.get_current_state_at(
+        #     room_id=room_id,
+        #     room_membership_for_user_at_to_token=not_in_room_membership_for_user,
+        #     state_filter=StateFilter.from_types(
+        #         [(EventTypes.RoomHistoryVisibility, "")]
+        #     ),
+        #     to_token=to_token,
+        # )
 
-        visibility_event = room_state.get((EventTypes.RoomHistoryVisibility, ""))
-        if (
-            visibility_event is not None
-            and visibility_event.content.get("history_visibility")
-            == HistoryVisibility.WORLD_READABLE
-        ):
-            return not_in_room_membership_for_user
+        # visibility_event = room_state.get((EventTypes.RoomHistoryVisibility, ""))
+        # if (
+        #     visibility_event is not None
+        #     and visibility_event.content.get("history_visibility")
+        #     == HistoryVisibility.WORLD_READABLE
+        # ):
+        #     return not_in_room_membership_for_user
 
-        return None
+        # return None
 
     async def filter_rooms(
         self,
