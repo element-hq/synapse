@@ -246,6 +246,7 @@ Example configuration:
 ```yaml
 presence:
   enabled: false
+  include_offline_users_on_sync: false
 ```
 
 `enabled` can also be set to a special value of "untracked" which ignores updates
@@ -253,6 +254,10 @@ received via clients and federation, while still accepting updates from the
 [module API](../../modules/index.md).
 
 *The "untracked" option was added in Synapse 1.96.0.*
+
+When clients perform an initial or `full_state` sync, presence results for offline users are
+not included by default. Setting `include_offline_users_on_sync` to `true` will always include
+offline users in the results. Defaults to false.
 
 ---
 ### `require_auth_for_profile_requests`

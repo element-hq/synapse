@@ -384,6 +384,11 @@ class ServerConfig(Config):
         # Whether to internally track presence, requires that presence is enabled,
         self.track_presence = self.presence_enabled and presence_enabled != "untracked"
 
+        # Determines if presence results for offline users are included on initial/full sync
+        self.presence_include_offline_users_on_sync = presence_config.get(
+            "include_offline_users_on_sync", False
+        )
+
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
         self.presence_router_module_class = None

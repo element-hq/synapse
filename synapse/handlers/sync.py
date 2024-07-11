@@ -2281,13 +2281,20 @@ class SyncHandler:
 
         since_token = sync_result_builder.since_token
         presence_key = None
+        include_offline = False
         if since_token and not sync_result_builder.full_state:
             presence_key = since_token.presence_key
+            include_offline = True
 
         presence, presence_key = await presence_source.get_new_events(
             user=user,
             from_key=presence_key,
             is_guest=sync_config.is_guest,
+            include_offline=(
+                True
+                if self.hs_config.server.presence_include_offline_users_on_sync
+                else include_offline
+            ),
         )
         assert presence_key
         sync_result_builder.now_token = now_token.copy_and_replace(
