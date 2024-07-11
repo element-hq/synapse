@@ -18,7 +18,7 @@
 #
 #
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Final, List, Optional, Sequence, Tuple
 
 import attr
 from typing_extensions import TypedDict
@@ -252,10 +252,39 @@ class SlidingSyncResult:
         count: int
         ops: List[Operation]
 
+    @attr.s(slots=True, frozen=True, auto_attribs=True)
+    class Extensions:
+        """Responses for extensions
+
+        Attributes:
+            to_device: The to-device extension (MSC3885)
+        """
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ToDeviceExtension:
+            """The to-device extension (MSC3885)
+
+            Attributes:
+                next_batch: The to-device stream token the client should use
+                    to get more results
+                events: A list of to-device messages for the client
+            """
+
+            next_batch: str
+            events: Sequence[JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.events)
+
+        to_device: Optional[ToDeviceExtension] = None
+
+        def __bool__(self) -> bool:
+            return bool(self.to_device)
+
     next_pos: StreamToken
     lists: Dict[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
-    extensions: JsonMapping
+    extensions: Extensions
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
@@ -271,5 +300,5 @@ class SlidingSyncResult:
             next_pos=next_pos,
             lists={},
             rooms={},
-            extensions={},
+            extensions=SlidingSyncResult.Extensions(),
         )

@@ -942,7 +942,9 @@ class SlidingSyncRestServlet(RestServlet):
         response["rooms"] = await self.encode_rooms(
             requester, sliding_sync_result.rooms
         )
-        response["extensions"] = {}  # TODO: sliding_sync_result.extensions
+        response["extensions"] = await self.encode_extensions(
+            requester, sliding_sync_result.extensions
+        )
 
         return response
 
@@ -1053,6 +1055,19 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
 
         return serialized_rooms
+
+    async def encode_extensions(
+        self, requester: Requester, extensions: SlidingSyncResult.Extensions
+    ) -> JsonDict:
+        result = {}
+
+        if extensions.to_device is not None:
+            result["to_device"] = {
+                "next_batch": extensions.to_device.next_batch,
+                "events": extensions.to_device.events,
+            }
+
+        return result
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
