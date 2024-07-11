@@ -1662,6 +1662,20 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             list(channel.json_body["lists"]["room-invites"]),
         )
 
+        # Ensure DM's are correctly marked
+        self.assertDictEqual(
+            {
+                room_id: room.get("is_dm")
+                for room_id, room in channel.json_body["rooms"].items()
+            },
+            {
+                invite_room_id: None,
+                room_id: None,
+                invited_dm_room_id: True,
+                joined_dm_room_id: True,
+            },
+        )
+
     def test_sort_list(self) -> None:
         """
         Test that the `lists` are sorted by `stream_ordering`
@@ -1874,6 +1888,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1]["invited_count"],
             0,
         )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
+        )
 
     def test_rooms_meta_when_invited(self) -> None:
         """
@@ -1954,6 +1971,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["invited_count"],
             1,
+        )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
         )
 
     def test_rooms_meta_when_banned(self) -> None:
@@ -2036,6 +2056,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["invited_count"],
             0,
+        )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
         )
 
     def test_rooms_meta_heroes(self) -> None:
