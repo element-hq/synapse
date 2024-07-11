@@ -2182,7 +2182,8 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 hero["user_id"]
                 for hero in channel.json_body["rooms"][room_id1].get("heroes", [])
             ],
-            # Heroes shouldn't include the user themselves (we shouldn't see user1)
+            # Heroes should be the first 5 users in the room (excluding the user
+            # themselves, we shouldn't see `user1`)
             [user2_id, user3_id, user4_id, user5_id, user6_id],
         )
         self.assertEqual(
