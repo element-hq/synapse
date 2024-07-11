@@ -34,6 +34,7 @@ from synapse.api.constants import (
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
+from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.types import (
     JsonDict,
@@ -988,6 +989,7 @@ class SlidingSyncHandler:
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
 
+    @trace
     async def sort_rooms(
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
@@ -1009,24 +1011,18 @@ class SlidingSyncHandler:
         # Assemble a map of room ID to the `stream_ordering` of the last activity that the
         # user should see in the room (<= `to_token`)
         last_activity_in_room_map: Dict[str, int] = {}
+        to_fetch = []
         for room_id, room_for_user in sync_room_map.items():
             # If they are fully-joined to the room, let's find the latest activity
             # at/before the `to_token`.
             if room_for_user.membership == Membership.JOIN:
-                last_event_result = (
-                    await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                        room_id, to_token.room_key
-                    )
-                )
+                stream = self.store._events_stream_cache._entity_to_key.get(room_id)
+                if stream is not None:
+                    if stream <= to_token.room_key.stream:
+                        last_activity_in_room_map[room_id] = stream
+                        continue
 
-                # If the room has no events at/before the `to_token`, this is probably a
-                # mistake in the code that generates the `sync_room_map` since that should
-                # only give us rooms that the user had membership in during the token range.
-                assert last_event_result is not None
-
-                _, event_pos = last_event_result
-
-                last_activity_in_room_map[room_id] = event_pos.stream
+                to_fetch.append(room_id)
             else:
                 # Otherwise, if the user has left/been invited/knocked/been banned from
                 # a room, they shouldn't see anything past that point.
@@ -1036,6 +1032,20 @@ class SlidingSyncHandler:
                 # `invite`/`world_readable` history visibility, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
                 last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
+
+        ordering_map = await self.store.get_max_stream_ordering_in_rooms(to_fetch)
+        for room_id, stream_pos in ordering_map.items():
+            if stream_pos is None:
+                continue
+
+            if stream_pos.persisted_after(to_token.room_key):
+                continue
+
+            last_activity_in_room_map[room_id] = stream_pos.stream
+
+        for room_id in sync_room_map.keys() - last_activity_in_room_map.keys():
+            # TODO: Handle better
+            last_activity_in_room_map[room_id] = sync_room_map[room_id].event_pos.stream
 
         return sorted(
             sync_room_map.values(),
@@ -1409,18 +1419,29 @@ class SlidingSyncHandler:
                     break
 
         # Figure out the last bump event in the room
-        last_bump_event_result = (
-            await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+        last_bump_event_stream_ordering = None
+        if timeline_events:
+            for e in reversed(timeline_events):
+                if e.type in DEFAULT_BUMP_EVENT_TYPES:
+                    last_bump_event_stream_ordering = (
+                        e.internal_metadata.stream_ordering
+                    )
+                    break
+
+        if last_bump_event_stream_ordering is None:
+            last_bump_event_result = (
+                await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                    room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+                )
             )
-        )
+            if last_bump_event_result is not None:
+                last_bump_event_stream_ordering = last_bump_event_result[1].stream
 
         # By default, just choose the membership event position
         bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
         # But if we found a bump event, use that instead
-        if last_bump_event_result is not None:
-            _, bump_event_pos = last_bump_event_result
-            bump_stamp = bump_event_pos.stream
+        if last_bump_event_stream_ordering is not None:
+            bump_stamp = last_bump_event_stream_ordering
 
         return SlidingSyncResult.RoomResult(
             name=room_name,
