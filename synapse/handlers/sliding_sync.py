@@ -684,7 +684,7 @@ class SlidingSyncHandler:
         # - 1b) Add back rooms that the user left after the `to_token`
         # - 1c) Update room membership events to the point in time of the `to_token`
         # - 2) Figure out which rooms are `newly_left` rooms (> `from_token` and <= `to_token`)
-        # - 3) Figure out which rooms are `newly_joined`
+        # - 3) Figure out which rooms are `newly_joined` (> `from_token` and <= `to_token`)
         # - 4) Figure out which rooms are DM's
 
         # 1) Fetch membership changes that fall in the range from `to_token` up to
