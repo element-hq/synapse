@@ -1250,7 +1250,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         exact: bool = False,
     ) -> None:
         """
-        Wrapper around `_assertIncludes` to give slightly better looking diff error
+        Wrapper around `assertIncludes` to give slightly better looking diff error
         messages that include some context "$event_id (type, state_key)".
 
         Args:
@@ -1266,7 +1266,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         for event in actual_required_state:
             assert isinstance(event, dict)
 
-        self._assertIncludes(
+        self.assertIncludes(
             {
                 f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
                 for event in actual_required_state
@@ -1279,56 +1279,6 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             # Message to help understand the diff in context
             message=str(actual_required_state),
         )
-
-    def _assertIncludes(
-        self,
-        actual_items: AbstractSet[str],
-        expected_items: AbstractSet[str],
-        exact: bool = False,
-        message: Optional[str] = None,
-    ) -> None:
-        """
-        Assert that all of the `expected_items` are included in the `actual_items`.
-
-        This assert could also be called `assertContains`, `assertItemsInSet`
-
-        Args:
-            actual_items: The container
-            expected_items: The items to check for in the container
-            exact: Whether the actual state should be exactly equal to the expected
-                state (no extras).
-            message: Optional message to include in the failure message.
-        """
-        # Check that each set has the same items
-        if exact and actual_items == expected_items:
-            return
-        # Check for a superset
-        elif not exact and actual_items >= expected_items:
-            return
-
-        expected_lines: List[str] = []
-        for expected_item in expected_items:
-            is_expected_in_actual = expected_item in actual_items
-            expected_lines.append(
-                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
-            )
-
-        actual_lines: List[str] = []
-        for actual_item in actual_items:
-            is_actual_in_expected = actual_item in expected_items
-            actual_lines.append(
-                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
-            )
-
-        newline = "\n"
-        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{newline.join(expected_lines)}\n }}"
-        actual_string = f"Actual ('+' = found expected items):\n {{\n{newline.join(actual_lines)}\n }}"
-        first_message = (
-            "Items must match exactly" if exact else "Some expected items are missing."
-        )
-        diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
-
-        self.fail(f"{diff_message}\n{message}")
 
     def _add_new_dm_to_global_account_data(
         self, source_user_id: str, target_user_id: str, target_room_id: str

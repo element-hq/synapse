@@ -587,7 +587,7 @@ class SlidingSyncHandler:
             extensions={},
         )
 
-    async def get_membership_for_user_at_to_token(
+    async def get_room_membership_for_user_at_to_token(
         self,
         user: UserID,
         to_token: StreamToken,
@@ -952,7 +952,7 @@ class SlidingSyncHandler:
         """
         user_id = user.to_string()
 
-        sync_room_id_set = await self.get_membership_for_user_at_to_token(
+        sync_room_id_set = await self.get_room_membership_for_user_at_to_token(
             user=user,
             to_token=to_token,
             from_token=from_token,
