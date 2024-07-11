@@ -958,7 +958,7 @@ class SlidingSyncHandler:
             from_token=from_token,
         )
 
-        # Filter the rooms
+        # Filter rooms to only what we're interested to sync with
         filtered_sync_room_id_set = {
             room_id: room_membership_for_user
             for room_id, room_membership_for_user in sync_room_id_set.items()
