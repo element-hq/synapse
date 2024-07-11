@@ -240,7 +240,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 if r is None:
                     continue
 
-                r["unsigned"] = {}
+                r.setdefault("unsigned", {})
                 if include_displaynames:
                     # Include the device's display name in the "unsigned" dictionary
                     display_name = device_info.display_name
