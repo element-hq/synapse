@@ -440,7 +440,12 @@ class SlidingSyncHandler:
 
         # Get all of the room IDs that the user should be able to see in the sync
         # response
-        if sync_config.lists is not None or sync_config.room_subscriptions is not None:
+        has_lists = sync_config.lists is not None and len(sync_config.lists) > 0
+        has_room_subscriptions = (
+            sync_config.room_subscriptions is not None
+            and len(sync_config.room_subscriptions) > 0
+        )
+        if has_lists or has_room_subscriptions:
             room_membership_for_user_map = (
                 await self.get_room_membership_for_user_at_to_token(
                     user=sync_config.user,
@@ -454,7 +459,7 @@ class SlidingSyncHandler:
         # Keep track of the rooms that we're going to display and need to fetch more
         # info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
-        if sync_config.lists is not None:
+        if has_lists and sync_config.lists is not None:
             sync_room_map = await self.filter_rooms_relevant_for_sync(
                 user=sync_config.user,
                 room_membership_for_user_map=room_membership_for_user_map,
@@ -547,33 +552,39 @@ class SlidingSyncHandler:
                 )
 
         # Handle room subscriptions
-        # if sync_config.room_subscriptions is not None:
-        #     for room_id, room_subscription in sync_config.room_subscriptions.items():
-        #         # We can first check if they are already allowed to see the room based
-        #         # on our previous work to assemble the `sync_room_map`.
-        #         if sync_room_map.get(room_id) is None:
-        #             # If not, we have to do some work to figure out if they should be
-        #             # allowed to see the room.
-        #             room_membership_for_user_at_to_token = (
-        #                 await self.check_room_subscription_allowed_for_user(
-        #                     user=sync_config.user, room_id=room_id
-        #                 )
-        #             )
+        if has_room_subscriptions and sync_config.room_subscriptions is not None:
+            for room_id, room_subscription in sync_config.room_subscriptions.items():
+                # We can first check if they are already allowed to see the room based
+                # on our previous work to assemble the `sync_room_map`.
+                if sync_room_map.get(room_id) is None:
+                    # If not, we have to do some work to figure out if they should be
+                    # allowed to see the room.
+                    room_membership_for_user_at_to_token = (
+                        await self.check_room_subscription_allowed_for_user(
+                            room_id=room_id,
+                            room_membership_for_user_map=room_membership_for_user_map,
+                            to_token=to_token,
+                        )
+                    )
 
-        #             # Skip this room if the user isn't allowed to see it
-        #             if not room_membership_for_user_at_to_token:
-        #                 continue
+                    # Skip this room if the user isn't allowed to see it
+                    if not room_membership_for_user_at_to_token:
+                        continue
 
-        #         # Take the superset of the `RoomSyncConfig` for each room.
-        #         #
-        #         # Update our `relevant_room_map` with the room we're going to display
-        #         # and need to fetch more info about.
-        #         room_sync_config = RoomSyncConfig.from_room_config(room_subscription)
-        #         existing_room_sync_config = relevant_room_map.get(room_id)
-        #         if existing_room_sync_config is not None:
-        #             existing_room_sync_config.combine_room_sync_config(room_sync_config)
-        #         else:
-        #             relevant_room_map[room_id] = room_sync_config
+                    room_membership_for_user_map[room_id] = (
+                        room_membership_for_user_at_to_token
+                    )
+
+                # Take the superset of the `RoomSyncConfig` for each room.
+                #
+                # Update our `relevant_room_map` with the room we're going to display
+                # and need to fetch more info about.
+                room_sync_config = RoomSyncConfig.from_room_config(room_subscription)
+                existing_room_sync_config = relevant_room_map.get(room_id)
+                if existing_room_sync_config is not None:
+                    existing_room_sync_config.combine_room_sync_config(room_sync_config)
+                else:
+                    relevant_room_map[room_id] = room_sync_config
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
@@ -582,7 +593,9 @@ class SlidingSyncHandler:
                 user=sync_config.user,
                 room_id=room_id,
                 room_sync_config=room_sync_config,
-                room_membership_for_user_at_to_token=sync_room_map[room_id],
+                room_membership_for_user_at_to_token=room_membership_for_user_map[
+                    room_id
+                ],
                 from_token=from_token,
                 to_token=to_token,
             )
@@ -934,7 +947,7 @@ class SlidingSyncHandler:
     ) -> Dict[str, _RoomMembershipForUser]:
         """
         Filter room IDs that should/can be listed for this user in the sync response (the
-        full room list that will be filtered, sorted, and sliced).
+        full room list that will be further filtered, sorted, and sliced).
 
         We're looking for rooms where the user has the following state in the token
         range (> `from_token` and <= `to_token`):
@@ -951,7 +964,7 @@ class SlidingSyncHandler:
 
         Args:
             user: User to fetch rooms for
-            room_membership_for_user_map: 
+            room_membership_for_user_map: TODO
 
         Returns:
             A dictionary of room IDs that should be listed in the sync response along
@@ -972,7 +985,10 @@ class SlidingSyncHandler:
         return filtered_sync_room_map
 
     async def check_room_subscription_allowed_for_user(
-        self, user: UserID, room_id: str
+        self,
+        room_id: str,
+        room_membership_for_user_map: Dict[str, _RoomMembershipForUser],
+        to_token: StreamToken,
     ) -> Optional[_RoomMembershipForUser]:
         """
         Check whether the user is allowed to see the room based on whether they have
@@ -981,56 +997,48 @@ class SlidingSyncHandler:
         Similar to `check_user_in_room_or_world_readable(...)`
 
         Args:
-            TODO
+            room_id: Room to check
+            room_membership_for_user_map: TODO
+            to_token: The token to fetch rooms up to.
 
         Returns:
             TODO
         """
-        user_id = user.to_string()
 
         # If they have had any membership in the room over time, let them
         # subscribe and see what they can.
-        (
-            membership,
-            member_event_id,
-        ) = await self.store.get_local_current_membership_for_user_in_room(
-            user_id=user_id,
-            room_id=room_id,
-        )
-        if membership is not None and member_event_id is not None:
-            return None
-            # return _RoomMembershipForUser(
-            #     room_id=room_id,
-            #     event_id=member_event_id,
-            #     event_pos=room_for_user.event_pos,
-            #     membership=membership,
-            #     sender=room_for_user.sender,
-            #     newly_joined=False,
-            #     newly_left=False,
-            #     is_dm=False,
-            # )
+        existing_membership_for_user = room_membership_for_user_map.get(room_id)
+        if existing_membership_for_user is not None:
+            return existing_membership_for_user
 
         # If the room is `world_readable`, it doesn't matter whether they can join,
         # everyone can see the room.
-        visibility = await self.storage_controllers.state.get_current_state_event(
-            room_id, EventTypes.RoomHistoryVisibility, ""
+        not_in_room_membership_for_user = _RoomMembershipForUser(
+            room_id=room_id,
+            event_id=None,
+            event_pos=None,
+            membership=None,
+            sender=None,
+            newly_joined=False,
+            newly_left=False,
+            is_dm=False,
         )
+        room_state = await self.get_current_state_at(
+            room_id=room_id,
+            room_membership_for_user_at_to_token=not_in_room_membership_for_user,
+            state_filter=StateFilter.from_types(
+                [(EventTypes.RoomHistoryVisibility, "")]
+            ),
+            to_token=to_token,
+        )
+
+        visibility_event = room_state.get((EventTypes.RoomHistoryVisibility, ""))
         if (
-            visibility
-            and visibility.content.get("history_visibility")
+            visibility_event is not None
+            and visibility_event.content.get("history_visibility")
             == HistoryVisibility.WORLD_READABLE
         ):
-            return None
-            # return _RoomMembershipForUser(
-            #     room_id=room_id,
-            #     event_id=None,
-            #     event_pos=None,
-            #     membership=None,
-            #     sender=None,
-            #     newly_joined=False,
-            #     newly_left=False,
-            #     is_dm=False,
-            # )
+            return not_in_room_membership_for_user
 
         return None
 

@@ -36,15 +36,15 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import (
-    _RoomMembershipForUser,
     RoomSyncConfig,
     StateValues,
+    _RoomMembershipForUser,
 )
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, UserID, StreamToken
+from synapse.types import JsonDict, StreamToken, UserID
 from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 
