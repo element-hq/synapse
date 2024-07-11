@@ -79,8 +79,8 @@ class _RoomMembershipForUser:
         sender: The person who sent the membership event
         newly_joined: Whether the user newly joined the room during the given token
             range and is still joined to the room at the end of this range.
-        newly_left: Whether the user newly left the room during the given token range
-            and is still "leave" at the end of this range.
+        newly_left: Whether the user newly left (or kicked) the room during the given
+            token range and is still "leave" at the end of this range.
         is_dm: Whether this user considers this room as a direct-message (DM) room
     """
 
@@ -131,14 +131,20 @@ def filter_membership_for_sync(
     # leave event.
     #
     # A leave != kick. This logic includes kicks (leave events where the sender is not
-    # the same user) and can be read as "anything that isn't a leave or newly_left or a
-    # leave with a different sender".
+    # the same user).
     #
     # When `sender=None`, it means that a state reset happened that removed the user
     # from the room without a corresponding leave event. We can just remove the rooms
     # since they are no longer relevant to the user but will still appear if they are
     # `newly_left`.
-    return membership != Membership.LEAVE or newly_left or sender not in (user_id, None)
+    return (
+        # Anything except leave events
+        membership != Membership.LEAVE
+        # Unless...
+        or newly_left
+        # Allow kicks
+        or (membership == Membership.LEAVE and sender not in (user_id, None))
+    )
 
 
 # We can't freeze this class because we want to update it in place with the
@@ -1258,7 +1264,6 @@ class SlidingSyncHandler:
                 in the room at the time of `to_token`.
             to_token: The point in the stream to sync up to.
         """
-
         room_state_ids: StateMap[str]
         # People shouldn't see past their leave/ban event
         if room_membership_for_user_at_to_token.membership in (
