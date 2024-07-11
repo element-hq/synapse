@@ -78,8 +78,9 @@ class _RoomMembershipForUser:
         membership: The membership state of the user in the room
         sender: The person who sent the membership event
         newly_joined: Whether the user newly joined the room during the given token
-            range
+            range and is still joined to the room at the end of this range.
         newly_left: Whether the user newly left the room during the given token range
+            and is still "leave" at the end of this range.
         is_dm: Whether this user considers this room as a direct-message (DM) room
     """
 
@@ -437,18 +438,26 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
+        # Get all of the room IDs that the user should be able to see in the sync
+        # response
+        if sync_config.lists is not None or sync_config.room_subscriptions is not None:
+            room_membership_for_user_map = (
+                await self.get_room_membership_for_user_at_to_token(
+                    user=sync_config.user,
+                    to_token=to_token,
+                    from_token=from_token,
+                )
+            )
+
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         # Keep track of the rooms that we're going to display and need to fetch more
         # info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
-        if sync_config.lists:
-            # Get all of the room IDs that the user should be able to see in the sync
-            # response
-            sync_room_map = await self.get_sync_room_ids_for_user(
-                sync_config.user,
-                from_token=from_token,
-                to_token=to_token,
+        if sync_config.lists is not None:
+            sync_room_map = await self.filter_rooms_relevant_for_sync(
+                user=sync_config.user,
+                room_membership_for_user_map=room_membership_for_user_map,
             )
 
             for list_key, list_config in sync_config.lists.items():
@@ -594,8 +603,8 @@ class SlidingSyncHandler:
         from_token: Optional[StreamToken],
     ) -> Dict[str, _RoomMembershipForUser]:
         """
-        Fetch room IDs that the user has had membership in (the full room list that will
-        be filtered, sorted, and sliced).
+        Fetch room IDs that the user has had membership in (the full room list including
+        long-lost left rooms that will be filtered, sorted, and sliced).
 
         We're looking for rooms where the user has had any sort of membership in the
         token range (> `from_token` and <= `to_token`)
@@ -918,14 +927,13 @@ class SlidingSyncHandler:
 
         return sync_room_id_set
 
-    async def get_sync_room_ids_for_user(
+    async def filter_rooms_relevant_for_sync(
         self,
         user: UserID,
-        to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        room_membership_for_user_map: Dict[str, _RoomMembershipForUser],
     ) -> Dict[str, _RoomMembershipForUser]:
         """
-        Fetch room IDs that should be listed for this user in the sync response (the
+        Filter room IDs that should/can be listed for this user in the sync response (the
         full room list that will be filtered, sorted, and sliced).
 
         We're looking for rooms where the user has the following state in the token
@@ -943,8 +951,7 @@ class SlidingSyncHandler:
 
         Args:
             user: User to fetch rooms for
-            to_token: The token to fetch rooms up to.
-            from_token: The point in the stream to sync from.
+            room_membership_for_user_map: 
 
         Returns:
             A dictionary of room IDs that should be listed in the sync response along
@@ -952,23 +959,17 @@ class SlidingSyncHandler:
         """
         user_id = user.to_string()
 
-        sync_room_id_set = await self.get_room_membership_for_user_at_to_token(
-            user=user,
-            to_token=to_token,
-            from_token=from_token,
-        )
-
         # Filter rooms to only what we're interested to sync with
-        filtered_sync_room_id_set = {
+        filtered_sync_room_map = {
             room_id: room_membership_for_user
-            for room_id, room_membership_for_user in sync_room_id_set.items()
+            for room_id, room_membership_for_user in room_membership_for_user_map.items()
             if filter_membership_for_sync(
                 user_id=user_id,
                 room_membership_for_user=room_membership_for_user,
             )
         }
 
-        return filtered_sync_room_id_set
+        return filtered_sync_room_map
 
     async def check_room_subscription_allowed_for_user(
         self, user: UserID, room_id: str

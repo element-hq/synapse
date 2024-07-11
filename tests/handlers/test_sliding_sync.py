@@ -19,7 +19,7 @@
 #
 import logging
 from copy import deepcopy
-from typing import Optional
+from typing import Dict, Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -35,12 +35,16 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.handlers.sliding_sync import RoomSyncConfig, StateValues
+from synapse.handlers.sliding_sync import (
+    _RoomMembershipForUser,
+    RoomSyncConfig,
+    StateValues,
+)
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, StreamToken
 from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 
@@ -2628,9 +2632,9 @@ class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCa
         self.assertEqual(room_id_results[room_id3].newly_left, False)
 
 
-class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
+class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it returns
+    Tests Sliding Sync handler `filter_rooms_relevant_for_sync()` to make sure it returns
     the correct list of rooms IDs.
     """
 
@@ -2653,6 +2657,31 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
 
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
+
     def test_no_rooms(self) -> None:
         """
         Test when the user has never joined any rooms before
@@ -2662,12 +2691,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         now_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=now_token,
-                to_token=now_token,
-            )
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=now_token,
+            to_token=now_token,
         )
 
         self.assertEqual(room_id_results.keys(), set())
@@ -2729,12 +2756,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
-                UserID.from_string(user1_id),
-                from_token=before_room_token,
-                to_token=after_room_token,
-            )
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_room_token,
+            to_token=after_room_token,
         )
 
         # Ensure that the invited, ban, and knock rooms show up
@@ -2802,12 +2827,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_room2_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=after_room1_token,
-                to_token=after_room2_token,
-            )
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_room1_token,
+            to_token=after_room2_token,
         )
 
         # Only the `newly_left` room should show up
@@ -2849,12 +2872,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         after_kick_token = self.event_sources.get_current_token()
 
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=after_kick_token,
-                to_token=after_kick_token,
-            )
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_kick_token,
+            to_token=after_kick_token,
         )
 
         # The kicked room should show up
@@ -2951,12 +2972,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_reset_token = self.event_sources.get_current_token()
 
         # The function under test
-        room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=before_reset_token,
-                to_token=after_reset_token,
-            )
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_reset_token,
+            to_token=after_reset_token,
         )
 
         # Room1 should show up because it was `newly_left` via state reset during the from/to range
@@ -2998,6 +3017,31 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
 
     def _create_dm_room(
         self,
@@ -3070,12 +3114,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_dm=True`
@@ -3128,12 +3170,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_encrypted=True`
@@ -3184,12 +3224,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_invite=True`
@@ -3253,12 +3291,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try finding only normal rooms
@@ -3346,12 +3382,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try finding *NOT* normal rooms
@@ -3450,6 +3484,31 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
+
     def test_sort_activity_basic(self) -> None:
         """
         Rooms with newer activity are sorted first.
@@ -3469,12 +3528,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
@@ -3552,12 +3609,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.helper.send(room_id3, "activity in room3", tok=user2_tok)
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=before_rooms_token,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_rooms_token,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
@@ -3618,12 +3673,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
