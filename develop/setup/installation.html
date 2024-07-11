@@ -367,7 +367,47 @@ header files for Python C extensions.</p>
                  libwebp-devel libxml2-devel libxslt-devel libpq-devel \
                  python3-virtualenv libffi-devel openssl-devel python3-devel \
                  libicu-devel
-sudo dnf groupinstall &quot;Development Tools&quot;
+sudo dnf group install &quot;Development Tools&quot;
+</code></pre>
+<h5 id="red-hat-enterprise-linux--rocky-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux">Red Hat Enterprise Linux / Rocky Linux</a></h5>
+<p><em>Note: The term &quot;RHEL&quot; below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.</em></p>
+<p>It's recommended to use the latest Python versions. </p>
+<p>RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.</p>
+<p>Python 3.11 and 3.12 are available for both RHEL 8 and 9.</p>
+<p>These commands should be run as root user.</p>
+<p>RHEL 8</p>
+<pre><code class="language-bash"># Enable PowerTools repository
+dnf config-manager --set-enabled powertools
+</code></pre>
+<p>RHEL 9</p>
+<pre><code class="language-bash"># Enable CodeReady Linux Builder repository
+crb enable
+</code></pre>
+<p>Install new version of Python. You only need one of these:</p>
+<pre><code class="language-bash"># Python 3.11
+dnf install python3.11 python3.11-devel
+</code></pre>
+<pre><code class="language-bash"># Python 3.12
+dnf install python3.12 python3.12-devel
+</code></pre>
+<p>Finally, install common prerequisites</p>
+<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf 
+dnf group install &quot;Development Tools&quot;
+</code></pre>
+<h6 id="using-venv-module-instead-of-virtualenv-command"><a class="header" href="#using-venv-module-instead-of-virtualenv-command">Using venv module instead of virtualenv command</a></h6>
+<p>It's recommended to use Python venv module directly rather than the virtualenv command.</p>
+<ul>
+<li>On RHEL 9, virtualenv is only available on <a href="https://docs.fedoraproject.org/en-US/epel/">EPEL</a>.</li>
+<li>On RHEL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.</li>
+</ul>
+<p>Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI. </p>
+<pre><code class="language-bash">mkdir -p ~/synapse
+# To use Python 3.11, simply use the command &quot;python3.11&quot; instead.
+python3.12 -m venv ~/synapse/env
+source ~/synapse/env/bin/activate
+pip install --upgrade pip
+pip install --upgrade setuptools
+pip install matrix-synapse
 </code></pre>
 <h5 id="macos"><a class="header" href="#macos">macOS</a></h5>
 <p>Installing prerequisites on macOS:</p>
