@@ -200,9 +200,6 @@ class SlidingSyncBody(RequestBodyModel):
                     }
 
             timeline_limit: The maximum number of timeline events to return per response.
-            include_heroes: Return a stripped variant of membership events (containing
-                `user_id` and optionally `avatar_url` and `displayname`) for the users used
-                to calculate the room name.
             filters: Filters to apply to the list before sorting.
         """
 
@@ -270,7 +267,6 @@ class SlidingSyncBody(RequestBodyModel):
         else:
             ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
         slow_get_all_rooms: Optional[StrictBool] = False
-        include_heroes: Optional[StrictBool] = False
         filters: Optional[Filters] = None
 
     class RoomSubscription(CommonRoomParameters):
