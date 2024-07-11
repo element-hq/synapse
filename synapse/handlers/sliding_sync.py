@@ -19,7 +19,7 @@
 #
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, Any, Dict, Final, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Final, List, Mapping, Optional, Set, Tuple
 
 import attr
 from immutabledict import immutabledict
@@ -28,7 +28,9 @@ from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membe
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
+from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
+from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     JsonDict,
     PersistedEventPosition,
@@ -1043,6 +1045,103 @@ class SlidingSyncHandler:
             reverse=True,
         )
 
+    async def get_current_state_ids_at(
+        self,
+        room_id: str,
+        room_membership_for_user_at_to_token: _RoomMembershipForUser,
+        state_filter: StateFilter,
+        to_token: StreamToken,
+    ) -> StateMap[str]:
+        """
+        Get current state IDs for the user in the room according to their membership. This
+        will be the current state at the time of their LEAVE/BAN, otherwise will be the
+        current state <= to_token.
+
+        Args:
+            room_id: The room ID to fetch data for
+            room_membership_for_user_at_token: Membership information for the user
+                in the room at the time of `to_token`.
+            to_token: The point in the stream to sync up to.
+        """
+
+        room_state_ids: StateMap[str]
+        # People shouldn't see past their leave/ban event
+        if room_membership_for_user_at_to_token.membership in (
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            # TODO: `get_state_ids_at(...)` doesn't take into account the "current state"
+            room_state_ids = await self.storage_controllers.state.get_state_ids_at(
+                room_id,
+                stream_position=to_token.copy_and_replace(
+                    StreamKeyType.ROOM,
+                    room_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
+                ),
+                state_filter=state_filter,
+                # Partially-stated rooms should have all state events except for
+                # remote membership events. Since we've already excluded
+                # partially-stated rooms unless `required_state` only has
+                # `["m.room.member", "$LAZY"]` for membership, we should be able to
+                # retrieve everything requested. When we're lazy-loading, if there
+                # are some remote senders in the timeline, we should also have their
+                # membership event because we had to auth that timeline event. Plus
+                # we don't want to block the whole sync waiting for this one room.
+                await_full_state=False,
+            )
+        # Otherwise, we can get the latest current state in the room
+        else:
+            room_state_ids = await self.storage_controllers.state.get_current_state_ids(
+                room_id,
+                state_filter,
+                # Partially-stated rooms should have all state events except for
+                # remote membership events. Since we've already excluded
+                # partially-stated rooms unless `required_state` only has
+                # `["m.room.member", "$LAZY"]` for membership, we should be able to
+                # retrieve everything requested. When we're lazy-loading, if there
+                # are some remote senders in the timeline, we should also have their
+                # membership event because we had to auth that timeline event. Plus
+                # we don't want to block the whole sync waiting for this one room.
+                await_full_state=False,
+            )
+            # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
+
+        return room_state_ids
+
+    async def get_current_state_at(
+        self,
+        room_id: str,
+        room_membership_for_user_at_to_token: _RoomMembershipForUser,
+        state_filter: StateFilter,
+        to_token: StreamToken,
+    ) -> StateMap[EventBase]:
+        """
+        Get current state for the user in the room according to their membership. This
+        will be the current state at the time of their LEAVE/BAN, otherwise will be the
+        current state <= to_token.
+
+        Args:
+            room_id: The room ID to fetch data for
+            room_membership_for_user_at_token: Membership information for the user
+                in the room at the time of `to_token`.
+            to_token: The point in the stream to sync up to.
+        """
+        room_state_ids = await self.get_current_state_ids_at(
+            room_id=room_id,
+            room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+            state_filter=state_filter,
+            to_token=to_token,
+        )
+
+        event_map = await self.store.get_events(list(room_state_ids.values()))
+
+        state_map = {}
+        for key, event_id in room_state_ids.items():
+            event = event_map.get(event_id)
+            if event:
+                state_map[key] = event
+
+        return state_map
+
     async def get_room_sync_data(
         self,
         user: UserID,
@@ -1074,7 +1173,7 @@ class SlidingSyncHandler:
         # membership. Currently, we have to make all of these optional because
         # `invite`/`knock` rooms only have `stripped_state`. See
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-        timeline_events: Optional[List[EventBase]] = None
+        timeline_events: List[EventBase] = []
         bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
         limited: Optional[bool] = None
         prev_batch_token: Optional[StreamToken] = None
@@ -1206,7 +1305,7 @@ class SlidingSyncHandler:
 
         # Figure out any stripped state events for invite/knocks. This allows the
         # potential joiner to identify the room.
-        stripped_state: Optional[List[JsonDict]] = None
+        stripped_state: List[JsonDict] = []
         if room_membership_for_user_at_to_token.membership in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -1243,6 +1342,44 @@ class SlidingSyncHandler:
         # updates.
         initial = True
 
+        # Check whether the room has a name set
+        name_state_ids = await self.get_current_state_ids_at(
+            room_id=room_id,
+            room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+            state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
+            to_token=to_token,
+        )
+        name_event_id = name_state_ids.get((EventTypes.Name, ""))
+
+        room_membership_summary: Mapping[str, MemberSummary]
+        empty_membership_summary = MemberSummary([], 0)
+        if room_membership_for_user_at_to_token.membership in (
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            # TODO: Figure out how to get the membership summary for left/banned rooms
+            room_membership_summary = {}
+        else:
+            room_membership_summary = await self.store.get_room_summary(room_id)
+            # TODO: Reverse/rewind back to the `to_token`
+
+        # `heroes` are required if the room name is not set.
+        #
+        # Note: When you're the first one on your server to be invited to a new room
+        # over federation, we only have access to some stripped state in
+        # `event.unsigned.invite_room_state` which currently doesn't include `heroes`,
+        # see https://github.com/matrix-org/matrix-spec/issues/380. This means that
+        # clients won't be able to calculate the room name when necessary and just a
+        # pitfall we have to deal with until that spec issue is resolved.
+        hero_user_ids: List[str] = []
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        if name_event_id is None:
+            hero_user_ids = extract_heroes_from_room_summary(
+                room_membership_summary, me=user.to_string()
+            )
+
         # Fetch the `required_state` for the room
         #
         # No `required_state` for invite/knock rooms (just `stripped_state`)
@@ -1253,13 +1390,11 @@ class SlidingSyncHandler:
         # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
-        room_state: Optional[StateMap[EventBase]] = None
-        required_room_state: Optional[StateMap[EventBase]] = None
+        required_state_filter = StateFilter.none()
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
         ):
-            required_state_filter = StateFilter.none()
             # If we have a double wildcard ("*", "*") in the `required_state`, we need
             # to fetch all state for the room
             #
@@ -1325,86 +1460,65 @@ class SlidingSyncHandler:
 
                 required_state_filter = StateFilter.from_types(required_state_types)
 
-            # We need this base set of info for the response so let's just fetch it along
-            # with the `required_state` for the room
-            META_ROOM_STATE = [(EventTypes.Name, ""), (EventTypes.RoomAvatar, "")]
+        # We need this base set of info for the response so let's just fetch it along
+        # with the `required_state` for the room
+        meta_room_state = [(EventTypes.Name, ""), (EventTypes.RoomAvatar, "")] + [
+            (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
+        ]
+        state_filter = StateFilter.all()
+        if required_state_filter != StateFilter.all():
             state_filter = StateFilter(
                 types=StateFilter.from_types(
-                    chain(META_ROOM_STATE, required_state_filter.to_types())
+                    chain(meta_room_state, required_state_filter.to_types())
                 ).types,
                 include_others=required_state_filter.include_others,
             )
 
-            # We can return all of the state that was requested if this was the first
-            # time we've sent the room down this connection.
-            if initial:
-                # People shouldn't see past their leave/ban event
-                if room_membership_for_user_at_to_token.membership in (
-                    Membership.LEAVE,
-                    Membership.BAN,
-                ):
-                    room_state = await self.storage_controllers.state.get_state_at(
-                        room_id,
-                        stream_position=to_token.copy_and_replace(
-                            StreamKeyType.ROOM,
-                            room_membership_for_user_at_to_token.event_pos.to_room_stream_token(),
-                        ),
-                        state_filter=state_filter,
-                        # Partially-stated rooms should have all state events except for
-                        # remote membership events. Since we've already excluded
-                        # partially-stated rooms unless `required_state` only has
-                        # `["m.room.member", "$LAZY"]` for membership, we should be able to
-                        # retrieve everything requested. When we're lazy-loading, if there
-                        # are some remote senders in the timeline, we should also have their
-                        # membership event because we had to auth that timeline event. Plus
-                        # we don't want to block the whole sync waiting for this one room.
-                        await_full_state=False,
-                    )
-                # Otherwise, we can get the latest current state in the room
-                else:
-                    room_state = await self.storage_controllers.state.get_current_state(
-                        room_id,
-                        state_filter,
-                        # Partially-stated rooms should have all state events except for
-                        # remote membership events. Since we've already excluded
-                        # partially-stated rooms unless `required_state` only has
-                        # `["m.room.member", "$LAZY"]` for membership, we should be able to
-                        # retrieve everything requested. When we're lazy-loading, if there
-                        # are some remote senders in the timeline, we should also have their
-                        # membership event because we had to auth that timeline event. Plus
-                        # we don't want to block the whole sync waiting for this one room.
-                        await_full_state=False,
-                    )
-                    # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
-            else:
-                # TODO: Once we can figure out if we've sent a room down this connection before,
-                # we can return updates instead of the full required state.
-                raise NotImplementedError()
+        # We can return all of the state that was requested if this was the first
+        # time we've sent the room down this connection.
+        room_state: StateMap[EventBase] = {}
+        if initial:
+            room_state = await self.get_current_state_at(
+                room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+                state_filter=state_filter,
+                to_token=to_token,
+            )
+        else:
+            # TODO: Once we can figure out if we've sent a room down this connection before,
+            # we can return updates instead of the full required state.
+            raise NotImplementedError()
 
-            if required_state_filter != StateFilter.none():
-                required_room_state = required_state_filter.filter_state(room_state)
+        required_room_state: StateMap[EventBase] = {}
+        if required_state_filter != StateFilter.none():
+            required_room_state = required_state_filter.filter_state(room_state)
 
         # Find the room name and avatar from the state
         room_name: Optional[str] = None
+        # TODO: Should we also check for `EventTypes.CanonicalAlias`
+        # (`m.room.canonical_alias`) as a fallback for the room name? see
+        # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1671260153
+        name_event = room_state.get((EventTypes.Name, ""))
+        if name_event is not None:
+            room_name = name_event.content.get("name")
+
         room_avatar: Optional[str] = None
-        if room_state is not None:
-            name_event = room_state.get((EventTypes.Name, ""))
-            if name_event is not None:
-                room_name = name_event.content.get("name")
+        avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
+        if avatar_event is not None:
+            room_avatar = avatar_event.content.get("url")
 
-            avatar_event = room_state.get((EventTypes.RoomAvatar, ""))
-            if avatar_event is not None:
-                room_avatar = avatar_event.content.get("url")
-        elif stripped_state is not None:
-            for event in stripped_state:
-                if event["type"] == EventTypes.Name:
-                    room_name = event.get("content", {}).get("name")
-                elif event["type"] == EventTypes.RoomAvatar:
-                    room_avatar = event.get("content", {}).get("url")
-
-                # Found everything so we can stop looking
-                if room_name is not None and room_avatar is not None:
-                    break
+        # Assemble heroes: extract the info from the state we just fetched
+        heroes: List[SlidingSyncResult.RoomResult.StrippedHero] = []
+        for hero_user_id in hero_user_ids:
+            member_event = room_state.get((EventTypes.Member, hero_user_id))
+            if member_event is not None:
+                heroes.append(
+                    SlidingSyncResult.RoomResult.StrippedHero(
+                        user_id=hero_user_id,
+                        display_name=member_event.content.get("displayname"),
+                        avatar_url=member_event.content.get("avatar_url"),
+                    )
+                )
 
         # Figure out the last bump event in the room
         last_bump_event_result = (
@@ -1423,14 +1537,11 @@ class SlidingSyncHandler:
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
-            # TODO: Dummy value
-            heroes=None,
+            heroes=heroes,
             # TODO: Dummy value
             is_dm=False,
             initial=initial,
-            required_state=(
-                list(required_room_state.values()) if required_room_state else None
-            ),
+            required_state=list(required_room_state.values()),
             timeline_events=timeline_events,
             bundled_aggregations=bundled_aggregations,
             stripped_state=stripped_state,
@@ -1438,9 +1549,12 @@ class SlidingSyncHandler:
             limited=limited,
             num_live=num_live,
             bump_stamp=bump_stamp,
-            # TODO: Dummy values
-            joined_count=0,
-            invited_count=0,
+            joined_count=room_membership_summary.get(
+                Membership.JOIN, empty_membership_summary
+            ).count,
+            invited_count=room_membership_summary.get(
+                Membership.INVITE, empty_membership_summary
+            ).count,
             # TODO: These are just dummy values. We could potentially just remove these
             # since notifications can only really be done correctly on the client anyway
             # (encrypted rooms).
