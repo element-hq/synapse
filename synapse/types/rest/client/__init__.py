@@ -272,10 +272,48 @@ class SlidingSyncBody(RequestBodyModel):
     class RoomSubscription(CommonRoomParameters):
         pass
 
-    class Extension(RequestBodyModel):
-        enabled: Optional[StrictBool] = False
-        lists: Optional[List[StrictStr]] = None
-        rooms: Optional[List[StrictStr]] = None
+    class Extensions(RequestBodyModel):
+        """The extensions section of the request.
+
+        Extensions MUST have an `enabled` flag which defaults to `false`. If a client
+        sends an unknown extension name, the server MUST ignore it (or else backwards
+        compatibility between clients and servers is broken when a newer client tries to
+        communicate with an older server).
+        """
+
+        class ToDeviceExtension(RequestBodyModel):
+            """The to-device extension (MSC3885)
+
+            Attributes:
+                enabled
+                limit: Maximum number of to-device messages to return
+                since: The `next_batch` from the previous sync response
+            """
+
+            enabled: Optional[StrictBool] = False
+            limit: StrictInt = 100
+            since: Optional[StrictStr] = None
+
+            @validator("since")
+            def since_token_check(
+                cls, value: Optional[StrictStr]
+            ) -> Optional[StrictStr]:
+                # `since` comes in as an opaque string token but we know that it's just
+                # an integer representing the position in the device inbox stream. We
+                # want to pre-validate it to make sure it works fine in downstream code.
+                if value is None:
+                    return value
+
+                try:
+                    int(value)
+                except ValueError:
+                    raise ValueError(
+                        "'extensions.to_device.since' is invalid (should look like an int)"
+                    )
+
+                return value
+
+        to_device: Optional[ToDeviceExtension] = None
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:
@@ -283,7 +321,7 @@ class SlidingSyncBody(RequestBodyModel):
     else:
         lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = None  # type: ignore[valid-type]
     room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
-    extensions: Optional[Dict[StrictStr, Extension]] = None
+    extensions: Optional[Extensions] = None
 
     @validator("lists")
     def lists_length_check(
