@@ -553,26 +553,23 @@ class SlidingSyncHandler:
         # Handle room subscriptions
         if has_room_subscriptions and sync_config.room_subscriptions is not None:
             for room_id, room_subscription in sync_config.room_subscriptions.items():
-                # We can first check if they are already allowed to see the room based
-                # on our previous work to assemble the `sync_room_map`.
-                if sync_room_map.get(room_id) is None:
-                    # If not, we have to do some work to figure out if they should be
-                    # allowed to see the room.
-                    room_membership_for_user_at_to_token = (
-                        await self.check_room_subscription_allowed_for_user(
-                            room_id=room_id,
-                            room_membership_for_user_map=room_membership_for_user_map,
-                            to_token=to_token,
-                        )
+                # If not, we have to do some work to figure out if they should be
+                # allowed to see the room.
+                room_membership_for_user_at_to_token = (
+                    await self.check_room_subscription_allowed_for_user(
+                        room_id=room_id,
+                        room_membership_for_user_map=room_membership_for_user_map,
+                        to_token=to_token,
                     )
+                )
 
-                    # Skip this room if the user isn't allowed to see it
-                    if not room_membership_for_user_at_to_token:
-                        continue
+                # Skip this room if the user isn't allowed to see it
+                if not room_membership_for_user_at_to_token:
+                    continue
 
-                    room_membership_for_user_map[room_id] = (
-                        room_membership_for_user_at_to_token
-                    )
+                room_membership_for_user_map[room_id] = (
+                    room_membership_for_user_at_to_token
+                )
 
                 # Take the superset of the `RoomSyncConfig` for each room.
                 #
@@ -1008,8 +1005,11 @@ class SlidingSyncHandler:
             TODO
         """
 
-        # If they have had any membership in the room over time, let them
-        # subscribe and see what they can.
+        # We can first check if they are already allowed to see the room based
+        # on our previous work to assemble the `room_membership_for_user_map`.
+        #
+        # If they have had any membership in the room over time (up to the `to_token`),
+        # let them subscribe and see what they can.
         existing_membership_for_user = room_membership_for_user_map.get(room_id)
         if existing_membership_for_user is not None:
             return existing_membership_for_user
