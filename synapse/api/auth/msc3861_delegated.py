@@ -121,7 +121,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._hostname = hs.hostname
         self._admin_token = self._config.admin_token
 
-        self._issuer_metadata = RetryOnExceptionCachedCall(self._load_metadata)
+        self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
+            self._load_metadata
+        )
 
         if isinstance(auth_method, PrivateKeyJWTWithKid):
             # Use the JWK as the client secret when using the private_key_jwt method
@@ -154,7 +156,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         """
         issuer: Optional[str] = None
         try:
-            metadata = await self._load_metadata()
+            metadata = await self._issuer_metadata.get()
             issuer = metadata.issuer
         # We don't want to raise here if we can't load the metadata
         except Exception:
@@ -174,7 +176,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             return self._config.account_management_url
 
         try:
-            metadata = await self._load_metadata()
+            metadata = await self._issuer_metadata.get()
             return metadata.get("account_management_uri", None)
         # We don't want to raise here if we can't load the metadata
         except Exception:
@@ -190,7 +192,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         if self._config.introspection_endpoint is not None:
             return self._config.introspection_endpoint
 
-        metadata = await self._load_metadata()
+        metadata = await self._issuer_metadata.get()
         return metadata.get("introspection_endpoint")
 
     async def _introspect_token(self, token: str) -> IntrospectionToken:
