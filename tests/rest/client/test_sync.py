@@ -20,9 +20,8 @@
 #
 import json
 import logging
-from typing import Any, Dict, Iterable, List
-
 from http import HTTPStatus
+from typing import Any, Dict, Iterable, List
 
 from parameterized import parameterized, parameterized_class
 
