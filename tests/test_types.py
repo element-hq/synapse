@@ -19,12 +19,16 @@
 #
 #
 
+from typing import Type
 from unittest import skipUnless
 
 from immutabledict import immutabledict
+from parameterized import parameterized_class
 
 from synapse.api.errors import SynapseError
 from synapse.types import (
+    AbstractMultiWriterStreamToken,
+    MultiWriterStreamToken,
     RoomAlias,
     RoomStreamToken,
     UserID,
@@ -135,17 +139,33 @@ class MapUsernameTestCase(unittest.TestCase):
         self.assertEqual(map_username_to_mxid_localpart("têst".encode()), "t=c3=aast")
 
 
-class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
+@parameterized_class(
+    ("token_type",),
+    [
+        (MultiWriterStreamToken,),
+        (RoomStreamToken,),
+    ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_{params_dict['token_type'].__name__}",
+)
+class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
+    """Tests for the different types of multi writer tokens."""
+
+    token_type: Type[AbstractMultiWriterStreamToken]
+
     def test_basic_token(self) -> None:
         """Test that a simple stream token be serialized and unserialized"""
         store = self.hs.get_datastores().main
 
-        token = RoomStreamToken(stream=5)
+        token = self.token_type(stream=5)
 
         string_token = self.get_success(token.to_string(store))
-        self.assertEqual(string_token, "s5")
 
-        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
+        if isinstance(token, RoomStreamToken):
+            self.assertEqual(string_token, "s5")
+        else:
+            self.assertEqual(string_token, "5")
+
+        parsed_token = self.get_success(self.token_type.parse(store, string_token))
         self.assertEqual(parsed_token, token)
 
     @skipUnless(USE_POSTGRES_FOR_TESTS, "Requires Postgres")
@@ -153,12 +173,12 @@ class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
         """Test for stream token with instance map"""
         store = self.hs.get_datastores().main
 
-        token = RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 6}))
+        token = self.token_type(stream=5, instance_map=immutabledict({"foo": 6}))
 
         string_token = self.get_success(token.to_string(store))
         self.assertEqual(string_token, "m5~1.6")
 
-        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
+        parsed_token = self.get_success(self.token_type.parse(store, string_token))
         self.assertEqual(parsed_token, token)
 
     def test_instance_map_assertion(self) -> None:
@@ -166,12 +186,12 @@ class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
         min stream position"""
 
         with self.assertRaises(ValueError):
-            RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 4}))
+            self.token_type(stream=5, instance_map=immutabledict({"foo": 4}))
 
     def test_parse_bad_token(self) -> None:
         """Test that we can parse tokens produced by a bug in Synapse of the
         form `m5~`"""
         store = self.hs.get_datastores().main
 
-        parsed_token = self.get_success(RoomStreamToken.parse(store, "m5~"))
-        self.assertEqual(parsed_token, RoomStreamToken(stream=5))
+        parsed_token = self.get_success(self.token_type.parse(store, "m5~"))
+        self.assertEqual(parsed_token, self.token_type(stream=5))
