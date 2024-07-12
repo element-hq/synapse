@@ -188,6 +188,9 @@ class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
         with self.assertRaises(ValueError):
             self.token_type(stream=5, instance_map=immutabledict({"foo": 4}))
 
+        with self.assertRaises(ValueError):
+            self.token_type(stream=5, instance_map=immutabledict({"foo": 5}))
+
     def test_parse_bad_token(self) -> None:
         """Test that we can parse tokens produced by a bug in Synapse of the
         form `m5~`"""
