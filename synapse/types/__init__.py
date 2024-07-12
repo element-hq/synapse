@@ -458,6 +458,8 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
     represented by a default `stream` attribute and a map of instance name to
     stream position of any writers that are ahead of the default stream
     position.
+
+    The values in `instance_map` must be greater than the `stream` attribute.
     """
 
     stream: int = attr.ib(validator=attr.validators.instance_of(int), kw_only=True)
@@ -471,6 +473,15 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
         ),
         kw_only=True,
     )
+
+    def __attrs_post_init__(self) -> None:
+        # Enforce that all instances have a value greater than the min stream
+        # position.
+        for v in self.instance_map.values():
+            if v < self.stream:
+                raise ValueError(
+                    "'instance_map' includes a stream position before the main 'stream' attribute"
+                )
 
     @classmethod
     @abc.abstractmethod
@@ -640,6 +651,8 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
             raise ValueError(
                 "Cannot set both 'topological' and 'instance_map' on 'RoomStreamToken'."
             )
+
+        super().__attrs_post_init__()
 
     @classmethod
     async def parse(cls, store: "PurgeEventsStore", string: str) -> "RoomStreamToken":

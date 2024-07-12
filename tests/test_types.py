@@ -161,16 +161,9 @@ class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
         parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
         self.assertEqual(parsed_token, token)
 
-    @skipUnless(USE_POSTGRES_FOR_TESTS, "Requires Postgres")
-    def test_instance_map_behind(self) -> None:
-        """Test for stream token with instance map, where instance map entries
-        are from before stream token."""
-        store = self.hs.get_datastores().main
+    def test_instance_map_assertion(self) -> None:
+        """Test that we assert values in the instance map are greater than the
+        min stream position"""
 
-        token = RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 4}))
-
-        string_token = self.get_success(token.to_string(store))
-        self.assertEqual(string_token, "s5")
-
-        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
-        self.assertEqual(parsed_token, RoomStreamToken(stream=5))
+        with self.assertRaises(ValueError):
+            RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 4}))
