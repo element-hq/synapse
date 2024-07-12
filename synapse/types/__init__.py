@@ -477,10 +477,10 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
     def __attrs_post_init__(self) -> None:
         # Enforce that all instances have a value greater than the min stream
         # position.
-        for v in self.instance_map.values():
-            if v < self.stream:
+        for i, v in self.instance_map.items():
+            if v <= self.stream:
                 raise ValueError(
-                    "'instance_map' includes a stream position before the main 'stream' attribute"
+                    f"'instance_map' includes a stream position before the main 'stream' attribute. Instance: {i}"
                 )
 
     @classmethod
@@ -508,6 +508,9 @@ class AbstractMultiWriterStreamToken(metaclass=abc.ABCMeta):
             )
             for instance in set(self.instance_map).union(other.instance_map)
         }
+
+        # Filter out any redundant entries.
+        instance_map = {i: s for i, s in instance_map.items() if s > max_stream}
 
         return attr.evolve(
             self, stream=max_stream, instance_map=immutabledict(instance_map)
@@ -738,6 +741,8 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
         return self.instance_map.get(instance_name, self.stream)
 
     async def to_string(self, store: "DataStore") -> str:
+        """See class level docstring for information about the format."""
+
         if self.topological is not None:
             return "t%d-%d" % (self.topological, self.stream)
         elif self.instance_map:
@@ -809,6 +814,8 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
         raise SynapseError(400, "Invalid stream token %r" % (string,))
 
     async def to_string(self, store: "DataStore") -> str:
+        """See class level docstring for information about the format."""
+
         if self.instance_map:
             entries = []
             for name, pos in self.instance_map.items():
