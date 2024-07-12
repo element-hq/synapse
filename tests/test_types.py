@@ -19,9 +19,14 @@
 #
 #
 
+from unittest import skipUnless
+
+from immutabledict import immutabledict
+
 from synapse.api.errors import SynapseError
 from synapse.types import (
     RoomAlias,
+    RoomStreamToken,
     UserID,
     get_domain_from_id,
     get_localpart_from_id,
@@ -29,6 +34,7 @@ from synapse.types import (
 )
 
 from tests import unittest
+from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
 class IsMineIDTests(unittest.HomeserverTestCase):
@@ -127,3 +133,44 @@ class MapUsernameTestCase(unittest.TestCase):
         # this should work with either a unicode or a bytes
         self.assertEqual(map_username_to_mxid_localpart("têst"), "t=c3=aast")
         self.assertEqual(map_username_to_mxid_localpart("têst".encode()), "t=c3=aast")
+
+
+class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
+    def test_basic_token(self) -> None:
+        """Test that a simple stream token be serialized and unserialized"""
+        store = self.hs.get_datastores().main
+
+        token = RoomStreamToken(stream=5)
+
+        string_token = self.get_success(token.to_string(store))
+        self.assertEqual(string_token, "s5")
+
+        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
+        self.assertEqual(parsed_token, token)
+
+    @skipUnless(USE_POSTGRES_FOR_TESTS, "Requires Postgres")
+    def test_instance_map(self) -> None:
+        """Test for stream token with instance map"""
+        store = self.hs.get_datastores().main
+
+        token = RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 6}))
+
+        string_token = self.get_success(token.to_string(store))
+        self.assertEqual(string_token, "m5~1.6")
+
+        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
+        self.assertEqual(parsed_token, token)
+
+    @skipUnless(USE_POSTGRES_FOR_TESTS, "Requires Postgres")
+    def test_instance_map_behind(self) -> None:
+        """Test for stream token with instance map, where instance map entries
+        are from before stream token."""
+        store = self.hs.get_datastores().main
+
+        token = RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 4}))
+
+        string_token = self.get_success(token.to_string(store))
+        self.assertEqual(string_token, "s5")
+
+        parsed_token = self.get_success(RoomStreamToken.parse(store, string_token))
+        self.assertEqual(parsed_token, RoomStreamToken(stream=5))
