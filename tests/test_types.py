@@ -167,3 +167,11 @@ class RoomStreamTokenTestCase(unittest.HomeserverTestCase):
 
         with self.assertRaises(ValueError):
             RoomStreamToken(stream=5, instance_map=immutabledict({"foo": 4}))
+
+    def test_parse_bad_token(self) -> None:
+        """Test that we can parse tokens produced by a bug in Synapse of the
+        form `m5~`"""
+        store = self.hs.get_datastores().main
+
+        parsed_token = self.get_success(RoomStreamToken.parse(store, "m5~"))
+        self.assertEqual(parsed_token, RoomStreamToken(stream=5))
