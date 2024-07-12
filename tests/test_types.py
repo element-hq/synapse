@@ -153,7 +153,7 @@ class MultiWriterTokenTestCase(unittest.HomeserverTestCase):
     token_type: Type[AbstractMultiWriterStreamToken]
 
     def test_basic_token(self) -> None:
-        """Test that a simple stream token be serialized and unserialized"""
+        """Test that a simple stream token can be serialized and unserialized"""
         store = self.hs.get_datastores().main
 
         token = self.token_type(stream=5)
