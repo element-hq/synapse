@@ -19,7 +19,7 @@
 #
 import logging
 from copy import deepcopy
-from typing import Optional
+from typing import Dict, Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -37,12 +37,16 @@ from synapse.api.constants import (
 from synapse.api.room_versions import RoomVersions
 from synapse.events import make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.handlers.sliding_sync import RoomSyncConfig, StateValues
+from synapse.handlers.sliding_sync import (
+    RoomSyncConfig,
+    StateValues,
+    _RoomMembershipForUser,
+)
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, StreamToken, UserID
 from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 
@@ -581,9 +585,9 @@ class RoomSyncConfigTestCase(TestCase):
         self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
 
 
-class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
+class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it returns
+    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it returns
     the correct list of rooms IDs.
     """
 
@@ -616,7 +620,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         now_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=now_token,
                 to_token=now_token,
@@ -643,7 +647,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -657,9 +661,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
         # We should be considered `newly_joined` because we joined during the token
         # range
         self.assertEqual(room_id_results[room_id].newly_joined, True)
+        self.assertEqual(room_id_results[room_id].newly_left, False)
 
     def test_get_already_joined_room(self) -> None:
         """
@@ -676,7 +682,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room_token,
                 to_token=after_room_token,
@@ -690,8 +696,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id].event_id,
             join_response["event_id"],
         )
+        self.assertEqual(room_id_results[room_id].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertEqual(room_id_results[room_id].newly_joined, False)
+        self.assertEqual(room_id_results[room_id].newly_left, False)
 
     def test_get_invited_banned_knocked_room(self) -> None:
         """
@@ -748,7 +756,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -770,19 +778,25 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[invited_room_id].event_id,
             invite_response["event_id"],
         )
+        self.assertEqual(room_id_results[invited_room_id].membership, Membership.INVITE)
+        self.assertEqual(room_id_results[invited_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[invited_room_id].newly_left, False)
+
         self.assertEqual(
             room_id_results[ban_room_id].event_id,
             ban_response["event_id"],
         )
+        self.assertEqual(room_id_results[ban_room_id].membership, Membership.BAN)
+        self.assertEqual(room_id_results[ban_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[ban_room_id].newly_left, False)
+
         self.assertEqual(
             room_id_results[knock_room_id].event_id,
             knock_room_membership_state_event.event_id,
         )
-        # We should *NOT* be `newly_joined` because we were not joined at the the time
-        # of the `to_token`.
-        self.assertEqual(room_id_results[invited_room_id].newly_joined, False)
-        self.assertEqual(room_id_results[ban_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[knock_room_id].membership, Membership.KNOCK)
         self.assertEqual(room_id_results[knock_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[knock_room_id].newly_left, False)
 
     def test_get_kicked_room(self) -> None:
         """
@@ -814,7 +828,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_kick_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -828,9 +842,12 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[kick_room_id].event_id,
             kick_response["event_id"],
         )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
         # We should *NOT* be `newly_joined` because we were not joined at the the time
         # of the `to_token`.
         self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[kick_room_id].newly_left, False)
 
     def test_forgotten_rooms(self) -> None:
         """
@@ -904,7 +921,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_forgets,
                 to_token=before_room_forgets,
@@ -914,52 +931,58 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # We shouldn't see the room because it was forgotten
         self.assertEqual(room_id_results.keys(), set())
 
-    def test_only_newly_left_rooms_show_up(self) -> None:
+    def test_newly_left_rooms(self) -> None:
         """
-        Test that newly_left rooms still show up in the sync response but rooms that
-        were left before the `from_token` don't show up. See condition "2)" comments in
-        the `get_sync_room_ids_for_user` method.
+        Test that newly_left are marked properly
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
         # Leave before we calculate the `from_token`
         room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
         # Leave during the from_token/to_token range (newly_left)
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room2_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room2_token,
             )
         )
 
-        # Only the newly_left room should show up
-        self.assertEqual(room_id_results.keys(), {room_id2})
-        # It should be pointing to the latest membership event in the from/to range but
-        # the `event_id` is `None` because we left the room causing the server to leave
-        # the room because no other local users are in it (quirk of the
-        # `current_state_delta_stream` table that we source things from)
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response1["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` or `newly_left` because that happened before
+        # the from/to range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
+
         self.assertEqual(
             room_id_results[room_id2].event_id,
-            None,  # _leave_response2["event_id"],
+            leave_response2["event_id"],
         )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
         # We should *NOT* be `newly_joined` because we are instead `newly_left`
         self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, True)
 
     def test_no_joins_after_to_token(self) -> None:
         """
         Rooms we join after the `to_token` should *not* show up. See condition "1b)"
-        comments in the `get_sync_room_ids_for_user()` method.
+        comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -978,7 +1001,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -991,14 +1014,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_join_during_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined during the
         from_token/to_token. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1016,7 +1041,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1038,14 +1063,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_join_before_range_and_left_room_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were joined before the `from_token`
         so it should show up. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1061,7 +1088,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1082,14 +1109,16 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_kicked_before_range_and_left_after_to_token(self) -> None:
         """
         Room still shows up if we left the room but were kicked before the `from_token`
         so it should show up. See condition "1a)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1123,7 +1152,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(kick_room_id, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -1146,14 +1175,17 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
         # We should *NOT* be `newly_joined` because we were kicked
         self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[kick_room_id].newly_left, False)
 
     def test_newly_left_during_range_and_join_leave_after_to_token(self) -> None:
         """
         Newly left room should show up. But we're also testing that joining and leaving
         after the `to_token` doesn't mess with the results. See condition "2)" and "1a)"
-        comments in the `get_sync_room_ids_for_user()` method.
+        comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1176,7 +1208,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response2 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1199,14 +1231,17 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
-        # We should *NOT* be `newly_joined` because we left during the token range
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we are actually `newly_left` during
+        # the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, True)
 
     def test_newly_left_during_range_and_join_after_to_token(self) -> None:
         """
         Newly left room should show up. But we're also testing that joining after the
         `to_token` doesn't mess with the results. See condition "2)" and "1b)" comments
-        in the `get_sync_room_ids_for_user()` method.
+        in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1228,7 +1263,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1250,16 +1285,19 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
-        # We should *NOT* be `newly_joined` because we left during the token range
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we are actually `newly_left` during
+        # the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, True)
 
     def test_no_from_token(self) -> None:
         """
-        Test that if we don't provide a `from_token`, we get all the rooms that we we're
-        joined up to the `to_token`.
+        Test that if we don't provide a `from_token`, we get all the rooms that we had
+        membership in up to the `to_token`.
 
-        Providing `from_token` only really has the effect that it adds `newly_left`
-        rooms to the response.
+        Providing `from_token` only really has the effect that it marks rooms as
+        `newly_left` in the response.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1276,7 +1314,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Join and leave the room2 before the `to_token`
         self.helper.join(room_id2, user1_id, tok=user1_tok)
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1284,7 +1322,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=None,
                 to_token=after_room1_token,
@@ -1292,15 +1330,31 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         # Only rooms we were joined to before the `to_token` should show up
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+
+        # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
             room_id_results[room_id1].event_id,
             join_response1["event_id"],
         )
-        # We should *NOT* be `newly_joined` because there is no `from_token` to
-        # define a "live" range to compare against
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should *NOT* be `newly_joined`/`newly_left` because there is no
+        # `from_token` to define a "live" range to compare against
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
+
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_response2["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because there is no
+        # `from_token` to define a "live" range to compare against
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, False)
 
     def test_from_token_ahead_of_to_token(self) -> None:
         """
@@ -1319,28 +1373,28 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         room_id4 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
 
-        # Join room1 before `before_room_token`
-        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # Join room1 before `to_token`
+        join_room1_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        # Join and leave the room2 before `before_room_token`
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        # Join and leave the room2 before `to_token`
+        _join_room2_response1 = self.helper.join(room_id2, user1_id, tok=user1_tok)
+        leave_room2_response1 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
 
         # Note: These are purposely swapped. The `from_token` should come after
         # the `to_token` in this test
         to_token = self.event_sources.get_current_token()
 
-        # Join room2 after `before_room_token`
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        # Join room2 after `to_token`
+        _join_room2_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         # --------
 
-        # Join room3 after `before_room_token`
-        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        # Join room3 after `to_token`
+        _join_room3_response1 = self.helper.join(room_id3, user1_id, tok=user1_tok)
 
-        # Join and leave the room4 after `before_room_token`
-        self.helper.join(room_id4, user1_id, tok=user1_tok)
-        self.helper.leave(room_id4, user1_id, tok=user1_tok)
+        # Join and leave the room4 after `to_token`
+        _join_room4_response1 = self.helper.join(room_id4, user1_id, tok=user1_tok)
+        _leave_room4_response1 = self.helper.leave(room_id4, user1_id, tok=user1_tok)
 
         # Note: These are purposely swapped. The `from_token` should come after the
         # `to_token` in this test
@@ -1350,31 +1404,59 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.join(room_id4, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=from_token,
                 to_token=to_token,
             )
         )
 
-        # Only rooms we were joined to before the `to_token` should show up
-        #
-        # There won't be any newly_left rooms because the `from_token` is ahead of the
-        # `to_token` and that range will give no membership changes to check.
-        self.assertEqual(room_id_results.keys(), {room_id1})
+        # In the "current" state snapshot, we're joined to all of the rooms but in the
+        # from/to token range...
+        self.assertIncludes(
+            room_id_results.keys(),
+            {
+                # Included because we were joined before both tokens
+                room_id1,
+                # Included because we had membership before the to_token
+                room_id2,
+                # Excluded because we joined after the `to_token`
+                # room_id3,
+                # Excluded because we joined after the `to_token`
+                # room_id4,
+            },
+            exact=True,
+        )
+
+        # Room1
         # It should be pointing to the latest membership event in the from/to range
         self.assertEqual(
             room_id_results[room_id1].event_id,
-            join_response1["event_id"],
+            join_room1_response1["event_id"],
         )
-        # We should *NOT* be `newly_joined` because we joined `room1` before either of the tokens
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined `room1`
+        # before either of the tokens
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
+
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_room2_response1["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, False)
 
     def test_leave_before_range_and_join_leave_after_to_token(self) -> None:
         """
-        Old left room shouldn't show up. But we're also testing that joining and leaving
-        after the `to_token` doesn't mess with the results. See condition "1a)" comments
-        in the `get_sync_room_ids_for_user()` method.
+        Test old left rooms. But we're also testing that joining and leaving after the
+        `to_token` doesn't mess with the results. See condition "1a)" comments in the
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1386,7 +1468,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1395,21 +1477,30 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
 
-        # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_leave_before_range_and_join_after_to_token(self) -> None:
         """
-        Old left room shouldn't show up. But we're also testing that joining after the
-        `to_token` doesn't mess with the results. See condition "1b)" comments in the
-        `get_sync_room_ids_for_user()` method.
+        Test old left room. But we're also testing that joining after the `to_token`
+        doesn't mess with the results. See condition "1b)" comments in the
+        `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1421,7 +1512,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         # Join and leave the room before the from/to range
         self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         after_room1_token = self.event_sources.get_current_token()
 
@@ -1429,24 +1520,32 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
             )
         )
 
-        # Room shouldn't show up because it was left before the `from_token`
-        self.assertEqual(room_id_results.keys(), set())
+        self.assertEqual(room_id_results.keys(), {room_id1})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we joined and left
+        # `room1` before either of the tokens
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_join_leave_multiple_times_during_range_and_after_to_token(
         self,
     ) -> None:
         """
         Join and leave multiple times shouldn't affect rooms from showing up. It just
-        matters that we were joined or newly_left in the from/to range. But we're also
-        testing that joining and leaving after the `to_token` doesn't mess with the
-        results.
+        matters that we had membership in the from/to range. But we're also testing that
+        joining and leaving after the `to_token` doesn't mess with the results.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1458,7 +1557,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         # We create the room with user2 so the room isn't left with no members when we
         # leave and can still re-join.
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
-        # Join, leave, join back to the room before the from/to range
+        # Join, leave, join back to the room during the from/to range
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
@@ -1471,7 +1570,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1496,15 +1595,19 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        # We should *NOT* be `newly_left` because we joined during the token range and
+        # was still joined at the end of the range
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_join_leave_multiple_times_before_range_and_after_to_token(
         self,
     ) -> None:
         """
         Join and leave multiple times before the from/to range shouldn't affect rooms
-        from showing up. It just matters that we were joined or newly_left in the
+        from showing up. It just matters that we had membership in the
         from/to range. But we're also testing that joining and leaving after the
         `to_token` doesn't mess with the results.
         """
@@ -1529,7 +1632,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1554,8 +1657,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_invite_before_range_and_join_leave_after_to_token(
         self,
@@ -1563,7 +1668,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         """
         Make it look like we joined after the token range but we were invited before the
         from/to range so the room should still show up. See condition "1a)" comments in
-        the `get_sync_room_ids_for_user()` method.
+        the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1586,7 +1691,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1608,9 +1713,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.INVITE)
         # We should *NOT* be `newly_joined` because we were only invited before the
         # token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_join_and_display_name_changes_in_token_range(
         self,
@@ -1658,7 +1765,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1684,8 +1791,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_display_name_changes_in_token_range(
         self,
@@ -1721,7 +1830,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_change1_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_change1_token,
@@ -1744,8 +1853,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_display_name_changes_before_and_after_token_range(
         self,
@@ -1791,7 +1902,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1817,8 +1928,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should *NOT* be `newly_joined` because we joined before the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_display_name_changes_leave_after_token_range(
         self,
@@ -1828,7 +1941,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         if there are multiple `join` membership events in a row indicating
         `displayname`/`avatar_url` updates and we leave after the `to_token`.
 
-        See condition "1a)" comments in the `get_sync_room_ids_for_user()` method.
+        See condition "1a)" comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1871,7 +1984,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1897,8 +2010,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_display_name_changes_join_after_token_range(
         self,
@@ -1908,7 +2023,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         indicating `displayname`/`avatar_url` updates doesn't affect the results (we
         joined after the token range so it shouldn't show up)
 
-        See condition "1b)" comments in the `get_sync_room_ids_for_user()` method.
+        See condition "1b)" comments in the `get_room_membership_for_user_at_to_token()` method.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1937,7 +2052,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1973,7 +2088,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_more_changes_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_more_changes_token,
@@ -1987,9 +2102,11 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
             room_id_results[room_id1].event_id,
             join_response2["event_id"],
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be considered `newly_joined` because there is some non-join event in
         # between our latest join event.
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_newly_joined_only_joins_during_token_range(
         self,
@@ -2036,7 +2153,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         after_room1_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -2062,8 +2179,10 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
                 }
             ),
         )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
         # We should be `newly_joined` because we first joined during the token range
         self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
     def test_multiple_rooms_are_not_confused(
         self,
@@ -2086,16 +2205,18 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
 
         # Invited and left the room before the token
         self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_room1_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
         # Invited to room2
-        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+        invite_room2_response = self.helper.invite(
+            room_id2, src=user2_id, targ=user1_id, tok=user2_tok
+        )
 
         before_room3_token = self.event_sources.get_current_token()
 
         # Invited and left room3 during the from/to range
         room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
         self.helper.invite(room_id3, src=user2_id, targ=user1_id, tok=user2_tok)
-        self.helper.leave(room_id3, user1_id, tok=user1_tok)
+        leave_room3_response = self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
         after_room3_token = self.event_sources.get_current_token()
 
@@ -2108,7 +2229,7 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room3_token,
                 to_token=after_room3_token,
@@ -2118,19 +2239,158 @@ class GetSyncRoomIdsForUserTestCase(HomeserverTestCase):
         self.assertEqual(
             room_id_results.keys(),
             {
-                # `room_id1` shouldn't show up because we left before the from/to range
-                #
-                # Room should show up because we were invited before the from/to range
+                # Left before the from/to range
+                room_id1,
+                # Invited before the from/to range
                 room_id2,
-                # Room should show up because it was newly_left during the from/to range
+                # `newly_left` during the from/to range
                 room_id3,
             },
         )
 
+        # Room1
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            leave_room1_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we were invited and left
+        # before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
 
-class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            invite_room2_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.INVITE)
+        # We should *NOT* be `newly_joined`/`newly_left` because we were invited before
+        # the token range
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, False)
+
+        # Room3
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id3].event_id,
+            leave_room3_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id3].membership, Membership.LEAVE)
+        # We should be `newly_left` because we were invited and left during
+        # the token range
+        self.assertEqual(room_id_results[room_id3].newly_joined, False)
+        self.assertEqual(room_id_results[room_id3].newly_left, True)
+
+    def test_state_reset(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # The room where the state reset will happen
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join another room so we don't hit the short-circuit and return early if they
+        # have no room membership
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event to make a position for the state reset to happen at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_events",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id1,
+                    "user_id": user1_id,
+                },
+                desc="state reset user in local_current_membership",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    "prev_event_id": join_response1["event_id"],
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        # The function under test
+        room_id_results = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                UserID.from_string(user1_id),
+                from_token=before_reset_token,
+                to_token=after_reset_token,
+            )
+        )
+
+        # Room1 should show up because it was `newly_left` via state reset during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        # It should be pointing to no event because we were removed from the room
+        # without a corresponding leave event
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            None,
+        )
+        # State reset caused us to leave the room and there is no corresponding leave event
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        # We should be `newly_left` because we were removed via state reset during the from/to range
+        self.assertEqual(room_id_results[room_id1].newly_left, True)
+
+
+class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCase):
     """
-    Tests Sliding Sync handler `get_sync_room_ids_for_user()` to make sure it works with
+    Tests Sliding Sync handler `get_room_membership_for_user_at_to_token()` to make sure it works with
     sharded event stream_writers enabled
     """
 
@@ -2189,7 +2449,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
 
         We then send some events to advance the stream positions of worker1 and worker3
         but worker2 is lagging behind because it's stuck. We are specifically testing
-        that `get_sync_room_ids_for_user(from_token=xxx, to_token=xxx)` should work
+        that `get_room_membership_for_user_at_to_token(from_token=xxx, to_token=xxx)` should work
         correctly in these adverse conditions.
         """
         user1_id = self.register_user("user1", "pass")
@@ -2228,7 +2488,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
         join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # Leave room2
-        self.helper.leave(room_id2, user1_id, tok=user1_tok)
+        leave_room2_response = self.helper.leave(room_id2, user1_id, tok=user1_tok)
         join_response3 = self.helper.join(room_id3, user1_id, tok=user1_tok)
         # Leave room3
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
@@ -2265,7 +2525,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
         # For room_id1/worker1: leave and join the room to advance the stream position
         # and generate membership changes.
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_room1_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
         # For room_id2/worker2: which is currently stuck, join the room.
         join_on_worker2_response = self.helper.join(room_id2, user1_id, tok=user1_tok)
         # For room_id3/worker3: leave and join the room to advance the stream position
@@ -2319,7 +2579,7 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
 
         # The function under test
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_stuck_activity_token,
                 to_token=stuck_activity_token,
@@ -2330,17 +2590,410 @@ class GetSyncRoomIdsForUserEventShardTestCase(BaseMultiWorkerStreamTestCase):
             room_id_results.keys(),
             {
                 room_id1,
-                # room_id2 shouldn't show up because we left before the from/to range
-                # and the join event during the range happened while worker2 was stuck.
-                # This means that from the perspective of the master, where the
-                # `stuck_activity_token` is generated, the stream position for worker2
-                # wasn't advanced to the join yet. Looking at the `instance_map`, the
-                # join technically comes after `stuck_activity_token``.
-                #
-                # room_id2,
+                room_id2,
                 room_id3,
             },
         )
+
+        # Room1
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            join_room1_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id1].membership, Membership.JOIN)
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, True)
+        self.assertEqual(room_id_results[room_id1].newly_left, False)
+
+        # Room2
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            leave_room2_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id2].membership, Membership.LEAVE)
+        # room_id2 should *NOT* be considered `newly_left` because we left before the
+        # from/to range and the join event during the range happened while worker2 was
+        # stuck. This means that from the perspective of the master, where the
+        # `stuck_activity_token` is generated, the stream position for worker2 wasn't
+        # advanced to the join yet. Looking at the `instance_map`, the join technically
+        # comes after `stuck_activity_token`.
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, False)
+
+        # Room3
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[room_id3].event_id,
+            join_on_worker3_response["event_id"],
+        )
+        self.assertEqual(room_id_results[room_id3].membership, Membership.JOIN)
+        # We should be `newly_joined` because we joined during the token range
+        self.assertEqual(room_id_results[room_id3].newly_joined, True)
+        self.assertEqual(room_id_results[room_id3].newly_left, False)
+
+
+class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
+    """
+    Tests Sliding Sync handler `filter_rooms_relevant_for_sync()` to make sure it returns
+    the correct list of rooms IDs.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        self.store = self.hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+        self.storage_controllers = hs.get_storage_controllers()
+
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
+
+    def test_no_rooms(self) -> None:
+        """
+        Test when the user has never joined any rooms before
+        """
+        user1_id = self.register_user("user1", "pass")
+        # user1_tok = self.login(user1_id, "pass")
+
+        now_token = self.event_sources.get_current_token()
+
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=now_token,
+            to_token=now_token,
+        )
+
+        self.assertEqual(room_id_results.keys(), set())
+
+    def test_basic_rooms(self) -> None:
+        """
+        Test that rooms that the user is joined to, invited to, banned from, and knocked
+        on show up.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        before_room_token = self.event_sources.get_current_token()
+
+        join_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(join_room_id, user1_id, tok=user1_tok)
+
+        # Setup the invited room (user2 invites user1 to the room)
+        invited_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        invite_response = self.helper.invite(
+            invited_room_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Setup the ban room (user2 bans user1 from the room)
+        ban_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(ban_room_id, user1_id, tok=user1_tok)
+        ban_response = self.helper.ban(
+            ban_room_id, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Setup the knock room (user1 knocks on the room)
+        knock_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=RoomVersions.V7.identifier
+        )
+        self.helper.send_state(
+            knock_room_id,
+            EventTypes.JoinRules,
+            {"join_rule": JoinRules.KNOCK},
+            tok=user2_tok,
+        )
+        # User1 knocks on the room
+        knock_channel = self.make_request(
+            "POST",
+            "/_matrix/client/r0/knock/%s" % (knock_room_id,),
+            b"{}",
+            user1_tok,
+        )
+        self.assertEqual(knock_channel.code, 200, knock_channel.result)
+        knock_room_membership_state_event = self.get_success(
+            self.storage_controllers.state.get_current_state_event(
+                knock_room_id, EventTypes.Member, user1_id
+            )
+        )
+        assert knock_room_membership_state_event is not None
+
+        after_room_token = self.event_sources.get_current_token()
+
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_room_token,
+            to_token=after_room_token,
+        )
+
+        # Ensure that the invited, ban, and knock rooms show up
+        self.assertEqual(
+            room_id_results.keys(),
+            {
+                join_room_id,
+                invited_room_id,
+                ban_room_id,
+                knock_room_id,
+            },
+        )
+        # It should be pointing to the the respective membership event (latest
+        # membership event in the from/to range)
+        self.assertEqual(
+            room_id_results[join_room_id].event_id,
+            join_response["event_id"],
+        )
+        self.assertEqual(room_id_results[join_room_id].membership, Membership.JOIN)
+        self.assertEqual(room_id_results[join_room_id].newly_joined, True)
+        self.assertEqual(room_id_results[join_room_id].newly_left, False)
+
+        self.assertEqual(
+            room_id_results[invited_room_id].event_id,
+            invite_response["event_id"],
+        )
+        self.assertEqual(room_id_results[invited_room_id].membership, Membership.INVITE)
+        self.assertEqual(room_id_results[invited_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[invited_room_id].newly_left, False)
+
+        self.assertEqual(
+            room_id_results[ban_room_id].event_id,
+            ban_response["event_id"],
+        )
+        self.assertEqual(room_id_results[ban_room_id].membership, Membership.BAN)
+        self.assertEqual(room_id_results[ban_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[ban_room_id].newly_left, False)
+
+        self.assertEqual(
+            room_id_results[knock_room_id].event_id,
+            knock_room_membership_state_event.event_id,
+        )
+        self.assertEqual(room_id_results[knock_room_id].membership, Membership.KNOCK)
+        self.assertEqual(room_id_results[knock_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[knock_room_id].newly_left, False)
+
+    def test_only_newly_left_rooms_show_up(self) -> None:
+        """
+        Test that `newly_left` rooms still show up in the sync response but rooms that
+        were left before the `from_token` don't show up. See condition "2)" comments in
+        the `get_room_membership_for_user_at_to_token()` method.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Leave before we calculate the `from_token`
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        after_room1_token = self.event_sources.get_current_token()
+
+        # Leave during the from_token/to_token range (newly_left)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        _leave_response2 = self.helper.leave(room_id2, user1_id, tok=user1_tok)
+
+        after_room2_token = self.event_sources.get_current_token()
+
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_room1_token,
+            to_token=after_room2_token,
+        )
+
+        # Only the `newly_left` room should show up
+        self.assertEqual(room_id_results.keys(), {room_id2})
+        self.assertEqual(
+            room_id_results[room_id2].event_id,
+            _leave_response2["event_id"],
+        )
+        # We should *NOT* be `newly_joined` because we are instead `newly_left`
+        self.assertEqual(room_id_results[room_id2].newly_joined, False)
+        self.assertEqual(room_id_results[room_id2].newly_left, True)
+
+    def test_get_kicked_room(self) -> None:
+        """
+        Test that a room that the user was kicked from still shows up. When the user
+        comes back to their client, they should see that they were kicked.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Setup the kick room (user2 kicks user1 from the room)
+        kick_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, is_public=True
+        )
+        self.helper.join(kick_room_id, user1_id, tok=user1_tok)
+        # Kick user1 from the room
+        kick_response = self.helper.change_membership(
+            room=kick_room_id,
+            src=user2_id,
+            targ=user1_id,
+            tok=user2_tok,
+            membership=Membership.LEAVE,
+            extra_data={
+                "reason": "Bad manners",
+            },
+        )
+
+        after_kick_token = self.event_sources.get_current_token()
+
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=after_kick_token,
+            to_token=after_kick_token,
+        )
+
+        # The kicked room should show up
+        self.assertEqual(room_id_results.keys(), {kick_room_id})
+        # It should be pointing to the latest membership event in the from/to range
+        self.assertEqual(
+            room_id_results[kick_room_id].event_id,
+            kick_response["event_id"],
+        )
+        self.assertEqual(room_id_results[kick_room_id].membership, Membership.LEAVE)
+        self.assertNotEqual(room_id_results[kick_room_id].sender, user1_id)
+        # We should *NOT* be `newly_joined` because we were not joined at the the time
+        # of the `to_token`.
+        self.assertEqual(room_id_results[kick_room_id].newly_joined, False)
+        self.assertEqual(room_id_results[kick_room_id].newly_left, False)
+
+    def test_state_reset(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # The room where the state reset will happen
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Join another room so we don't hit the short-circuit and return early if they
+        # have no room membership
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Send another state event to make a position for the state reset to happen at
+        dummy_state_response = self.helper.send_state(
+            room_id1,
+            event_type="foobarbaz",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        dummy_state_pos = self.get_success(
+            self.store.get_position_for_event(dummy_state_response["event_id"])
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                },
+                desc="state reset user in current_state_events",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="local_current_membership",
+                keyvalues={
+                    "room_id": room_id1,
+                    "user_id": user1_id,
+                },
+                desc="state reset user in local_current_membership",
+            )
+        )
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="current_state_delta_stream",
+                values={
+                    "stream_id": dummy_state_pos.stream,
+                    "room_id": room_id1,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "event_id": None,
+                    "prev_event_id": join_response1["event_id"],
+                    "instance_name": dummy_state_pos.instance_name,
+                },
+                desc="state reset user in current_state_delta_stream",
+            )
+        )
+
+        # Manually bust the cache since we we're just manually messing with the database
+        # and not causing an actual state reset.
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, dummy_state_pos.stream
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        # The function under test
+        room_id_results = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_reset_token,
+            to_token=after_reset_token,
+        )
+
+        # Room1 should show up because it was `newly_left` via state reset during the from/to range
+        self.assertEqual(room_id_results.keys(), {room_id1, room_id2})
+        # It should be pointing to no event because we were removed from the room
+        # without a corresponding leave event
+        self.assertEqual(
+            room_id_results[room_id1].event_id,
+            None,
+        )
+        # State reset caused us to leave the room and there is no corresponding leave event
+        self.assertEqual(room_id_results[room_id1].membership, Membership.LEAVE)
+        # We should *NOT* be `newly_joined` because we joined before the token range
+        self.assertEqual(room_id_results[room_id1].newly_joined, False)
+        # We should be `newly_left` because we were removed via state reset during the from/to range
+        self.assertEqual(room_id_results[room_id1].newly_left, True)
 
 
 class FilterRoomsTestCase(HomeserverTestCase):
@@ -2366,6 +3019,31 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
 
     def _create_dm_room(
         self,
@@ -2438,12 +3116,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_dm=True`
@@ -2496,12 +3172,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_encrypted=True`
@@ -2552,12 +3226,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try with `is_invite=True`
@@ -2621,12 +3293,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try finding only normal rooms
@@ -2714,12 +3384,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Try finding *NOT* normal rooms
@@ -2838,12 +3506,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         filtered_room_map = self.get_success(
@@ -2884,6 +3550,31 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
 
+    def _get_sync_room_ids_for_user(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Dict[str, _RoomMembershipForUser]:
+        """
+        Get the rooms the user should be syncing with
+        """
+        room_membership_for_user_map = self.get_success(
+            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+                user=user,
+                from_token=from_token,
+                to_token=to_token,
+            )
+        )
+        filtered_sync_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+                user=user,
+                room_membership_for_user_map=room_membership_for_user_map,
+            )
+        )
+
+        return filtered_sync_room_map
+
     def test_sort_activity_basic(self) -> None:
         """
         Rooms with newer activity are sorted first.
@@ -2903,12 +3594,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
@@ -2986,12 +3675,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         self.helper.send(room_id3, "activity in room3", tok=user2_tok)
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=before_rooms_token,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_rooms_token,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
@@ -3052,12 +3739,10 @@ class SortRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self.get_success(
-            self.sliding_sync_handler.get_sync_room_ids_for_user(
-                UserID.from_string(user1_id),
-                from_token=None,
-                to_token=after_rooms_token,
-            )
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
         )
 
         # Sort the rooms (what we're testing)
