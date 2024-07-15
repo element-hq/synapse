@@ -1184,8 +1184,10 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            room_id_to_is_encrypted = await self.store.bulk_get_room_is_encrypted(
-                filtered_room_id_set
+            # Lookup the encryption state from the database. Since this function is
+            # cached, need to make a mutable copy via `dict(...)`.
+            room_id_to_is_encrypted = dict(
+                await self.store.bulk_get_room_is_encrypted(filtered_room_id_set)
             )
             room_ids_with_results = [
                 room_id
@@ -1238,6 +1240,7 @@ class SlidingSyncHandler:
                 # Just remove rooms if we can't determine their encryption status
                 if is_encrypted is None:
                     filtered_room_id_set.remove(room_id)
+                    continue
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa

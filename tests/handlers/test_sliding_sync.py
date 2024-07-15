@@ -3097,7 +3097,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
     def _create_remote_invite_room_for_user(
         self, invitee_user_id: str, unsigned_invite_room_state: Optional[List[JsonDict]]
-    ) -> None:
+    ) -> str:
         """
         Create a fake remote invite and persist it.
 
@@ -3105,6 +3105,9 @@ class FilterRoomsTestCase(HomeserverTestCase):
             invitee_user_id: The person being invited
             unsigned_invite_room_state: List of stripped state events to assist the
                 receiver in identifying the room. Use the `strip_event(...)` helper.
+
+        Returns:
+            The room ID of the remote invite room
         """
         invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
 
@@ -3265,20 +3268,21 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
-    def test_filter_encrypted_with_remote_invite_room(self) -> None:
+    def test_filter_encrypted_with_remote_invite_room_no_stripped_state(self) -> None:
         """
-        Test that we can apply a `filter.is_encrypted` filter, even if we only have an
-        invite for a remote room.
-
-        This is a regression test.
+        Test that we can apply a `filter.is_encrypted` filter against a remote invite
+        room without any `unsigned.invite_room_state` (stripped state).
         """
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        remote_invite_room_id = self._create_remote_invite_room_for_user(user1_id, None)
+        # Create a remote invite room without any `unsigned.invite_room_state`
+        _remote_invite_room_id = self._create_remote_invite_room_for_user(
+            user1_id, None
+        )
 
-        # Create a normal room (no room type)
+        # Create a unencrypted room
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         after_rooms_token = self.event_sources.get_current_token()
@@ -3295,13 +3299,15 @@ class FilterRoomsTestCase(HomeserverTestCase):
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
-                    is_encrypted=True,
+                    is_encrypted=False,
                 ),
                 after_rooms_token,
             )
         )
 
-        self.assertEqual(filtered_room_map.keys(), {room_id, remote_invite_room_id})
+        # `remote_invite_room_id` should not appear because we can't figure out whether
+        # it is encrypted or not.
+        self.assertEqual(filtered_room_map.keys(), {room_id})
 
     def test_filter_invite_rooms(self) -> None:
         """
