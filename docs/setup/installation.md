@@ -314,13 +314,13 @@ sudo dnf group install "Development Tools"
 
 ##### Red Hat Enterprise Linux / Rocky Linux / Oracle Linux
 
-*Note: The term "EL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
+*Note: The term "RHEL" below refers to Red Hat Enterprise Linux, Oracle Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
 
 It's recommended to use the latest Python versions.
 
-EL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. EL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
+RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ships with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
 
-Python 3.11 and 3.12 are available for both EL 8 and 9.
+Python 3.11 and 3.12 are available for both RHEL 8 and 9.
 
 These commands should be run as root user.
 
@@ -341,8 +341,8 @@ dnf group install "Development Tools"
 ###### Using venv module instead of virtualenv command
 
 It's recommended to use Python venv module directly rather than the virtualenv command.
-* On EL 9, virtualenv is only available on [EPEL](https://docs.fedoraproject.org/en-US/epel/).
-* On EL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.
+* On RHEL 9, virtualenv is only available on [EPEL](https://docs.fedoraproject.org/en-US/epel/).
+* On RHEL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.
 
 Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI. 
 
