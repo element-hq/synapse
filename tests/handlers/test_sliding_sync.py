@@ -3219,7 +3219,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Create a normal room
+        # Create a unencrypted room
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         # Create an encrypted room
@@ -3285,6 +3285,15 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Create a unencrypted room
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
+        # Create an encrypted room
+        encrypted_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.send_state(
+            encrypted_room_id,
+            EventTypes.RoomEncryption,
+            {"algorithm": "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
@@ -3294,7 +3303,24 @@ class FilterRoomsTestCase(HomeserverTestCase):
             to_token=after_rooms_token,
         )
 
-        filtered_room_map = self.get_success(
+        # Try with `is_encrypted=True`
+        truthy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should not appear because we can't figure out whether
+        # it is encrypted or not.
+        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
+
+        # Try with `is_encrypted=False`
+        falsy_filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
@@ -3307,7 +3333,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # `remote_invite_room_id` should not appear because we can't figure out whether
         # it is encrypted or not.
-        self.assertEqual(filtered_room_map.keys(), {room_id})
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
     def test_filter_invite_rooms(self) -> None:
         """

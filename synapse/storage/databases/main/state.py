@@ -300,8 +300,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cached(max_entries=10000)
     async def get_room_type(self, room_id: str) -> Optional[str]:
-        """Get the room type for a given room. The server must be joined to the
-        given room.
+        """Get the room type for a given room.
+
+        Returns None if the room is not known to the server.
         """
 
         row = await self.db_pool.simple_select_one(
@@ -317,9 +318,13 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         # If we haven't updated `room_stats_state` with the room yet, query the
         # create event directly.
-        create_event = await self.get_create_event_for_room(room_id)
-        room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
-        return room_type
+        try:
+            create_event = await self.get_create_event_for_room(room_id)
+            room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
+            return room_type
+        except NotFoundError:
+            # Ignore unknown rooms
+            pass
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
@@ -358,7 +363,10 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         """
         Get whether the given room is encrypted.
 
-        Returns None if the room is not known to the server.
+        Returns:
+            True if the room is encrypted,
+            False if it is not encrypted, and
+            None if the room is not known to the server.
         """
 
         row = await self.db_pool.simple_select_one(
@@ -370,7 +378,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
 
         if row is not None:
-            return row[0]
+            return row[0] is not None
 
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly.
@@ -407,6 +415,12 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         """Bulk fetch whether the given rooms are encrypted.
 
         Rooms unknown to this server will be omitted from the response.
+
+        Returns:
+            A mapping from room ID to whether the room is encrypted:
+                True if the room is encrypted,
+                False if it is not encrypted, and
+                None if the room is not known to the server.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -420,7 +434,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
-        results = dict(rows)
+        results = {room_id: encryption is not None for room_id, encryption in rows}
         encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(

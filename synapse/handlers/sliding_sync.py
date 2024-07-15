@@ -1189,6 +1189,7 @@ class SlidingSyncHandler:
             room_id_to_is_encrypted = dict(
                 await self.store.bulk_get_room_is_encrypted(filtered_room_id_set)
             )
+            logger.info("room_id_to_is_encrypted: %s", room_id_to_is_encrypted)
             room_ids_with_results = [
                 room_id
                 for room_id, is_encrypted in room_id_to_is_encrypted.items()
