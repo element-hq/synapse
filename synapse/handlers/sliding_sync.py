@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Any, Dict, Final, List, Mapping, Optional, Set
 import attr
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, Direction, EventTypes, EventContentFields, Membership
+from synapse.api.constants import (
+    AccountDataTypes,
+    Direction,
+    EventTypes,
+    EventContentFields,
+    Membership,
+)
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -38,6 +44,7 @@ from synapse.types import (
     RoomStreamToken,
     StateMap,
     StreamKeyType,
+    StrCollection,
     StreamToken,
     UserID,
 )
@@ -1107,12 +1114,66 @@ class SlidingSyncHandler:
         if filters.spaces:
             raise NotImplementedError()
 
+        async def _bulk_fetch_stripped_state_for_rooms(
+            room_ids_to_fetch: StrCollection[str],
+        ) -> Mapping[str, Optional[List[Any]]]:
+            """
+            Fetch stripped state for a list of rooms that we are invited to/knocked on.
+            """
+            room_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
+
+            # Gather a list of event IDs we can grab stripped state from
+            invite_or_knock_event_ids: List[str] = []
+            for room_id in room_ids_to_fetch:
+                if sync_room_map[room_id].membership in (
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                ):
+                    event_id = sync_room_map[room_id].event_id
+                    # If this is an invite/knock then there should be an event_id
+                    assert event_id is not None
+                    invite_or_knock_event_ids.append(event_id)
+                else:
+                    room_to_stripped_state_map[room_id] = None
+
+            invite_or_knock_events = await self.store.get_events(
+                invite_or_knock_event_ids
+            )
+            for invite_or_knock_event in invite_or_knock_events.values():
+                room_id = invite_or_knock_event.room_id
+                membership = invite_or_knock_event.membership
+
+                if membership == Membership.INVITE:
+                    # Scrutinize unsigned things
+                    invite_room_state = invite_or_knock_event.unsigned.get(
+                        "invite_room_state", None
+                    )
+                    if isinstance(invite_room_state, list):
+                        room_to_stripped_state_map[room_id] = invite_room_state
+                elif membership == Membership.KNOCK:
+                    # Scrutinize unsigned things
+                    knock_room_state = invite_or_knock_event.unsigned.get(
+                        "knock_room_state", None
+                    )
+                    if isinstance(knock_room_state, list):
+                        room_to_stripped_state_map[room_id] = knock_room_state
+                else:
+                    raise AssertionError(
+                        f"Unexpected membership {membership} (fix Synapse)"
+                    )
+
+            return room_to_stripped_state_map
+
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
             room_to_is_encrypted = await self.store.bulk_get_room_is_encrypted(
                 filtered_room_id_set
             )
-            room_ids_with_results = set(room_to_is_encrypted.keys())
+            room_ids_with_results = [
+                room_id
+                for room_id, is_encrypted in room_to_is_encrypted.items()
+                if is_encrypted is not None
+            ]
 
             # We might not have room state for remote invite/knocks if we are the first
             # person on our server to see the room. The best we can do is look in the
@@ -1120,35 +1181,10 @@ class SlidingSyncHandler:
             room_ids_without_results = filtered_room_id_set.difference(
                 room_ids_with_results
             )
-            invite_or_knock_event_ids: List[str] = []
+            asdf = await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
+
             for room_id in room_ids_without_results:
-                event_id = sync_room_map[room_id].event_id
-                # If this is an invite/knock then there should be an event_id
-                assert event_id is not None
-
-                if sync_room_map[room_id].membership in (
-                    Membership.INVITE,
-                    Membership.KNOCK,
-                ):
-                    invite_or_knock_event_ids.append(event_id)
-
-            invite_or_knock_events = await self.store.get_events(
-                invite_or_knock_event_ids
-            )
-            for invite_or_knock_event in invite_or_knock_events.values():
-                room_id = invite_or_knock_event.room_id
-                membership = sync_room_map[room_id].membership
-
-                stripped_state = []
-                if membership == Membership.INVITE:
-                    stripped_state.extend(
-                        invite_or_knock_event.unsigned.get("invite_room_state", [])
-                    )
-                elif membership == Membership.KNOCK:
-                    stripped_state.extend(
-                        invite_or_knock_event.unsigned.get("knock_room_state", [])
-                    )
-
+                stripped_state = asdf[room_id]
                 for event in stripped_state:
                     if event["type"] == EventTypes.RoomEncryption:
                         is_encrypted = (

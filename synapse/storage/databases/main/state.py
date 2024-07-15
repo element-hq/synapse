@@ -352,7 +352,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="get_room_is_encrypted", list_name="room_ids")
     async def bulk_get_room_is_encrypted(
         self, room_ids: Set[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, Optional[bool]]:
         """Bulk fetch whether the given rooms are encrypted.
 
         Will only return results if the server is in the room given.

@@ -19,7 +19,7 @@
 #
 import logging
 from copy import deepcopy
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -3093,6 +3093,65 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         return room_id
 
+    _remote_invite_count: int = 0
+
+    def _create_remote_invite_room_for_user(
+        self, invitee_user_id: str, unsigned_invite_room_state: Optional[List[JsonDict]]
+    ) -> None:
+        """
+        Create a fake remote invite and persist it.
+
+        Args:
+            invitee_user_id: The person being invited
+            unsigned_invite_room_state: List of stripped state events to assist the
+                receiver in identifying the room. Use the `strip_event(...)` helper.
+        """
+        invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
+
+        invite_event_dict = {
+            "room_id": invite_room_id,
+            "sender": "@inviter:remote_server",
+            "state_key": invitee_user_id,
+            "depth": 1,
+            "origin_server_ts": 1,
+            "type": EventTypes.Member,
+            "content": {"membership": Membership.INVITE},
+            "auth_events": [],
+            "prev_events": [],
+        }
+        if unsigned_invite_room_state is not None:
+            for stripped_event in unsigned_invite_room_state:
+                # Required stripped event fields
+                assert "type" in stripped_event
+                assert "state_key" in stripped_event
+                assert "sender" in stripped_event
+                assert "content" in stripped_event
+
+            invite_event_dict["unsigned"] = {
+                "invite_room_state": unsigned_invite_room_state
+            }
+
+        invite_event = make_event_from_dict(
+            invite_event_dict,
+            room_version=RoomVersions.V10,
+        )
+        invite_event.internal_metadata.outlier = True
+        invite_event.internal_metadata.out_of_band_membership = True
+
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(
+                room_id=invite_room_id, room_version=invite_event.room_version
+            )
+        )
+        context = EventContext.for_outlier(self.hs.get_storage_controllers())
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+        self.get_success(persist_controller.persist_event(invite_event, context))
+
+        self._remote_invite_count += 1
+
+        return invite_room_id
+
     def test_filter_dm_rooms(self) -> None:
         """
         Test `filter.is_dm` for DM rooms
@@ -3461,9 +3520,10 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
-    def test_filter_room_types_with_invite_remote_room(self) -> None:
-        """Test that we can apply a room type filter, even if we have an invite
-        for a remote room.
+    def test_filter_room_types_with_remote_invite_room(self) -> None:
+        """
+        Test that we can apply a `filter.not_room_types` filter, even if we only have an
+        invite for a remote room.
 
         This is a regression test.
         """
@@ -3471,34 +3531,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Create a fake remote invite and persist it.
-        invite_room_id = "!some:room"
-        invite_event = make_event_from_dict(
-            {
-                "room_id": invite_room_id,
-                "sender": "@user:test.serv",
-                "state_key": user1_id,
-                "depth": 1,
-                "origin_server_ts": 1,
-                "type": EventTypes.Member,
-                "content": {"membership": Membership.INVITE},
-                "auth_events": [],
-                "prev_events": [],
-            },
-            room_version=RoomVersions.V10,
-        )
-        invite_event.internal_metadata.outlier = True
-        invite_event.internal_metadata.out_of_band_membership = True
-
-        self.get_success(
-            self.store.maybe_store_room_on_outlier_membership(
-                room_id=invite_room_id, room_version=invite_event.room_version
-            )
-        )
-        context = EventContext.for_outlier(self.hs.get_storage_controllers())
-        persist_controller = self.hs.get_storage_controllers().persistence
-        assert persist_controller is not None
-        self.get_success(persist_controller.persist_event(invite_event, context))
+        remote_invite_room_id = self._create_remote_invite_room_for_user(user1_id, None)
 
         # Create a normal room (no room type)
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
@@ -3523,7 +3556,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(filtered_room_map.keys(), {room_id, invite_room_id})
+        self.assertEqual(filtered_room_map.keys(), {room_id, remote_invite_room_id})
 
 
 class SortRoomsTestCase(HomeserverTestCase):
