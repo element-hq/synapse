@@ -237,6 +237,9 @@ class EventContentFields:
     # an unspecced field added to to-device messages to identify them uniquely-ish
     TO_DEVICE_MSGID: Final = "org.matrix.msgid"
 
+    # `m.room.encryption`` algorithm field
+    ENCRYPTION_ALGORITHM: Final = "algorithm"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""

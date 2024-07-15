@@ -325,8 +325,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     async def bulk_get_room_type(
         self, room_ids: Set[str]
     ) -> Mapping[str, Optional[str]]:
-        """Bulk fetch room types for the given rooms, the server must be in all
-        the rooms given.
+        """Bulk fetch room types for the given rooms.
+
+        Will only return results if the server is in the room given.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -345,6 +346,47 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             create_event = await self.get_create_event_for_room(room_id)
             room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
             results[room_id] = room_type
+
+        return results
+
+    @cachedList(cached_method_name="get_room_is_encrypted", list_name="room_ids")
+    async def bulk_get_room_is_encrypted(
+        self, room_ids: Set[str]
+    ) -> Mapping[str, Optional[str]]:
+        """Bulk fetch whether the given rooms are encrypted.
+
+        Will only return results if the server is in the room given.
+        """
+
+        rows = await self.db_pool.simple_select_many_batch(
+            table="room_stats_state",
+            column="room_id",
+            iterable=room_ids,
+            retcols=("room_id", "room_type"),
+            desc="bulk_get_room_type",
+        )
+
+        # If we haven't updated `room_stats_state` with the room yet, query the state
+        # directly. This should happen only rarely so we don't mind if we do this in a
+        # loop.
+        results = dict(rows)
+        for room_id in room_ids - results.keys():
+            state_map = await self.get_partial_filtered_current_state_ids(
+                room_id,
+                state_filter=StateFilter.from_types([(EventTypes.RoomEncryption, "")]),
+            )
+            encryption_event = state_map.get((EventTypes.RoomEncryption, ""))
+
+            is_encrypted = False
+            if encryption_event is not None:
+                is_encrypted = (
+                    encryption_event.content.get(
+                        EventContentFields.ENCRYPTION_ALGORITHM
+                    )
+                    is not None
+                )
+
+            results[room_id] = is_encrypted
 
         return results
 

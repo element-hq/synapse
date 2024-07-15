@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, Final, List, Mapping, Optional, Set
 import attr
 from immutabledict import immutabledict
 
-from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membership
+from synapse.api.constants import AccountDataTypes, Direction, EventTypes, EventContentFields, Membership
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -1109,23 +1109,63 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            # Make a copy so we don't run into an error: `Set changed size during
-            # iteration`, when we filter out and remove items
-            for room_id in filtered_room_id_set.copy():
-                state_at_to_token = await self.storage_controllers.state.get_state_at(
-                    room_id,
-                    to_token,
-                    state_filter=StateFilter.from_types(
-                        [(EventTypes.RoomEncryption, "")]
-                    ),
-                    # Partially-stated rooms should have all state events except for the
-                    # membership events so we don't need to wait because we only care
-                    # about retrieving the `EventTypes.RoomEncryption` state event here.
-                    # Plus we don't want to block the whole sync waiting for this one
-                    # room.
-                    await_full_state=False,
-                )
-                is_encrypted = state_at_to_token.get((EventTypes.RoomEncryption, ""))
+            room_to_is_encrypted = await self.store.bulk_get_room_is_encrypted(
+                filtered_room_id_set
+            )
+            room_ids_with_results = set(room_to_is_encrypted.keys())
+
+            # We might not have room state for remote invite/knocks if we are the first
+            # person on our server to see the room. The best we can do is look in the
+            # optional stripped state from the invite/knock event.
+            room_ids_without_results = filtered_room_id_set.difference(
+                room_ids_with_results
+            )
+            invite_or_knock_event_ids: List[str] = []
+            for room_id in room_ids_without_results:
+                event_id = sync_room_map[room_id].event_id
+                # If this is an invite/knock then there should be an event_id
+                assert event_id is not None
+
+                if sync_room_map[room_id].membership in (
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                ):
+                    invite_or_knock_event_ids.append(event_id)
+
+            invite_or_knock_events = await self.store.get_events(
+                invite_or_knock_event_ids
+            )
+            for invite_or_knock_event in invite_or_knock_events.values():
+                room_id = invite_or_knock_event.room_id
+                membership = sync_room_map[room_id].membership
+
+                stripped_state = []
+                if membership == Membership.INVITE:
+                    stripped_state.extend(
+                        invite_or_knock_event.unsigned.get("invite_room_state", [])
+                    )
+                elif membership == Membership.KNOCK:
+                    stripped_state.extend(
+                        invite_or_knock_event.unsigned.get("knock_room_state", [])
+                    )
+
+                for event in stripped_state:
+                    if event["type"] == EventTypes.RoomEncryption:
+                        is_encrypted = (
+                            event["content"].get(
+                                EventContentFields.ENCRYPTION_ALGORITHM
+                            )
+                            is not None
+                        )
+                        room_to_is_encrypted[room_id] = is_encrypted
+                        break
+
+            for room_id in filtered_room_id_set:
+                is_encrypted = room_to_is_encrypted.get(room_id)
+
+                # Just remove rooms if we can't determine their encryption status
+                if is_encrypted is None:
+                    filtered_room_id_set.remove(room_id)
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa
