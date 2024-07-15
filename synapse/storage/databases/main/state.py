@@ -327,7 +327,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Mapping[str, Optional[str]]:
         """Bulk fetch room types for the given rooms.
 
-        Will only return results if the server is in the room given.
+        Rooms unknown to this server will be omitted from the response.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -343,9 +343,13 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # mind if we do this in a loop.
         results = dict(rows)
         for room_id in room_ids - results.keys():
-            create_event = await self.get_create_event_for_room(room_id)
-            room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
-            results[room_id] = room_type
+            try:
+                create_event = await self.get_create_event_for_room(room_id)
+                room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
+                results[room_id] = room_type
+            except NotFoundError:
+                # Ignore unknown rooms
+                pass
 
         return results
 
@@ -355,7 +359,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     ) -> Mapping[str, Optional[bool]]:
         """Bulk fetch whether the given rooms are encrypted.
 
-        Will only return results if the server is in the room given.
+        Rooms unknown to this server will be omitted from the response.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -370,21 +374,25 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
         results = dict(rows)
+        encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(
                 room_id,
                 state_filter=StateFilter.from_types([(EventTypes.RoomEncryption, "")]),
             )
-            encryption_event = state_map.get((EventTypes.RoomEncryption, ""))
+            encryption_event_id = state_map.get((EventTypes.RoomEncryption, ""))
+            if encryption_event_id:
+                encryption_event_ids.append(encryption_event_id)
+            else:
+                results[room_id] = False
 
-            is_encrypted = False
-            if encryption_event is not None:
-                is_encrypted = (
-                    encryption_event.content.get(
-                        EventContentFields.ENCRYPTION_ALGORITHM
-                    )
-                    is not None
-                )
+        encryption_event_map = await self.get_events(encryption_event_ids)
+
+        for encryption_event in encryption_event_map.values():
+            is_encrypted = (
+                encryption_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
+                is not None
+            )
 
             results[room_id] = is_encrypted
 

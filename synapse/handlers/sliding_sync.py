@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import enum
 import logging
 from itertools import chain
 from typing import TYPE_CHECKING, Any, Dict, Final, List, Mapping, Optional, Set, Tuple
@@ -27,8 +28,8 @@ from immutabledict import immutabledict
 from synapse.api.constants import (
     AccountDataTypes,
     Direction,
-    EventTypes,
     EventContentFields,
+    EventTypes,
     Membership,
 )
 from synapse.events import EventBase
@@ -43,8 +44,8 @@ from synapse.types import (
     Requester,
     RoomStreamToken,
     StateMap,
-    StreamKeyType,
     StrCollection,
+    StreamKeyType,
     StreamToken,
     UserID,
 )
@@ -56,6 +57,12 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class _Sentinel(enum.Enum):
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    sentinel = object()
 
 
 # The event types that clients should consider as new activity.
@@ -1092,6 +1099,67 @@ class SlidingSyncHandler:
             A filtered dictionary of room IDs along with membership information in the
             room at the time of `to_token`.
         """
+        room_id_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
+
+        async def _bulk_fetch_stripped_state_for_rooms(
+            room_ids: StrCollection,
+        ) -> None:
+            """
+            Fetch stripped state for a list of rooms (stripped state is only applicable to invite/knock rooms).
+            """
+            # Fetch what we haven't before
+            room_ids_to_fetch = [
+                room_id
+                for room_id in room_ids
+                if room_id not in room_id_to_stripped_state_map
+            ]
+
+            # Gather a list of event IDs we can grab stripped state from
+            invite_or_knock_event_ids: List[str] = []
+            for room_id in room_ids_to_fetch:
+                if sync_room_map[room_id].membership in (
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                ):
+                    event_id = sync_room_map[room_id].event_id
+                    # If this is an invite/knock then there should be an event_id
+                    assert event_id is not None
+                    invite_or_knock_event_ids.append(event_id)
+                else:
+                    room_id_to_stripped_state_map[room_id] = None
+
+            invite_or_knock_events = await self.store.get_events(
+                invite_or_knock_event_ids
+            )
+            for invite_or_knock_event in invite_or_knock_events.values():
+                room_id = invite_or_knock_event.room_id
+                membership = invite_or_knock_event.membership
+
+                if membership == Membership.INVITE:
+                    # Scrutinize unsigned things
+                    invite_room_state = invite_or_knock_event.unsigned.get(
+                        "invite_room_state", None
+                    )
+                    # `invite_room_state` should be a list of stripped events
+                    if isinstance(invite_room_state, list):
+                        room_id_to_stripped_state_map[room_id] = invite_room_state
+                    else:
+                        room_id_to_stripped_state_map[room_id] = None
+                elif membership == Membership.KNOCK:
+                    # Scrutinize unsigned things
+                    knock_room_state = invite_or_knock_event.unsigned.get(
+                        "knock_room_state", None
+                    )
+                    # `knock_room_state` should be a list of stripped events
+                    if isinstance(knock_room_state, list):
+                        room_id_to_stripped_state_map[room_id] = knock_room_state
+                    else:
+                        room_id_to_stripped_state_map[room_id] = None
+                else:
+                    raise AssertionError(
+                        f"Unexpected membership {membership} (this is a problem with Synapse itself)"
+                    )
+
         filtered_room_id_set = set(sync_room_map.keys())
 
         # Filter for Direct-Message (DM) rooms
@@ -1111,67 +1179,17 @@ class SlidingSyncHandler:
                     if not sync_room_map[room_id].is_dm
                 }
 
-        if filters.spaces:
+        if filters.spaces is not None:
             raise NotImplementedError()
-
-        async def _bulk_fetch_stripped_state_for_rooms(
-            room_ids_to_fetch: StrCollection[str],
-        ) -> Mapping[str, Optional[List[Any]]]:
-            """
-            Fetch stripped state for a list of rooms that we are invited to/knocked on.
-            """
-            room_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
-
-            # Gather a list of event IDs we can grab stripped state from
-            invite_or_knock_event_ids: List[str] = []
-            for room_id in room_ids_to_fetch:
-                if sync_room_map[room_id].membership in (
-                    Membership.INVITE,
-                    Membership.KNOCK,
-                ):
-                    event_id = sync_room_map[room_id].event_id
-                    # If this is an invite/knock then there should be an event_id
-                    assert event_id is not None
-                    invite_or_knock_event_ids.append(event_id)
-                else:
-                    room_to_stripped_state_map[room_id] = None
-
-            invite_or_knock_events = await self.store.get_events(
-                invite_or_knock_event_ids
-            )
-            for invite_or_knock_event in invite_or_knock_events.values():
-                room_id = invite_or_knock_event.room_id
-                membership = invite_or_knock_event.membership
-
-                if membership == Membership.INVITE:
-                    # Scrutinize unsigned things
-                    invite_room_state = invite_or_knock_event.unsigned.get(
-                        "invite_room_state", None
-                    )
-                    if isinstance(invite_room_state, list):
-                        room_to_stripped_state_map[room_id] = invite_room_state
-                elif membership == Membership.KNOCK:
-                    # Scrutinize unsigned things
-                    knock_room_state = invite_or_knock_event.unsigned.get(
-                        "knock_room_state", None
-                    )
-                    if isinstance(knock_room_state, list):
-                        room_to_stripped_state_map[room_id] = knock_room_state
-                else:
-                    raise AssertionError(
-                        f"Unexpected membership {membership} (fix Synapse)"
-                    )
-
-            return room_to_stripped_state_map
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            room_to_is_encrypted = await self.store.bulk_get_room_is_encrypted(
+            room_id_to_is_encrypted = await self.store.bulk_get_room_is_encrypted(
                 filtered_room_id_set
             )
             room_ids_with_results = [
                 room_id
-                for room_id, is_encrypted in room_to_is_encrypted.items()
+                for room_id, is_encrypted in room_id_to_is_encrypted.items()
                 if is_encrypted is not None
             ]
 
@@ -1181,24 +1199,42 @@ class SlidingSyncHandler:
             room_ids_without_results = filtered_room_id_set.difference(
                 room_ids_with_results
             )
-            asdf = await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
+            await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
 
+            # Update our room_id_to_is_encrypted map based on the stripped state
             for room_id in room_ids_without_results:
-                stripped_state = asdf[room_id]
-                for event in stripped_state:
-                    if event["type"] == EventTypes.RoomEncryption:
-                        is_encrypted = (
-                            event["content"].get(
-                                EventContentFields.ENCRYPTION_ALGORITHM
-                            )
-                            is not None
-                        )
-                        room_to_is_encrypted[room_id] = is_encrypted
-                        break
+                stripped_state = room_id_to_stripped_state_map.get(
+                    room_id, _Sentinel.sentinel
+                )
+                assert stripped_state is not _Sentinel.sentinel, (
+                    f"Stripped state left unset for room {room_id}. "
+                    + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
+                    + "with that room_id. (this is a problem with Synapse itself)"
+                )
 
-            for room_id in filtered_room_id_set:
-                is_encrypted = room_to_is_encrypted.get(room_id)
+                if stripped_state is not None:
+                    for event in stripped_state:
+                        event_type = event.get("type")
+                        event_content = event.get("content")
+                        # Scrutinize unsigned stripped state
+                        if isinstance(event_type, str) and isinstance(
+                            event_content, dict
+                        ):
+                            if event_type == EventTypes.RoomEncryption:
+                                # Optional because Python is not block-scoped and we re-use the name below
+                                is_encrypted: Optional[bool] = (
+                                    event_content.get(
+                                        EventContentFields.ENCRYPTION_ALGORITHM
+                                    )
+                                    is not None
+                                )
+                                room_id_to_is_encrypted[room_id] = is_encrypted
+                                break
+                    else:
+                        # Didn't see any encryption events in the stripped state
+                        room_id_to_is_encrypted[room_id] = False
 
+            for room_id, is_encrypted in room_id_to_is_encrypted.items():
                 # Just remove rooms if we can't determine their encryption status
                 if is_encrypted is None:
                     filtered_room_id_set.remove(room_id)
@@ -1251,13 +1287,13 @@ class SlidingSyncHandler:
                 ):
                     filtered_room_id_set.remove(room_id)
 
-        if filters.room_name_like:
+        if filters.room_name_like is not None:
             raise NotImplementedError()
 
-        if filters.tags:
+        if filters.tags is not None:
             raise NotImplementedError()
 
-        if filters.not_tags:
+        if filters.not_tags is not None:
             raise NotImplementedError()
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
