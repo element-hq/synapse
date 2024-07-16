@@ -1256,6 +1256,8 @@ class RoomTypingRestServlet(RestServlet):
         # Limit timeout to stop people from setting silly typing timeouts.
         timeout = min(content.get("timeout", 30000), 120000)
 
+        type = content.get("io.element.type", "m.typing")
+
         # Defer getting the typing handler since it will raise on WORKER_PATTERNS.
         typing_handler = self.hs.get_typing_writer_handler()
 
@@ -1266,10 +1268,14 @@ class RoomTypingRestServlet(RestServlet):
                     requester=requester,
                     room_id=room_id,
                     timeout=timeout,
+                    type=type,
                 )
             else:
                 await typing_handler.stopped_typing(
-                    target_user=target_user, requester=requester, room_id=room_id
+                    target_user=target_user,
+                    requester=requester,
+                    room_id=room_id,
+                    type=type,
                 )
         except ShadowBanError:
             # Pretend this worked without error.
