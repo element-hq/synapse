@@ -791,6 +791,8 @@ worker_log_config: /etc/matrix-synapse/federation-sender-log.yaml
 <h3 id="synapseappmedia_repository"><a class="header" href="#synapseappmedia_repository"><code>synapse.app.media_repository</code></a></h3>
 <p>Handles the media repository. It can handle all endpoints starting with:</p>
 <pre><code>/_matrix/media/
+/_matrix/client/v1/media/
+/_matrix/federation/v1/media/
 </code></pre>
 <p>... and the following regular expressions matching media-specific administration APIs:</p>
 <pre><code>^/_synapse/admin/v1/purge_media_cache$

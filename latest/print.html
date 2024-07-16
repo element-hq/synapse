@@ -1834,7 +1834,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.110.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.111.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1852,6 +1852,14 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11110"><a class="header" href="#upgrading-to-v11110">Upgrading to v1.111.0</a></h1>
+<h2 id="new-worker-endpoints-for-authenticated-client-and-federation-media"><a class="header" href="#new-worker-endpoints-for-authenticated-client-and-federation-media">New worker endpoints for authenticated client and federation media</a></h2>
+<p><a href="./workers.html#synapseappmedia_repository">Media repository workers</a> handling
+Media APIs can now handle the following endpoint patterns:</p>
+<pre><code>^/_matrix/client/v1/media/.*$
+^/_matrix/federation/v1/media/.*$
+</code></pre>
+<p>Please update your reverse proxy configuration.</p>
 <h1 id="upgrading-to-v11060"><a class="header" href="#upgrading-to-v11060">Upgrading to v1.106.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.65.0 to v1.66.0.
@@ -5456,9 +5464,10 @@ to download/operate on media.</p>
 <p>This will not prevent the listed domains from accessing media themselves.
 It simply prevents users on this server from downloading media originating
 from the listed servers.</p>
-<p>This will have no effect on media originating from the local server.
-This only affects media downloaded from other Matrix servers, to
-block domains from URL previews see <a href="usage/configuration/config_documentation.html#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a>.</p>
+<p>This will have no effect on media originating from the local server. This only
+affects media downloaded from other Matrix servers, to control URL previews see
+<a href="usage/configuration/config_documentation.html#url_preview_ip_range_blacklist"><code>url_preview_ip_range_blacklist</code></a> or
+<a href="usage/configuration/config_documentation.html#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a>.</p>
 <p>Defaults to an empty list (nothing blocked).</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">prevent_media_downloads_from:
@@ -5584,12 +5593,14 @@ website only visible in your network. Defaults to none.</p>
 </code></pre>
 <hr />
 <h3 id="url_preview_url_blacklist"><a class="header" href="#url_preview_url_blacklist"><code>url_preview_url_blacklist</code></a></h3>
-<p>Optional list of URL matches that the URL preview spider is
-denied from accessing.  You should use <code>url_preview_ip_range_blacklist</code>
-in preference to this, otherwise someone could define a public DNS
-entry that points to a private IP address and circumvent the blacklist.
-This is more useful if you know there is an entire shape of URL that
-you know that will never want synapse to try to spider.</p>
+<p>Optional list of URL matches that the URL preview spider is denied from
+accessing.  This is a usability feature, not a security one. You should use
+<code>url_preview_ip_range_blacklist</code> in preference to this, otherwise someone could
+define a public DNS entry that points to a private IP address and circumvent
+the blacklist. Applications that perform redirects or serve different content
+when detecting that Synapse is accessing them can also bypass the blacklist.
+This is more useful if you know there is an entire shape of URL that you know
+that you do not want Synapse to preview.</p>
 <p>Each list entry is a dictionary of url component attributes as returned
 by urlparse.urlsplit as applied to the absolute form of the URL.  See
 <a href="https://docs.python.org/2/library/urlparse.html#urlparse.urlsplit">here</a> for more
@@ -12002,6 +12013,8 @@ worker_log_config: /etc/matrix-synapse/federation-sender-log.yaml
 <h3 id="synapseappmedia_repository"><a class="header" href="#synapseappmedia_repository"><code>synapse.app.media_repository</code></a></h3>
 <p>Handles the media repository. It can handle all endpoints starting with:</p>
 <pre><code>/_matrix/media/
+/_matrix/client/v1/media/
+/_matrix/federation/v1/media/
 </code></pre>
 <p>... and the following regular expressions matching media-specific administration APIs:</p>
 <pre><code>^/_synapse/admin/v1/purge_media_cache$
@@ -12524,19 +12537,16 @@ will be an empty JSON object.</p>
 </ul>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="experimental-features-api"><a class="header" href="#experimental-features-api">Experimental Features API</a></h1>
 <p>This API allows a server administrator to enable or disable some experimental features on a per-user
-basis. The currently supported features are: </p>
+basis. The currently supported features are:</p>
 <ul>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3026">MSC3026</a>: busy 
-presence state enabled</li>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3881">MSC3881</a>: enable remotely toggling push notifications 
-for another client </li>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3967">MSC3967</a>: do not require
-UIA when first uploading cross-signing keys. </li>
+<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3881">MSC3881</a>: enable remotely toggling push notifications
+for another client</li>
+<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3575">MSC3575</a>: enable experimental sliding sync support</li>
 </ul>
 <p>To use it, you will need to authenticate by providing an <code>access_token</code>
 for a server admin: see <a href="admin_api/../usage/administration/admin_api/">Admin API</a>.</p>
 <h2 id="enablingdisabling-features"><a class="header" href="#enablingdisabling-features">Enabling/Disabling Features</a></h2>
-<p>This API allows a server administrator to enable experimental features for a given user. The request must 
+<p>This API allows a server administrator to enable experimental features for a given user. The request must
 provide a body containing the user id and listing the features to enable/disable in the following format:</p>
 <pre><code class="language-json">{
    &quot;features&quot;: {
@@ -16911,9 +16921,9 @@ contributions and would like to have you shouted out in the release notes!</p>
 <p>The security levels of Florbs are now validated when received
 via the <code>/federation/florb</code> endpoint. Contributed by Jane Matrix.</p>
 </blockquote>
-<p>If there are multiple pull requests involved in a single bugfix/feature/etc,
-then the content for each <code>changelog.d</code> file should be the same. Towncrier will
-merge the matching files together into a single changelog entry when we come to
+<p>If there are multiple pull requests involved in a single bugfix/feature/etc, then the
+content for each <code>changelog.d</code> file and file extension should be the same. Towncrier
+will merge the matching files together into a single changelog entry when we come to
 release.</p>
 <h3 id="how-do-i-know-what-to-call-the-changelog-file-before-i-create-the-pr"><a class="header" href="#how-do-i-know-what-to-call-the-changelog-file-before-i-create-the-pr">How do I know what to call the changelog file before I create the PR?</a></h3>
 <p>Obviously, you don't know if you should call your newsfile

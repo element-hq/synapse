@@ -161,19 +161,16 @@
 
                         <h1 id="experimental-features-api"><a class="header" href="#experimental-features-api">Experimental Features API</a></h1>
 <p>This API allows a server administrator to enable or disable some experimental features on a per-user
-basis. The currently supported features are: </p>
+basis. The currently supported features are:</p>
 <ul>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3026">MSC3026</a>: busy 
-presence state enabled</li>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3881">MSC3881</a>: enable remotely toggling push notifications 
-for another client </li>
-<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3967">MSC3967</a>: do not require
-UIA when first uploading cross-signing keys. </li>
+<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3881">MSC3881</a>: enable remotely toggling push notifications
+for another client</li>
+<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3575">MSC3575</a>: enable experimental sliding sync support</li>
 </ul>
 <p>To use it, you will need to authenticate by providing an <code>access_token</code>
 for a server admin: see <a href="../usage/administration/admin_api/">Admin API</a>.</p>
 <h2 id="enablingdisabling-features"><a class="header" href="#enablingdisabling-features">Enabling/Disabling Features</a></h2>
-<p>This API allows a server administrator to enable experimental features for a given user. The request must 
+<p>This API allows a server administrator to enable experimental features for a given user. The request must
 provide a body containing the user id and listing the features to enable/disable in the following format:</p>
 <pre><code class="language-json">{
    &quot;features&quot;: {

@@ -267,7 +267,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.110.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.111.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -285,6 +285,14 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11110"><a class="header" href="#upgrading-to-v11110">Upgrading to v1.111.0</a></h1>
+<h2 id="new-worker-endpoints-for-authenticated-client-and-federation-media"><a class="header" href="#new-worker-endpoints-for-authenticated-client-and-federation-media">New worker endpoints for authenticated client and federation media</a></h2>
+<p><a href="./workers.html#synapseappmedia_repository">Media repository workers</a> handling
+Media APIs can now handle the following endpoint patterns:</p>
+<pre><code>^/_matrix/client/v1/media/.*$
+^/_matrix/federation/v1/media/.*$
+</code></pre>
+<p>Please update your reverse proxy configuration.</p>
 <h1 id="upgrading-to-v11060"><a class="header" href="#upgrading-to-v11060">Upgrading to v1.106.0</a></h1>
 <h2 id="minimum-supported-rust-version"><a class="header" href="#minimum-supported-rust-version">Minimum supported Rust version</a></h2>
 <p>The minimum supported Rust version has been increased from v1.65.0 to v1.66.0.
