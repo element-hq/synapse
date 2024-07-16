@@ -490,8 +490,8 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         for encryption_event_id in encryption_event_ids:
             encryption_event = encryption_event_map.get(encryption_event_id)
-            # If the state curent state says there is an encryption event, we should
-            # have it in the database.
+            # If the curent state says there is an encryption event, we should have it
+            # in the database.
             assert encryption_event is not None
 
             results[encryption_event.room_id] = encryption_event.content.get(
