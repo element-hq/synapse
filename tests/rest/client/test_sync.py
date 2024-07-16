@@ -50,7 +50,14 @@ from synapse.rest.client import (
     sync,
 )
 from synapse.server import HomeServer
-from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken, UserID
+from synapse.types import (
+    JsonDict,
+    RoomStreamToken,
+    SlidingSyncStreamToken,
+    StreamKeyType,
+    StreamToken,
+    UserID,
+)
 from synapse.util import Clock
 
 from tests import unittest
@@ -1448,7 +1455,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
         future_position_token_serialized = self.get_success(
-            future_position_token.to_string(self.store)
+            SlidingSyncStreamToken(future_position_token, 0).to_string(self.store)
         )
 
         # Make the Sliding Sync request
