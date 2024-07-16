@@ -60,16 +60,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Freeze so it's immutable and we can use it as a cache value
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class _Sentinel:
-    pass
-
-
-# Use an enum so mypy handles the type of a dictionary lookup and subsequent type
-# narrowing.
 class Sentinel(enum.Enum):
-    UNSET_SENTINEL = _Sentinel()
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    UNSET_SENTINEL = object()
 
 
 # The event types that clients should consider as new activity.
