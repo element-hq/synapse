@@ -1102,7 +1102,7 @@ class SlidingSyncHandler:
         """
         room_id_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
 
-        async def _bulk_fetch_stripped_state_for_rooms(
+        async def _bulk_get_stripped_state_for_rooms(
             room_ids: StrCollection,
         ) -> None:
             """
@@ -1202,7 +1202,7 @@ class SlidingSyncHandler:
             room_ids_without_results = filtered_room_id_set.difference(
                 room_ids_with_results
             )
-            await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
+            await _bulk_get_stripped_state_for_rooms(room_ids_without_results)
 
             # Update our `room_id_to_encryption` map based on the stripped state
             for room_id in room_ids_without_results:
@@ -1211,7 +1211,7 @@ class SlidingSyncHandler:
                 )
                 assert stripped_state is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
-                    + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
+                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
                 )
 
@@ -1287,7 +1287,7 @@ class SlidingSyncHandler:
             room_ids_without_results = filtered_room_id_set.difference(
                 room_ids_with_results
             )
-            await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
+            await _bulk_get_stripped_state_for_rooms(room_ids_without_results)
 
             # Update our `room_id_to_type` map based on the stripped state
             for room_id in room_ids_without_results:
@@ -1296,7 +1296,7 @@ class SlidingSyncHandler:
                 )
                 assert stripped_state is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
-                    + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
+                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
                 )
 
