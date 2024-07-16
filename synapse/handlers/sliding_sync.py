@@ -1106,7 +1106,12 @@ class SlidingSyncHandler:
             room_ids: StrCollection,
         ) -> None:
             """
-            Fetch stripped state for a list of rooms (stripped state is only applicable to invite/knock rooms).
+            Fetch stripped state for a list of room IDs. Stripped state is only
+            applicable to invite/knock rooms. Other rooms will have `None` as their
+            stripped state.
+
+            For invite rooms, we pull from `unsigned.invite_room_state`.
+            For knock rooms, we pull from `unsigned.knock_room_state`.
             """
             # Fetch what we haven't before
             room_ids_to_fetch = [
@@ -1186,7 +1191,7 @@ class SlidingSyncHandler:
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
             # Lookup the encryption state from the database. Since this function is
-            # cached, need to make a mutable copy via `dict(...)`.
+            # cached, we need to make a mutable copy via `dict(...)`.
             room_id_to_encryption = dict(
                 await self.store.bulk_get_room_encryption(filtered_room_id_set)
             )
@@ -1229,7 +1234,8 @@ class SlidingSyncHandler:
                                 )
                                 break
                     else:
-                        # Didn't see any encryption events in the stripped state
+                        # Didn't see any encryption events in the stripped state so we
+                        # can assume the room is unencrypted.
                         room_id_to_encryption[room_id] = None
 
             # Make a copy so we don't run into an error: `Set changed size during
@@ -1271,7 +1277,7 @@ class SlidingSyncHandler:
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
             # Lookup the room type from the database. Since this function is
-            # cached, need to make a mutable copy via `dict(...)`.
+            # cached, we need to make a mutable copy via `dict(...)`.
             room_id_to_type = dict(
                 await self.store.bulk_get_room_type(filtered_room_id_set)
             )
