@@ -3756,6 +3756,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
+    # TODO: Add more tests like we have for `filters.is_encrypted`
     def test_filter_room_types_with_remote_invite_room(self) -> None:
         """
         Test that we can apply a `filter.not_room_types` filter, even if we only have an
