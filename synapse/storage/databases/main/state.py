@@ -465,7 +465,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 EventContentFields.ENCRYPTION_ALGORITHM
             )
 
-        logger.info("results %s", results)
         return results
 
     @cached(max_entries=100000, iterable=True)
