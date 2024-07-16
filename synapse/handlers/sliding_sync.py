@@ -1186,14 +1186,10 @@ class SlidingSyncHandler:
         if filters.is_encrypted is not None:
             # Lookup the encryption state from the database. Since this function is
             # cached, need to make a mutable copy via `dict(...)`.
-            room_id_to_is_encrypted = dict(
-                await self.store.bulk_get_room_is_encrypted(filtered_room_id_set)
+            room_id_to_encryption = dict(
+                await self.store.bulk_get_room_encryption(filtered_room_id_set)
             )
-            room_ids_with_results = [
-                room_id
-                for room_id, is_encrypted in room_id_to_is_encrypted.items()
-                if is_encrypted is not None
-            ]
+            room_ids_with_results = room_id_to_encryption.keys()
 
             # We might not have room state for remote invite/knocks if we are the first
             # person on our server to see the room. The best we can do is look in the
@@ -1203,7 +1199,7 @@ class SlidingSyncHandler:
             )
             await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
 
-            # Update our room_id_to_is_encrypted map based on the stripped state
+            # Update our `room_id_to_encryption` map based on the stripped state
             for room_id in room_ids_without_results:
                 stripped_state = room_id_to_stripped_state_map.get(
                     room_id, _Sentinel.sentinel
@@ -1223,27 +1219,27 @@ class SlidingSyncHandler:
                             event_content, dict
                         ):
                             if event_type == EventTypes.RoomEncryption:
-                                # Optional because Python is not block-scoped and we re-use the name below
-                                is_encrypted: Optional[bool] = (
-                                    event_content.get(
-                                        EventContentFields.ENCRYPTION_ALGORITHM
-                                    )
-                                    is not None
+                                room_id_to_encryption[room_id] = event_content.get(
+                                    EventContentFields.ENCRYPTION_ALGORITHM
                                 )
-                                room_id_to_is_encrypted[room_id] = is_encrypted
                                 break
                     else:
                         # Didn't see any encryption events in the stripped state
-                        room_id_to_is_encrypted[room_id] = False
+                        room_id_to_encryption[room_id] = None
 
-            for room_id, is_encrypted in room_id_to_is_encrypted.items():
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in filtered_room_id_set.copy():
+                encryption = room_id_to_encryption.get(room_id, _Sentinel.sentinel)
+
                 # Just remove rooms if we can't determine their encryption status
-                if is_encrypted is None:
+                if encryption is _Sentinel.sentinel:
                     filtered_room_id_set.remove(room_id)
                     continue
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa
+                is_encrypted = encryption is not None
                 if (filters.is_encrypted and not is_encrypted) or (
                     not filters.is_encrypted and is_encrypted
                 ):
@@ -1269,15 +1265,56 @@ class SlidingSyncHandler:
         # provided in the list. `None` is a valid type for rooms which do not have a
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
-            room_to_type = await self.store.bulk_get_room_type(
-                {
-                    room_id
-                    for room_id in filtered_room_id_set
-                    # We only know the room types for joined rooms
-                    if sync_room_map[room_id].membership == Membership.JOIN
-                }
+            # Lookup the room type from the database. Since this function is
+            # cached, need to make a mutable copy via `dict(...)`.
+            room_id_to_type = dict(
+                await self.store.bulk_get_room_type(filtered_room_id_set)
             )
-            for room_id, room_type in room_to_type.items():
+            room_ids_with_results = room_id_to_type.keys()
+
+            # We might not have room state for remote invite/knocks if we are the first
+            # person on our server to see the room. The best we can do is look in the
+            # optional stripped state from the invite/knock event.
+            room_ids_without_results = filtered_room_id_set.difference(
+                room_ids_with_results
+            )
+            await _bulk_fetch_stripped_state_for_rooms(room_ids_without_results)
+
+            # Update our `room_id_to_type` map based on the stripped state
+            for room_id in room_ids_without_results:
+                stripped_state = room_id_to_stripped_state_map.get(
+                    room_id, _Sentinel.sentinel
+                )
+                assert stripped_state is not _Sentinel.sentinel, (
+                    f"Stripped state left unset for room {room_id}. "
+                    + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
+                    + "with that room_id. (this is a problem with Synapse itself)"
+                )
+
+                if stripped_state is not None:
+                    for event in stripped_state:
+                        event_type = event.get("type")
+                        event_content = event.get("content")
+                        # Scrutinize unsigned stripped state
+                        if isinstance(event_type, str) and isinstance(
+                            event_content, dict
+                        ):
+                            if event_type == EventTypes.Create:
+                                room_id_to_type[room_id] = event_content.get(
+                                    EventContentFields.ROOM_TYPE
+                                )
+                                break
+
+            # Make a copy so we don't run into an error: `Set changed size during
+            # iteration`, when we filter out and remove items
+            for room_id in filtered_room_id_set.copy():
+                room_type = room_id_to_type.get(room_id, _Sentinel.sentinel)
+
+                # Just remove rooms if we can't determine their type
+                if room_type is _Sentinel.sentinel:
+                    filtered_room_id_set.remove(room_id)
+                    continue
+
                 if (
                     filters.room_types is not None
                     and room_type not in filters.room_types

@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
 
-
 MAX_STATE_DELTA_HOPS = 100
 
 
@@ -300,9 +299,14 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cached(max_entries=10000)
     async def get_room_type(self, room_id: str) -> Optional[str]:
-        """Get the room type for a given room.
+        """
+        Get the room type for a given room.
 
-        Returns None if the room is not known to the server.
+        Returns:
+            The room type if known (`None` is a valid room type)
+
+        Raises:
+            NotFoundError if the room is unknown
         """
 
         row = await self.db_pool.simple_select_one(
@@ -318,19 +322,16 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         # If we haven't updated `room_stats_state` with the room yet, query the
         # create event directly.
-        try:
-            create_event = await self.get_create_event_for_room(room_id)
-            room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
-            return room_type
-        except NotFoundError:
-            # Ignore unknown rooms
-            pass
+        create_event = await self.get_create_event_for_room(room_id)
+        room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
+        return room_type
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
         self, room_ids: Set[str]
     ) -> Mapping[str, Optional[str]]:
-        """Bulk fetch room types for the given rooms.
+        """
+        Bulk fetch room types for the given rooms.
 
         Rooms unknown to this server will be omitted from the response.
         """
@@ -359,14 +360,15 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return results
 
     @cached(max_entries=10000)
-    async def get_room_is_encrypted(self, room_id: str) -> Optional[bool]:
+    async def get_room_encryption(self, room_id: str) -> Optional[str]:
         """
-        Get whether the given room is encrypted.
+        Get the encryption algorithm for a given room.
 
         Returns:
-            True if the room is encrypted,
-            False if it is not encrypted, and
-            None if the room is not known to the server.
+            The encryption algorithm if the room is encrypted, otherwise `None`.
+
+        Raises:
+            NotFoundError if the room is unknown
         """
 
         row = await self.db_pool.simple_select_one(
@@ -378,7 +380,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
 
         if row is not None:
-            return row[0] is not None
+            return row[0]
 
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly.
@@ -396,31 +398,28 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         create_event_id = state_map.get((EventTypes.Create, ""))
         encryption_event_id = state_map.get((EventTypes.RoomEncryption, ""))
         if create_event_id is None:
+            raise NotFoundError(
+                f"Unknown room {room_id} does not have any state to determine room encryption"
+            )
+
+        if encryption_event_id is None:
             return None
-        elif create_event_id is not None and encryption_event_id is None:
-            return False
 
         encryption_event = await self.get_event(encryption_event_id)
-        is_encrypted = (
-            encryption_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
-            is not None
-        )
+        return encryption_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
 
-        return is_encrypted
-
-    @cachedList(cached_method_name="get_room_is_encrypted", list_name="room_ids")
-    async def bulk_get_room_is_encrypted(
+    @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
+    async def bulk_get_room_encryption(
         self, room_ids: Set[str]
-    ) -> Mapping[str, Optional[bool]]:
-        """Bulk fetch whether the given rooms are encrypted.
+    ) -> Mapping[str, Optional[str]]:
+        """
+        Bulk fetch room encryption for the given rooms.
 
         Rooms unknown to this server will be omitted from the response.
 
         Returns:
-            A mapping from room ID to whether the room is encrypted:
-                True if the room is encrypted,
-                False if it is not encrypted, and
-                None if the room is not known to the server.
+            A mapping from room ID to the room's encryption algorithm if the room is
+            encrypted, otherwise `None`.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -434,7 +433,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
-        results = {room_id: encryption is not None for room_id, encryption in rows}
+        results = dict(rows)
         encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(
@@ -450,21 +449,23 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             # seen the room before
             create_event_id = state_map.get((EventTypes.Create, ""))
             encryption_event_id = state_map.get((EventTypes.RoomEncryption, ""))
-            if create_event_id is not None and encryption_event_id is not None:
+
+            if create_event_id is None:
+                continue
+
+            if encryption_event_id is None:
+                results[room_id] = None
+            else:
                 encryption_event_ids.append(encryption_event_id)
-            elif create_event_id is not None:
-                results[room_id] = False
 
         encryption_event_map = await self.get_events(encryption_event_ids)
 
         for encryption_event in encryption_event_map.values():
-            is_encrypted = (
-                encryption_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
-                is not None
+            results[encryption_event.room_id] = encryption_event.content.get(
+                EventContentFields.ENCRYPTION_ALGORITHM
             )
 
-            results[room_id] = is_encrypted
-
+        logger.info("results %s", results)
         return results
 
     @cached(max_entries=100000, iterable=True)
