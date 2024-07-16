@@ -3099,12 +3099,17 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self, invitee_user_id: str, unsigned_invite_room_state: Optional[List[JsonDict]]
     ) -> str:
         """
-        Create a fake remote invite and persist it.
+        Create a fake invite for a remote room and persist it.
+
+        We don't have any state for these kind of rooms and can only rely on the
+        stripped state included in the unsigned portion of the invite event to identify
+        the room.
 
         Args:
             invitee_user_id: The person being invited
             unsigned_invite_room_state: List of stripped state events to assist the
-                receiver in identifying the room. Use the `strip_event(...)` helper.
+                receiver in identifying the room. Stripped state events have `type`,
+                `state_key`, `sender`, `content`.
 
         Returns:
             The room ID of the remote invite room
