@@ -225,6 +225,9 @@ class EventContentFields:
     # This is deprecated in MSC2175.
     ROOM_CREATOR: Final = "creator"
 
+    # The version of the room for `m.room.create` events.
+    ROOM_VERSION: Final = "room_version"
+
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
 

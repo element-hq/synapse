@@ -3315,7 +3315,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         # `remote_invite_room_id` should not appear because we can't figure out whether
-        # it is encrypted or not.
+        # it is encrypted or not (no stripped state, `unsigned.invite_room_state`).
         self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
 
         # Try with `is_encrypted=False`
@@ -3331,7 +3331,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         # `remote_invite_room_id` should not appear because we can't figure out whether
-        # it is encrypted or not.
+        # it is encrypted or not (no stripped state, `unsigned.invite_room_state`).
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
     def test_filter_encrypted_with_remote_invite_encrypted_room(self) -> None:
@@ -3342,7 +3342,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Create a remote invite room without any `unsigned.invite_room_state`
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
@@ -3429,7 +3430,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Create a remote invite room without any `unsigned.invite_room_state`
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # but don't set any room encryption event.
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
@@ -3756,22 +3758,30 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
-    # TODO: Add more tests like we have for `filters.is_encrypted`
-    def test_filter_room_types_with_remote_invite_room(self) -> None:
+    def test_filter_room_types_with_remote_invite_room_no_stripped_state(self) -> None:
         """
-        Test that we can apply a `filter.not_room_types` filter, even if we only have an
-        invite for a remote room.
-
-        This is a regression test.
+        Test that we can apply a `filter.room_types` filter against a remote invite
+        room without any `unsigned.invite_room_state` (stripped state).
         """
-
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        remote_invite_room_id = self._create_remote_invite_room_for_user(user1_id, None)
+        # Create a remote invite room without any `unsigned.invite_room_state`
+        _remote_invite_room_id = self._create_remote_invite_room_for_user(
+            user1_id, None
+        )
 
         # Create a normal room (no room type)
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
 
         after_rooms_token = self.event_sources.get_current_token()
 
@@ -3782,18 +3792,186 @@ class FilterRoomsTestCase(HomeserverTestCase):
             to_token=after_rooms_token,
         )
 
+        # Try finding only normal rooms
         filtered_room_map = self.get_success(
             self.sliding_sync_handler.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
-                SlidingSyncConfig.SlidingSyncList.Filters(
-                    room_types=[None, RoomTypes.SPACE],
-                ),
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
                 after_rooms_token,
             )
         )
 
+        # `remote_invite_room_id` should not appear because we can't figure out what
+        # room type it is (no stripped state, `unsigned.invite_room_state`)
+        self.assertEqual(filtered_room_map.keys(), {room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should not appear because we can't figure out what
+        # room type it is (no stripped state, `unsigned.invite_room_state`)
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
+
+    def test_filter_room_types_with_remote_invite_space(self) -> None:
+        """
+        Test that we can apply a `filter.room_types` filter against a remote invite
+        to a space room with some `unsigned.invite_room_state` (stripped state).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state` indicating
+        # that it is a space room
+        remote_invite_room_id = self._create_remote_invite_room_for_user(
+            user1_id,
+            [
+                {
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "sender": "@inviter:remote_server",
+                    "content": {
+                        EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                        EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        # Specify that it is a space room
+                        EventContentFields.ROOM_TYPE: RoomTypes.SPACE,
+                    },
+                },
+            ],
+        )
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try finding only normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should not appear here because it is a space room
+        # according to the stripped state
+        self.assertEqual(filtered_room_map.keys(), {room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should appear here because it is a space room
+        # according to the stripped state
+        self.assertEqual(
+            filtered_room_map.keys(), {space_room_id, remote_invite_room_id}
+        )
+
+    def test_filter_encrypted_with_remote_invite_normal_room(self) -> None:
+        """
+        Test that we can apply a `filter.room_types` filter against a remote invite
+        to a normal room with some `unsigned.invite_room_state` (stripped state).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # but the create event does not specify a room type (normal room)
+        remote_invite_room_id = self._create_remote_invite_room_for_user(
+            user1_id,
+            [
+                {
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "sender": "@inviter:remote_server",
+                    "content": {
+                        EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                        EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        # No room type means this is a normal room
+                    },
+                },
+            ],
+        )
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try finding only normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should appear here because it is a normal room
+        # according to the stripped state (no room type)
         self.assertEqual(filtered_room_map.keys(), {room_id, remote_invite_room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
+                after_rooms_token,
+            )
+        )
+
+        # `remote_invite_room_id` should not appear here because it is a normal room
+        # according to the stripped state (no room type)
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
 
 class SortRoomsTestCase(HomeserverTestCase):

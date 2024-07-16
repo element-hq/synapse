@@ -75,6 +75,15 @@ _T = TypeVar("_T")
 MAX_STATE_DELTA_HOPS = 100
 
 
+# Freeze so it's immutable and we can use it as a cache value
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class Sentinel:
+    pass
+
+
+ROOM_UNKNOWN_SENTINEL = Sentinel()
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class EventMetadata:
     """Returned by `get_metadata_for_events`"""
@@ -329,11 +338,19 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
         self, room_ids: Set[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
         Bulk fetch room types for the given rooms.
 
-        Rooms unknown to this server will be omitted from the response.
+        Since this function is cached, any missing values would be cached as `None`. In
+        order to distinguish between an unencrypted room that has `None` encryption and
+        a room that is unknown to the server where we might want to omit the value
+        (which would make it cached as `None`), instead we use the sentinel value
+        `ROOM_UNKNOWN_SENTINEL`.
+
+        Returns:
+            A mapping from room ID to the room's type (`None` is a valid room type).
+            Rooms unknown to this server will return `ROOM_UNKNOWN_SENTINEL`.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -354,8 +371,10 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
                 results[room_id] = room_type
             except NotFoundError:
-                # Ignore unknown rooms
-                pass
+                # We use the sentinel value to distinguish between `None` which is a
+                # valid room type and a room that is unknown to the server so the value
+                # is just unset.
+                results[room_id] = ROOM_UNKNOWN_SENTINEL
 
         return results
 
@@ -411,15 +430,20 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
     async def bulk_get_room_encryption(
         self, room_ids: Set[str]
-    ) -> Mapping[str, Optional[str]]:
+    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
         Bulk fetch room encryption for the given rooms.
 
-        Rooms unknown to this server will be omitted from the response.
+        Since this function is cached, any missing values would be cached as `None`. In
+        order to distinguish between an unencrypted room that has `None` encryption and
+        a room that is unknown to the server where we might want to omit the value
+        (which would make it cached as `None`), instead we use the sentinel value
+        `ROOM_UNKNOWN_SENTINEL`.
 
         Returns:
             A mapping from room ID to the room's encryption algorithm if the room is
-            encrypted, otherwise `None`.
+            encrypted, otherwise `None`. Rooms unknown to this server will return
+            `ROOM_UNKNOWN_SENTINEL`.
         """
 
         rows = await self.db_pool.simple_select_many_batch(
@@ -451,6 +475,10 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             encryption_event_id = state_map.get((EventTypes.RoomEncryption, ""))
 
             if create_event_id is None:
+                # We use the sentinel value to distinguish between `None` which is a
+                # valid room type and a room that is unknown to the server so the value
+                # is just unset.
+                results[room_id] = ROOM_UNKNOWN_SENTINEL
                 continue
 
             if encryption_event_id is None:
@@ -460,7 +488,12 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         encryption_event_map = await self.get_events(encryption_event_ids)
 
-        for encryption_event in encryption_event_map.values():
+        for encryption_event_id in encryption_event_ids:
+            encryption_event = encryption_event_map.get(encryption_event_id)
+            # If the state curent state says there is an encryption event, we should
+            # have it in the database.
+            assert encryption_event is not None
+
             results[encryption_event.room_id] = encryption_event.content.get(
                 EventContentFields.ENCRYPTION_ALGORITHM
             )

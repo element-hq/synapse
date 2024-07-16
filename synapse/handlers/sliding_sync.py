@@ -36,6 +36,7 @@ from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.state import ROOM_UNKNOWN_SENTINEL
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
@@ -1189,7 +1190,11 @@ class SlidingSyncHandler:
             room_id_to_encryption = dict(
                 await self.store.bulk_get_room_encryption(filtered_room_id_set)
             )
-            room_ids_with_results = room_id_to_encryption.keys()
+            room_ids_with_results = [
+                room_id
+                for room_id, encryption in room_id_to_encryption.items()
+                if encryption is not ROOM_UNKNOWN_SENTINEL
+            ]
 
             # We might not have room state for remote invite/knocks if we are the first
             # person on our server to see the room. The best we can do is look in the
@@ -1230,10 +1235,10 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                encryption = room_id_to_encryption.get(room_id, _Sentinel.sentinel)
+                encryption = room_id_to_encryption.get(room_id, ROOM_UNKNOWN_SENTINEL)
 
                 # Just remove rooms if we can't determine their encryption status
-                if encryption is _Sentinel.sentinel:
+                if encryption is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
@@ -1270,7 +1275,11 @@ class SlidingSyncHandler:
             room_id_to_type = dict(
                 await self.store.bulk_get_room_type(filtered_room_id_set)
             )
-            room_ids_with_results = room_id_to_type.keys()
+            room_ids_with_results = [
+                room_id
+                for room_id, room_type in room_id_to_type.items()
+                if room_type is not ROOM_UNKNOWN_SENTINEL
+            ]
 
             # We might not have room state for remote invite/knocks if we are the first
             # person on our server to see the room. The best we can do is look in the
@@ -1308,10 +1317,10 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                room_type = room_id_to_type.get(room_id, _Sentinel.sentinel)
+                room_type = room_id_to_type.get(room_id, ROOM_UNKNOWN_SENTINEL)
 
                 # Just remove rooms if we can't determine their type
-                if room_type is _Sentinel.sentinel:
+                if room_type is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
