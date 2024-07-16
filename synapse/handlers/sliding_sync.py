@@ -60,10 +60,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class _Sentinel(enum.Enum):
-    # defining a sentinel in this way allows mypy to correctly handle the
-    # type of a dictionary lookup and subsequent type narrowing.
-    sentinel = object()
+# Freeze so it's immutable and we can use it as a cache value
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _Sentinel:
+    pass
+
+
+# Use an enum so mypy handles the type of a dictionary lookup and subsequent type
+# narrowing.
+class Sentinel(enum.Enum):
+    UNSET_SENTINEL = _Sentinel()
 
 
 # The event types that clients should consider as new activity.
@@ -1207,9 +1213,9 @@ class SlidingSyncHandler:
             # Update our `room_id_to_encryption` map based on the stripped state
             for room_id in room_ids_without_results:
                 stripped_state = room_id_to_stripped_state_map.get(
-                    room_id, _Sentinel.sentinel
+                    room_id, Sentinel.UNSET_SENTINEL
                 )
-                assert stripped_state is not _Sentinel.sentinel, (
+                assert stripped_state is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
                     + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
@@ -1292,9 +1298,9 @@ class SlidingSyncHandler:
             # Update our `room_id_to_type` map based on the stripped state
             for room_id in room_ids_without_results:
                 stripped_state = room_id_to_stripped_state_map.get(
-                    room_id, _Sentinel.sentinel
+                    room_id, Sentinel.UNSET_SENTINEL
                 )
-                assert stripped_state is not _Sentinel.sentinel, (
+                assert stripped_state is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
                     + "Make sure you're calling `_bulk_fetch_stripped_state_for_rooms(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
