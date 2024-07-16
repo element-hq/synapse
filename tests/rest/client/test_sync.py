@@ -2608,7 +2608,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             room_id1, "activity before token2", tok=user2_tok
         )
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         # Join the room after the `from_token` which will make us consider this room as
         # `newly_joined`.
@@ -2630,8 +2645,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make an incremental Sliding Sync request (what we're trying to test)
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -2817,7 +2831,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.helper.send(room_id1, "activity after invite3", tok=user2_tok)
         self.helper.send(room_id1, "activity after invite4", tok=user2_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         self.helper.send(room_id1, "activity after token5", tok=user2_tok)
         self.helper.send(room_id1, "activity after toekn6", tok=user2_tok)
@@ -2825,8 +2854,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -3074,7 +3102,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.helper.send(room_id1, "activity after invite3", tok=user2_tok)
         self.helper.send(room_id1, "activity after invite4", tok=user2_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         self.helper.send(room_id1, "activity after token5", tok=user2_tok)
         self.helper.send(room_id1, "activity after toekn6", tok=user2_tok)
@@ -3082,8 +3125,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -3239,7 +3281,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.helper.send(room_id1, "activity before2", tok=user2_tok)
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         event_response3 = self.helper.send(room_id1, "activity after3", tok=user2_tok)
         event_response4 = self.helper.send(room_id1, "activity after4", tok=user2_tok)
@@ -3255,8 +3312,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -3316,15 +3372,29 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         self.helper.send(room_id1, "activity after3", tok=user2_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         self.helper.send(room_id1, "activity after4", tok=user2_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -3451,13 +3521,27 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        after_room_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        after_room_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(after_room_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={after_room_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -3729,7 +3813,22 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         user3_id = self.register_user("user3", "pass")
         user3_tok = self.login(user3_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 4,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id1, user1_id, tok=user1_tok)
@@ -3767,8 +3866,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # Make the Sliding Sync request with lazy loading for the room members
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
