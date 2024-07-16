@@ -11,6 +11,5 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-
-ALTER TABLE remote_media_cache ADD COLUMN authenticated BOOLEAN;
-ALTER TABLE local_media_repository ADD COLUMN authenticated BOOLEAN;
+ALTER TABLE remote_media_cache ADD COLUMN authenticated BOOLEAN DEFAULT FALSE NOT NULL;
+ALTER TABLE local_media_repository ADD COLUMN authenticated BOOLEAN DEFAULT FALSE NOT NULL;

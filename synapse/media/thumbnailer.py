@@ -284,9 +284,9 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
-                raise NotFoundError
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         await self._select_and_respond_with_thumbnail(
@@ -324,9 +324,9 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
-                raise NotFoundError
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         for info in thumbnail_infos:
@@ -410,7 +410,7 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
                 respond_404(request)
                 return
@@ -490,9 +490,9 @@ class ThumbnailProvider:
 
         # if the media the thumbnail is generated from is authenticated, don't serve the
         # thumbnail over an unauthenticated endpoint
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
-                raise NotFoundError
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id

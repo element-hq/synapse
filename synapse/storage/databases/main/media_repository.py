@@ -423,7 +423,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         time_now_ms: int,
         user_id: UserID,
     ) -> None:
-        if self.hs.config.media.authenticate_new_media:
+        if self.hs.config.media.enable_authenticated_media:
             authenticated = True
         else:
             authenticated = False
@@ -450,7 +450,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         user_id: UserID,
         url_cache: Optional[str] = None,
     ) -> None:
-        if self.hs.config.media.authenticate_new_media:
+        if self.hs.config.media.enable_authenticated_media:
             authenticated = True
         else:
             authenticated = False
@@ -686,7 +686,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
         upload_name: Optional[str],
         filesystem_id: str,
     ) -> None:
-        if self.hs.config.media.authenticate_new_media:
+        if self.hs.config.media.enable_authenticated_media:
             authenticated = True
         else:
             authenticated = False

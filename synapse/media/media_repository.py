@@ -453,9 +453,9 @@ class MediaRepository:
         if not media_info:
             return
 
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
             if media_info.authenticated:
-                raise NotFoundError
+                raise NotFoundError()
 
         self.mark_recently_accessed(None, media_id)
 
@@ -634,14 +634,10 @@ class MediaRepository:
         """
         media_info = await self.store.get_cached_remote_media(server_name, media_id)
 
-        if self.hs.config.media.enforce_authenticated_media and not allow_authenticated:
-            # if it isn't cached then don't fetch it
-            if not media_info:
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            # if it isn't cached then don't fetch it or if it's authenticated then don't serve it
+            if not media_info or media_info.authenticated:
                 raise NotFoundError()
-            # and if it's authenticated don't serve it
-            else:
-                if media_info.authenticated:
-                    raise NotFoundError()
 
         # file_id is the ID we use to track the file locally. If we've already
         # seen the file then reuse the existing ID, otherwise generate a new
@@ -816,7 +812,7 @@ class MediaRepository:
 
         logger.info("Stored remote media in file %r", fname)
 
-        if self.hs.config.media.authenticate_new_media:
+        if self.hs.config.media.enable_authenticated_media:
             authenticated = True
         else:
             authenticated = False
@@ -945,7 +941,7 @@ class MediaRepository:
 
         logger.debug("Stored remote media in file %r", fname)
 
-        if self.hs.config.media.authenticate_new_media:
+        if self.hs.config.media.enable_authenticated_media:
             authenticated = True
         else:
             authenticated = False

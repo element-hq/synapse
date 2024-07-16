@@ -272,9 +272,8 @@ class ContentRepositoryConfig(Config):
                 remote_media_lifetime
             )
 
-        self.authenticate_new_media = config.get("authenticate_new_media", False)
-        self.enforce_authenticated_media = config.get(
-            "enforce_authenticated_media", False
+        self.enable_authenticated_media = config.get(
+            "enable_authenticated_media", False
         )
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
