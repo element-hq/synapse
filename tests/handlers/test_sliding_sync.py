@@ -3357,8 +3357,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
                     "state_key": "",
                     "sender": "@inviter:remote_server",
                     "content": {
-                        "creator": "@inviter:remote_server",
-                        "room_version": RoomVersions.V10.identifier,
+                        EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                        EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                     },
                 },
                 {
@@ -3445,8 +3445,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
                     "state_key": "",
                     "sender": "@inviter:remote_server",
                     "content": {
-                        "creator": "@inviter:remote_server",
-                        "room_version": RoomVersions.V10.identifier,
+                        EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                        EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                     },
                 },
                 # No room encryption event
