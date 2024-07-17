@@ -22,7 +22,7 @@
 
 import logging
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
@@ -248,17 +248,23 @@ class KeyChangesServlet(RestServlet):
 
         # We want to enforce they do pass us one, but we ignore it and return
         # changes after the "to" as well as before.
-        #
-        # XXX This does not enforce that "to" is passed.
-        set_tag("to", str(parse_string(request, "to")))
+        to_token_string = parse_string(request, "to", required=True)
+        set_tag("to", to_token_string)
 
         from_token = await StreamToken.from_string(self.store, from_token_string)
+        # to_token = await StreamToken.from_string(self.store, to_token_string)
 
         user_id = requester.user.to_string()
 
-        results = await self.device_handler.get_user_ids_changed(user_id, from_token)
+        device_list_updates = await self.device_handler.get_user_ids_changed(
+            user_id, from_token
+        )
 
-        return 200, results
+        response: JsonDict = defaultdict(dict)
+        response["changed"] = list(device_list_updates.changed)
+        response["left"] = list(device_list_updates.left)
+
+        return 200, response
 
 
 class OneTimeKeyServlet(RestServlet):

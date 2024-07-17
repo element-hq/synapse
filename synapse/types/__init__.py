@@ -1219,11 +1219,12 @@ class ReadReceipt:
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class DeviceListUpdates:
     """
-    An object containing a diff of information regarding other users' device lists, intended for
-    a recipient to carry out device list tracking.
+    An object containing a diff of information regarding other users' device lists,
+    intended for a recipient to carry out device list tracking.
 
     Attributes:
-        changed: A set of users whose device lists have changed recently.
+        changed: A set of users who have updated their device identity or
+            cross-signing keys, or who now share an encrypted room with.
         left: A set of users who the recipient no longer needs to track the device lists of.
             Typically when those users no longer share any end-to-end encryption enabled rooms.
     """
