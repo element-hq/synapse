@@ -1807,7 +1807,7 @@ class SlidingSyncHandler:
         """
 
         user_id = sync_config.user.to_string()
-        device_id = sync_config.device_id
+        device_id = sync_config.requester.device_id
 
         # Check that this request has a valid device ID (not all requests have
         # to belong to a device, and so device_id is None), and that the

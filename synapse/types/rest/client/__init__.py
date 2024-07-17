@@ -120,6 +120,9 @@ class SlidingSyncBody(RequestBodyModel):
     Sliding Sync API request body.
 
     Attributes:
+        conn_id: An optional string to identify this connection to the server. If this
+            is missing, only 1 sliding sync connection can be made to the server at
+            any one time.
         lists: Sliding window API. A map of list key to list information
             (:class:`SlidingSyncList`). Max lists: 100. The list keys should be
             arbitrary strings which the client is using to refer to the list. Keep this
@@ -314,6 +317,8 @@ class SlidingSyncBody(RequestBodyModel):
                 return value
 
         to_device: Optional[ToDeviceExtension] = None
+
+    conn_id: Optional[str]
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:

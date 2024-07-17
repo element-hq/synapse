@@ -34,6 +34,7 @@ from synapse.events import EventBase
 from synapse.types import (
     JsonDict,
     JsonMapping,
+    Requester,
     SlidingSyncStreamToken,
     StreamToken,
     UserID,
@@ -108,7 +109,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     """
 
     user: UserID
-    device_id: Optional[str]
+    requester: Requester
 
     # Pydantic config
     class Config:
@@ -118,6 +119,31 @@ class SlidingSyncConfig(SlidingSyncBody):
         allow_mutation = False
         # Allow custom types like `UserID` to be used in the model
         arbitrary_types_allowed = True
+
+    def connection_id(self) -> str:
+        """Return a string identifier for this connection. May clash with
+        connection IDs from different users.
+
+        This is generally a combination of device ID and conn_id. However, both
+        these two are optional (e.g. puppet access tokens don't have device
+        IDs), so this handles those edge cases.
+        """
+
+        # `conn_id` can be null, in which case we default to the empty string
+        # (if conn ID is empty then the client can't have multiple sync loops)
+        conn_id = self.conn_id or ""
+
+        if self.requester.device_id:
+            return f"D/{self.requester.device_id}/{conn_id}"
+
+        if self.requester.access_token_id:
+            # If we don't have a device, then the access token ID should be a
+            # stable ID.
+            return f"A/{self.requester.access_token_id}/{conn_id}"
+
+        # If we have neither then its likely an AS or some weird token. Either
+        # way we can just fail here.
+        raise Exception("Cannot use sliding sync with access token type")
 
 
 class OperationType(Enum):
