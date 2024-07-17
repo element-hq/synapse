@@ -1391,6 +1391,37 @@ class SlidingSyncHandler:
         """
         user = sync_config.user
 
+        # Determine whether we should limit the timeline to the token range.
+        #
+        # We should return historical messages (before token range) in the
+        # following cases because we want clients to be able to show a basic
+        # screen of information:
+        #  - Initial sync (because no `from_token` to limit us anyway)
+        #  - When users `newly_joined`
+        #  - For an incremental sync where we haven't sent it down this
+        #    connection before
+        to_bound = None
+        initial = True
+        if from_token and not room_membership_for_user_at_to_token.newly_joined:
+            room_status = await self.connection_store.have_sent_room(
+                user_id=user.to_string(),
+                conn_id=sync_config.connection_id(),
+                connection_token=from_token.connection_token,
+                room_id=room_id,
+            )
+            if room_status.status == HaveSentRoomFlag.LIVE:
+                to_bound = from_token.stream_token.room_key
+                initial = False
+            elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                assert room_status.last_token is not None
+                to_bound = room_status.last_token
+                initial = False
+            elif room_status.status == HaveSentRoomFlag.NEVER:
+                to_bound = None
+                initial = True
+            else:
+                assert_never(room_status.status)
+
         # Assemble the list of timeline events
         #
         # FIXME: It would be nice to make the `rooms` response more uniform regardless of
@@ -1425,35 +1456,6 @@ class SlidingSyncHandler:
                 from_bound = (
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
-
-            # Determine whether we should limit the timeline to the token range.
-            #
-            # We should return historical messages (before token range) in the
-            # following cases because we want clients to be able to show a basic
-            # screen of information:
-            #  - Initial sync (because no `from_token` to limit us anyway)
-            #  - When users `newly_joined`
-            #  - For an incremental sync where we haven't sent it down this
-            #    connection before
-
-            if from_token and not room_membership_for_user_at_to_token.newly_joined:
-                room_status = await self.connection_store.have_sent_room(
-                    user_id=user.to_string(),
-                    conn_id=sync_config.connection_id(),
-                    connection_token=from_token.connection_token,
-                    room_id=room_id,
-                )
-                if room_status.status == HaveSentRoomFlag.LIVE:
-                    to_bound = from_token.stream_token.room_key
-                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
-                    assert room_status.last_token is not None
-                    to_bound = room_status.last_token
-                elif room_status.status == HaveSentRoomFlag.NEVER:
-                    to_bound = None
-                else:
-                    assert_never(room_status.status)
-            else:
-                to_bound = None
 
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
@@ -1574,12 +1576,6 @@ class SlidingSyncHandler:
         # room_membership_for_user_at_to_token.membership is not None`, we should
         # indicate to the client that a state reset happened. Perhaps we should indicate
         # this by setting `initial: True` and empty `required_state`.
-
-        # TODO: Since we can't determine whether we've already sent a room down this
-        # Sliding Sync connection before (we plan to add this optimization in the
-        # future), we're always returning the requested room state instead of
-        # updates.
-        initial = True
 
         # Check whether the room has a name set
         name_state_ids = await self.get_current_state_ids_at(
