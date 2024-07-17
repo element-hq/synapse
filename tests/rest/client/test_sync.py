@@ -3567,21 +3567,9 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        # The returned state doesn't change from initial to incremental sync. In the
-        # future, we will only return updates but only if we've sent the room down the
+        # We only return updates but only if we've sent the room down the
         # connection before.
-        self._assertRequiredStateIncludes(
-            channel.json_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
-            },
-            exact=True,
-        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("required_state"))
         self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_wildcard(self) -> None:
