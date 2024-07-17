@@ -601,6 +601,31 @@ class SlidingSyncHandler:
                 else:
                     relevant_room_map[room_id] = room_sync_config
 
+        # Filter out rooms that haven't received updates and we've sent down
+        # previously.
+        if from_token:
+            rooms_should_send = set()
+            for room_id in relevant_room_map:
+                status = await self.connection_store.have_sent_room(
+                    user_id,
+                    sync_config.connection_id(),
+                    from_token.connection_token,
+                    room_id,
+                )
+                if status.status != HaveSentRoomFlag.LIVE:
+                    rooms_should_send.add(room_id)
+
+            # TODO: Also check current state delta stream
+            rooms_that_have_updates = (
+                self.store._events_stream_cache.get_entities_changed(
+                    relevant_room_map, from_token.stream_token.room_key.stream
+                )
+            )
+            rooms_should_send.update(rooms_that_have_updates)
+            relevant_room_map = {
+                r: c for r, c in relevant_room_map.items() if r in rooms_should_send
+            }
+
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
         for room_id, room_sync_config in relevant_room_map.items():

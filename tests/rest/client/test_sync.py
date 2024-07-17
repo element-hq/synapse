@@ -3569,8 +3569,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         # We only return updates but only if we've sent the room down the
         # connection before.
-        self.assertIsNone(channel.json_body["rooms"][room_id1].get("required_state"))
-        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+        self.assertNotIn(room_id1, channel.json_body["rooms"])
 
     def test_rooms_required_state_wildcard(self) -> None:
         """
