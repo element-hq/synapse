@@ -342,6 +342,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         results = dict(rows)
         for room_id in room_ids - results.keys():
             try:
+                # FIXME: Currently, this grabs the create event from the current state
+                # which will be cleared if the server is no longer in the room. We should
+                # make this work even if the server is no longer in the room.
                 create_event = await self.get_create_event_for_room(room_id)
                 room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
                 results[room_id] = room_type
@@ -390,6 +393,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         results = dict(rows)
         encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
+            # FIXME: Currently, this grabs the create event from the current state
+            # which will be cleared if the server is no longer in the room. We should
+            # make this work even if the server is no longer in the room.
             state_map = await self.get_partial_filtered_current_state_ids(
                 room_id,
                 state_filter=StateFilter.from_types(
