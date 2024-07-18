@@ -3714,6 +3714,33 @@ except <code>com.example.foo</code>.</p>
    trusted_private_chat: null
    public_chat: null
 </code></pre>
+<p>The default power levels for each preset are:</p>
+<pre><code class="language-yaml">&quot;m.room.name&quot;: 50
+&quot;m.room.power_levels&quot;: 100
+&quot;m.room.history_visibility&quot;: 100
+&quot;m.room.canonical_alias&quot;: 50
+&quot;m.room.avatar&quot;: 50
+&quot;m.room.tombstone&quot;: 100
+&quot;m.room.server_acl&quot;: 100
+&quot;m.room.encryption&quot;: 100
+</code></pre>
+<p>So a complete example where the default power-levels for a preset are maintained
+but the power level for a new key is set is:</p>
+<pre><code class="language-yaml">default_power_level_content_override:
+   private_chat:
+    events:
+      &quot;com.example.foo&quot;: 0
+      &quot;m.room.name&quot;: 50
+      &quot;m.room.power_levels&quot;: 100
+      &quot;m.room.history_visibility&quot;: 100
+      &quot;m.room.canonical_alias&quot;: 50
+      &quot;m.room.avatar&quot;: 50
+      &quot;m.room.tombstone&quot;: 100
+      &quot;m.room.server_acl&quot;: 100
+      &quot;m.room.encryption&quot;: 100
+   trusted_private_chat: null
+   public_chat: null
+</code></pre>
 <hr />
 <h3 id="forget_rooms_on_leave"><a class="header" href="#forget_rooms_on_leave"><code>forget_rooms_on_leave</code></a></h3>
 <p>Set to true to automatically forget rooms for users when they leave them, either
