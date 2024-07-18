@@ -22,7 +22,7 @@
 
 import logging
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
