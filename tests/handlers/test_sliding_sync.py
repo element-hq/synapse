@@ -3273,6 +3273,66 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
+    def test_filter_encrypted_server_left_room(self) -> None:
+        """
+        Test that we can apply a `filter.is_encrypted` against a room that everyone has left.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create an unencrypted room
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Leave the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Create an encrypted room
+        encrypted_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.send_state(
+            encrypted_room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+        # Leave the room
+        self.helper.leave(encrypted_room_id, user1_id, tok=user1_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try with `is_encrypted=True`
+        truthy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
+
+        # Try with `is_encrypted=False`
+        falsy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=False,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
     def test_filter_encrypted_with_remote_invite_room_no_stripped_state(self) -> None:
         """
         Test that we can apply a `filter.is_encrypted` filter against a remote invite
@@ -3757,6 +3817,62 @@ class FilterRoomsTestCase(HomeserverTestCase):
                 SlidingSyncConfig.SlidingSyncList.Filters(
                     room_types=[None, RoomTypes.SPACE], not_room_types=[None]
                 ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
+
+    def test_filter_room_types_server_left_room(self) -> None:
+        """
+        Test that we can apply a `filter.room_types` against a room that everyone has left.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Leave the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Leave the room
+        self.helper.leave(space_room_id, user1_id, tok=user1_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try finding only normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
                 after_rooms_token,
             )
         )
