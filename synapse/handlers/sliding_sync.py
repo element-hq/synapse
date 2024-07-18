@@ -1079,6 +1079,82 @@ class SlidingSyncHandler:
 
         # return None
 
+    async def _bulk_get_stripped_state_for_rooms_from_sync_room_map(
+        self,
+        room_ids: StrCollection,
+        sync_room_map: Dict[str, _RoomMembershipForUser],
+    ) -> Dict[str, Optional[List[Any]]]:
+        """
+        Fetch stripped state for a list of room IDs. Stripped state is only
+        applicable to invite/knock rooms. Other rooms will have `None` as their
+        stripped state.
+
+        For invite rooms, we pull from `unsigned.invite_room_state`.
+        For knock rooms, we pull from `unsigned.knock_room_state`.
+
+        Args:
+            room_ids: Room IDs to fetch stripped state for
+            sync_room_map: Dictionary of room IDs to sort along with membership
+                information in the room at the time of `to_token`.
+
+        Returns:
+            A dictionary of room IDs to stripped state.
+        """
+        room_id_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
+
+        # Fetch what we haven't before
+        room_ids_to_fetch = [
+            room_id
+            for room_id in room_ids
+            if room_id not in room_id_to_stripped_state_map
+        ]
+
+        # Gather a list of event IDs we can grab stripped state from
+        invite_or_knock_event_ids: List[str] = []
+        for room_id in room_ids_to_fetch:
+            if sync_room_map[room_id].membership in (
+                Membership.INVITE,
+                Membership.KNOCK,
+            ):
+                event_id = sync_room_map[room_id].event_id
+                # If this is an invite/knock then there should be an event_id
+                assert event_id is not None
+                invite_or_knock_event_ids.append(event_id)
+            else:
+                room_id_to_stripped_state_map[room_id] = None
+
+        invite_or_knock_events = await self.store.get_events(invite_or_knock_event_ids)
+        for invite_or_knock_event in invite_or_knock_events.values():
+            room_id = invite_or_knock_event.room_id
+            membership = invite_or_knock_event.membership
+
+            if membership == Membership.INVITE:
+                # Scrutinize unsigned things
+                invite_room_state = invite_or_knock_event.unsigned.get(
+                    "invite_room_state", None
+                )
+                # `invite_room_state` should be a list of stripped events
+                if isinstance(invite_room_state, list):
+                    room_id_to_stripped_state_map[room_id] = invite_room_state
+                else:
+                    room_id_to_stripped_state_map[room_id] = None
+            elif membership == Membership.KNOCK:
+                # Scrutinize unsigned things
+                knock_room_state = invite_or_knock_event.unsigned.get(
+                    "knock_room_state", None
+                )
+                # `knock_room_state` should be a list of stripped events
+                if isinstance(knock_room_state, list):
+                    room_id_to_stripped_state_map[room_id] = knock_room_state
+                else:
+                    room_id_to_stripped_state_map[room_id] = None
+            else:
+                raise AssertionError(
+                    f"Unexpected membership {membership} (this is a problem with Synapse itself)"
+                )
+
+        return room_id_to_stripped_state_map
+
     async def filter_rooms(
         self,
         user: UserID,
@@ -1101,70 +1177,6 @@ class SlidingSyncHandler:
             room at the time of `to_token`.
         """
         room_id_to_stripped_state_map: Dict[str, Optional[List[Any]]] = {}
-
-        async def _bulk_get_stripped_state_for_rooms(
-            room_ids: StrCollection,
-        ) -> None:
-            """
-            Fetch stripped state for a list of room IDs. Stripped state is only
-            applicable to invite/knock rooms. Other rooms will have `None` as their
-            stripped state.
-
-            For invite rooms, we pull from `unsigned.invite_room_state`.
-            For knock rooms, we pull from `unsigned.knock_room_state`.
-            """
-            # Fetch what we haven't before
-            room_ids_to_fetch = [
-                room_id
-                for room_id in room_ids
-                if room_id not in room_id_to_stripped_state_map
-            ]
-
-            # Gather a list of event IDs we can grab stripped state from
-            invite_or_knock_event_ids: List[str] = []
-            for room_id in room_ids_to_fetch:
-                if sync_room_map[room_id].membership in (
-                    Membership.INVITE,
-                    Membership.KNOCK,
-                ):
-                    event_id = sync_room_map[room_id].event_id
-                    # If this is an invite/knock then there should be an event_id
-                    assert event_id is not None
-                    invite_or_knock_event_ids.append(event_id)
-                else:
-                    room_id_to_stripped_state_map[room_id] = None
-
-            invite_or_knock_events = await self.store.get_events(
-                invite_or_knock_event_ids
-            )
-            for invite_or_knock_event in invite_or_knock_events.values():
-                room_id = invite_or_knock_event.room_id
-                membership = invite_or_knock_event.membership
-
-                if membership == Membership.INVITE:
-                    # Scrutinize unsigned things
-                    invite_room_state = invite_or_knock_event.unsigned.get(
-                        "invite_room_state", None
-                    )
-                    # `invite_room_state` should be a list of stripped events
-                    if isinstance(invite_room_state, list):
-                        room_id_to_stripped_state_map[room_id] = invite_room_state
-                    else:
-                        room_id_to_stripped_state_map[room_id] = None
-                elif membership == Membership.KNOCK:
-                    # Scrutinize unsigned things
-                    knock_room_state = invite_or_knock_event.unsigned.get(
-                        "knock_room_state", None
-                    )
-                    # `knock_room_state` should be a list of stripped events
-                    if isinstance(knock_room_state, list):
-                        room_id_to_stripped_state_map[room_id] = knock_room_state
-                    else:
-                        room_id_to_stripped_state_map[room_id] = None
-                else:
-                    raise AssertionError(
-                        f"Unexpected membership {membership} (this is a problem with Synapse itself)"
-                    )
 
         filtered_room_id_set = set(sync_room_map.keys())
 
@@ -1205,9 +1217,14 @@ class SlidingSyncHandler:
             # person on our server to see the room. The best we can do is look in the
             # optional stripped state from the invite/knock event.
             room_ids_without_results = filtered_room_id_set.difference(
-                room_ids_with_results
+                chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
             )
-            await _bulk_get_stripped_state_for_rooms(room_ids_without_results)
+            room_id_to_stripped_state_map = {
+                **room_id_to_stripped_state_map,
+                **await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
+                    room_ids_without_results, sync_room_map
+                ),
+            }
 
             # Update our `room_id_to_encryption` map based on the stripped state
             for room_id in room_ids_without_results:
@@ -1291,9 +1308,14 @@ class SlidingSyncHandler:
             # person on our server to see the room. The best we can do is look in the
             # optional stripped state from the invite/knock event.
             room_ids_without_results = filtered_room_id_set.difference(
-                room_ids_with_results
+                chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
             )
-            await _bulk_get_stripped_state_for_rooms(room_ids_without_results)
+            room_id_to_stripped_state_map = {
+                **room_id_to_stripped_state_map,
+                **await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
+                    room_ids_without_results, sync_room_map
+                ),
+            }
 
             # Update our `room_id_to_type` map based on the stripped state
             for room_id in room_ids_without_results:
