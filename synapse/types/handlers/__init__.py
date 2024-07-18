@@ -129,8 +129,8 @@ class SlidingSyncConfig(SlidingSyncBody):
         IDs), so this handles those edge cases.
         """
 
-        # `conn_id` can be null, in which case we default to the empty string
-        # (if conn ID is empty then the client can't have multiple sync loops)
+        # If this is missing, only one sliding sync connection is allowed per
+        # given conn_id.
         conn_id = self.conn_id or ""
 
         if self.requester.device_id:
