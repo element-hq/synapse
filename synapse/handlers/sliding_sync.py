@@ -379,7 +379,7 @@ class SlidingSyncHandler:
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
             before_wait_ts = self.clock.time_msec()
-            if not await self.notifier.wait_for_stream_token(from_token.stream_token):
+            if not await self.notifier.wait_for_stream_token(from_token.stream):
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
@@ -417,7 +417,7 @@ class SlidingSyncHandler:
                 sync_config.user.to_string(),
                 timeout_ms,
                 current_sync_callback,
-                from_token=from_token.stream_token,
+                from_token=from_token.stream,
             )
 
         return result
@@ -459,7 +459,7 @@ class SlidingSyncHandler:
                 await self.get_room_membership_for_user_at_to_token(
                     user=sync_config.user,
                     to_token=to_token,
-                    from_token=from_token.stream_token if from_token else None,
+                    from_token=from_token.stream if from_token else None,
                 )
             )
 
@@ -1414,7 +1414,7 @@ class SlidingSyncHandler:
             #  - TODO: For an incremental sync where we haven't sent it down this
             #    connection before
             to_bound = (
-                from_token.stream_token.room_key
+                from_token.stream.room_key
                 if from_token is not None
                 and not room_membership_for_user_at_to_token.newly_joined
                 else None
@@ -1481,9 +1481,7 @@ class SlidingSyncHandler:
                         instance_name=timeline_event.internal_metadata.instance_name,
                         stream=timeline_event.internal_metadata.stream_ordering,
                     )
-                    if persisted_position.persisted_after(
-                        from_token.stream_token.room_key
-                    ):
+                    if persisted_position.persisted_after(from_token.stream.room_key):
                         num_live += 1
                     else:
                         # Since we're iterating over the timeline events in
