@@ -1106,6 +1106,8 @@ class SlidingSyncRestServlet(RestServlet):
             }
 
             if extensions.e2ee.device_list_updates is not None:
+                serialized_extensions["e2ee"]["device_lists"] = {}
+
                 serialized_extensions["e2ee"]["device_lists"]["changed"] = list(
                     extensions.e2ee.device_list_updates.changed
                 )

@@ -260,7 +260,7 @@ class KeyChangesServlet(RestServlet):
             user_id, from_token
         )
 
-        response: JsonDict = defaultdict(dict)
+        response: JsonDict = {}
         response["changed"] = list(device_list_updates.changed)
         response["left"] = list(device_list_updates.left)
 

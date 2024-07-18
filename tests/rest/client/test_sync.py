@@ -1508,11 +1508,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
         # Create a normal room
-        room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
         # Create a room that user1 is invited to
-        invite_room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        invite_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.invite(invite_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
 
         # Make the Sliding Sync request
@@ -4413,3 +4413,318 @@ class SlidingSyncToDeviceExtensionTestCase(unittest.HomeserverTestCase):
             access_token=user1_tok,
         )
         self._assert_to_device_response(channel, [])
+
+
+class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
+    """Tests for the e2ee sliding sync extension"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        devices.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+        self.sync_endpoint = (
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+        )
+
+    def test_no_data_initial_sync(self) -> None:
+        """
+        Test that enabling e2ee extension works during an intitial sync, even if there
+        is no-data
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Make an initial Sliding Sync request with the e2ee extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Device list updates are only present for incremental syncs
+        self.assertIsNone(channel.json_body["extensions"]["e2ee"].get("device_lists"))
+
+        # Both of these should be present even when empty
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]["device_one_time_keys_count"],
+            {
+                # This is always present because of
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                "signed_curve25519": 0
+            },
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
+            [],
+        )
+
+    def test_no_data_incremental_sync(self) -> None:
+        """
+        Test that enabling e2ee extension works during an incremental sync, even if
+        there is no-data
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        from_token = self.event_sources.get_current_token()
+
+        # Make an incremental Sliding Sync request with the e2ee extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Device list shows up for incremental syncs
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed"),
+            [],
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
+            [],
+        )
+
+        # Both of these should be present even when empty
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]["device_one_time_keys_count"],
+            {
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                "signed_curve25519": 0
+            },
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
+            [],
+        )
+
+    def test_device_lists(self) -> None:
+        """
+        Test that device list updates are included in the response
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        test_device_id = "TESTDEVICE"
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass", device_id=test_device_id)
+
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+        self.helper.join(room_id, user4_id, tok=user4_tok)
+
+        from_token = self.event_sources.get_current_token()
+
+        # Have user3 update their device list
+        channel = self.make_request(
+            "PUT",
+            f"/devices/{test_device_id}",
+            {
+                "display_name": "New Device Name",
+            },
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # User4 leaves the room
+        self.helper.leave(room_id, user4_id, tok=user4_tok)
+
+        # Make an incremental Sliding Sync request with the e2ee extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Device list updates show up
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed"),
+            [user3_id],
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
+            [user4_id],
+        )
+
+    def test_device_one_time_keys_count(self) -> None:
+        """
+        Test that `device_one_time_keys_count` are included in the response
+        """
+        test_device_id = "TESTDEVICE"
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass", device_id=test_device_id)
+
+        # Upload one time keys for the user/device
+        keys: JsonDict = {
+            "alg1:k1": "key1",
+            "alg2:k2": {"key": "key2", "signatures": {"k1": "sig1"}},
+            "alg2:k3": {"key": "key3"},
+        }
+        upload_keys_response = self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                user1_id, test_device_id, {"one_time_keys": keys}
+            )
+        )
+        self.assertDictEqual(
+            upload_keys_response,
+            {
+                "one_time_key_counts": {
+                    "alg1": 1,
+                    "alg2": 2,
+                    # Note that "signed_curve25519" is always returned in key count responses
+                    # regardless of whether we uploaded any keys for it. This is necessary until
+                    # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                    #
+                    # Also related:
+                    # https://github.com/element-hq/element-android/issues/3725 and
+                    # https://github.com/matrix-org/synapse/issues/10456
+                    "signed_curve25519": 0,
+                }
+            },
+        )
+
+        # Make a Sliding Sync request with the e2ee extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for those one time key counts
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"].get("device_one_time_keys_count"),
+            {
+                "alg1": 1,
+                "alg2": 2,
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                "signed_curve25519": 0,
+            },
+        )
+
+    def test_device_unused_fallback_key_types(self) -> None:
+        """
+        Test that `device_unused_fallback_key_types` are included in the response
+        """
+        test_device_id = "TESTDEVICE"
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass", device_id=test_device_id)
+
+        # We shouldn't have any unused fallback keys yet
+        res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(user1_id, test_device_id)
+        )
+        self.assertEqual(res, [])
+
+        # Upload a fallback key for the user/device
+        fallback_key = {"alg1:k1": "fallback_key1"}
+        self.get_success(
+            self.e2e_keys_handler.upload_keys_for_user(
+                user1_id,
+                test_device_id,
+                {"fallback_keys": fallback_key},
+            )
+        )
+        # We should now have an unused alg1 key
+        fallback_res = self.get_success(
+            self.store.get_e2e_unused_fallback_key_types(user1_id, test_device_id)
+        )
+        self.assertEqual(fallback_res, ["alg1"], fallback_res)
+
+        # Make a Sliding Sync request with the e2ee extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Check for the unused fallback key types
+        self.assertListEqual(
+            channel.json_body["extensions"]["e2ee"].get(
+                "device_unused_fallback_key_types"
+            ),
+            ["alg1"],
+        )
