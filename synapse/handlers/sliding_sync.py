@@ -1402,7 +1402,7 @@ class SlidingSyncHandler:
         #  - When users `newly_joined`
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
-        to_bound = None
+        from_bound = None
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
             room_status = await self.connection_store.have_sent_room(
@@ -1412,14 +1412,14 @@ class SlidingSyncHandler:
                 room_id=room_id,
             )
             if room_status.status == HaveSentRoomFlag.LIVE:
-                to_bound = from_token.stream_token.room_key
+                from_bound = from_token.stream_token.room_key
                 initial = False
             elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
                 assert room_status.last_token is not None
-                to_bound = room_status.last_token
+                from_bound = room_status.last_token
                 initial = False
             elif room_status.status == HaveSentRoomFlag.NEVER:
-                to_bound = None
+                from_bound = None
                 initial = True
             else:
                 assert_never(room_status.status)
@@ -1449,20 +1449,22 @@ class SlidingSyncHandler:
             prev_batch_token = to_token
 
             # We're going to paginate backwards from the `to_token`
-            from_bound = to_token.room_key
+            to_bound = to_token.room_key
             # People shouldn't see past their leave/ban event
             if room_membership_for_user_at_to_token.membership in (
                 Membership.LEAVE,
                 Membership.BAN,
             ):
-                from_bound = (
+                to_bound = (
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
-                from_key=from_bound,
-                to_key=to_bound,
+                # Because we want the latest events first the bounds are
+                # reversed.
+                from_key=to_bound,
+                to_key=from_bound,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -1722,11 +1724,11 @@ class SlidingSyncHandler:
                 to_token=to_token,
             )
         else:
-            assert to_bound is not None
+            assert from_bound is not None
 
             deltas = await self.store.get_current_state_deltas_for_room(
                 room_id=room_id,
-                from_token=to_bound,
+                from_token=from_bound,
                 to_token=to_token.room_key,
             )
             # TODO: Filter room state before fetching events
