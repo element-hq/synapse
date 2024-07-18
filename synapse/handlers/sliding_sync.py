@@ -1725,7 +1725,9 @@ class SlidingSyncHandler:
             assert to_bound is not None
 
             deltas = await self.store.get_current_state_deltas_for_room(
-                room_id, to_bound, to_token.room_key
+                room_id=room_id,
+                from_token=to_bound,
+                to_token=to_token.room_key,
             )
             # TODO: Filter room state before fetching events
             # TODO: Handle state resets where event_id is None
