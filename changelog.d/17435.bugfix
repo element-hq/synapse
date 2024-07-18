@@ -1,0 +1,1 @@
+Order `heroes` by `stream_ordering` as the Matrix specification states (applies to `/sync`).

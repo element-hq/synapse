@@ -1,3 +1,10 @@
+# Synapse 1.111.0 (2024-07-16)
+
+No significant changes since 1.111.0rc2.
+
+
+
+
 # Synapse 1.111.0rc2 (2024-07-10)
 
 ### Bugfixes
