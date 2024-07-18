@@ -3333,6 +3333,78 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
+    def test_filter_encrypted_after_we_left(self) -> None:
+        """
+        Test that we can apply a `filter.is_encrypted` against a room that was encrypted
+        after we left the room (make sure we don't just use the current state)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create an unencrypted room
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Leave the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Create a room that will be encrypted
+        encrypted_after_we_left_room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok
+        )
+        # Leave the room
+        self.helper.join(encrypted_after_we_left_room_id, user1_id, tok=user1_tok)
+        self.helper.leave(encrypted_after_we_left_room_id, user1_id, tok=user1_tok)
+
+        # Encrypt the room after we've left
+        self.helper.send_state(
+            encrypted_after_we_left_room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try with `is_encrypted=True`
+        truthy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_map.keys(), {})
+
+        # Try with `is_encrypted=False`
+        falsy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=False,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        # At the time of us leaving, both rooms were unencrypted
+        self.assertEqual(
+            falsy_filtered_room_map.keys(), {room_id, encrypted_after_we_left_room_id}
+        )
+
     def test_filter_encrypted_with_remote_invite_room_no_stripped_state(self) -> None:
         """
         Test that we can apply a `filter.is_encrypted` filter against a remote invite

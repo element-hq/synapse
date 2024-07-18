@@ -315,7 +315,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         self, room_ids: Set[str]
     ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
-        Bulk fetch room types for the given rooms.
+        Bulk fetch room types for the given rooms (via current state).
 
         Since this function is cached, any missing values would be cached as `None`. In
         order to distinguish between an unencrypted room that has `None` encryption and
@@ -342,9 +342,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         results = dict(rows)
         for room_id in room_ids - results.keys():
             try:
-                # FIXME: Currently, this grabs the create event from the current state
-                # which will be cleared if the server is no longer in the room. We should
-                # make this work even if the server is no longer in the room.
                 create_event = await self.get_create_event_for_room(room_id)
                 room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
                 results[room_id] = room_type
@@ -365,7 +362,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         self, room_ids: Set[str]
     ) -> Mapping[str, Union[Optional[str], Sentinel]]:
         """
-        Bulk fetch room encryption for the given rooms.
+        Bulk fetch room encryption for the given rooms (via current state).
 
         Since this function is cached, any missing values would be cached as `None`. In
         order to distinguish between an unencrypted room that has `None` encryption and
@@ -393,9 +390,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         results = dict(rows)
         encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
-            # FIXME: Currently, this grabs the create event from the current state
-            # which will be cleared if the server is no longer in the room. We should
-            # make this work even if the server is no longer in the room.
             state_map = await self.get_partial_filtered_current_state_ids(
                 room_id,
                 state_filter=StateFilter.from_types(
