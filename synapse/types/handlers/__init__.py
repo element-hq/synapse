@@ -200,18 +200,24 @@ class SlidingSyncResult:
                 flag set. (same as sync v2)
         """
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StrippedHero:
+            user_id: str
+            display_name: Optional[str]
+            avatar_url: Optional[str]
+
         name: Optional[str]
         avatar: Optional[str]
-        heroes: Optional[List[EventBase]]
+        heroes: Optional[List[StrippedHero]]
         is_dm: bool
         initial: bool
-        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        required_state: Optional[List[EventBase]]
-        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
-        timeline_events: Optional[List[EventBase]]
+        # Should be empty for invite/knock rooms with `stripped_state`
+        required_state: List[EventBase]
+        # Should be empty for invite/knock rooms with `stripped_state`
+        timeline_events: List[EventBase]
         bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
         # Optional because it's only relevant to invite/knock rooms
-        stripped_state: Optional[List[JsonDict]]
+        stripped_state: List[JsonDict]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         prev_batch: Optional[StreamToken]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`

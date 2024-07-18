@@ -1,0 +1,1 @@
+Fix rare bug where `/sync` would break for a user when using workers with multiple stream writers.
