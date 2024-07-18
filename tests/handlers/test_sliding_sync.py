@@ -20,7 +20,7 @@
 import logging
 from copy import deepcopy
 from typing import Dict, Optional, Tuple
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from parameterized import parameterized
 
@@ -3792,9 +3792,9 @@ class GetRoomSyncDataTestCase(HomeserverTestCase):
 
     def _create_sync_configs(
         self,
-        user_id,
-        room_id,
-        timeline_limit=5,
+        user_id: str,
+        room_id: str,
+        timeline_limit: int = 5,
     ) -> Tuple[SlidingSyncConfig, RoomSyncConfig, _RoomMembershipForUser]:
         """Create the configs necessary to call `get_room_sync_data`"""
         requester = create_requester(user_id, device_id="foo_device")
