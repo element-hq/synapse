@@ -1250,7 +1250,7 @@ class SlidingSyncHandler:
                 )
                 assert stripped_state_map is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
-                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms(...)` "
+                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms_from_sync_room_map(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
                 )
 
@@ -1336,7 +1336,7 @@ class SlidingSyncHandler:
                 )
                 assert stripped_state_map is not Sentinel.UNSET_SENTINEL, (
                     f"Stripped state left unset for room {room_id}. "
-                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms(...)` "
+                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms_from_sync_room_map(...)` "
                     + "with that room_id. (this is a problem with Synapse itself)"
                 )
 
