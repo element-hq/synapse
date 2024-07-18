@@ -127,6 +127,11 @@ class SlidingSyncConfig(SlidingSyncBody):
         This is generally a combination of device ID and conn_id. However, both
         these two are optional (e.g. puppet access tokens don't have device
         IDs), so this handles those edge cases.
+
+        We use this over the raw `conn_id` to avoid clashes between different
+        clients that use the same `conn_id`. Imagine a user uses a web client
+        that uses `conn_id: main_sync_loop` and an Android client that also has
+        a `conn_id: main_sync_loop`.
         """
 
         # If this is missing, only one sliding sync connection is allowed per
