@@ -627,11 +627,13 @@ class SlidingSyncHandler:
                 conn_id=sync_config.connection_id(),
                 from_token=from_token,
                 sent_room_ids=relevant_room_map.keys(),
-                unsent_room_ids=[],  # TODO: We currently ssume that we have sent down all updates.
+                # TODO: We need to calculate which rooms have had updates since the `from_token` but were not included in the `sent_room_ids`
+                unsent_room_ids=[],
             )
         elif from_token:
             connection_token = from_token.connection_token
         else:
+            # Initial sync without a `from_token` starts a `0`
             connection_token = 0
 
         return SlidingSyncResult(
@@ -1982,7 +1984,7 @@ class SlidingSyncConnectionStore:
     async def have_sent_room(
         self, user_id: str, conn_id: str, connection_token: int, room_id: str
     ) -> HaveSentRoom:
-        """Whether for the given user_id/conn_id/token, return whether we have
+        """For the given user_id/conn_id/token, return whether we have
         previously sent the room down
         """
 
@@ -2012,7 +2014,7 @@ class SlidingSyncConnectionStore:
                 part of this request (only needs to be ones we didn't
                 previously sent down).
             unsent_room_ids: The set of room IDs that have had updates
-                since the `last_room_token`, but which were not included in
+                since the `from_token`, but which were not included in
                 this request
         """
         prev_connection_token = 0
@@ -2089,9 +2091,9 @@ class SlidingSyncConnectionStore:
             return
 
         sync_statuses = {
-            i: room_statuses
-            for i, room_statuses in sync_statuses.items()
-            if i == from_token.connection_token
+            connection_token: room_statuses
+            for connection_token, room_statuses in sync_statuses.items()
+            if connection_token == from_token.connection_token
         }
         if sync_statuses:
             self._connections[(user_id, conn_id)] = sync_statuses

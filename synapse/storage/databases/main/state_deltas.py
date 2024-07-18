@@ -162,8 +162,7 @@ class StateDeltasStore(SQLBaseStore):
     async def get_current_state_deltas_for_room(
         self, room_id: str, from_token: RoomStreamToken, to_token: RoomStreamToken
     ) -> List[StateDelta]:
-        """Get the state deltas between that have happened between two
-        tokens."""
+        """Get the state deltas between two tokens."""
 
         def get_current_state_deltas_for_room_txn(
             txn: LoggingTransaction,

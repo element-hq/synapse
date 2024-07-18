@@ -4411,7 +4411,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
 
     def test_incremental_sync_full_state_new_room(self) -> None:
-        """Test that we get state all state in incremental sync for rooms that
+        """Test that we get all state in incremental sync for rooms that
         we haven't seen before.
         """
 
