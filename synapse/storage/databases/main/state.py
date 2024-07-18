@@ -308,32 +308,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cached(max_entries=10000)
     async def get_room_type(self, room_id: str) -> Optional[str]:
-        """
-        Get the room type for a given room.
-
-        Returns:
-            The room type if known (`None` is a valid room type)
-
-        Raises:
-            NotFoundError if the room is unknown
-        """
-
-        row = await self.db_pool.simple_select_one(
-            table="room_stats_state",
-            keyvalues={"room_id": room_id},
-            retcols=("room_type",),
-            allow_none=True,
-            desc="get_room_type",
-        )
-
-        if row is not None:
-            return row[0]
-
-        # If we haven't updated `room_stats_state` with the room yet, query the
-        # create event directly.
-        create_event = await self.get_create_event_for_room(room_id)
-        room_type = create_event.content.get(EventContentFields.ROOM_TYPE)
-        return room_type
+        raise NotImplementedError()
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
@@ -380,52 +355,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     @cached(max_entries=10000)
     async def get_room_encryption(self, room_id: str) -> Optional[str]:
-        """
-        Get the encryption algorithm for a given room.
-
-        Returns:
-            The encryption algorithm if the room is encrypted, otherwise `None`.
-
-        Raises:
-            NotFoundError if the room is unknown
-        """
-
-        row = await self.db_pool.simple_select_one(
-            table="room_stats_state",
-            keyvalues={"room_id": room_id},
-            retcols=("encryption",),
-            allow_none=True,
-            desc="get_room_is_encrypted",
-        )
-
-        if row is not None:
-            return row[0]
-
-        # If we haven't updated `room_stats_state` with the room yet, query the state
-        # directly.
-        state_map = await self.get_partial_filtered_current_state_ids(
-            room_id,
-            state_filter=StateFilter.from_types(
-                [
-                    (EventTypes.Create, ""),
-                    (EventTypes.RoomEncryption, ""),
-                ]
-            ),
-        )
-        # We can use the create event as a canary to tell whether the server has seen
-        # the room before
-        create_event_id = state_map.get((EventTypes.Create, ""))
-        encryption_event_id = state_map.get((EventTypes.RoomEncryption, ""))
-        if create_event_id is None:
-            raise NotFoundError(
-                f"Unknown room {room_id} does not have any state to determine room encryption"
-            )
-
-        if encryption_event_id is None:
-            return None
-
-        encryption_event = await self.get_event(encryption_event_id)
-        return encryption_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
+        raise NotImplementedError()
 
     @cachedList(cached_method_name="get_room_encryption", list_name="room_ids")
     async def bulk_get_room_encryption(
