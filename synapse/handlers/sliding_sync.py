@@ -30,6 +30,7 @@ from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membe
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
+from synapse.logging.opentracing import start_active_span, tag_args, trace
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.storage.roommember import MemberSummary
@@ -47,6 +48,7 @@ from synapse.types import (
 )
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
 from synapse.types.state import StateFilter
+from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -385,7 +387,7 @@ class SlidingSyncHandler:
             # this returns false, it means we timed out waiting, and we should
             # just return an empty response.
             before_wait_ts = self.clock.time_msec()
-            if not await self.notifier.wait_for_stream_token(from_token.stream_token):
+            if not await self.notifier.wait_for_stream_token(from_token.stream):
                 logger.warning(
                     "Timed out waiting for worker to catch up. Returning empty response"
                 )
@@ -423,7 +425,7 @@ class SlidingSyncHandler:
                 sync_config.user.to_string(),
                 timeout_ms,
                 current_sync_callback,
-                from_token=from_token.stream_token,
+                from_token=from_token.stream,
             )
 
         return result
@@ -470,7 +472,7 @@ class SlidingSyncHandler:
                 await self.get_room_membership_for_user_at_to_token(
                     user=sync_config.user,
                     to_token=to_token,
-                    from_token=from_token.stream_token if from_token else None,
+                    from_token=from_token.stream if from_token else None,
                 )
             )
 
@@ -603,11 +605,14 @@ class SlidingSyncHandler:
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
-        for room_id, room_sync_config in relevant_room_map.items():
+
+        @trace
+        @tag_args
+        async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
                 room_id=room_id,
-                room_sync_config=room_sync_config,
+                room_sync_config=relevant_room_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
                     room_id
                 ],
@@ -616,6 +621,9 @@ class SlidingSyncHandler:
             )
 
             rooms[room_id] = room_sync_result
+
+        with start_active_span("sliding_sync.generate_room_entries"):
+            await concurrently_execute(handle_room, relevant_room_map, 10)
 
         extensions = await self.get_extensions_response(
             sync_config=sync_config, to_token=to_token
@@ -630,7 +638,7 @@ class SlidingSyncHandler:
                 unsent_room_ids=[],
             )
         elif from_token:
-            connection_token = from_token.connection_token
+            connection_token = from_token.connection
         else:
             # Initial sync without a `from_token` starts a `0`
             connection_token = 0
@@ -1406,11 +1414,11 @@ class SlidingSyncHandler:
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
             room_status = await self.connection_store.have_sent_room(
                 sync_config=sync_config,
-                connection_token=from_token.connection_token,
+                connection_token=from_token.connection,
                 room_id=room_id,
             )
             if room_status.status == HaveSentRoomFlag.LIVE:
-                from_bound = from_token.stream_token.room_key
+                from_bound = from_token.stream.room_key
                 initial = False
             elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
                 assert room_status.last_token is not None
@@ -1520,9 +1528,7 @@ class SlidingSyncHandler:
                         instance_name=timeline_event.internal_metadata.instance_name,
                         stream=timeline_event.internal_metadata.stream_ordering,
                     )
-                    if persisted_position.persisted_after(
-                        from_token.stream_token.room_key
-                    ):
+                    if persisted_position.persisted_after(from_token.stream.room_key):
                         num_live += 1
                     else:
                         # Since we're iterating over the timeline events in
@@ -2020,7 +2026,7 @@ class SlidingSyncConnectionStore:
         """
         prev_connection_token = 0
         if from_token is not None:
-            prev_connection_token = from_token.connection_token
+            prev_connection_token = from_token.connection
 
         # If there are no changes then this is a noop.
         if not sent_room_ids and not unsent_room_ids:
@@ -2056,7 +2062,7 @@ class SlidingSyncConnectionStore:
 
         # Work out the new state for unsent rooms that were `LIVE`.
         if from_token:
-            new_unsent_state = HaveSentRoom.previously(from_token.stream_token.room_key)
+            new_unsent_state = HaveSentRoom.previously(from_token.stream.room_key)
         else:
             new_unsent_state = HAVE_SENT_ROOM_NEVER
 
@@ -2095,7 +2101,7 @@ class SlidingSyncConnectionStore:
         sync_statuses = {
             connection_token: room_statuses
             for connection_token, room_statuses in sync_statuses.items()
-            if connection_token == from_token.connection_token
+            if connection_token == from_token.connection
         }
         if sync_statuses:
             self._connections[conn_key] = sync_statuses
