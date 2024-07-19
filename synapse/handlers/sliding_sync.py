@@ -1219,64 +1219,41 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            localhost_participating_room_ids: set[str] = {
-                room_id
-                for room_id in filtered_room_id_set
-                # We already know the server is participating because this user is
-                # joined
-                if sync_room_map[room_id].membership == Membership.JOIN
-            }
-
-            # Check if the server is participating in the room which we can use
-            # to derive whether we can rely on current state for this room.
-            room_id_to_server_participating = await self.store.is_local_host_in_rooms(
-                # We only need to check the rooms that we don't know are participating
-                filtered_room_id_set.difference(localhost_participating_room_ids),
-            )
-
-            localhost_not_participating_room_ids = set()
-            for room_id, is_participating in room_id_to_server_participating.items():
-                if is_participating:
-                    localhost_participating_room_ids.add(room_id)
-                else:
-                    localhost_not_participating_room_ids.add(room_id)
-
             # As a bulk shortcut, lookup the encryption state for the room based on the
             # current state if the server is particpating in the room (meaning we have
-            # current state). Ideally, for leave/ban rooms, we would at the state at the
-            # time of the membership instead of current state to not leak anything but
-            # we consider the room encryption status to not be a secret given it's often
-            # set at the start of the room and it's one of the stripped state events
-            # that is normally handed out.
+            # current state). Ideally, for leave/ban rooms, we would want the state at
+            # the time of the membership instead of current state to not leak anything
+            # but we consider the room encryption status to not be a secret given it's
+            # often set at the start of the room and it's one of the stripped state
+            # events that is normally handed out.
             #
             # Since this function is cached, we need to make a mutable copy via
             # `dict(...)`.
-            #
-            # TODO: It's possible we race from the time we checked if the server is
-            # participating in the room and the time we fetch the encryption state here
-            # which may be unset now because the server left in the time in between. We
-            # can't really easily tell if this happened. We could do both queries in the
-            # same transaction.
             room_id_to_encryption = dict(
-                await self.store.bulk_get_room_encryption(
-                    localhost_participating_room_ids
-                )
+                await self.store.bulk_get_room_encryption(filtered_room_id_set)
             )
+            room_ids_with_results = [
+                room_id
+                for room_id, encryption in room_id_to_encryption.items()
+                if encryption is not ROOM_UNKNOWN_SENTINEL
+            ]
 
             # We might not have current room state for remote invite/knocks if we are
             # the first person on our server to see the room. The best we can do is look
             # in the optional stripped state from the invite/knock event.
-            room_id_to_stripped_state_map = {
-                **room_id_to_stripped_state_map,
-                **await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
-                    localhost_not_participating_room_ids, sync_room_map
-                ),
-            }
+            room_ids_without_results = filtered_room_id_set.difference(
+                chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
+            )
+            room_id_to_stripped_state_map.update(
+                await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
+                    room_ids_without_results, sync_room_map
+                )
+            )
 
             # Update our `room_id_to_encryption` map based on the stripped state
             # (applies to invite/knock rooms)
             rooms_ids_without_stripped_state: Set[str] = set()
-            for room_id in localhost_not_participating_room_ids:
+            for room_id in room_ids_without_results:
                 stripped_state_map = room_id_to_stripped_state_map.get(
                     room_id, Sentinel.UNSET_SENTINEL
                 )
@@ -1306,22 +1283,37 @@ class SlidingSyncHandler:
             # Last resort, we might not have current room state for rooms that the
             # server has left (no one local is in the room) but we can look at the
             # historical state.
-            left_room_ids_without_results = [
+            server_left_room_ids_without_results = [
                 room_id for room_id in rooms_ids_without_stripped_state
             ]
-
             # Update our `room_id_to_encryption` map based on the state at the time of
-            # the leave/ban membership event.
-            for room_id in left_room_ids_without_results:
-                room_state = await self.get_current_state_at(
+            # the membership event.
+            for room_id in server_left_room_ids_without_results:
+                room_state = await self.storage_controllers.state.get_state_at(
                     room_id=room_id,
-                    room_membership_for_user_at_to_token=sync_room_map[room_id],
-                    state_filter=StateFilter.from_types(
-                        [(EventTypes.RoomEncryption, "")]
+                    stream_position=to_token.copy_and_replace(
+                        StreamKeyType.ROOM,
+                        sync_room_map[room_id].event_pos.to_room_stream_token(),
                     ),
-                    to_token=to_token,
+                    state_filter=StateFilter.from_types(
+                        [
+                            (EventTypes.Create, ""),
+                            (EventTypes.RoomEncryption, ""),
+                        ]
+                    ),
+                    # Partially-stated rooms should have all state events except for
+                    # remote membership events so we don't need to wait at all.
+                    await_full_state=False,
                 )
+                # We can use the create event as a canary to tell whether the server has
+                # seen the room before
+                create_event = room_state.get((EventTypes.Create, ""))
                 encryption_event = room_state.get((EventTypes.RoomEncryption, ""))
+
+                if create_event is None:
+                    # Skip for unknown rooms
+                    continue
+
                 if encryption_event is not None:
                     room_id_to_encryption[room_id] = encryption_event.content.get(
                         EventContentFields.ENCRYPTION_ALGORITHM
@@ -1369,8 +1361,16 @@ class SlidingSyncHandler:
         # provided in the list. `None` is a valid type for rooms which do not have a
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
-            # Lookup the room type from the database. Since this function is
-            # cached, we need to make a mutable copy via `dict(...)`.
+            # As a bulk shortcut, lookup the room_type based on the current state if the
+            # server is particpating in the room (meaning we have current state).
+            # Ideally, for leave/ban rooms, we wouldn't be looking at the current state
+            # but the create event isn't secret given it's created at the beginning of
+            # the room meaning if you've had any membership before, you already knew
+            # about it and for invite/knock it is handed out as one of the stripped
+            # events anyway.
+            #
+            # Since this function is cached, we need to make a mutable copy via
+            # `dict(...)`.
             room_id_to_type = dict(
                 await self.store.bulk_get_room_type(filtered_room_id_set)
             )
@@ -1386,14 +1386,14 @@ class SlidingSyncHandler:
             room_ids_without_results = filtered_room_id_set.difference(
                 chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
             )
-            room_id_to_stripped_state_map = {
-                **room_id_to_stripped_state_map,
-                **await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
+            room_id_to_stripped_state_map.update(
+                await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
                     room_ids_without_results, sync_room_map
-                ),
-            }
+                )
+            )
 
             # Update our `room_id_to_type` map based on the stripped state
+            rooms_ids_without_stripped_state: Set[str] = set()
             for room_id in room_ids_without_results:
                 stripped_state_map = room_id_to_stripped_state_map.get(
                     room_id, Sentinel.UNSET_SENTINEL
@@ -1410,6 +1410,44 @@ class SlidingSyncHandler:
                         room_id_to_type[room_id] = create_event.content.get(
                             EventContentFields.ROOM_TYPE
                         )
+                else:
+                    rooms_ids_without_stripped_state.add(room_id)
+
+            # Last resort, we might not have current room state for rooms that the
+            # server has left (no one local is in the room) but we can look at the
+            # historical state.
+            server_left_room_ids_without_results = [
+                room_id for room_id in rooms_ids_without_stripped_state
+            ]
+            # Update our `room_id_to_type` map based on the state at the time of
+            # the membership event.
+            for room_id in server_left_room_ids_without_results:
+                room_state = await self.storage_controllers.state.get_state_at(
+                    room_id=room_id,
+                    stream_position=to_token.copy_and_replace(
+                        StreamKeyType.ROOM,
+                        sync_room_map[room_id].event_pos.to_room_stream_token(),
+                    ),
+                    state_filter=StateFilter.from_types(
+                        [
+                            (EventTypes.Create, ""),
+                        ]
+                    ),
+                    # Partially-stated rooms should have all state events except for
+                    # remote membership events so we don't need to wait at all.
+                    await_full_state=False,
+                )
+                # We can use the create event as a canary to tell whether the server has
+                # seen the room before
+                create_event = room_state.get((EventTypes.Create, ""))
+
+                if create_event is None:
+                    # Skip for unknown rooms
+                    continue
+
+                room_id_to_type[room_id] = create_event.content.get(
+                    EventContentFields.ROOM_TYPE
+                )
 
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
@@ -1520,14 +1558,17 @@ class SlidingSyncHandler:
                 in the room at the time of `to_token`.
             to_token: The point in the stream to sync up to.
         """
-        room_state_ids: StateMap[str]
+        state_ids: StateMap[str]
         # People shouldn't see past their leave/ban event
         if room_membership_for_user_at_to_token.membership in (
             Membership.LEAVE,
             Membership.BAN,
         ):
-            # TODO: `get_state_ids_at(...)` doesn't take into account the "current state"
-            room_state_ids = await self.storage_controllers.state.get_state_ids_at(
+            # TODO: `get_state_ids_at(...)` doesn't take into account the "current
+            # state". Maybe we need to use
+            # `get_forward_extremities_for_room_at_stream_ordering(...)` to "Fetch the
+            # current state at the time."
+            state_ids = await self.storage_controllers.state.get_state_ids_at(
                 room_id,
                 stream_position=to_token.copy_and_replace(
                     StreamKeyType.ROOM,
@@ -1546,7 +1587,7 @@ class SlidingSyncHandler:
             )
         # Otherwise, we can get the latest current state in the room
         else:
-            room_state_ids = await self.storage_controllers.state.get_current_state_ids(
+            state_ids = await self.storage_controllers.state.get_current_state_ids(
                 room_id,
                 state_filter,
                 # Partially-stated rooms should have all state events except for
@@ -1561,7 +1602,7 @@ class SlidingSyncHandler:
             )
             # TODO: Query `current_state_delta_stream` and reverse/rewind back to the `to_token`
 
-        return room_state_ids
+        return state_ids
 
     async def get_current_state_at(
         self,
@@ -1581,17 +1622,17 @@ class SlidingSyncHandler:
                 in the room at the time of `to_token`.
             to_token: The point in the stream to sync up to.
         """
-        room_state_ids = await self.get_current_state_ids_at(
+        state_ids = await self.get_current_state_ids_at(
             room_id=room_id,
             room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
             state_filter=state_filter,
             to_token=to_token,
         )
 
-        event_map = await self.store.get_events(list(room_state_ids.values()))
+        event_map = await self.store.get_events(list(state_ids.values()))
 
         state_map = {}
-        for key, event_id in room_state_ids.items():
+        for key, event_id in state_ids.items():
             event = event_map.get(event_id)
             if event:
                 state_map[key] = event

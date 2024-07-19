@@ -328,18 +328,43 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             Rooms unknown to this server will return `ROOM_UNKNOWN_SENTINEL`.
         """
 
-        rows = await self.db_pool.simple_select_many_batch(
-            table="room_stats_state",
-            column="room_id",
-            iterable=room_ids,
-            retcols=("room_id", "room_type"),
-            desc="bulk_get_room_type",
+        def txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, bool]:
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "room_id", room_ids
+            )
+
+            # FIXME: Use `room_stats_current.current_state_events` instead of
+            # `room_stats_current.local_users_in_room` once
+            # https://github.com/element-hq/synapse/issues/17457 is fixed.
+            sql = """
+                SELECT room_id, room_type
+                FROM room_stats_state
+                INNER JOIN room_stats_current USING (room_id)
+                WHERE
+                    %s
+                    AND local_users_in_room > 0
+            """ % (
+                clause
+            )
+
+            txn.execute(sql, args)
+
+            room_id_to_type_map = {}
+            for row in txn:
+                room_id_to_type_map[row[0]] = row[1]
+
+            return room_id_to_type_map
+
+        results = await self.db_pool.runInteraction(
+            "bulk_get_room_type",
+            txn,
         )
 
         # If we haven't updated `room_stats_state` with the room yet, query the
         # create events directly. This should happen only rarely so we don't
         # mind if we do this in a loop.
-        results = dict(rows)
         for room_id in room_ids - results.keys():
             try:
                 create_event = await self.get_create_event_for_room(room_id)
@@ -384,7 +409,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             )
 
             # FIXME: Use `room_stats_current.current_state_events` instead of
-            # `room_stats_current.joined_members` once
+            # `room_stats_current.local_users_in_room` once
             # https://github.com/element-hq/synapse/issues/17457 is fixed.
             sql = """
                 SELECT room_id, encryption
@@ -392,7 +417,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 INNER JOIN room_stats_current USING (room_id)
                 WHERE
                     %s
-                    AND joined_members > 0
+                    AND local_users_in_room > 0
             """ % (
                 clause
             )
