@@ -315,7 +315,7 @@ class SlidingSyncResult:
         e2ee: Optional[E2eeExtension] = None
 
         def __bool__(self) -> bool:
-            return bool(self.to_device)
+            return bool(self.to_device or self.e2ee)
 
     next_pos: StreamToken
     lists: Dict[str, SlidingWindowList]
