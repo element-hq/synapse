@@ -248,11 +248,11 @@ class KeyChangesServlet(RestServlet):
 
         # We want to enforce they do pass us one, but we ignore it and return
         # changes after the "to" as well as before.
-        to_token_string = parse_string(request, "to", required=True)
-        set_tag("to", to_token_string)
+        #
+        # XXX This does not enforce that "to" is passed.
+        set_tag("to", str(parse_string(request, "to")))
 
         from_token = await StreamToken.from_string(self.store, from_token_string)
-        # to_token = await StreamToken.from_string(self.store, to_token_string)
 
         user_id = requester.user.to_string()
 
