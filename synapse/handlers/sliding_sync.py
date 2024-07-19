@@ -1275,7 +1275,7 @@ class SlidingSyncHandler:
 
             # Update our `room_id_to_encryption` map based on the stripped state
             # (applies to invite/knock rooms)
-            rooms_ids_without_stripped_state: set[str] = []
+            rooms_ids_without_stripped_state: Set[str] = set()
             for room_id in localhost_not_participating_room_ids:
                 stripped_state_map = room_id_to_stripped_state_map.get(
                     room_id, Sentinel.UNSET_SENTINEL

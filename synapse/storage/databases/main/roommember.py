@@ -1285,7 +1285,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         self, room_ids: Sequence[str]
     ) -> Mapping[str, bool]:
         """
-        Check if there are any local users joined to the given rooms
+        Check if there are any local users joined to the given rooms.
 
         Returns:
             A mapping from room_id to whether there are any local users in the room.

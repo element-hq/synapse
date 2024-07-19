@@ -375,18 +375,44 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             encrypted, otherwise `None`. Rooms unknown to this server will return
             `ROOM_UNKNOWN_SENTINEL`.
         """
-        rows = await self.db_pool.simple_select_many_batch(
-            table="room_stats_state",
-            column="room_id",
-            iterable=room_ids,
-            retcols=("room_id", "encryption"),
-            desc="bulk_get_encryption",
+
+        def txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, bool]:
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "room_id", room_ids
+            )
+
+            # FIXME: Use `room_stats_current.current_state_events` instead of
+            # `room_stats_current.joined_members` once
+            # https://github.com/element-hq/synapse/issues/17457 is fixed.
+            sql = """
+                SELECT room_id, encryption
+                FROM room_stats_state
+                INNER JOIN room_stats_current USING (room_id)
+                WHERE
+                    %s
+                    AND joined_members > 0
+            """ % (
+                clause
+            )
+
+            txn.execute(sql, args)
+
+            room_id_to_encryption_map = {}
+            for row in txn:
+                room_id_to_encryption_map[row[0]] = row[1]
+
+            return room_id_to_encryption_map
+
+        results = await self.db_pool.runInteraction(
+            "bulk_get_room_encryption",
+            txn,
         )
 
         # If we haven't updated `room_stats_state` with the room yet, query the state
         # directly. This should happen only rarely so we don't mind if we do this in a
         # loop.
-        results = dict(rows)
         encryption_event_ids: List[str] = []
         for room_id in room_ids - results.keys():
             state_map = await self.get_partial_filtered_current_state_ids(
