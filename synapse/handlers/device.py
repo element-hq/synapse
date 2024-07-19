@@ -343,8 +343,8 @@ class DeviceWorkerHandler:
             possibly_left = set()
 
         device_list_updates = DeviceListUpdates(
-            changed=set(possibly_joined),
-            left=set(possibly_left),
+            changed=possibly_joined,
+            left=possibly_left,
         )
 
         log_kv(
