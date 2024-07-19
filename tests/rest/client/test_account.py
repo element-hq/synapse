@@ -535,7 +535,7 @@ class DeactivateTestCase(unittest.HomeserverTestCase):
         # Check that the membership of @invitee:test in the room is now "leave".
         memberships = self.get_success(
             store.get_rooms_for_local_user_where_membership_is(
-                invitee_id, (Membership.LEAVE,)
+                invitee_id, [Membership.LEAVE]
             )
         )
         self.assertEqual(len(memberships), 1, memberships)

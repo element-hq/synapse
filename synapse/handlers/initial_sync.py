@@ -135,7 +135,7 @@ class InitialSyncHandler:
             memberships.append(Membership.LEAVE)
 
         room_list = await self.store.get_rooms_for_local_user_where_membership_is(
-            user_id=user_id, membership_list=tuple(memberships)
+            user_id=user_id, membership_list=memberships
         )
 
         user = UserID.from_string(user_id)

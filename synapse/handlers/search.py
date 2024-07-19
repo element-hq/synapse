@@ -278,7 +278,7 @@ class SearchHandler:
         # TODO: Search through left rooms too
         rooms = await self.store.get_rooms_for_local_user_where_membership_is(
             requester.user.to_string(),
-            membership_list=(Membership.JOIN,),
+            membership_list=[Membership.JOIN],
             # membership_list=[Membership.JOIN, Membership.LEAVE, Membership.Ban],
         )
         room_ids = {r.room_id for r in rooms}

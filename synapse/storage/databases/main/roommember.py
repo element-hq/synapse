@@ -385,7 +385,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         return await self.get_rooms_for_local_user_where_membership_is(
-            user_id, (Membership.INVITE,)
+            user_id, [Membership.INVITE]
         )
 
     async def get_knocked_at_rooms_for_local_user(
@@ -401,7 +401,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         return await self.get_rooms_for_local_user_where_membership_is(
-            user_id, (Membership.KNOCK,)
+            user_id, [Membership.KNOCK]
         )
 
     async def get_invite_for_local_user_in_room(

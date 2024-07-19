@@ -114,7 +114,7 @@ class ServerNoticesManager:
             return None
 
         rooms = await self._store.get_rooms_for_local_user_where_membership_is(
-            user_id, (Membership.INVITE, Membership.JOIN)
+            user_id, [Membership.INVITE, Membership.JOIN]
         )
         for room in rooms:
             # it's worth noting that there is an asymmetry here in that we
@@ -262,7 +262,7 @@ class ServerNoticesManager:
         # Check whether the user has already joined or been invited to this room. If
         # that's the case, there is no need to re-invite them.
         joined_rooms = await self._store.get_rooms_for_local_user_where_membership_is(
-            user_id, (Membership.INVITE, Membership.JOIN)
+            user_id, [Membership.INVITE, Membership.JOIN]
         )
         for room in joined_rooms:
             if room.room_id == room_id:
