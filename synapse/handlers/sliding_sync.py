@@ -1219,6 +1219,13 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
+            # As a bulk shortcut, lookup the encryption state for the room based on the
+            # current state. Ideally, for leave/ban rooms, we would at the state at the
+            # time of the membership instead of current state to not leak anything but
+            # we consider the room encryption status to not be a secret given it's often
+            # set at the start of the room and it's one of the stripped state events
+            # that is normally handed out.
+            #
             # Lookup the encryption state from the database. Since this function is
             # cached, we need to make a mutable copy via `dict(...)`.
             room_id_to_encryption = dict(
@@ -1230,9 +1237,9 @@ class SlidingSyncHandler:
                 if encryption is not ROOM_UNKNOWN_SENTINEL
             ]
 
-            # We might not have room state for remote invite/knocks if we are the first
-            # person on our server to see the room. The best we can do is look in the
-            # optional stripped state from the invite/knock event.
+            # We might not have current room state for remote invite/knocks if we are
+            # the first person on our server to see the room. The best we can do is look
+            # in the optional stripped state from the invite/knock event.
             room_ids_without_results = filtered_room_id_set.difference(
                 chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
             )
@@ -1255,17 +1262,52 @@ class SlidingSyncHandler:
                 )
 
                 if stripped_state_map is not None:
-                    encryption_event = stripped_state_map.get(
+                    encryption_stripped_event = stripped_state_map.get(
                         (EventTypes.RoomEncryption, "")
                     )
-                    if encryption_event is not None:
-                        room_id_to_encryption[room_id] = encryption_event.content.get(
-                            EventContentFields.ENCRYPTION_ALGORITHM
+                    if encryption_stripped_event is not None:
+                        room_id_to_encryption[room_id] = (
+                            encryption_stripped_event.content.get(
+                                EventContentFields.ENCRYPTION_ALGORITHM
+                            )
                         )
                     else:
                         # Didn't see any encryption events in the stripped state so we
                         # can assume the room is unencrypted.
                         room_id_to_encryption[room_id] = None
+
+            # Last resort, we might not have current room state for rooms that the
+            # server has left (everyone local has left the room).
+            left_room_ids_without_results = [
+                room_id
+                for room_id in room_ids_without_results
+                if sync_room_map[room_id].membership
+                in (Membership.LEAVE, Membership.BAN)
+            ]
+            logger.info(
+                "left_room_ids_without_results %s", left_room_ids_without_results
+            )
+
+            # Update our `room_id_to_encryption` map based on the state at the time of
+            # the leave/ban membership event.
+            for room_id in left_room_ids_without_results:
+                room_state = await self.get_current_state_at(
+                    room_id=room_id,
+                    room_membership_for_user_at_to_token=sync_room_map[room_id],
+                    state_filter=StateFilter.from_types(
+                        [(EventTypes.RoomEncryption, "")]
+                    ),
+                    to_token=to_token,
+                )
+                encryption_event = room_state.get((EventTypes.RoomEncryption, ""))
+                if encryption_event is not None:
+                    room_id_to_encryption[room_id] = encryption_event.content.get(
+                        EventContentFields.ENCRYPTION_ALGORITHM
+                    )
+                else:
+                    # Didn't see any encryption events in the state so we can assume the
+                    # room is unencrypted.
+                    room_id_to_encryption[room_id] = None
 
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items

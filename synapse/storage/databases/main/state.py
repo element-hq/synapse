@@ -375,7 +375,6 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             encrypted, otherwise `None`. Rooms unknown to this server will return
             `ROOM_UNKNOWN_SENTINEL`.
         """
-
         rows = await self.db_pool.simple_select_many_batch(
             table="room_stats_state",
             column="room_id",

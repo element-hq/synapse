@@ -3280,6 +3280,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
+        before_rooms_token = self.event_sources.get_current_token()
+
         # Create an unencrypted room
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         # Leave the room
@@ -3301,7 +3303,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Get the rooms the user should be syncing with
         sync_room_map = self._get_sync_room_ids_for_user(
             UserID.from_string(user1_id),
-            from_token=None,
+            from_token=before_rooms_token,
             to_token=after_rooms_token,
         )
 
