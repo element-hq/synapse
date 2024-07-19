@@ -1283,12 +1283,10 @@ class SlidingSyncHandler:
             # Last resort, we might not have current room state for rooms that the
             # server has left (no one local is in the room) but we can look at the
             # historical state.
-            server_left_room_ids_without_results = [
-                room_id for room_id in rooms_ids_without_stripped_state
-            ]
+            #
             # Update our `room_id_to_encryption` map based on the state at the time of
             # the membership event.
-            for room_id in server_left_room_ids_without_results:
+            for room_id in rooms_ids_without_stripped_state:
                 room_state = await self.storage_controllers.state.get_state_at(
                     room_id=room_id,
                     stream_position=to_token.copy_and_replace(
@@ -1302,7 +1300,8 @@ class SlidingSyncHandler:
                         ]
                     ),
                     # Partially-stated rooms should have all state events except for
-                    # remote membership events so we don't need to wait at all.
+                    # remote membership events so we don't need to wait at all because
+                    # we only want the create/room-encryptione events.
                     await_full_state=False,
                 )
                 # We can use the create event as a canary to tell whether the server has
@@ -1416,12 +1415,10 @@ class SlidingSyncHandler:
             # Last resort, we might not have current room state for rooms that the
             # server has left (no one local is in the room) but we can look at the
             # historical state.
-            server_left_room_ids_without_results = [
-                room_id for room_id in rooms_ids_without_stripped_state
-            ]
+            #
             # Update our `room_id_to_type` map based on the state at the time of
             # the membership event.
-            for room_id in server_left_room_ids_without_results:
+            for room_id in rooms_ids_without_stripped_state:
                 room_state = await self.storage_controllers.state.get_state_at(
                     room_id=room_id,
                     stream_position=to_token.copy_and_replace(
@@ -1434,7 +1431,8 @@ class SlidingSyncHandler:
                         ]
                     ),
                     # Partially-stated rooms should have all state events except for
-                    # remote membership events so we don't need to wait at all.
+                    # remote membership events so we don't need to wait at all because
+                    # we only want the create event.
                     await_full_state=False,
                 )
                 # We can use the create event as a canary to tell whether the server has

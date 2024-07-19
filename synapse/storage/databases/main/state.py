@@ -30,6 +30,7 @@ from typing import (
     Iterable,
     List,
     Mapping,
+    MutableMapping,
     Optional,
     Set,
     Tuple,
@@ -330,7 +331,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> Mapping[str, bool]:
+        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
@@ -403,7 +404,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         def txn(
             txn: LoggingTransaction,
-        ) -> Mapping[str, bool]:
+        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
             clause, args = make_in_list_sql_clause(
                 txn.database_engine, "room_id", room_ids
             )
