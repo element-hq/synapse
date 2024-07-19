@@ -3343,7 +3343,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         left.
 
         There is still someone local who is invited to the rooms but that doesn't affect
-        whether the server is participating in the room.
+        whether the server is participating in the room (users need to be joined).
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -4042,6 +4042,75 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(filtered_room_map.keys(), {space_room_id})
 
+    def test_filter_room_types_server_left_room2(self) -> None:
+        """
+        Test that we can apply a `filter.room_types` against a room that everyone has left.
+
+        There is still someone local who is invited to the rooms but that doesn't affect
+        whether the server is participating in the room (users need to be joined).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        _user2_tok = self.login(user2_id, "pass")
+
+        before_rooms_token = self.event_sources.get_current_token()
+
+        # Create a normal room (no room type)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Invite user2
+        self.helper.invite(room_id, targ=user2_id, tok=user1_tok)
+        # User1 leaves the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Invite user2
+        self.helper.invite(space_room_id, targ=user2_id, tok=user1_tok)
+        # User1 leaves the room
+        self.helper.leave(space_room_id, user1_id, tok=user1_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            # We're using a `from_token` so that the room is considered `newly_left` and
+            # appears in our list of relevant sync rooms
+            from_token=before_rooms_token,
+            to_token=after_rooms_token,
+        )
+
+        # Try finding only normal rooms
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {room_id})
+
+        # Try finding only spaces
+        filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(filtered_room_map.keys(), {space_room_id})
+
     def test_filter_room_types_with_remote_invite_room_no_stripped_state(self) -> None:
         """
         Test that we can apply a `filter.room_types` filter against a remote invite
@@ -4182,7 +4251,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
             filtered_room_map.keys(), {space_room_id, remote_invite_room_id}
         )
 
-    def test_filter_encrypted_with_remote_invite_normal_room(self) -> None:
+    def test_filter_room_types_with_remote_invite_normal_room(self) -> None:
         """
         Test that we can apply a `filter.room_types` filter against a remote invite
         to a normal room with some `unsigned.invite_room_state` (stripped state).
