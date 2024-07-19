@@ -445,6 +445,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         if not membership_list:
             return []
 
+        # Convert membership list to frozen set as a) it needs to be hashable,
+        # and b) we don't care about the order.
+        membership_list = frozenset(membership_list)
+
         rooms = await self._get_rooms_for_local_user_where_membership_is_inner(
             user_id,
             membership_list,
