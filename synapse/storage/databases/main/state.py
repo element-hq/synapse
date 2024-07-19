@@ -336,6 +336,15 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 txn.database_engine, "room_id", room_ids
             )
 
+            # We can't rely on `room_stats_state.room_type` if the server has left the
+            # room because the `room_id` will still be in the table but everything will
+            # be set to `None` but `None` is a valid room type value. We join against
+            # the `room_stats_current` table which keeps track of the
+            # `current_state_events` count (and a proxy value `local_users_in_room`
+            # which can used to assume the server is participating in the room and has
+            # current state) to ensure that the data in `room_stats_state` is up-to-date
+            # with the current state.
+            #
             # FIXME: Use `room_stats_current.current_state_events` instead of
             # `room_stats_current.local_users_in_room` once
             # https://github.com/element-hq/synapse/issues/17457 is fixed.
@@ -409,6 +418,15 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
                 txn.database_engine, "room_id", room_ids
             )
 
+            # We can't rely on `room_stats_state.encryption` if the server has left the
+            # room because the `room_id` will still be in the table but everything will
+            # be set to `None` but `None` is a valid encryption value. We join against
+            # the `room_stats_current` table which keeps track of the
+            # `current_state_events` count (and a proxy value `local_users_in_room`
+            # which can used to assume the server is participating in the room and has
+            # current state) to ensure that the data in `room_stats_state` is up-to-date
+            # with the current state.
+            #
             # FIXME: Use `room_stats_current.current_state_events` instead of
             # `room_stats_current.local_users_in_room` once
             # https://github.com/element-hq/synapse/issues/17457 is fixed.
