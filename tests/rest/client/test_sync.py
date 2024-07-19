@@ -2167,18 +2167,15 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
 
         # Room2 doesn't have a name so we should see `heroes` populated
         self.assertIsNone(channel.json_body["rooms"][room_id1].get("name"))
-        # FIXME: Remove this basic assertion and uncomment the better assertion below
-        # after https://github.com/element-hq/synapse/pull/17435 merges
-        self.assertEqual(len(channel.json_body["rooms"][room_id1].get("heroes", [])), 5)
-        # self.assertCountEqual(
-        #     [
-        #         hero["user_id"]
-        #         for hero in channel.json_body["rooms"][room_id1].get("heroes", [])
-        #     ],
-        #     # Heroes should be the first 5 users in the room (excluding the user
-        #     # themselves, we shouldn't see `user1`)
-        #     [user2_id, user3_id, user4_id, user5_id, user6_id],
-        # )
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in channel.json_body["rooms"][room_id1].get("heroes", [])
+            ],
+            # Heroes should be the first 5 users in the room (excluding the user
+            # themselves, we shouldn't see `user1`)
+            [user2_id, user3_id, user4_id, user5_id, user6_id],
+        )
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["joined_count"],
             7,
