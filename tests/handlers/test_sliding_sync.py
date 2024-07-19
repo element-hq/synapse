@@ -35,7 +35,7 @@ from synapse.api.constants import (
     RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict
+from synapse.events import StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.handlers.sliding_sync import (
     RoomSyncConfig,
@@ -3096,7 +3096,9 @@ class FilterRoomsTestCase(HomeserverTestCase):
     _remote_invite_count: int = 0
 
     def _create_remote_invite_room_for_user(
-        self, invitee_user_id: str, unsigned_invite_room_state: Optional[List[JsonDict]]
+        self,
+        invitee_user_id: str,
+        unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
     ) -> str:
         """
         Create a fake invite for a remote room and persist it.
@@ -3108,8 +3110,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         Args:
             invitee_user_id: The person being invited
             unsigned_invite_room_state: List of stripped state events to assist the
-                receiver in identifying the room. Stripped state events have `type`,
-                `state_key`, `sender`, `content`.
+                receiver in identifying the room.
 
         Returns:
             The room ID of the remote invite room
@@ -3128,15 +3129,19 @@ class FilterRoomsTestCase(HomeserverTestCase):
             "prev_events": [],
         }
         if unsigned_invite_room_state is not None:
+            serialized_stripped_state_events = []
             for stripped_event in unsigned_invite_room_state:
-                # Required stripped event fields
-                assert "type" in stripped_event
-                assert "state_key" in stripped_event
-                assert "sender" in stripped_event
-                assert "content" in stripped_event
+                serialized_stripped_state_events.append(
+                    {
+                        "type": stripped_event.type,
+                        "state_key": stripped_event.state_key,
+                        "sender": stripped_event.sender,
+                        "content": stripped_event.content,
+                    }
+                )
 
             invite_event_dict["unsigned"] = {
-                "invite_room_state": unsigned_invite_room_state
+                "invite_room_state": serialized_stripped_state_events
             }
 
         invite_event = make_event_from_dict(
@@ -3571,23 +3576,23 @@ class FilterRoomsTestCase(HomeserverTestCase):
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
-                {
-                    "type": EventTypes.Create,
-                    "state_key": "",
-                    "sender": "@inviter:remote_server",
-                    "content": {
+                StrippedStateEvent(
+                    type=EventTypes.Create,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={
                         EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
                         EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                     },
-                },
-                {
-                    "type": EventTypes.RoomEncryption,
-                    "state_key": "",
-                    "sender": "@inviter:remote_server",
-                    "content": {
+                ),
+                StrippedStateEvent(
+                    type=EventTypes.RoomEncryption,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={
                         EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
                     },
-                },
+                ),
             ],
         )
 
@@ -3659,15 +3664,15 @@ class FilterRoomsTestCase(HomeserverTestCase):
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
-                {
-                    "type": EventTypes.Create,
-                    "state_key": "",
-                    "sender": "@inviter:remote_server",
-                    "content": {
+                StrippedStateEvent(
+                    type=EventTypes.Create,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={
                         EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
                         EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                     },
-                },
+                ),
                 # No room encryption event
             ],
         )
@@ -4186,17 +4191,17 @@ class FilterRoomsTestCase(HomeserverTestCase):
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
-                {
-                    "type": EventTypes.Create,
-                    "state_key": "",
-                    "sender": "@inviter:remote_server",
-                    "content": {
+                StrippedStateEvent(
+                    type=EventTypes.Create,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={
                         EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
                         EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                         # Specify that it is a space room
                         EventContentFields.ROOM_TYPE: RoomTypes.SPACE,
                     },
-                },
+                ),
             ],
         )
 
@@ -4264,16 +4269,16 @@ class FilterRoomsTestCase(HomeserverTestCase):
         remote_invite_room_id = self._create_remote_invite_room_for_user(
             user1_id,
             [
-                {
-                    "type": EventTypes.Create,
-                    "state_key": "",
-                    "sender": "@inviter:remote_server",
-                    "content": {
+                StrippedStateEvent(
+                    type=EventTypes.Create,
+                    state_key="",
+                    sender="@inviter:remote_server",
+                    content={
                         EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
                         EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
                         # No room type means this is a normal room
                     },
-                },
+                ),
             ],
         )
 
