@@ -1264,6 +1264,8 @@ class SlidingSyncHandler:
                 )
 
                 if stripped_state_map is not None:
+                    # We assume that if the invite/knock event has some stripped state,
+                    # it would include the room encryption event if it was encrypted.
                     encryption_stripped_event = stripped_state_map.get(
                         (EventTypes.RoomEncryption, "")
                     )
@@ -1392,7 +1394,7 @@ class SlidingSyncHandler:
             )
 
             # Update our `room_id_to_type` map based on the stripped state
-            rooms_ids_without_stripped_state: Set[str] = set()
+            rooms_ids_without_stripped_state = set()
             for room_id in room_ids_without_results:
                 stripped_state_map = room_id_to_stripped_state_map.get(
                     room_id, Sentinel.UNSET_SENTINEL
@@ -1404,9 +1406,11 @@ class SlidingSyncHandler:
                 )
 
                 if stripped_state_map is not None:
-                    create_event = stripped_state_map.get((EventTypes.Create, ""))
-                    if create_event is not None:
-                        room_id_to_type[room_id] = create_event.content.get(
+                    create_stripped_event = stripped_state_map.get(
+                        (EventTypes.Create, "")
+                    )
+                    if create_stripped_event is not None:
+                        room_id_to_type[room_id] = create_stripped_event.content.get(
                             EventContentFields.ROOM_TYPE
                         )
                 else:
