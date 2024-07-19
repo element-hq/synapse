@@ -1219,39 +1219,64 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
+            localhost_participating_room_ids: set[str] = {
+                room_id
+                for room_id in filtered_room_id_set
+                # We already know the server is participating because this user is
+                # joined
+                if sync_room_map[room_id].membership == Membership.JOIN
+            }
+
+            # Check if the server is participating in the room which we can use
+            # to derive whether we can rely on current state for this room.
+            room_id_to_server_participating = await self.store.is_local_host_in_rooms(
+                # We only need to check the rooms that we don't know are participating
+                filtered_room_id_set.difference(localhost_participating_room_ids),
+            )
+
+            localhost_not_participating_room_ids = set()
+            for room_id, is_participating in room_id_to_server_participating.items():
+                if is_participating:
+                    localhost_participating_room_ids.add(room_id)
+                else:
+                    localhost_not_participating_room_ids.add(room_id)
+
             # As a bulk shortcut, lookup the encryption state for the room based on the
-            # current state. Ideally, for leave/ban rooms, we would at the state at the
+            # current state if the server is particpating in the room (meaning we have
+            # current state). Ideally, for leave/ban rooms, we would at the state at the
             # time of the membership instead of current state to not leak anything but
             # we consider the room encryption status to not be a secret given it's often
             # set at the start of the room and it's one of the stripped state events
             # that is normally handed out.
             #
-            # Lookup the encryption state from the database. Since this function is
-            # cached, we need to make a mutable copy via `dict(...)`.
+            # Since this function is cached, we need to make a mutable copy via
+            # `dict(...)`.
+            #
+            # TODO: It's possible we race from the time we checked if the server is
+            # participating in the room and the time we fetch the encryption state here
+            # which may be unset now because the server left in the time in between. We
+            # can't really easily tell if this happened. We could do both queries in the
+            # same transaction.
             room_id_to_encryption = dict(
-                await self.store.bulk_get_room_encryption(filtered_room_id_set)
+                await self.store.bulk_get_room_encryption(
+                    localhost_participating_room_ids
+                )
             )
-            room_ids_with_results = [
-                room_id
-                for room_id, encryption in room_id_to_encryption.items()
-                if encryption is not ROOM_UNKNOWN_SENTINEL
-            ]
 
             # We might not have current room state for remote invite/knocks if we are
             # the first person on our server to see the room. The best we can do is look
             # in the optional stripped state from the invite/knock event.
-            room_ids_without_results = filtered_room_id_set.difference(
-                chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
-            )
             room_id_to_stripped_state_map = {
                 **room_id_to_stripped_state_map,
                 **await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
-                    room_ids_without_results, sync_room_map
+                    localhost_not_participating_room_ids, sync_room_map
                 ),
             }
 
             # Update our `room_id_to_encryption` map based on the stripped state
-            for room_id in room_ids_without_results:
+            # (applies to invite/knock rooms)
+            rooms_ids_without_stripped_state: set[str] = []
+            for room_id in localhost_not_participating_room_ids:
                 stripped_state_map = room_id_to_stripped_state_map.get(
                     room_id, Sentinel.UNSET_SENTINEL
                 )
@@ -1275,18 +1300,15 @@ class SlidingSyncHandler:
                         # Didn't see any encryption events in the stripped state so we
                         # can assume the room is unencrypted.
                         room_id_to_encryption[room_id] = None
+                else:
+                    rooms_ids_without_stripped_state.add(room_id)
 
             # Last resort, we might not have current room state for rooms that the
-            # server has left (everyone local has left the room).
+            # server has left (no one local is in the room) but we can look at the
+            # historical state.
             left_room_ids_without_results = [
-                room_id
-                for room_id in room_ids_without_results
-                if sync_room_map[room_id].membership
-                in (Membership.LEAVE, Membership.BAN)
+                room_id for room_id in rooms_ids_without_stripped_state
             ]
-            logger.info(
-                "left_room_ids_without_results %s", left_room_ids_without_results
-            )
 
             # Update our `room_id_to_encryption` map based on the state at the time of
             # the leave/ban membership event.

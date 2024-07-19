@@ -3335,6 +3335,78 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
+    def test_filter_encrypted_server_left_room2(self) -> None:
+        """
+        Test that we can apply a `filter.is_encrypted` against a room that everyone has
+        left.
+
+        There is still someone local who is invited to the rooms but that doesn't affect
+        whether the server is participating in the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        _user2_tok = self.login(user2_id, "pass")
+
+        before_rooms_token = self.event_sources.get_current_token()
+
+        # Create an unencrypted room
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Invite user2
+        self.helper.invite(room_id, targ=user2_id, tok=user1_tok)
+        # User1 leaves the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Create an encrypted room
+        encrypted_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.helper.send_state(
+            encrypted_room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+        # Invite user2
+        self.helper.invite(encrypted_room_id, targ=user2_id, tok=user1_tok)
+        # User1 leaves the room
+        self.helper.leave(encrypted_room_id, user1_id, tok=user1_tok)
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=before_rooms_token,
+            to_token=after_rooms_token,
+        )
+
+        # Try with `is_encrypted=True`
+        truthy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=True,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(truthy_filtered_room_map.keys(), {encrypted_room_id})
+
+        # Try with `is_encrypted=False`
+        falsy_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.filter_rooms(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    is_encrypted=False,
+                ),
+                after_rooms_token,
+            )
+        )
+
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
     def test_filter_encrypted_after_we_left(self) -> None:
         """
         Test that we can apply a `filter.is_encrypted` against a room that was encrypted
@@ -3344,6 +3416,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
         user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
+
+        before_rooms_token = self.event_sources.get_current_token()
 
         # Create an unencrypted room
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
@@ -3372,7 +3446,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Get the rooms the user should be syncing with
         sync_room_map = self._get_sync_room_ids_for_user(
             UserID.from_string(user1_id),
-            from_token=None,
+            from_token=before_rooms_token,
             to_token=after_rooms_token,
         )
 
@@ -3388,7 +3462,14 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(truthy_filtered_room_map.keys(), {})
+        # Even though we left the room before it was encrypted, we still see it because
+        # someone else on our server is still participating in the room and we "leak"
+        # the current state to the left user. But we consider the room encryption status
+        # to not be a secret given it's often set at the start of the room and it's one
+        # of the stripped state events that is normally handed out.
+        self.assertEqual(
+            truthy_filtered_room_map.keys(), {encrypted_after_we_left_room_id}
+        )
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
@@ -3402,10 +3483,8 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        # At the time of us leaving, both rooms were unencrypted
-        self.assertEqual(
-            falsy_filtered_room_map.keys(), {room_id, encrypted_after_we_left_room_id}
-        )
+        # Even though we left the room before it was encrypted... (see comment above)
+        self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
 
     def test_filter_encrypted_with_remote_invite_room_no_stripped_state(self) -> None:
         """

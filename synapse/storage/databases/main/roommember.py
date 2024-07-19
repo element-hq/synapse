@@ -49,7 +49,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
-from synapse.storage.engines import Sqlite3Engine
+from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.roommember import MemberSummary, ProfileInfo, RoomsForUser
 from synapse.types import (
     JsonDict,
@@ -1279,6 +1279,54 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "is_local_host_in_room_ignoring_users",
             _is_local_host_in_room_ignoring_users_txn,
+        )
+
+    async def is_local_host_in_rooms(
+        self, room_ids: Sequence[str]
+    ) -> Mapping[str, bool]:
+        """
+        Check if there are any local users joined to the given rooms
+
+        Returns:
+            A mapping from room_id to whether there are any local users in the room.
+        """
+
+        def txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, bool]:
+            if isinstance(self.database_engine, PostgresEngine):
+                sql = """
+                WITH room_ids AS (
+                    SELECT unnest(ARRAY[%s]::text[]) AS room_id
+                )
+                SELECT x.*
+                FROM room_ids,
+                    LATERAL (
+                        SELECT room_id FROM local_current_membership
+                        WHERE room_id = room_ids.room_id AND membership = ?
+                        LIMIT 1
+                    ) AS x
+                """ % (
+                    ",".join("?" for _ in room_ids)
+                )
+            elif isinstance(self.database_engine, Sqlite3Engine):
+                # TODO: Handle SQLite
+                raise NotImplementedError()
+            else:
+                # This should be unreachable.
+                raise AssertionError("Unrecognized database engine")
+
+            txn.execute(sql, (*room_ids, Membership.JOIN))
+
+            room_id_to_server_participating = {room_id: False for room_id in room_ids}
+            for row in txn:
+                room_id_to_server_participating[row[0]] = True
+
+            return room_id_to_server_participating
+
+        return await self.db_pool.runInteraction(
+            "is_local_host_in_rooms",
+            txn,
         )
 
     async def forget(self, user_id: str, room_id: str) -> None:
