@@ -53,6 +53,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
@@ -673,7 +674,9 @@ class SlidingSyncE2eeRestServlet(RestServlet):
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req_experimental_feature(
+            request, allow_guest=True, feature=ExperimentalFeature.MSC3575
+        )
         user = requester.user
         device_id = requester.device_id
 
@@ -873,7 +876,10 @@ class SlidingSyncRestServlet(RestServlet):
         self.event_serializer = hs.get_event_client_serializer()
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        requester = await self.auth.get_user_by_req_experimental_feature(
+            request, allow_guest=True, feature=ExperimentalFeature.MSC3575
+        )
+
         user = requester.user
         device_id = requester.device_id
 
@@ -936,7 +942,9 @@ class SlidingSyncRestServlet(RestServlet):
         response["rooms"] = await self.encode_rooms(
             requester, sliding_sync_result.rooms
         )
-        response["extensions"] = {}  # TODO: sliding_sync_result.extensions
+        response["extensions"] = await self.encode_extensions(
+            requester, sliding_sync_result.extensions
+        )
 
         return response
 
@@ -976,6 +984,7 @@ class SlidingSyncRestServlet(RestServlet):
         serialized_rooms: Dict[str, JsonDict] = {}
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
+                "bump_stamp": room_result.bump_stamp,
                 "joined_count": room_result.joined_count,
                 "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
@@ -988,16 +997,32 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.avatar:
                 serialized_rooms[room_id]["avatar"] = room_result.avatar
 
-            if room_result.heroes:
-                serialized_rooms[room_id]["heroes"] = room_result.heroes
+            if room_result.heroes is not None and len(room_result.heroes) > 0:
+                serialized_heroes = []
+                for hero in room_result.heroes:
+                    serialized_hero = {
+                        "user_id": hero.user_id,
+                    }
+                    if hero.display_name is not None:
+                        # Not a typo, just how "displayname" is spelled in the spec
+                        serialized_hero["displayname"] = hero.display_name
+
+                    if hero.avatar_url is not None:
+                        serialized_hero["avatar_url"] = hero.avatar_url
+
+                    serialized_heroes.append(serialized_hero)
+                serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
             # The absense of this flag means `False`.
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
-            # This will omitted for invite/knock rooms with `stripped_state`
-            if room_result.required_state is not None:
+            # This will be omitted for invite/knock rooms with `stripped_state`
+            if (
+                room_result.required_state is not None
+                and len(room_result.required_state) > 0
+            ):
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
                         room_result.required_state,
@@ -1007,8 +1032,11 @@ class SlidingSyncRestServlet(RestServlet):
                 )
                 serialized_rooms[room_id]["required_state"] = serialized_required_state
 
-            # This will omitted for invite/knock rooms with `stripped_state`
-            if room_result.timeline_events is not None:
+            # This will be omitted for invite/knock rooms with `stripped_state`
+            if (
+                room_result.timeline_events is not None
+                and len(room_result.timeline_events) > 0
+            ):
                 serialized_timeline = await self.event_serializer.serialize_events(
                     room_result.timeline_events,
                     time_now,
@@ -1017,17 +1045,17 @@ class SlidingSyncRestServlet(RestServlet):
                 )
                 serialized_rooms[room_id]["timeline"] = serialized_timeline
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.limited is not None:
                 serialized_rooms[room_id]["limited"] = room_result.limited
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
                 serialized_rooms[room_id]["prev_batch"] = (
                     await room_result.prev_batch.to_string(self.store)
                 )
 
-            # This will omitted for invite/knock rooms with `stripped_state`
+            # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:
                 serialized_rooms[room_id]["num_live"] = room_result.num_live
 
@@ -1036,7 +1064,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["is_dm"] = room_result.is_dm
 
             # Stripped state only applies to invite/knock rooms
-            if room_result.stripped_state is not None:
+            if (
+                room_result.stripped_state is not None
+                and len(room_result.stripped_state) > 0
+            ):
                 # TODO: `knocked_state` but that isn't specced yet.
                 #
                 # TODO: Instead of adding `knocked_state`, it would be good to rename
@@ -1047,10 +1078,22 @@ class SlidingSyncRestServlet(RestServlet):
 
         return serialized_rooms
 
+    async def encode_extensions(
+        self, requester: Requester, extensions: SlidingSyncResult.Extensions
+    ) -> JsonDict:
+        result = {}
+
+        if extensions.to_device is not None:
+            result["to_device"] = {
+                "next_batch": extensions.to_device.next_batch,
+                "events": extensions.to_device.events,
+            }
+
+        return result
+
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     SyncRestServlet(hs).register(http_server)
 
-    if hs.config.experimental.msc3575_enabled:
-        SlidingSyncRestServlet(hs).register(http_server)
-        SlidingSyncE2eeRestServlet(hs).register(http_server)
+    SlidingSyncRestServlet(hs).register(http_server)
+    SlidingSyncE2eeRestServlet(hs).register(http_server)

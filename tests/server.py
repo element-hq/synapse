@@ -289,10 +289,6 @@ class FakeChannel:
         self._reactor.run()
 
         while not self.is_finished():
-            # If there's a producer, tell it to resume producing so we get content
-            if self._producer:
-                self._producer.resumeProducing()
-
             if self._reactor.seconds() > end_time:
                 raise TimedOutException("Timed out waiting for request to finish.")
 
@@ -946,7 +942,7 @@ def connect_client(
 
 
 class TestHomeServer(HomeServer):
-    DATASTORE_CLASS = DataStore  # type: ignore[assignment]
+    DATASTORE_CLASS = DataStore
 
 
 def setup_test_homeserver(

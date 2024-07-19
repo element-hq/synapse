@@ -1,4 +1,4 @@
-.. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
+.. image:: ./docs/element_logo_white_bg.svg
    :height: 60px
 
 **Element Synapse - Matrix homeserver implementation**
@@ -179,10 +179,10 @@ desired ``localpart`` in the 'User name' box.
 -----------------------
 
 Enterprise quality support for Synapse including SLAs is available as part of an
-`Element Server Suite (ESS) <https://element.io/pricing>` subscription.
+`Element Server Suite (ESS) <https://element.io/pricing>`_ subscription.
 
-If you are an existing ESS subscriber then you can raise a `support request <https://ems.element.io/support>`
-and access the `knowledge base <https://ems-docs.element.io>`.
+If you are an existing ESS subscriber then you can raise a `support request <https://ems.element.io/support>`_
+and access the `knowledge base <https://ems-docs.element.io>`_.
 
 🤝 Community support
 --------------------

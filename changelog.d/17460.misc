@@ -1,0 +1,1 @@
+Add cache to `get_rooms_for_local_user_where_membership_is` to speed up sliding sync.

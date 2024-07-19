@@ -88,11 +88,25 @@ class ThumbnailResource(RestServlet):
         if self._is_mine_server_name(server_name):
             if self.dynamic_thumbnails:
                 await self.thumbnail_provider.select_or_generate_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             else:
                 await self.thumbnail_provider.respond_local_thumbnail(
-                    request, media_id, width, height, method, m_type, max_timeout_ms
+                    request,
+                    media_id,
+                    width,
+                    height,
+                    method,
+                    m_type,
+                    max_timeout_ms,
+                    False,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -120,5 +134,6 @@ class ThumbnailResource(RestServlet):
                 m_type,
                 max_timeout_ms,
                 ip_address,
+                False,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)

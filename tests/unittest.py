@@ -28,6 +28,7 @@ import logging
 import secrets
 import time
 from typing import (
+    AbstractSet,
     Any,
     Awaitable,
     Callable,
@@ -268,6 +269,56 @@ class TestCase(unittest.TestCase):
             self.assertEqual(
                 required[key], actual[key], msg="%s mismatch. %s" % (key, actual)
             )
+
+    def assertIncludes(
+        self,
+        actual_items: AbstractSet[str],
+        expected_items: AbstractSet[str],
+        exact: bool = False,
+        message: Optional[str] = None,
+    ) -> None:
+        """
+        Assert that all of the `expected_items` are included in the `actual_items`.
+
+        This assert could also be called `assertContains`, `assertItemsInSet`
+
+        Args:
+            actual_items: The container
+            expected_items: The items to check for in the container
+            exact: Whether the actual state should be exactly equal to the expected
+                state (no extras).
+            message: Optional message to include in the failure message.
+        """
+        # Check that each set has the same items
+        if exact and actual_items == expected_items:
+            return
+        # Check for a superset
+        elif not exact and actual_items >= expected_items:
+            return
+
+        expected_lines: List[str] = []
+        for expected_item in expected_items:
+            is_expected_in_actual = expected_item in actual_items
+            expected_lines.append(
+                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
+            )
+
+        actual_lines: List[str] = []
+        for actual_item in actual_items:
+            is_actual_in_expected = actual_item in expected_items
+            actual_lines.append(
+                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
+            )
+
+        newline = "\n"
+        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n {{\n{newline.join(expected_lines)}\n }}"
+        actual_string = f"Actual ('+' = found expected items):\n {{\n{newline.join(actual_lines)}\n }}"
+        first_message = (
+            "Items must match exactly" if exact else "Some expected items are missing."
+        )
+        diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
+
+        self.fail(f"{diff_message}\n{message}")
 
 
 def DEBUG(target: TV) -> TV:

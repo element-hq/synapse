@@ -44,7 +44,7 @@ logger = logging.getLogger("generate_workers_map")
 
 
 class MockHomeserver(HomeServer):
-    DATASTORE_CLASS = DataStore  # type: ignore
+    DATASTORE_CLASS = DataStore
 
     def __init__(self, config: HomeServerConfig, worker_app: Optional[str]) -> None:
         super().__init__(config.server.server_name, config=config)

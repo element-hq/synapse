@@ -50,7 +50,7 @@ class Membership:
     KNOCK: Final = "knock"
     LEAVE: Final = "leave"
     BAN: Final = "ban"
-    LIST: Final = {INVITE, JOIN, KNOCK, LEAVE, BAN}
+    LIST: Final = frozenset((INVITE, JOIN, KNOCK, LEAVE, BAN))
 
 
 class PresenceState:
@@ -128,8 +128,12 @@ class EventTypes:
     SpaceParent: Final = "m.space.parent"
 
     Reaction: Final = "m.reaction"
+    Sticker: Final = "m.sticker"
+    LiveLocationShareStart: Final = "m.beacon_info"
 
     CallInvite: Final = "m.call.invite"
+
+    PollStart: Final = "m.poll.start"
 
 
 class ToDeviceEventTypes:

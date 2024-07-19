@@ -20,7 +20,8 @@
 #
 import json
 import logging
-from typing import Dict, List
+from http import HTTPStatus
+from typing import Any, Dict, Iterable, List
 
 from parameterized import parameterized, parameterized_class
 
@@ -32,10 +33,22 @@ from synapse.api.constants import (
     EventContentFields,
     EventTypes,
     HistoryVisibility,
+    Membership,
     ReceiptTypes,
     RelationTypes,
 )
-from synapse.rest.client import devices, knock, login, read_marker, receipts, room, sync
+from synapse.events import EventBase
+from synapse.handlers.sliding_sync import StateValues
+from synapse.rest.client import (
+    devices,
+    knock,
+    login,
+    read_marker,
+    receipts,
+    room,
+    sendtodevice,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomStreamToken, StreamKeyType, StreamToken, UserID
 from synapse.util import Clock
@@ -44,7 +57,8 @@ from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
-from tests.server import TimedOutException
+from tests.server import FakeChannel, TimedOutException
+from tests.test_utils.event_injection import mark_event_as_partial_state
 
 logger = logging.getLogger(__name__)
 
@@ -1237,6 +1251,44 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+        self.storage_controllers = hs.get_storage_controllers()
+
+    def _assertRequiredStateIncludes(
+        self,
+        actual_required_state: Any,
+        expected_state_events: Iterable[EventBase],
+        exact: bool = False,
+    ) -> None:
+        """
+        Wrapper around `assertIncludes` to give slightly better looking diff error
+        messages that include some context "$event_id (type, state_key)".
+
+        Args:
+            actual_required_state: The "required_state" of a room from a Sliding Sync
+                request response.
+            expected_state_events: The expected state events to be included in the
+                `actual_required_state`.
+            exact: Whether the actual state should be exactly equal to the expected
+                state (no extras).
+        """
+
+        assert isinstance(actual_required_state, list)
+        for event in actual_required_state:
+            assert isinstance(event, dict)
+
+        self.assertIncludes(
+            {
+                f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
+                for event in actual_required_state
+            },
+            {
+                f'{event.event_id} ("{event.type}", "{event.state_key}")'
+                for event in expected_state_events
+            },
+            exact=exact,
+            # Message to help understand the diff in context
+            message=str(actual_required_state),
+        )
 
     def _add_new_dm_to_global_account_data(
         self, source_user_id: str, target_user_id: str, target_room_id: str
@@ -1561,6 +1613,20 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             list(channel.json_body["lists"]["room-invites"]),
         )
 
+        # Ensure DM's are correctly marked
+        self.assertDictEqual(
+            {
+                room_id: room.get("is_dm")
+                for room_id, room in channel.json_body["rooms"].items()
+            },
+            {
+                invite_room_id: None,
+                room_id: None,
+                invited_dm_room_id: True,
+                joined_dm_room_id: True,
+            },
+        )
+
     def test_sort_list(self) -> None:
         """
         Test that the `lists` are sorted by `stream_ordering`
@@ -1708,6 +1774,496 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
                 }
             ],
             channel.json_body["lists"]["foo-list"],
+        )
+
+    def test_rooms_meta_when_joined(self) -> None:
+        """
+        Test that the `rooms` `name` and `avatar` are included in the response and
+        reflect the current state of the room when the user is joined to the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "name": "my super room",
+            },
+        )
+        # Set the room avatar URL
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Reflect the current state of the room
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["name"],
+            "my super room",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["avatar"],
+            "mxc://DUMMY_MEDIA_ID",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            2,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            0,
+        )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
+        )
+
+    def test_rooms_meta_when_invited(self) -> None:
+        """
+        Test that the `rooms` `name` and `avatar` are included in the response and
+        reflect the current state of the room when the user is invited to the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "name": "my super room",
+            },
+        )
+        # Set the room avatar URL
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
+        # User1 is invited to the room
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Update the room name after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Update the room avatar URL after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://UPDATED_DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # This should still reflect the current state of the room even when the user is
+        # invited.
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["name"],
+            "my super duper room",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["avatar"],
+            "mxc://UPDATED_DUMMY_MEDIA_ID",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            1,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            1,
+        )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
+        )
+
+    def test_rooms_meta_when_banned(self) -> None:
+        """
+        Test that the `rooms` `name` and `avatar` reflect the state of the room when the
+        user was banned (do not leak current state).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "name": "my super room",
+            },
+        )
+        # Set the room avatar URL
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Update the room name after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Update the room avatar URL after user1 has left
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://UPDATED_DUMMY_MEDIA_ID"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Reflect the state of the room at the time of leaving
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["name"],
+            "my super room",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["avatar"],
+            "mxc://DUMMY_MEDIA_ID",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            # FIXME: The actual number should be "1" (user2) but we currently don't
+            # support this for rooms where the user has left/been banned.
+            0,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            0,
+        )
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("is_dm"),
+        )
+
+    def test_rooms_meta_heroes(self) -> None:
+        """
+        Test that the `rooms` `heroes` are included in the response when the room
+        doesn't have a room name set.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        _user3_tok = self.login(user3_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "name": "my super room",
+            },
+        )
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # User3 is invited
+        self.helper.invite(room_id1, src=user2_id, targ=user3_id, tok=user2_tok)
+
+        room_id2 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                # No room name set so that `heroes` is populated
+                #
+                # "name": "my super room2",
+            },
+        )
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        # User3 is invited
+        self.helper.invite(room_id2, src=user2_id, targ=user3_id, tok=user2_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Room1 has a name so we shouldn't see any `heroes` which the client would use
+        # the calculate the room name themselves.
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["name"],
+            "my super room",
+            channel.json_body["rooms"][room_id1],
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("heroes"))
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            2,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            1,
+        )
+
+        # Room2 doesn't have a name so we should see `heroes` populated
+        self.assertIsNone(channel.json_body["rooms"][room_id2].get("name"))
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in channel.json_body["rooms"][room_id2].get("heroes", [])
+            ],
+            # Heroes shouldn't include the user themselves (we shouldn't see user1)
+            [user2_id, user3_id],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id2]["joined_count"],
+            2,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id2]["invited_count"],
+            1,
+        )
+
+        # We didn't request any state so we shouldn't see any `required_state`
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("required_state"))
+        self.assertIsNone(channel.json_body["rooms"][room_id2].get("required_state"))
+
+    def test_rooms_meta_heroes_max(self) -> None:
+        """
+        Test that the `rooms` `heroes` only includes the first 5 users (not including
+        yourself).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+        user5_id = self.register_user("user5", "pass")
+        user5_tok = self.login(user5_id, "pass")
+        user6_id = self.register_user("user6", "pass")
+        user6_tok = self.login(user6_id, "pass")
+        user7_id = self.register_user("user7", "pass")
+        user7_tok = self.login(user7_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                # No room name set so that `heroes` is populated
+                #
+                # "name": "my super room",
+            },
+        )
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+        self.helper.join(room_id1, user5_id, tok=user5_tok)
+        self.helper.join(room_id1, user6_id, tok=user6_tok)
+        self.helper.join(room_id1, user7_id, tok=user7_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Room2 doesn't have a name so we should see `heroes` populated
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("name"))
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in channel.json_body["rooms"][room_id1].get("heroes", [])
+            ],
+            # Heroes should be the first 5 users in the room (excluding the user
+            # themselves, we shouldn't see `user1`)
+            [user2_id, user3_id, user4_id, user5_id, user6_id],
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            7,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            0,
+        )
+
+        # We didn't request any state so we shouldn't see any `required_state`
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("required_state"))
+
+    def test_rooms_meta_heroes_when_banned(self) -> None:
+        """
+        Test that the `rooms` `heroes` are included in the response when the room
+        doesn't have a room name set but doesn't leak information past their ban.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        _user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+        user5_id = self.register_user("user5", "pass")
+        _user5_tok = self.login(user5_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                # No room name set so that `heroes` is populated
+                #
+                # "name": "my super room",
+            },
+        )
+        # User1 joins the room
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        # User3 is invited
+        self.helper.invite(room_id1, src=user2_id, targ=user3_id, tok=user2_tok)
+
+        # User1 is banned from the room
+        self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # User4 joins the room after user1 is banned
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+        # User5 is invited after user1 is banned
+        self.helper.invite(room_id1, src=user2_id, targ=user5_id, tok=user2_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Room2 doesn't have a name so we should see `heroes` populated
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("name"))
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in channel.json_body["rooms"][room_id1].get("heroes", [])
+            ],
+            # Heroes shouldn't include the user themselves (we shouldn't see user1). We
+            # also shouldn't see user4 since they joined after user1 was banned.
+            #
+            # FIXME: The actual result should be `[user2_id, user3_id]` but we currently
+            # don't support this for rooms where the user has left/been banned.
+            [],
+        )
+
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["joined_count"],
+            # FIXME: The actual number should be "1" (user2) but we currently don't
+            # support this for rooms where the user has left/been banned.
+            0,
+        )
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["invited_count"],
+            # We shouldn't see user5 since they were invited after user1 was banned.
+            #
+            # FIXME: The actual number should be "1" (user3) but we currently don't
+            # support this for rooms where the user has left/been banned.
+            0,
         )
 
     def test_rooms_limited_initial_sync(self) -> None:
@@ -1937,6 +2493,102 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1],
         )
 
+    def test_rooms_bump_stamp(self) -> None:
+        """
+        Test that `bump_stamp` is present and pointing to relevant events.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        event_response1 = message_response = self.helper.send(
+            room_id1, "message in room1", tok=user1_tok
+        )
+        event_pos1 = self.get_success(
+            self.store.get_position_for_event(event_response1["event_id"])
+        )
+        room_id2 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+        send_response2 = self.helper.send(room_id2, "message in room2", tok=user1_tok)
+        event_pos2 = self.get_success(
+            self.store.get_position_for_event(send_response2["event_id"])
+        )
+
+        # Send a reaction in room1 but it shouldn't affect the `bump_stamp`
+        # because reactions are not part of the `DEFAULT_BUMP_EVENT_TYPES`
+        self.helper.send_event(
+            room_id1,
+            type=EventTypes.Reaction,
+            content={
+                "m.relates_to": {
+                    "event_id": message_response["event_id"],
+                    "key": "👍",
+                    "rel_type": "m.annotation",
+                }
+            },
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        timeline_limit = 100
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": timeline_limit,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure it has the foo-list we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the list includes the rooms in the right order
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    # room1 sorts before room2 because it has the latest event (the
+                    # reaction)
+                    "room_ids": [room_id1, room_id2],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+        # The `bump_stamp` for room1 should point at the latest message (not the
+        # reaction since it's not one of the `DEFAULT_BUMP_EVENT_TYPES`)
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["bump_stamp"],
+            event_pos1.stream,
+            channel.json_body["rooms"][room_id1],
+        )
+
+        # The `bump_stamp` for room2 should point at the latest message
+        self.assertEqual(
+            channel.json_body["rooms"][room_id2]["bump_stamp"],
+            event_pos2.stream,
+            channel.json_body["rooms"][room_id2],
+        )
+
     def test_rooms_newly_joined_incremental_sync(self) -> None:
         """
         Test that when we make an incremental sync with a `newly_joined` `rooms`, we are
@@ -2091,6 +2743,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             channel.json_body["rooms"][room_id1].get("prev_batch"),
             channel.json_body["rooms"][room_id1],
         )
+        # `required_state` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
+            channel.json_body["rooms"][room_id1],
+        )
         # We should have some `stripped_state` so the potential joiner can identify the
         # room (we don't care about the order).
         self.assertCountEqual(
@@ -2198,6 +2855,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
         self.assertIsNone(
             channel.json_body["rooms"][room_id1].get("prev_batch"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `required_state` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
             channel.json_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
@@ -2319,6 +2981,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
         self.assertIsNone(
             channel.json_body["rooms"][room_id1].get("prev_batch"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `required_state` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
             channel.json_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
@@ -2446,6 +3113,11 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         # `prev_batch` is omitted for `invite` rooms with `stripped_state` (no timeline anyway)
         self.assertIsNone(
             channel.json_body["rooms"][room_id1].get("prev_batch"),
+            channel.json_body["rooms"][room_id1],
+        )
+        # `required_state` is omitted for `invite` rooms with `stripped_state`
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
             channel.json_body["rooms"][room_id1],
         )
         # We should have some `stripped_state` so the potential joiner can identify the
@@ -2664,11 +3336,7 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Nothing to see for this banned user in the room in the token range
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["timeline"],
-            [],
-            channel.json_body["rooms"][room_id1]["timeline"],
-        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("timeline"))
         # No events returned in the timeline so nothing is "live"
         self.assertEqual(
             channel.json_body["rooms"][room_id1]["num_live"],
@@ -2681,3 +3349,1067 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
             False,
             channel.json_body["rooms"][room_id1],
         )
+
+    def test_rooms_no_required_state(self) -> None:
+        """
+        Empty `rooms.required_state` should not return any state events in the room
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        # Empty `required_state`
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # No `required_state` in response
+        self.assertIsNone(
+            channel.json_body["rooms"][room_id1].get("required_state"),
+            channel.json_body["rooms"][room_id1],
+        )
+
+    def test_rooms_required_state_initial_sync(self) -> None:
+        """
+        Test `rooms.required_state` returns requested state events in the room during an
+        initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.RoomHistoryVisibility, ""],
+                            # This one doesn't exist in the room
+                            [EventTypes.Tombstone, ""],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_incremental_sync(self) -> None:
+        """
+        Test `rooms.required_state` returns requested state events in the room during an
+        incremental sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        after_room_token = self.event_sources.get_current_token()
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(after_room_token.to_string(self.store))}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.RoomHistoryVisibility, ""],
+                            # This one doesn't exist in the room
+                            [EventTypes.Tombstone, ""],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # The returned state doesn't change from initial to incremental sync. In the
+        # future, we will only return updates but only if we've sent the room down the
+        # connection before.
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_wildcard(self) -> None:
+        """
+        Test `rooms.required_state` returns all state events when using wildcard `["*", "*"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="namespaced",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with wildcards for the `event_type` and `state_key`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [StateValues.WILDCARD, StateValues.WILDCARD],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            # We should see all the state events in the room
+            state_map.values(),
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_wildcard_event_type(self) -> None:
+        """
+        Test `rooms.required_state` returns relevant state events when using wildcard in
+        the event_type `["*", "foobarbaz"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key=user2_id,
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with wildcards for the `event_type`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [StateValues.WILDCARD, user2_id],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # We expect at-least any state event with the `user2_id` as the `state_key`
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[("org.matrix.foo_state", user2_id)],
+            },
+            # Ideally, this would be exact but we're currently returning all state
+            # events when the `event_type` is a wildcard.
+            exact=False,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_wildcard_state_key(self) -> None:
+        """
+        Test `rooms.required_state` returns relevant state events when using wildcard in
+        the state_key `["foobarbaz","*"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request with wildcards for the `state_key`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Member, StateValues.WILDCARD],
+                        ],
+                        "timeline_limit": 0,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[(EventTypes.Member, user2_id)],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_lazy_loading_room_members(self) -> None:
+        """
+        Test `rooms.required_state` returns people relevant to the timeline when
+        lazy-loading room members, `["m.room.member","$LAZY"]`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+        self.helper.send(room_id1, "2", tok=user3_tok)
+        self.helper.send(room_id1, "3", tok=user2_tok)
+
+        # Make the Sliding Sync request with lazy loading for the room members
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.Member, StateValues.LAZY],
+                        ],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[(EventTypes.Member, user3_id)],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
+    def test_rooms_required_state_leave_ban(self, stop_membership: str) -> None:
+        """
+        Test `rooms.required_state` should not return state past a leave/ban event.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        from_token = self.event_sources.get_current_token()
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        if stop_membership == Membership.LEAVE:
+            # User 1 leaves
+            self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        elif stop_membership == Membership.BAN:
+            # User 1 is banned
+            self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Change the state after user 1 leaves
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "qux"},
+            tok=user2_tok,
+        )
+        self.helper.leave(room_id1, user3_id, tok=user3_tok)
+
+        # Make the Sliding Sync request with lazy loading for the room members
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.Member, "*"],
+                            ["org.matrix.foo_state", ""],
+                        ],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[(EventTypes.Member, user3_id)],
+                state_map[("org.matrix.foo_state", "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_combine_superset(self) -> None:
+        """
+        Test `rooms.required_state` is combined across lists and room subscriptions.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.bar_state",
+            state_key="",
+            body={"bar": "qux"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with wildcards for the `state_key`
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.Member, user1_id],
+                        ],
+                        "timeline_limit": 0,
+                    },
+                    "bar-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Member, StateValues.WILDCARD],
+                            ["org.matrix.foo_state", ""],
+                        ],
+                        "timeline_limit": 0,
+                    },
+                },
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [["org.matrix.bar_state", ""]],
+                        "timeline_limit": 0,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[("org.matrix.foo_state", "")],
+                state_map[("org.matrix.bar_state", "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_partial_state(self) -> None:
+        """
+        Test partially-stated room are excluded unless `rooms.required_state` is
+        lazy-loading room members.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        _join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # Mark room2 as partial state
+        self.get_success(
+            mark_event_as_partial_state(self.hs, join_response2["event_id"], room_id2)
+        )
+
+        # Make the Sliding Sync request (NOT lazy-loading room members)
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure the list includes room1 but room2 is excluded because it's still
+        # partially-stated
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    "room_ids": [room_id1],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+        # Make the Sliding Sync request (with lazy-loading room members)
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            # Lazy-load room members
+                            [EventTypes.Member, StateValues.LAZY],
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # The list should include both rooms now because we're lazy-loading room members
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    "room_ids": [room_id2, room_id1],
+                }
+            ],
+            channel.json_body["lists"]["foo-list"],
+        )
+
+    def test_room_subscriptions_with_join_membership(self) -> None:
+        """
+        Test `room_subscriptions` with a joined room should give us timeline and current
+        state events.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request with just the room subscription
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # We should see some state
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+        # We should see some events
+        self.assertEqual(
+            [
+                event["event_id"]
+                for event in channel.json_body["rooms"][room_id1]["timeline"]
+            ],
+            [
+                join_response["event_id"],
+            ],
+            channel.json_body["rooms"][room_id1]["timeline"],
+        )
+        # No "live" events in an initial sync (no `from_token` to define the "live"
+        # range)
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["num_live"],
+            0,
+            channel.json_body["rooms"][room_id1],
+        )
+        # There are more events to paginate to
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["limited"],
+            True,
+            channel.json_body["rooms"][room_id1],
+        )
+
+    def test_room_subscriptions_with_leave_membership(self) -> None:
+        """
+        Test `room_subscriptions` with a leave room should give us timeline and state
+        events up to the leave event.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Send some events after user1 leaves
+        self.helper.send(room_id1, "activity after leave", tok=user2_tok)
+        # Update state after user1 leaves
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "qux"},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with just the room subscription
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [
+                            ["org.matrix.foo_state", ""],
+                        ],
+                        "timeline_limit": 2,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the state at the time of the leave
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[("org.matrix.foo_state", "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
+        # We should see some before we left (nothing after)
+        self.assertEqual(
+            [
+                event["event_id"]
+                for event in channel.json_body["rooms"][room_id1]["timeline"]
+            ],
+            [
+                join_response["event_id"],
+                leave_response["event_id"],
+            ],
+            channel.json_body["rooms"][room_id1]["timeline"],
+        )
+        # No "live" events in an initial sync (no `from_token` to define the "live"
+        # range)
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["num_live"],
+            0,
+            channel.json_body["rooms"][room_id1],
+        )
+        # There are more events to paginate to
+        self.assertEqual(
+            channel.json_body["rooms"][room_id1]["limited"],
+            True,
+            channel.json_body["rooms"][room_id1],
+        )
+
+    def test_room_subscriptions_no_leak_private_room(self) -> None:
+        """
+        Test `room_subscriptions` with a private room we have never been in should not
+        leak any data to the user.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=False)
+
+        # We should not be able to join the private room
+        self.helper.join(
+            room_id1, user1_id, tok=user1_tok, expect_code=HTTPStatus.FORBIDDEN
+        )
+
+        # Make the Sliding Sync request with just the room subscription
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should not see the room at all (we're not in it)
+        self.assertIsNone(
+            channel.json_body["rooms"].get(room_id1), channel.json_body["rooms"]
+        )
+
+    def test_room_subscriptions_world_readable(self) -> None:
+        """
+        Test `room_subscriptions` with a room that has `world_readable` history visibility
+
+        FIXME: We should be able to see the room timeline and state
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room with `world_readable` history visibility
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "preset": "public_chat",
+                "initial_state": [
+                    {
+                        "content": {
+                            "history_visibility": HistoryVisibility.WORLD_READABLE
+                        },
+                        "state_key": "",
+                        "type": EventTypes.RoomHistoryVisibility,
+                    }
+                ],
+            },
+        )
+        # Ensure we're testing with a room with `world_readable` history visibility
+        # which means events are visible to anyone even without membership.
+        history_visibility_response = self.helper.get_state(
+            room_id1, EventTypes.RoomHistoryVisibility, tok=user2_tok
+        )
+        self.assertEqual(
+            history_visibility_response.get("history_visibility"),
+            HistoryVisibility.WORLD_READABLE,
+        )
+
+        # Note: We never join the room
+
+        # Make the Sliding Sync request with just the room subscription
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                        ],
+                        "timeline_limit": 1,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # FIXME: In the future, we should be able to see the room because it's
+        # `world_readable` but currently we don't support this.
+        self.assertIsNone(
+            channel.json_body["rooms"].get(room_id1), channel.json_body["rooms"]
+        )
+
+
+class SlidingSyncToDeviceExtensionTestCase(unittest.HomeserverTestCase):
+    """Tests for the to-device sliding sync extension"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+        sendtodevice.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.sync_endpoint = (
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+        )
+
+    def _assert_to_device_response(
+        self, channel: FakeChannel, expected_messages: List[JsonDict]
+    ) -> str:
+        """Assert the sliding sync response was successful and has the expected
+        to-device messages.
+
+        Returns the next_batch token from the to-device section.
+        """
+        self.assertEqual(channel.code, 200, channel.json_body)
+        extensions = channel.json_body["extensions"]
+        to_device = extensions["to_device"]
+        self.assertIsInstance(to_device["next_batch"], str)
+        self.assertEqual(to_device["events"], expected_messages)
+
+        return to_device["next_batch"]
+
+    def test_no_data(self) -> None:
+        """Test that enabling to-device extension works, even if there is
+        no-data
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+
+        # We expect no to-device messages
+        self._assert_to_device_response(channel, [])
+
+    def test_data_initial_sync(self) -> None:
+        """Test that we get to-device messages when we don't specify a since
+        token"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass", "d1")
+        user2_id = self.register_user("u2", "pass")
+        user2_tok = self.login(user2_id, "pass", "d2")
+
+        # Send the to-device message
+        test_msg = {"foo": "bar"}
+        chan = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/1234",
+            content={"messages": {user1_id: {"d1": test_msg}}},
+            access_token=user2_tok,
+        )
+        self.assertEqual(chan.code, 200, chan.result)
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self._assert_to_device_response(
+            channel,
+            [{"content": test_msg, "sender": user2_id, "type": "m.test"}],
+        )
+
+    def test_data_incremental_sync(self) -> None:
+        """Test that we get to-device messages over incremental syncs"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass", "d1")
+        user2_id = self.register_user("u2", "pass")
+        user2_tok = self.login(user2_id, "pass", "d2")
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        # No to-device messages yet.
+        next_batch = self._assert_to_device_response(channel, [])
+
+        test_msg = {"foo": "bar"}
+        chan = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/1234",
+            content={"messages": {user1_id: {"d1": test_msg}}},
+            access_token=user2_tok,
+        )
+        self.assertEqual(chan.code, 200, chan.result)
+
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                        "since": next_batch,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        next_batch = self._assert_to_device_response(
+            channel,
+            [{"content": test_msg, "sender": user2_id, "type": "m.test"}],
+        )
+
+        # The next sliding sync request should not include the to-device
+        # message.
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                        "since": next_batch,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self._assert_to_device_response(channel, [])
+
+        # An initial sliding sync request should not include the to-device
+        # message, as it should have been deleted
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self._assert_to_device_response(channel, [])

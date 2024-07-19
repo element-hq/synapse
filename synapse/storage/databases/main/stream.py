@@ -371,7 +371,7 @@ def _make_generic_sql_bound(
 def _filter_results(
     lower_token: Optional[RoomStreamToken],
     upper_token: Optional[RoomStreamToken],
-    instance_name: str,
+    instance_name: Optional[str],
     topological_ordering: int,
     stream_ordering: int,
 ) -> bool:
@@ -384,7 +384,13 @@ def _filter_results(
     position maps, which we handle by fetching more than necessary from the DB
     and then filtering (rather than attempting to construct a complicated SQL
     query).
+
+    The `instance_name` arg is optional to handle historic rows, and is
+    interpreted as if it was "master".
     """
+
+    if instance_name is None:
+        instance_name = "master"
 
     event_historical_tuple = (
         topological_ordering,
@@ -420,7 +426,7 @@ def _filter_results(
 def _filter_results_by_stream(
     lower_token: Optional[RoomStreamToken],
     upper_token: Optional[RoomStreamToken],
-    instance_name: str,
+    instance_name: Optional[str],
     stream_ordering: int,
 ) -> bool:
     """
@@ -436,7 +442,14 @@ def _filter_results_by_stream(
     position maps, which we handle by fetching more than necessary from the DB
     and then filtering (rather than attempting to construct a complicated SQL
     query).
+
+    The `instance_name` arg is optional to handle historic rows, and is
+    interpreted as if it was "master".
     """
+
+    if instance_name is None:
+        instance_name = "master"
+
     if lower_token:
         assert lower_token.topological is None
 
@@ -912,7 +925,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 prev_sender,
             ) in txn:
                 assert room_id is not None
-                assert instance_name is not None
                 assert stream_ordering is not None
 
                 if _filter_results_by_stream(
@@ -936,7 +948,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         # Event
                         event_id=event_id,
                         event_pos=PersistedEventPosition(
-                            instance_name=instance_name,
+                            # If instance_name is null we default to "master"
+                            instance_name=instance_name or "master",
                             stream=stream_ordering,
                         ),
                         # When `s.event_id = null`, we won't be able to get respective
@@ -952,13 +965,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         prev_event_id=prev_event_id,
                         prev_event_pos=(
                             PersistedEventPosition(
-                                instance_name=prev_instance_name,
+                                # If instance_name is null we default to "master"
+                                instance_name=prev_instance_name or "master",
                                 stream=prev_stream_ordering,
                             )
-                            if (
-                                prev_instance_name is not None
-                                and prev_stream_ordering is not None
-                            )
+                            if (prev_stream_ordering is not None)
                             else None
                         ),
                         prev_membership=prev_membership,
@@ -1178,6 +1189,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         end_token: RoomStreamToken,
+        event_types: Optional[Collection[str]] = None,
     ) -> Optional[Tuple[str, PersistedEventPosition]]:
         """
         Returns the ID and event position of the last event in a room at or before a
@@ -1186,6 +1198,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         Args:
             room_id
             end_token: The token used to stream from
+            event_types: Optional allowlist of event types to filter by
 
         Returns:
             The ID of the most recent event and it's position, or None if there are no
@@ -1207,9 +1220,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             min_stream = end_token.stream
             max_stream = end_token.get_max_stream_pos()
 
-            # We use `union all` because we don't need any of the deduplication logic
-            # (`union` is really a union + distinct). `UNION ALL` does preserve the
-            # ordering of the operand queries but there is no actual gurantee that it
+            event_type_clause = ""
+            event_type_args: List[str] = []
+            if event_types is not None and len(event_types) > 0:
+                event_type_clause, event_type_args = make_in_list_sql_clause(
+                    txn.database_engine, "type", event_types
+                )
+                event_type_clause = f"AND {event_type_clause}"
+
+            # We use `UNION ALL` because we don't need any of the deduplication logic
+            # (`UNION` is really a `UNION` + `DISTINCT`). `UNION ALL` does preserve the
+            # ordering of the operand queries but there is no actual guarantee that it
             # has this behavior in all scenarios so we need the extra `ORDER BY` at the
             # bottom.
             sql = """
@@ -1218,6 +1239,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     FROM events
                     LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
+                        %s
                         AND ? < stream_ordering AND stream_ordering <= ?
                         AND NOT outlier
                         AND rejections.event_id IS NULL
@@ -1229,6 +1251,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     FROM events
                     LEFT JOIN rejections USING (event_id)
                     WHERE room_id = ?
+                        %s
                         AND stream_ordering <= ?
                         AND NOT outlier
                         AND rejections.event_id IS NULL
@@ -1236,16 +1259,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     LIMIT 1
                 ) AS b
                 ORDER BY stream_ordering DESC
-            """
+            """ % (
+                event_type_clause,
+                event_type_clause,
+            )
             txn.execute(
                 sql,
-                (
-                    room_id,
-                    min_stream,
-                    max_stream,
-                    room_id,
-                    min_stream,
-                ),
+                [room_id]
+                + event_type_args
+                + [min_stream, max_stream, room_id]
+                + event_type_args
+                + [min_stream],
             )
 
             for instance_name, stream_ordering, topological_ordering, event_id in txn:
@@ -1257,7 +1281,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     stream_ordering=stream_ordering,
                 ):
                     return event_id, PersistedEventPosition(
-                        instance_name, stream_ordering
+                        # If instance_name is null we default to "master"
+                        instance_name or "master",
+                        stream_ordering,
                     )
 
             return None

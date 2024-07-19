@@ -110,7 +110,7 @@ class AdminCmdStore(
 
 
 class AdminCmdServer(HomeServer):
-    DATASTORE_CLASS = AdminCmdStore  # type: ignore
+    DATASTORE_CLASS = AdminCmdStore
 
 
 async def export_data_command(hs: HomeServer, args: argparse.Namespace) -> None:

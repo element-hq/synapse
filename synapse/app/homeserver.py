@@ -81,7 +81,7 @@ def gz_wrap(r: Resource) -> Resource:
 
 
 class SynapseHomeServer(HomeServer):
-    DATASTORE_CLASS = DataStore  # type: ignore
+    DATASTORE_CLASS = DataStore
 
     def _listener_http(
         self,
@@ -217,7 +217,7 @@ class SynapseHomeServer(HomeServer):
             )
 
         if name in ["media", "federation", "client"]:
-            if self.config.server.enable_media_repo:
+            if self.config.media.can_load_media_repo:
                 media_repo = self.get_media_repository_resource()
                 resources.update(
                     {
