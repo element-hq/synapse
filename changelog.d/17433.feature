@@ -1,0 +1,1 @@
+Prepare for authenticated media freeze.
