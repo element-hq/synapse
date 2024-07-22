@@ -1798,7 +1798,7 @@ class SlidingSyncHandler:
 
         to_device_response = None
         if sync_config.extensions.to_device is not None:
-            to_device_response = await self.get_to_device_extensions_response(
+            to_device_response = await self.get_to_device_extension_response(
                 sync_config=sync_config,
                 to_device_request=sync_config.extensions.to_device,
                 to_token=to_token,
@@ -1806,7 +1806,7 @@ class SlidingSyncHandler:
 
         e2ee_response = None
         if sync_config.extensions.e2ee is not None:
-            e2ee_response = await self.get_e2ee_extensions_response(
+            e2ee_response = await self.get_e2ee_extension_response(
                 sync_config=sync_config,
                 e2ee_request=sync_config.extensions.e2ee,
                 to_token=to_token,
@@ -1818,7 +1818,7 @@ class SlidingSyncHandler:
             e2ee=e2ee_response,
         )
 
-    async def get_to_device_extensions_response(
+    async def get_to_device_extension_response(
         self,
         sync_config: SlidingSyncConfig,
         to_device_request: SlidingSyncConfig.Extensions.ToDeviceExtension,
@@ -1892,7 +1892,7 @@ class SlidingSyncHandler:
             events=messages,
         )
 
-    async def get_e2ee_extensions_response(
+    async def get_e2ee_extension_response(
         self,
         sync_config: SlidingSyncConfig,
         e2ee_request: SlidingSyncConfig.Extensions.E2eeExtension,
