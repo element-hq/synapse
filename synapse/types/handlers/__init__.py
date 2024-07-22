@@ -305,8 +305,20 @@ class SlidingSyncResult:
             device_unused_fallback_key_types: Sequence[str]
 
             def __bool__(self) -> bool:
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                more_than_default_otk = (
+                    len(self.device_one_time_keys_count) > 1
+                    or self.device_one_time_keys_count.get("signed_curve25519") > 0
+                )
+
                 return bool(
-                    self.device_one_time_keys_count
+                    more_than_default_otk
                     or self.device_list_updates
                     or self.device_unused_fallback_key_types
                 )
