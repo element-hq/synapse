@@ -348,16 +348,14 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             # FIXME: Use `room_stats_current.current_state_events` instead of
             # `room_stats_current.local_users_in_room` once
             # https://github.com/element-hq/synapse/issues/17457 is fixed.
-            sql = """
+            sql = f"""
                 SELECT room_id, room_type
                 FROM room_stats_state
                 INNER JOIN room_stats_current USING (room_id)
                 WHERE
-                    %s
+                    {clause}
                     AND local_users_in_room > 0
-            """ % (
-                clause
-            )
+            """
 
             txn.execute(sql, args)
 
@@ -430,16 +428,14 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             # FIXME: Use `room_stats_current.current_state_events` instead of
             # `room_stats_current.local_users_in_room` once
             # https://github.com/element-hq/synapse/issues/17457 is fixed.
-            sql = """
+            sql = f"""
                 SELECT room_id, encryption
                 FROM room_stats_state
                 INNER JOIN room_stats_current USING (room_id)
                 WHERE
-                    %s
+                    {clause}
                     AND local_users_in_room > 0
-            """ % (
-                clause
-            )
+            """
 
             txn.execute(sql, args)
 
