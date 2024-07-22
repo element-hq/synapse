@@ -1761,6 +1761,15 @@ into fewer transactions. Defaults to 50.</p>
 <h2 id="media-store"><a class="header" href="#media-store">Media Store</a></h2>
 <p>Config options related to Synapse's media store.</p>
 <hr />
+<h3 id="enable_authenticated_media"><a class="header" href="#enable_authenticated_media"><code>enable_authenticated_media</code></a></h3>
+<p>When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
+unauthenticated media endpoints (<code>/_matrix/media/(r0|v3|v1)/download</code> and <code>/_matrix/media/(r0|v3|v1)/thumbnail</code>) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints <code>_matrix/client/v1/media/download</code> and <code>_matrix/client/v1/media/thumbnail</code>. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
+this will change to true in a future Synapse release.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">enable_authenticated_media: true
+</code></pre>
+<hr />
 <h3 id="enable_media_repo"><a class="header" href="#enable_media_repo"><code>enable_media_repo</code></a></h3>
 <p>Enable the media store service in the Synapse master. Defaults to true.
 Set to false if you are using a separate media store worker.</p>
