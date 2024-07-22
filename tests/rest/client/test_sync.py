@@ -3714,6 +3714,80 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         )
         self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
 
+    def test_rooms_required_state_me(self) -> None:
+        """
+        Test `rooms.required_state` correctly handles $ME.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+
+        # Also send normal state events with state keys of the users, first
+        # change the power levels to allow this.
+        self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.PowerLevels,
+            body={"users": {user1_id: 50, user2_id: 100}},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo",
+            state_key=user1_id,
+            body={},
+            tok=user1_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo",
+            state_key=user2_id,
+            body={},
+            tok=user2_tok,
+        )
+
+        # Make the Sliding Sync request with a request for '$ME'.
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [
+                            [EventTypes.Create, ""],
+                            [EventTypes.Member, StateValues.ME],
+                            ["org.matrix.foo", StateValues.ME],
+                        ],
+                        "timeline_limit": 3,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
+        self._assertRequiredStateIncludes(
+            channel.json_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[("org.matrix.foo", user1_id)],
+            },
+            exact=True,
+        )
+        self.assertIsNone(channel.json_body["rooms"][room_id1].get("invite_state"))
+
     @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
     def test_rooms_required_state_leave_ban(self, stop_membership: str) -> None:
         """
