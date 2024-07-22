@@ -249,5 +249,5 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertEqual(cache.get_max_pos_of_last_change("bar@baz.net"), 3)
         self.assertEqual(cache.get_max_pos_of_last_change("user@elsewhere.org"), 4)
 
-        # Unknown entities will return the stream start position.
-        self.assertEqual(cache.get_max_pos_of_last_change("not@here.website"), 1)
+        # Unknown entities will return None
+        self.assertEqual(cache.get_max_pos_of_last_change("not@here.website"), None)
