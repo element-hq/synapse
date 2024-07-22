@@ -1113,12 +1113,11 @@ class DeviceUnusedFallbackKeySyncTestCase(unittest.HomeserverTestCase):
         self.assertEqual(res, [])
 
         # Upload a fallback key for the user/device
-        fallback_key = {"alg1:k1": "fallback_key1"}
         self.get_success(
             self.e2e_keys_handler.upload_keys_for_user(
                 alice_user_id,
                 test_device_id,
-                {"fallback_keys": fallback_key},
+                {"fallback_keys": {"alg1:k1": "fallback_key1"}},
             )
         )
         # We should now have an unused alg1 key
@@ -4588,6 +4587,75 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
             [],
         )
 
+    def test_wait_for_new_data(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive.
+
+        (Only applies to incremental syncs with a `timeout` specified)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        test_device_id = "TESTDEVICE"
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass", device_id=test_device_id)
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        from_token = self.event_sources.get_current_token()
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + "?timeout=10000"
+            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Bump the device lists to trigger new results
+        # Have user3 update their device list
+        device_update_channel = self.make_request(
+            "PUT",
+            f"/devices/{test_device_id}",
+            {
+                "display_name": "New Device Name",
+            },
+            access_token=user3_tok,
+        )
+        self.assertEqual(
+            device_update_channel.code, 200, device_update_channel.json_body
+        )
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the device list update
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"]
+            .get("device_lists", {})
+            .get("changed"),
+            [user3_id],
+        )
+        self.assertEqual(
+            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
+            [],
+        )
+
     def test_wait_for_new_data_timeout(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
@@ -4813,12 +4881,11 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(res, [])
 
         # Upload a fallback key for the user/device
-        fallback_key = {"alg1:k1": "fallback_key1"}
         self.get_success(
             self.e2e_keys_handler.upload_keys_for_user(
                 user1_id,
                 test_device_id,
-                {"fallback_keys": fallback_key},
+                {"fallback_keys": {"alg1:k1": "fallback_key1"}},
             )
         )
         # We should now have an unused alg1 key
