@@ -4441,23 +4441,6 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
         )
 
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-
-        # Update the account data so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping account data because it won't show up in the Sliding Sync
-        # response so it won't affect whether we have results.
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
-        )
-
     def test_no_data_initial_sync(self) -> None:
         """
         Test that enabling e2ee extension works during an intitial sync, even if there
@@ -4562,11 +4545,13 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
         no data ever arrives so we timeout. We're also making sure that the default data
-        `device_one_time_keys_count.signed_curve25519` that the E2EE extension doesn't
-        trigger a false-positive for new data.
+        from the E2EE extension doesn't trigger a false-positive for new data (see
+        `device_one_time_keys_count.signed_curve25519`).
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         from_token = self.event_sources.get_current_token()
 
@@ -4590,9 +4575,10 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=5000)
-        self._bump_notifier_wait_for_events(user1_id)
-        # Block for a little bit more to ensure that our `SlidingSyncResult.__bool__`
-        # conditions are working as expected (no new results yet)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self.helper.send(room_id, body="new activity", tok=user1_tok)
+        # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
         # Wait for the sync to complete (wait for the rest of the 10 second timeout,
@@ -4600,7 +4586,7 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Device lists are present for incremental syncs but empty because no device change
+        # Device lists are present for incremental syncs but empty because no device changes
         self.assertEqual(
             channel.json_body["extensions"]["e2ee"]
             .get("device_lists", {})
