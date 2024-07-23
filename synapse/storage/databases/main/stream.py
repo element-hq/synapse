@@ -1391,6 +1391,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ORDER BY stream_ordering ASC
             """
             txn.execute(sql, [min_token, max_token] + args)
+
+            # We take the max stream ordering that is less than the token. Since
+            # we ordered by stream ordering we just need to iterate through and
+            # take the last matching stream ordering.
             txn_results: Dict[str, int] = {}
             for row in txn:
                 room_id = row[0]
