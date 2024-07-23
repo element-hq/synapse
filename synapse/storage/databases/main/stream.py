@@ -1308,7 +1308,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         results: Dict[str, int] = {}
 
         # First, we check for the rooms in the stream change cache to see if we
-        # can just use the latetst position from it.
+        # can just use the latest position from it.
         missing_room_ids: Set[str] = set()
         for room_id in room_ids:
             stream_pos = self._events_stream_cache.get_max_pos_of_last_change(room_id)
