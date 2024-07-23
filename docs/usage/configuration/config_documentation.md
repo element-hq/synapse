@@ -246,6 +246,7 @@ Example configuration:
 ```yaml
 presence:
   enabled: false
+  include_offline_users_on_sync: false
 ```
 
 `enabled` can also be set to a special value of "untracked" which ignores updates
@@ -253,6 +254,10 @@ received via clients and federation, while still accepting updates from the
 [module API](../../modules/index.md).
 
 *The "untracked" option was added in Synapse 1.96.0.*
+
+When clients perform an initial or `full_state` sync, presence results for offline users are
+not included by default. Setting `include_offline_users_on_sync` to `true` will always include
+offline users in the results. Defaults to false.
 
 ---
 ### `require_auth_for_profile_requests`
@@ -1863,6 +1868,18 @@ federation_rr_transactions_per_room_per_second: 40
 ## Media Store
 Config options related to Synapse's media store.
 
+---
+### `enable_authenticated_media`
+
+When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
+unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
+this will change to true in a future Synapse release.
+
+Example configuration:
+```yaml
+enable_authenticated_media: true
+```
 ---
 ### `enable_media_repo`
 
@@ -4134,6 +4151,38 @@ default_power_level_content_override:
    trusted_private_chat: null
    public_chat: null
 ```
+
+The default power levels for each preset are:
+```yaml
+"m.room.name": 50
+"m.room.power_levels": 100
+"m.room.history_visibility": 100
+"m.room.canonical_alias": 50
+"m.room.avatar": 50
+"m.room.tombstone": 100
+"m.room.server_acl": 100
+"m.room.encryption": 100
+```
+
+So a complete example where the default power-levels for a preset are maintained
+but the power level for a new key is set is:
+```yaml
+default_power_level_content_override:
+   private_chat:
+    events:
+      "com.example.foo": 0
+      "m.room.name": 50
+      "m.room.power_levels": 100
+      "m.room.history_visibility": 100
+      "m.room.canonical_alias": 50
+      "m.room.avatar": 50
+      "m.room.tombstone": 100
+      "m.room.server_acl": 100
+      "m.room.encryption": 100
+   trusted_private_chat: null
+   public_chat: null
+```
+
 ---
 ### `forget_rooms_on_leave`
 
