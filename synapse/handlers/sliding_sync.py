@@ -1324,6 +1324,7 @@ class SlidingSyncHandler:
         # Update our `room_id_to_content` map based on the state at the time of
         # the membership event.
         for room_id in rooms_ids_without_stripped_state:
+            # TODO: It would be nice to look this up in a bulk way (N+1 queries)
             room_state = await self.storage_controllers.state.get_state_at(
                 room_id=room_id,
                 stream_position=to_token.copy_and_replace(
