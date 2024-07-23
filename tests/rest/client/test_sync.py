@@ -1551,14 +1551,26 @@ class SlidingSyncTestCase(unittest.HomeserverTestCase):
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 0]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
             {
                 "lists": {
                     "foo-list": {
@@ -4819,14 +4831,25 @@ class SlidingSyncToDeviceExtensionTestCase(unittest.HomeserverTestCase):
         user2_id = self.register_user("u2", "pass")
         user2_tok = self.login(user2_id, "pass", "d2")
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + "?timeout=10000" + f"&pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
@@ -4870,14 +4893,25 @@ class SlidingSyncToDeviceExtensionTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "to_device": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + "?timeout=10000" + f"&pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
@@ -5029,13 +5063,25 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make an incremental Sliding Sync request with the e2ee extension enabled
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
@@ -5097,14 +5143,25 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         self.helper.join(room_id, user1_id, tok=user1_tok)
         self.helper.join(room_id, user3_id, tok=user3_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + "?timeout=10000" + f"&pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
@@ -5158,14 +5215,25 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + "?timeout=10000" + f"&pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
@@ -5243,7 +5311,20 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         self.helper.join(room_id, user3_id, tok=user3_tok)
         self.helper.join(room_id, user4_id, tok=user4_tok)
 
-        from_token = self.event_sources.get_current_token()
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "extensions": {
+                    "e2ee": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        from_token = channel.json_body["pos"]
 
         # Have user3 update their device list
         channel = self.make_request(
@@ -5262,8 +5343,7 @@ class SlidingSyncE2eeExtensionTestCase(unittest.HomeserverTestCase):
         # Make an incremental Sliding Sync request with the e2ee extension enabled
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?pos={from_token}",
             {
                 "lists": {},
                 "extensions": {
