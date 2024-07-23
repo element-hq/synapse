@@ -1176,8 +1176,8 @@ class SlidingSyncStreamToken:
             per-connection state stored by Synapse.
     """
 
-    stream: StreamToken
-    connection: int
+    stream_token: StreamToken
+    connection_position: int
 
     @staticmethod
     @cancellable
@@ -1189,8 +1189,8 @@ class SlidingSyncStreamToken:
             stream_token = await StreamToken.from_string(store, stream_token_str)
 
             return SlidingSyncStreamToken(
-                stream=stream_token,
-                connection=connection_token,
+                stream_token=stream_token,
+                connection_position=connection_token,
             )
         except CancelledError:
             raise
@@ -1199,8 +1199,8 @@ class SlidingSyncStreamToken:
 
     async def to_string(self, store: "DataStore") -> str:
         """Serializes the token to a string"""
-        stream_token_str = await self.stream.to_string(store)
-        return f"{self.connection}/{stream_token_str}"
+        stream_token_str = await self.stream_token.to_string(store)
+        return f"{self.connection_position}/{stream_token_str}"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
