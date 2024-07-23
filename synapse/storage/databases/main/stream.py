@@ -1391,14 +1391,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ORDER BY stream_ordering ASC
             """
             txn.execute(sql, [min_token, max_token] + args)
-            results: Dict[str, int] = {}
+            txn_results: Dict[str, int] = {}
             for row in txn:
                 room_id = row[0]
                 event_pos = PersistedEventPosition(row[1], row[2])
                 if not event_pos.persisted_after(end_token):
-                    results[room_id] = event_pos.stream
+                    txn_results[room_id] = event_pos.stream
 
-            return results
+            return txn_results
 
         for batched in batch_iter(recheck_rooms, 1000):
             recheck_result = await self.db_pool.runInteraction(
