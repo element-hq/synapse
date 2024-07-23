@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Type
 
 from PIL import Image
 
-from synapse.api.errors import Codes, SynapseError, cs_error
+from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
 from synapse.http.server import respond_with_json
 from synapse.http.site import SynapseRequest
@@ -274,12 +274,19 @@ class ThumbnailProvider:
         m_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         await self._select_and_respond_with_thumbnail(
@@ -307,13 +314,19 @@ class ThumbnailProvider:
         desired_type: str,
         max_timeout_ms: int,
         for_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
-
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         for info in thumbnail_infos:
@@ -381,13 +394,26 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms, ip_address, use_federation
+            server_name,
+            media_id,
+            max_timeout_ms,
+            ip_address,
+            use_federation,
+            allow_authenticated,
         )
         if not media_info:
             respond_404(request)
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                respond_404(request)
+                return
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
@@ -446,15 +472,27 @@ class ThumbnailProvider:
         max_timeout_ms: int,
         ip_address: str,
         use_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         # TODO: Don't download the whole remote file
         # We should proxy the thumbnail from the remote server instead of
         # downloading the remote file and generating our own thumbnails.
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms, ip_address, use_federation
+            server_name,
+            media_id,
+            max_timeout_ms,
+            ip_address,
+            use_federation,
+            allow_authenticated,
         )
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
@@ -485,8 +523,8 @@ class ThumbnailProvider:
         file_id: str,
         url_cache: bool,
         for_federation: bool,
-        server_name: Optional[str] = None,
         media_info: Optional[LocalMedia] = None,
+        server_name: Optional[str] = None,
     ) -> None:
         """
         Respond to a request with an appropriate thumbnail from the previously generated thumbnails.

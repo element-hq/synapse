@@ -315,7 +315,17 @@ class SlidingSyncBody(RequestBodyModel):
 
                 return value
 
+        class E2eeExtension(RequestBodyModel):
+            """The E2EE device extension (MSC3884)
+
+            Attributes:
+                enabled
+            """
+
+            enabled: Optional[StrictBool] = False
+
         to_device: Optional[ToDeviceExtension] = None
+        e2ee: Optional[E2eeExtension] = None
 
     conn_id: Optional[str]
 

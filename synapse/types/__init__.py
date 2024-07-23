@@ -777,6 +777,13 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
         return super().bound_stream_token(max_stream)
 
+    def __str__(self) -> str:
+        instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
+        return (
+            f"RoomStreamToken(stream: {self.stream}, topological: {self.topological}, "
+            f"instances: {{{instances}}})"
+        )
+
 
 @attr.s(frozen=True, slots=True, order=False)
 class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
@@ -872,6 +879,13 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
                 return False
 
         return True
+
+    def __str__(self) -> str:
+        instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
+        return (
+            f"MultiWriterStreamToken(stream: {self.stream}, "
+            f"instances: {{{instances}}})"
+        )
 
 
 class StreamKeyType(Enum):
@@ -1131,6 +1145,15 @@ class StreamToken:
 
         return True
 
+    def __str__(self) -> str:
+        return (
+            f"StreamToken(room: {self.room_key}, presence: {self.presence_key}, "
+            f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
+            f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
+            f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key})"
+        )
+
 
 StreamToken.START = StreamToken(
     RoomStreamToken(stream=0), 0, 0, MultiWriterStreamToken(stream=0), 0, 0, 0, 0, 0, 0
@@ -1153,8 +1176,8 @@ class SlidingSyncStreamToken:
             per-connection state stored by Synapse.
     """
 
-    stream: StreamToken
-    connection: int
+    stream_token: StreamToken
+    connection_position: int
 
     @staticmethod
     @cancellable
@@ -1166,8 +1189,8 @@ class SlidingSyncStreamToken:
             stream_token = await StreamToken.from_string(store, stream_token_str)
 
             return SlidingSyncStreamToken(
-                stream=stream_token,
-                connection=connection_token,
+                stream_token=stream_token,
+                connection_position=connection_token,
             )
         except CancelledError:
             raise
@@ -1176,8 +1199,8 @@ class SlidingSyncStreamToken:
 
     async def to_string(self, store: "DataStore") -> str:
         """Serializes the token to a string"""
-        stream_token_str = await self.stream.to_string(store)
-        return f"{self.connection}/{stream_token_str}"
+        stream_token_str = await self.stream_token.to_string(store)
+        return f"{self.connection_position}/{stream_token_str}"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1262,11 +1285,12 @@ class ReadReceipt:
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class DeviceListUpdates:
     """
-    An object containing a diff of information regarding other users' device lists, intended for
-    a recipient to carry out device list tracking.
+    An object containing a diff of information regarding other users' device lists,
+    intended for a recipient to carry out device list tracking.
 
     Attributes:
-        changed: A set of users whose device lists have changed recently.
+        changed: A set of users who have updated their device identity or
+            cross-signing keys, or who now share an encrypted room with.
         left: A set of users who the recipient no longer needs to track the device lists of.
             Typically when those users no longer share any end-to-end encryption enabled rooms.
     """
