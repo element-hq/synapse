@@ -268,16 +268,23 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
 
             if data.type == EventTypes.Member:
-                self.get_rooms_for_user.invalidate((data.state_key,))  # type: ignore[attr-defined]
+                self._attempt_to_invalidate_cache(
+                    "get_rooms_for_user", (data.state_key,)
+                )
 
-            self.get_partial_current_state_id_for_event_type.invalidate((data.room_id, data.type, data.state_key))  # type: ignore[attr-defined]
+            self._attempt_to_invalidate_cache(
+                "get_partial_current_state_id_for_event_type",
+                (data.room_id, data.type, data.state_key),
+            )
         elif row.type == EventsStreamAllStateRow.TypeId:
             assert isinstance(data, EventsStreamAllStateRow)
             # Similar to the above, but the entire caches are invalidated. This is
             # unfortunate for the membership caches, but should recover quickly.
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
-            self.get_rooms_for_user.invalidate_all()  # type: ignore[attr-defined]
-            self.get_partial_current_state_id_for_event_type.invalidate((data.room_id,))  # type: ignore[attr-defined]
+            self._attempt_to_invalidate_cache("get_rooms_for_user", None)
+            self._attempt_to_invalidate_cache(
+                "get_partial_current_state_id_for_event_type", (data.room_id,)
+            )
         else:
             raise Exception("Unknown events stream row type %s" % (row.type,))
 
