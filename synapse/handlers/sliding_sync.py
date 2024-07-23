@@ -1185,13 +1185,23 @@ class SlidingSyncHandler:
 
         return room_id_to_stripped_state_map
 
-    async def _bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
+    async def _bulk_get_partial_current_state_content_for_rooms(
         self,
         # These should be restricted to the possible stripped state events (see bulk
         # shortcut note below for more details).
         event_type: Literal[
             # EventTypes.Create
             "m.room.create",
+            # EventTypes.Name
+            "m.room.name",
+            # EventTypes.RoomAvatar
+            "m.room.avatar",
+            # EventTypes.Topic
+            "m.room.topic",
+            # EventTypes.JoinRules
+            "m.room.join_rules",
+            # EventTypes.CanonicalAlias
+            "m.room.canonical_alias",
             # EventTypes.RoomEncryption
             "m.room.encryption",
         ],
@@ -1418,12 +1428,14 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            room_id_to_encrypted_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
-                event_type=EventTypes.RoomEncryption,
-                room_ids=filtered_room_id_set,
-                to_token=to_token,
-                sync_room_map=sync_room_map,
-                room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+            room_id_to_encrypted_content = (
+                await self._bulk_get_partial_current_state_content_for_rooms(
+                    event_type=EventTypes.RoomEncryption,
+                    room_ids=filtered_room_id_set,
+                    to_token=to_token,
+                    sync_room_map=sync_room_map,
+                    room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+                )
             )
 
             # Make a copy so we don't run into an error: `Set changed size during
@@ -1466,12 +1478,14 @@ class SlidingSyncHandler:
         # provided in the list. `None` is a valid type for rooms which do not have a
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
-            room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
-                event_type=EventTypes.Create,
-                room_ids=filtered_room_id_set,
-                to_token=to_token,
-                sync_room_map=sync_room_map,
-                room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+            room_id_to_create_content = (
+                await self._bulk_get_partial_current_state_content_for_rooms(
+                    event_type=EventTypes.Create,
+                    room_ids=filtered_room_id_set,
+                    to_token=to_token,
+                    sync_room_map=sync_room_map,
+                    room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+                )
             )
 
             # Make a copy so we don't run into an error: `Set changed size during
@@ -1504,7 +1518,7 @@ class SlidingSyncHandler:
 
         if filters.room_name_like is not None:
             # TODO:
-            # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
+            # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms(
             #     event_type=EventTypes.Name,
             #     room_ids=filtered_room_id_set,
             #     to_token=to_token,
