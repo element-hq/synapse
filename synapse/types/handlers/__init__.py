@@ -322,6 +322,21 @@ class SlidingSyncResult:
                     or self.device_list_updates
                     or self.device_unused_fallback_key_types
                 )
+            
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class AccountDataExtension:
+            """The Account Data extension (MSC3959)
+
+            Attributes:
+                global: Same as the the top-level `account_data.events` field in Sync v2.
+                rooms: Same as the joined room's account_data field in Sync v2, e.g the path `rooms.join["!foo:bar"].account_data.events`.
+            """
+
+            global_events: List[JsonDict]
+            rooms: Dict[str, List[Dict[str, JsonDict]]]
+
+            def __bool__(self) -> bool:
+                return bool(self.events)
 
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None

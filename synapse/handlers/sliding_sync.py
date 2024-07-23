@@ -1816,9 +1816,19 @@ class SlidingSyncHandler:
                 from_token=from_token,
             )
 
+        account_data_response = None
+        if sync_config.extensions.account_data is not None:
+            account_data_response = await self.get_account_data_extension_response(
+                sync_config=sync_config,
+                account_data_request=sync_config.extensions.account_data,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         return SlidingSyncResult.Extensions(
             to_device=to_device_response,
             e2ee=e2ee_response,
+            account_data=account_data_response,
         )
 
     async def get_to_device_extension_response(
