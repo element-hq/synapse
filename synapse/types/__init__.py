@@ -777,6 +777,13 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
         return super().bound_stream_token(max_stream)
 
+    def __str__(self) -> str:
+        instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
+        return (
+            f"RoomStreamToken(stream: {self.stream}, topological: {self.topological}, "
+            f"instances: {{{instances}}})"
+        )
+
 
 @attr.s(frozen=True, slots=True, order=False)
 class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
@@ -872,6 +879,13 @@ class MultiWriterStreamToken(AbstractMultiWriterStreamToken):
                 return False
 
         return True
+
+    def __str__(self) -> str:
+        instances = ", ".join(f"{k}: {v}" for k, v in sorted(self.instance_map.items()))
+        return (
+            f"MultiWriterStreamToken(stream: {self.stream}, "
+            f"instances: {{{instances}}})"
+        )
 
 
 class StreamKeyType(Enum):
@@ -1130,6 +1144,15 @@ class StreamToken:
                     return False
 
         return True
+
+    def __str__(self) -> str:
+        return (
+            f"StreamToken(room: {self.room_key}, presence: {self.presence_key}, "
+            f"typing: {self.typing_key}, receipt: {self.receipt_key}, "
+            f"account_data: {self.account_data_key}, push_rules: {self.push_rules_key}, "
+            f"to_device: {self.to_device_key}, device_list: {self.device_list_key}, "
+            f"groups: {self.groups_key}, un_partial_stated_rooms: {self.un_partial_stated_rooms_key})"
+        )
 
 
 StreamToken.START = StreamToken(
