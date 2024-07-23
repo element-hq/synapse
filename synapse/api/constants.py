@@ -228,6 +228,8 @@ class EventContentFields:
     # The version of the room for `m.room.create` events.
     ROOM_VERSION: Final = "room_version"
 
+    ROOM_NAME: Final = "name"
+
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
 

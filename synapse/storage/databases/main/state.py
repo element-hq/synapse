@@ -495,6 +495,88 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return results
 
+    @cached(max_entries=10000)
+    async def get_partial_current_state_id_for_event_type(
+        self, room_id: str, event_type: str, state_key: str
+    ) -> Optional[str]:
+        raise NotImplementedError()
+
+    @cachedList(
+        cached_method_name="get_partial_current_state_id_for_event_type",
+        list_name="room_ids",
+    )
+    async def bulk_get_partial_current_state_ids_for_event_type(
+        self, room_ids: Set[str], event_type: str, state_key: str
+    ) -> Mapping[str, Union[Optional[str], Sentinel]]:
+        """
+        Bulk fetch a given (type, state_key) for the given rooms (via current state).
+
+        Since this function is cached, any missing values would be cached as `None`. In
+        order to distinguish between a room without the state and a room that is unknown
+        to the server where we might want to omit the value (which would make it cached
+        as `None`), instead we use the sentinel value `ROOM_UNKNOWN_SENTINEL`.
+
+        Returns:
+            A mapping from room ID to the state event ID if the room has the state,
+            otherwise `None`. Rooms unknown to this server will return
+            `ROOM_UNKNOWN_SENTINEL`.
+        """
+
+        def txn(
+            txn: LoggingTransaction,
+        ) -> MutableMapping[str, Union[Optional[str], Sentinel]]:
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "room_id", room_ids
+            )
+
+            sql = f"""
+                SELECT room_id, event_id, type
+                FROM current_state_events
+                WHERE
+                    {clause}
+                    AND (
+                        (type = ? AND state_key = ?)
+                        OR (type = ? AND state_key = ?)
+                    )
+            """
+
+            # We can use the create event as a canary to tell whether the server has
+            # seen the room before
+            txn.execute(sql, args + [EventTypes.Create, "", event_type, state_key])
+
+            room_id_to_create_map: Dict[str, str] = {}
+            room_id_to_state_map: Dict[str, str] = {}
+            for row in txn:
+                room_id = row[0]
+                event_id = row[1]
+                event_type_from_db = row[2]
+
+                if event_type_from_db == EventTypes.Create:
+                    room_id_to_create_map[room_id] = event_id
+
+                if event_type_from_db == event_type:
+                    room_id_to_state_map[room_id] = event_id
+
+            results: Dict[str, Union[Optional[str], Sentinel]] = {}
+            for room_id in room_ids:
+                if room_id_to_create_map.get(room_id) is None:
+                    # We use the sentinel value to distinguish between `None` which is a
+                    # valid room type and a room that is unknown to the server so the value
+                    # is just unset.
+                    results[room_id] = ROOM_UNKNOWN_SENTINEL
+                    continue
+
+                results[room_id] = room_id_to_state_map.get(room_id)
+
+            return results
+
+        results = await self.db_pool.runInteraction(
+            "bulk_get_partial_current_state_ids_for_event_type",
+            txn,
+        )
+
+        return results
+
     @cached(max_entries=100000, iterable=True)
     async def get_partial_current_state_ids(self, room_id: str) -> StateMap[str]:
         """Get the current state event ids for a room based on the
