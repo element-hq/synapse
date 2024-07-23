@@ -1187,18 +1187,13 @@ class SlidingSyncHandler:
 
     async def _bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
         self,
+        # These should be restricted to the possible stripped state events (see bulk
+        # shortcut note below for more details).
         event_type: Literal[
             # EventTypes.Create
             "m.room.create",
             # EventTypes.RoomEncryption
             "m.room.encryption",
-        ],
-        event_content_field: Literal[
-            None,
-            # EventContentFields.ROOM_TYPE
-            "type",
-            # EventContentFields.ENCRYPTION_ALGORITHM
-            "algorithm",
         ],
         room_ids: Set[str],
         sync_room_map: Dict[str, _RoomMembershipForUser],
@@ -1206,24 +1201,31 @@ class SlidingSyncHandler:
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
         ],
-    ) -> Mapping[str, Union[Optional[str], StateSentinel]]:
+    ) -> Mapping[str, Union[Optional[Dict[str, Any]], StateSentinel]]:
         """
-        TODO
+        Get the given state event content for a list of rooms. First we check the
+        current state of the room, then fallback to stripped state if available, then
+        historical state.
 
         Args:
-            event_type: TODO
-            event_content_field: TODO
+            event_type: State event type to fetch (event_type, "")
             room_ids: Room IDs to fetch the given content field for.
             sync_room_map: Dictionary of room IDs to sort along with membership
                 information in the room at the time of `to_token`.
             to_token: We filter based on the state of the room at this token
-            room_id_to_stripped_state_map: TODO (Modified in place)
+            room_id_to_stripped_state_map: This does not need to be filled in before
+                calling this function. Mapping from room_id to mapping of (type, state_key)
+                to stripped state event. Modified in place when we fetch new rooms so we can
+                save work next time this function is called.
 
         Returns:
-            A mapping from room ID to the `event_content_field` value if the room has
+            A mapping from room ID to the state event content if the room has
             the given state event (event_type, ""), otherwise `None`. Rooms unknown to
             this server will return `ROOM_UNKNOWN_SENTINEL`.
         """
+        room_id_to_content: Dict[
+            str, Union[Optional[Dict[str, Any]], StateSentinel]
+        ] = {}
 
         # As a bulk shortcut, use the current state if the server is particpating in the
         # room (meaning we have current state). Ideally, for leave/ban rooms, we would
@@ -1239,47 +1241,38 @@ class SlidingSyncHandler:
                 room_ids=room_ids, event_type=event_type, state_key=""
             )
         )
-        room_id_to_content_field: Dict[str, Union[Optional[str], StateSentinel]] = {}
-        # If we're just looking for the mere existence of the event, we can use the
-        # map we already have for the state event IDs.
-        if event_content_field is None:
-            room_id_to_content_field = room_id_to_state_event_id
-        # Otherwise, we need to fetch the full event to look at the content field.
-        else:
-            state_events = await self.store.get_events(
-                [
-                    state_event_id
-                    for state_event_id in room_id_to_state_event_id.values()
-                    # Dont waste our time fetching `None` or ROOM_UNKNOWN_SENTINEL values
-                    if isinstance(state_event_id, str)
-                ]
-            )
-            for room_id in room_ids:
-                state_event_id = room_id_to_state_event_id.get(room_id)
-                if state_event_id is ROOM_UNKNOWN_SENTINEL:
-                    room_id_to_content_field[room_id] = ROOM_UNKNOWN_SENTINEL
-                    continue
-                elif state_event_id is None:
-                    room_id_to_content_field[room_id] = None
-                    continue
 
-                # Given the above checks, we can assume `state_event_id` is a string now
-                assert isinstance(state_event_id, str)
+        # We need to fetch the full event to look at the content field.
+        state_events = await self.store.get_events(
+            [
+                state_event_id
+                for state_event_id in room_id_to_state_event_id.values()
+                # Dont waste our time fetching `None` or ROOM_UNKNOWN_SENTINEL values
+                if isinstance(state_event_id, str)
+            ]
+        )
+        for room_id in room_ids:
+            state_event_id = room_id_to_state_event_id.get(room_id)
+            if state_event_id is ROOM_UNKNOWN_SENTINEL:
+                room_id_to_content[room_id] = ROOM_UNKNOWN_SENTINEL
+                continue
+            elif state_event_id is None:
+                room_id_to_content[room_id] = None
+                continue
 
-                state_event = state_events.get(state_event_id)
-                # If the curent state says there is a state event, we should have it in
-                # the database.
-                assert state_event is not None
+            # Given the above checks, we can assume `state_event_id` is a string now
+            assert isinstance(state_event_id, str)
 
-                room_id_to_content_field[room_id] = (
-                    state_event.content.get(event_content_field)
-                    if event_content_field is not None
-                    else "set"
-                )
+            state_event = state_events.get(state_event_id)
+            # If the curent state says there is a state event, we should have it in
+            # the database.
+            assert state_event is not None
+
+            room_id_to_content[room_id] = state_event.content
 
         room_ids_with_results = [
             room_id
-            for room_id, content_field in room_id_to_content_field.items()
+            for room_id, content_field in room_id_to_content.items()
             if content_field is not ROOM_UNKNOWN_SENTINEL
         ]
 
@@ -1295,7 +1288,7 @@ class SlidingSyncHandler:
             )
         )
 
-        # Update our `room_id_to_content_field` map based on the stripped state
+        # Update our `room_id_to_content` map based on the stripped state
         # (applies to invite/knock rooms)
         rooms_ids_without_stripped_state: Set[str] = set()
         for room_id in room_ids_without_results:
@@ -1311,17 +1304,16 @@ class SlidingSyncHandler:
             # If there is some stripped state, we assume the remote server passed *all*
             # of the potential stripped state events for the room.
             if stripped_state_map is not None:
+                create_stripped_event = stripped_state_map.get((EventTypes.Create, ""))
                 stripped_event = stripped_state_map.get((event_type, ""))
-                if stripped_event is not None:
-                    room_id_to_content_field[room_id] = (
-                        stripped_event.content.get(event_content_field)
-                        if event_content_field is not None
-                        else "set"
-                    )
-                else:
-                    # Didn't see the state event we're looking for in the stripped
-                    # state so we can assume relevant content field is `None`.
-                    room_id_to_content_field[room_id] = None
+                # Sanity check that we at-least have the create event
+                if create_stripped_event is not None:
+                    if stripped_event is not None:
+                        room_id_to_content[room_id] = stripped_event.content
+                    else:
+                        # Didn't see the state event we're looking for in the stripped
+                        # state so we can assume relevant content field is `None`.
+                        room_id_to_content[room_id] = None
             else:
                 rooms_ids_without_stripped_state.add(room_id)
 
@@ -1329,7 +1321,7 @@ class SlidingSyncHandler:
         # server has left (no one local is in the room) but we can look at the
         # historical state.
         #
-        # Update our `room_id_to_content_field` map based on the state at the time of
+        # Update our `room_id_to_content` map based on the state at the time of
         # the membership event.
         for room_id in rooms_ids_without_stripped_state:
             room_state = await self.storage_controllers.state.get_state_at(
@@ -1359,17 +1351,13 @@ class SlidingSyncHandler:
                 continue
 
             if state_event is not None:
-                room_id_to_content_field[room_id] = (
-                    state_event.content.get(event_content_field)
-                    if event_content_field is not None
-                    else "set"
-                )
+                room_id_to_content[room_id] = state_event.content
             else:
                 # Didn't see the state event we're looking for in the stripped
                 # state so we can assume relevant content field is `None`.
-                room_id_to_content_field[room_id] = None
+                room_id_to_content[room_id] = None
 
-        return room_id_to_content_field
+        return room_id_to_content
 
     async def filter_rooms(
         self,
@@ -1420,9 +1408,8 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            room_id_to_is_encrypted = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
+            room_id_to_encrypted_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
                 event_type=EventTypes.RoomEncryption,
-                event_content_field=None,
                 room_ids=filtered_room_id_set,
                 to_token=to_token,
                 sync_room_map=sync_room_map,
@@ -1432,17 +1419,18 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                is_encrypted = room_id_to_is_encrypted.get(
+                encrypted_content = room_id_to_encrypted_content.get(
                     room_id, ROOM_UNKNOWN_SENTINEL
                 )
 
                 # Just remove rooms if we can't determine their encryption status
-                if is_encrypted is ROOM_UNKNOWN_SENTINEL:
+                if encrypted_content is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa
+                is_encrypted = encrypted_content is not None
                 if (filters.is_encrypted and not is_encrypted) or (
                     not filters.is_encrypted and is_encrypted
                 ):
@@ -1468,105 +1456,30 @@ class SlidingSyncHandler:
         # provided in the list. `None` is a valid type for rooms which do not have a
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
-            # As a bulk shortcut, lookup the room_type based on the current state if the
-            # server is particpating in the room (meaning we have current state).
-            # Ideally, for leave/ban rooms, we wouldn't be looking at the current state
-            # but the create event isn't secret given it's created at the beginning of
-            # the room meaning if you've had any membership before, you already knew
-            # about it and for invite/knock it is handed out as one of the stripped
-            # events anyway.
-            #
-            # Since this function is cached, we need to make a mutable copy via
-            # `dict(...)`.
-            room_id_to_type = dict(
-                await self.store.bulk_get_room_type(filtered_room_id_set)
+            room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
+                event_type=EventTypes.Create,
+                room_ids=filtered_room_id_set,
+                to_token=to_token,
+                sync_room_map=sync_room_map,
+                room_id_to_stripped_state_map=room_id_to_stripped_state_map,
             )
-            room_ids_with_results = [
-                room_id
-                for room_id, room_type in room_id_to_type.items()
-                if room_type is not ROOM_UNKNOWN_SENTINEL
-            ]
-
-            # We might not have room state for remote invite/knocks if we are the first
-            # person on our server to see the room. The best we can do is look in the
-            # optional stripped state from the invite/knock event.
-            room_ids_without_results = filtered_room_id_set.difference(
-                chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
-            )
-            room_id_to_stripped_state_map.update(
-                await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(
-                    room_ids_without_results, sync_room_map
-                )
-            )
-
-            # Update our `room_id_to_type` map based on the stripped state
-            rooms_ids_without_stripped_state = set()
-            for room_id in room_ids_without_results:
-                stripped_state_map = room_id_to_stripped_state_map.get(
-                    room_id, Sentinel.UNSET_SENTINEL
-                )
-                assert stripped_state_map is not Sentinel.UNSET_SENTINEL, (
-                    f"Stripped state left unset for room {room_id}. "
-                    + "Make sure you're calling `_bulk_get_stripped_state_for_rooms_from_sync_room_map(...)` "
-                    + "with that room_id. (this is a problem with Synapse itself)"
-                )
-
-                if stripped_state_map is not None:
-                    create_stripped_event = stripped_state_map.get(
-                        (EventTypes.Create, "")
-                    )
-                    if create_stripped_event is not None:
-                        room_id_to_type[room_id] = create_stripped_event.content.get(
-                            EventContentFields.ROOM_TYPE
-                        )
-                else:
-                    rooms_ids_without_stripped_state.add(room_id)
-
-            # Last resort, we might not have current room state for rooms that the
-            # server has left (no one local is in the room) but we can look at the
-            # historical state.
-            #
-            # Update our `room_id_to_type` map based on the state at the time of
-            # the membership event.
-            for room_id in rooms_ids_without_stripped_state:
-                room_state = await self.storage_controllers.state.get_state_at(
-                    room_id=room_id,
-                    stream_position=to_token.copy_and_replace(
-                        StreamKeyType.ROOM,
-                        sync_room_map[room_id].event_pos.to_room_stream_token(),
-                    ),
-                    state_filter=StateFilter.from_types(
-                        [
-                            (EventTypes.Create, ""),
-                        ]
-                    ),
-                    # Partially-stated rooms should have all state events except for
-                    # remote membership events so we don't need to wait at all because
-                    # we only want the create event.
-                    await_full_state=False,
-                )
-                # We can use the create event as a canary to tell whether the server has
-                # seen the room before
-                create_event = room_state.get((EventTypes.Create, ""))
-
-                if create_event is None:
-                    # Skip for unknown rooms
-                    continue
-
-                room_id_to_type[room_id] = create_event.content.get(
-                    EventContentFields.ROOM_TYPE
-                )
 
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                room_type = room_id_to_type.get(room_id, ROOM_UNKNOWN_SENTINEL)
+                create_content = room_id_to_create_content.get(
+                    room_id, ROOM_UNKNOWN_SENTINEL
+                )
 
                 # Just remove rooms if we can't determine their type
-                if room_type is ROOM_UNKNOWN_SENTINEL:
+                if create_content is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
+                # We assume that the room is either unknown or has a create event
+                assert isinstance(create_content, dict)
+
+                room_type = create_content.get(EventContentFields.ROOM_TYPE)
                 if (
                     filters.room_types is not None
                     and room_type not in filters.room_types
@@ -1580,6 +1493,14 @@ class SlidingSyncHandler:
                     filtered_room_id_set.remove(room_id)
 
         if filters.room_name_like is not None:
+            # TODO:
+            # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms_from_sync_room_map(
+            #     event_type=EventTypes.Name,
+            #     room_ids=filtered_room_id_set,
+            #     to_token=to_token,
+            #     sync_room_map=sync_room_map,
+            #     room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+            # )
             raise NotImplementedError()
 
         if filters.tags is not None:
