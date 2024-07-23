@@ -4008,11 +4008,15 @@ This option replaces the previous top-level 'use_presence' option.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">presence:
   enabled: false
+  include_offline_users_on_sync: false
 </code></pre>
 <p><code>enabled</code> can also be set to a special value of &quot;untracked&quot; which ignores updates
 received via clients and federation, while still accepting updates from the
 <a href="usage/configuration/../../modules/index.html">module API</a>.</p>
 <p><em>The &quot;untracked&quot; option was added in Synapse 1.96.0.</em></p>
+<p>When clients perform an initial or <code>full_state</code> sync, presence results for offline users are
+not included by default. Setting <code>include_offline_users_on_sync</code> to <code>true</code> will always include
+offline users in the results. Defaults to false.</p>
 <hr />
 <h3 id="require_auth_for_profile_requests"><a class="header" href="#require_auth_for_profile_requests"><code>require_auth_for_profile_requests</code></a></h3>
 <p>Whether to require authentication to retrieve profile data (avatars, display names) of other
