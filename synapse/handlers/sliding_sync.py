@@ -1187,21 +1187,13 @@ class SlidingSyncHandler:
 
     async def _bulk_get_partial_current_state_content_for_rooms(
         self,
-        # These should be restricted to the possible stripped state events (see bulk
-        # shortcut note below for more details).
+        # These should be restricted to the possible stripped state events and
+        # non-sensitive details (see bulk shortcut note below for more details). For
+        # example, even though the room name/avatar/topic are stripped state, they seem
+        # a lot more senstive to leak the current state value of.
         event_type: Literal[
             # EventTypes.Create
             "m.room.create",
-            # EventTypes.Name
-            "m.room.name",
-            # EventTypes.RoomAvatar
-            "m.room.avatar",
-            # EventTypes.Topic
-            "m.room.topic",
-            # EventTypes.JoinRules
-            "m.room.join_rules",
-            # EventTypes.CanonicalAlias
-            "m.room.canonical_alias",
             # EventTypes.RoomEncryption
             "m.room.encryption",
         ],
@@ -1240,9 +1232,9 @@ class SlidingSyncHandler:
         # As a bulk shortcut, use the current state if the server is particpating in the
         # room (meaning we have current state). Ideally, for leave/ban rooms, we would
         # want the state at the time of the membership instead of current state to not
-        # leak anything but we consider the stripped state events to not be a secret
-        # given they are often set at the start of the room and they one of the stripped
-        # state events that is normally handed out on invite/knock.
+        # leak anything but we consider the create/encryption stripped state events to
+        # not be a secret given they are often set at the start of the room and they are
+        # normally handed out on invite/knock.
         #
         # Since this function is cached, we need to make a mutable copy via
         # `dict(...)`.
@@ -1517,7 +1509,10 @@ class SlidingSyncHandler:
                     filtered_room_id_set.remove(room_id)
 
         if filters.room_name_like is not None:
-            # TODO:
+            # TODO: The room name is a bit more sensitive to leak than the
+            # create/encryption event. Maybe we should consider a better way to fetch
+            # historical state before implementing this.
+            #
             # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms(
             #     event_type=EventTypes.Name,
             #     room_ids=filtered_room_id_set,
