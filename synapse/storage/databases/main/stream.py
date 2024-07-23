@@ -1360,10 +1360,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             # minimum position of the token. If not then we need to fetch more
             # rows.
             for room_id, stream in result.items():
-                if min_token < stream:
-                    recheck_rooms.add(room_id)
-                else:
+                if stream <= min_token:
                     results[room_id] = stream
+                else:
+                    recheck_rooms.add(room_id)
 
         if not recheck_rooms:
             return results
