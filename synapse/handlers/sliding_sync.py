@@ -1280,7 +1280,14 @@ class SlidingSyncHandler:
         # the first person on our server to see the room. The best we can do is look
         # in the optional stripped state from the invite/knock event.
         room_ids_without_results = room_ids.difference(
-            chain(room_ids_with_results, room_id_to_stripped_state_map.keys())
+            chain(
+                room_ids_with_results,
+                [
+                    room_id
+                    for room_id, stripped_state_map in room_id_to_stripped_state_map.items()
+                    if stripped_state_map is not None
+                ],
+            )
         )
         room_id_to_stripped_state_map.update(
             await self._bulk_get_stripped_state_for_rooms_from_sync_room_map(

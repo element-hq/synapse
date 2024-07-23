@@ -124,8 +124,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         # Purge other caches based on room state.
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
-        self._attempt_to_invalidate_cache("get_room_type", (room_id,))
-        self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_partial_current_state_id_for_event_type", (room_id,))
 
     def _invalidate_state_caches_all(self, room_id: str) -> None:
         """Invalidates caches that are based on the current state, but does
@@ -149,8 +148,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_user_in_room_with_profile", None)
         self._attempt_to_invalidate_cache("get_rooms_for_user", None)
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
-        self._attempt_to_invalidate_cache("get_room_type", (room_id,))
-        self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_partial_current_state_id_for_event_type", (room_id,))
 
     def _attempt_to_invalidate_cache(
         self, cache_name: str, key: Optional[Collection[Any]]

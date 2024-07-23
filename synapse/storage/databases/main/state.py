@@ -307,7 +307,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         create_event = await self.get_event(create_id)
         return create_event
 
-    @cached(max_entries=10000)
+    @cached(max_entries=10000, tree=True)
     async def get_partial_current_state_id_for_event_type(
         self, room_id: str, event_type: str, state_key: str
     ) -> Optional[str]:
