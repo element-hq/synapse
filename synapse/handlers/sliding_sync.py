@@ -640,7 +640,7 @@ class SlidingSyncHandler:
         elif from_token:
             connection_token = from_token.connection
         else:
-            # Initial sync without a `from_token` starts a `0`
+            # Initial sync without a `from_token` starts at `0`
             connection_token = 0
 
         return SlidingSyncResult(
@@ -1467,8 +1467,9 @@ class SlidingSyncHandler:
 
             timeline_events, new_room_key = await self.store.paginate_room_events(
                 room_id=room_id,
-                # Because we want the latest events first the bounds are
-                # reversed.
+                # The bounds are reversed so we can paginate backwards
+                # (from newer to older events) starting at to_bound.
+                # This ensures we fill the `limit` with the newest events first,
                 from_key=to_bound,
                 to_key=from_bound,
                 direction=Direction.BACKWARDS,
