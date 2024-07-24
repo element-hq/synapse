@@ -1184,13 +1184,13 @@ class SlidingSyncStreamToken:
     async def from_string(store: "DataStore", string: str) -> "SlidingSyncStreamToken":
         """Creates a SlidingSyncStreamToken from its textual representation."""
         try:
-            connection_token_str, stream_token_str = string.split("/", 1)
-            connection_token = int(connection_token_str)
+            connection_position_str, stream_token_str = string.split("/", 1)
+            connection_position = int(connection_position_str)
             stream_token = await StreamToken.from_string(store, stream_token_str)
 
             return SlidingSyncStreamToken(
                 stream_token=stream_token,
-                connection_position=connection_token,
+                connection_position=connection_position,
             )
         except CancelledError:
             raise
