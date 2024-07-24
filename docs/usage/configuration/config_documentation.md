@@ -2420,7 +2420,7 @@ allowed_local_3pids:
   - medium: email
     pattern: '^[^@]+@vector\.im$'
   - medium: msisdn
-    pattern: '\+44'
+    pattern: '^44\d{10}$'
 ```
 ---
 ### `enable_3pid_lookup`
