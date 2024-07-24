@@ -18,7 +18,7 @@
 #
 #
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, Final, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Final, List, Mapping, Optional, Sequence, Tuple
 
 import attr
 from typing_extensions import TypedDict
@@ -31,7 +31,14 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
+from synapse.types import (
+    DeviceListUpdates,
+    JsonDict,
+    JsonMapping,
+    SlidingSyncStreamToken,
+    StreamToken,
+    UserID,
+)
 from synapse.types.rest.client import SlidingSyncBody
 
 if TYPE_CHECKING:
@@ -264,6 +271,7 @@ class SlidingSyncResult:
 
         Attributes:
             to_device: The to-device extension (MSC3885)
+            e2ee: The E2EE device extension (MSC3884)
         """
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -282,12 +290,53 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.events)
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class E2eeExtension:
+            """The E2EE device extension (MSC3884)
+
+            Attributes:
+                device_list_updates: List of user_ids whose devices have changed or left (only
+                    present on incremental syncs).
+                device_one_time_keys_count: Map from key algorithm to the number of
+                    unclaimed one-time keys currently held on the server for this device. If
+                    an algorithm is unlisted, the count for that algorithm is assumed to be
+                    zero. If this entire parameter is missing, the count for all algorithms
+                    is assumed to be zero.
+                device_unused_fallback_key_types: List of unused fallback key algorithms
+                    for this device.
+            """
+
+            # Only present on incremental syncs
+            device_list_updates: Optional[DeviceListUpdates]
+            device_one_time_keys_count: Mapping[str, int]
+            device_unused_fallback_key_types: Sequence[str]
+
+            def __bool__(self) -> bool:
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
+                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
+                    default_otk is not None and default_otk > 0
+                )
+
+                return bool(
+                    more_than_default_otk
+                    or self.device_list_updates
+                    or self.device_unused_fallback_key_types
+                )
+
         to_device: Optional[ToDeviceExtension] = None
+        e2ee: Optional[E2eeExtension] = None
 
         def __bool__(self) -> bool:
-            return bool(self.to_device)
+            return bool(self.to_device or self.e2ee)
 
-    next_pos: StreamToken
+    next_pos: SlidingSyncStreamToken
     lists: Dict[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
     extensions: Extensions
@@ -300,7 +349,7 @@ class SlidingSyncResult:
         return bool(self.lists or self.rooms or self.extensions)
 
     @staticmethod
-    def empty(next_pos: StreamToken) -> "SlidingSyncResult":
+    def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
         "Return a new empty result"
         return SlidingSyncResult(
             next_pos=next_pos,

@@ -96,6 +96,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    allow_authenticated=False,
                 )
             else:
                 await self.thumbnail_provider.respond_local_thumbnail(
@@ -107,6 +108,7 @@ class ThumbnailResource(RestServlet):
                     m_type,
                     max_timeout_ms,
                     False,
+                    allow_authenticated=False,
                 )
             self.media_repo.mark_recently_accessed(None, media_id)
         else:
@@ -134,6 +136,7 @@ class ThumbnailResource(RestServlet):
                 m_type,
                 max_timeout_ms,
                 ip_address,
-                False,
+                use_federation=False,
+                allow_authenticated=False,
             )
             self.media_repo.mark_recently_accessed(server_name, media_id)
