@@ -6103,8 +6103,9 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         # `SlidingSyncResult.__bool__` for new results.
         self._bump_notifier_wait_for_events(
             user1_id,
-            # We choose presense because we're not testing for presence updates and
-            # don't want to contimainate the results.
+            # We choose `StreamKeyType.PRESENCE` because we're testing for account data
+            # and don't want to contaminate the account data results using
+            # `StreamKeyType.ACCOUNT_DATA`.
             wake_stream_key=StreamKeyType.PRESENCE,
         )
         # Block for a little bit more to ensure we don't see any new results.
