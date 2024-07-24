@@ -1255,7 +1255,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
         sync_path = self.sync_endpoint
         if since:
-            sync_path += f"&pos={since}"
+            sync_path += f"?pos={since}"
 
         channel = self.make_request(
             method="POST",
