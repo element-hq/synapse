@@ -1170,9 +1170,9 @@ class SlidingSyncStreamToken:
         5/s2633508_17_338_6732159_1082514_541479_274711_265584_1_379
 
     Attributes:
-        stream: Token representing the position of all the standard
+        stream_token: Token representing the position of all the standard
             streams.
-        connection: Token used by sliding sync to track updates to any
+        connection_position: Token used by sliding sync to track updates to any
             per-connection state stored by Synapse.
     """
 
