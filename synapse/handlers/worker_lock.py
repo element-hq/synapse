@@ -247,6 +247,7 @@ class WaitingLock:
                             timeout=self._get_next_retry_interval(),
                             reactor=self.reactor,
                         )
+                        self._retry_interval = 0.1
                 except Exception:
                     pass
 
