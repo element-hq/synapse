@@ -5458,3 +5458,789 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             ),
             ["alg1"],
         )
+
+
+class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
+    """Tests for the account_data sliding sync extension"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        sendtodevice.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.event_sources = hs.get_event_sources()
+        self.e2e_keys_handler = hs.get_e2e_keys_handler()
+        self.account_data_handler = hs.get_account_data_handler()
+        self.notifier = hs.get_notifier()
+        self.sync_endpoint = (
+            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+        )
+
+    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
+        """
+        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
+        Sync results.
+        """
+        # We're expecting some new activity from this point onwards
+        from_token = self.event_sources.get_current_token()
+
+        triggered_notifier_wait_for_events = False
+
+        async def _on_new_acivity(
+            before_token: StreamToken, after_token: StreamToken
+        ) -> bool:
+            nonlocal triggered_notifier_wait_for_events
+            triggered_notifier_wait_for_events = True
+            return True
+
+        # Listen for some new activity for the user. We're just trying to confirm that
+        # our bump below actually does what we think it does (triggers new activity for
+        # the user).
+        result_awaitable = self.notifier.wait_for_events(
+            user_id,
+            1000,
+            _on_new_acivity,
+            from_token=from_token,
+        )
+
+        # Send a new To-Device message so that `notifier.wait_for_events(...)` wakes up.
+        # We're bumping to-device because it won't show up in the Sliding Sync response
+        # for this extension so it won't affect whether we have results.
+        sending_user_id = self.register_user(
+            "user_bump_notifier_wait_for_events", "pass"
+        )
+        sending_user_tok = self.login(sending_user_id, "pass")
+        test_msg = {"foo": "bar"}
+        chan = self.make_request(
+            "PUT",
+            "/_matrix/client/r0/sendToDevice/m.test/1234",
+            content={"messages": {user_id: {"d1": test_msg}}},
+            access_token=sending_user_tok,
+        )
+        self.assertEqual(chan.code, 200, chan.result)
+
+        # Wait for our notifier result
+        self.get_success(result_awaitable)
+
+        if not triggered_notifier_wait_for_events:
+            raise AssertionError(
+                "Expected `notifier.wait_for_events(...)` to be triggered"
+            )
+
+    def test_no_data_initial_sync(self) -> None:
+        """
+        Test that enabling the account_data extension works during an intitial sync,
+        even if there is no-data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            # Even though we don't have any global account data set, Synapse saves some
+            # default push rules for us.
+            {AccountDataTypes.PUSH_RULES},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_no_data_incremental_sync(self) -> None:
+        """
+        Test that enabling account_data extension works during an incremental sync, even
+        if there is no-data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # There has been no account data changes since the `from_token` so we shouldn't
+        # see any account data here.
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            set(),
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_global_account_data_initial_sync(self) -> None:
+        """
+        On initial sync, we should return all global account data on initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Update the global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.foobarbaz",
+                content={"foo": "bar"},
+            )
+        )
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # It should show us all of the global account data
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            {AccountDataTypes.PUSH_RULES, "org.matrix.foobarbaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_global_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we should only account data that has changed since the
+        `from_token`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Add some global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.foobarbaz",
+                content={"foo": "bar"},
+            )
+        )
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add some other global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.doodardaz",
+                content={"doo": "dar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            # We should only see the new global account data that happened after the `from_token`
+            {"org.matrix.doodardaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_room_account_data_initial_sync(self) -> None:
+        """
+        On initial sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz"},
+            exact=True,
+        )
+
+    def test_room_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add some other room account data
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        # We should only see the new room account data that happened after the `from_token`
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz2"},
+            exact=True,
+        )
+
+    def test_room_account_data_relevant_rooms(self) -> None:
+        """
+        Test out different variations of `lists`/`rooms` we are requesting account data for.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id3,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id4 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id4,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id5 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id5,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        room_id_to_human_name_map = {
+            room_id1: "room1",
+            room_id2: "room2",
+            room_id3: "room3",
+            room_id4: "room4",
+            room_id5: "room5",
+        }
+
+        # Mix lists and rooms
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": ["foo-list", "non-existent-list"],
+                    "rooms": [room_id1, room_id2, "!non-existent-room"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ✅ Requested via `rooms` and a room subscription exists
+        # room2: ❌ Requested via `rooms` but not in the response (from lists or room subscriptions)
+        # room3: ❌ Not requested
+        # room4: ✅ Shows up because requested via `lists` and list exists in the response
+        # room5: ✅ Shows up because requested via `lists` and list exists in the response
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room4", "room5"},
+            exact=True,
+        )
+
+        # Try wildcards (this is the default)
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    # "lists": ["*"],
+                    # "rooms": ["*"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ✅ Shows up because of default `rooms` wildcard and is in one of the room subscriptions
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room3", "room4", "room5"},
+            exact=True,
+        )
+
+        # Empty list will return nothing
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": [],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ❌ Not requested
+        # room4: ❌ Not requested
+        # room5: ❌ Not requested
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            set(),
+            exact=True,
+        )
+
+        # Try wildcard and none
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": ["*"],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room3", "room4", "room5"},
+            exact=True,
+        )
+
+    def test_wait_for_new_data(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive.
+
+        (Only applies to incremental syncs with a `timeout` specified)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Bump the global account data to trigger new results
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user1_id,
+                "org.matrix.foobarbaz",
+                {"foo": "bar"},
+            )
+        )
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the global account data update
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in channel.json_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            {"org.matrix.foobarbaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_wait_for_new_data_timeout(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive but
+        no data ever arrives so we timeout. We're also making sure that the default data
+        from the account_data extension doesn't trigger a false-positive for new data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self._bump_notifier_wait_for_events(user1_id)
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("global")
+        )
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("rooms")
+        )
