@@ -334,8 +334,10 @@ class SlidingSyncBody(RequestBodyModel):
             """
 
             enabled: Optional[StrictBool] = False
-            lists: Optional[List[StrictStr]] = None
-            rooms: Optional[List[StrictStr]] = None
+            # Process all lists defined in the Sliding Window API. (This is the default.)
+            lists: Optional[List[StrictStr]] = ["*"]
+            # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
+            rooms: Optional[List[StrictStr]] = ["*"]
 
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
