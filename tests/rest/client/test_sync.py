@@ -3652,41 +3652,27 @@ class SlidingSyncTestCase(SlidingSyncBase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 4,
-                    }
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Tombstone, ""],
+                    ],
+                    "timeline_limit": 0,
                 }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
-        after_room_token = channel.json_body["pos"]
+            }
+        }
+        _, after_room_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
             self.sync_endpoint + f"?pos={after_room_token}",
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            # This one doesn't exist in the room
-                            [EventTypes.Tombstone, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
-                }
-            },
+            content=sync_body,
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
