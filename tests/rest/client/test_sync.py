@@ -5418,6 +5418,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             # Even though we don't have any global account data set, Synapse saves some
             # default push rules for us.
             {AccountDataTypes.PUSH_RULES},
+            exact=True,
         )
         self.assertIncludes(
             channel.json_body["extensions"]["account_data"].get("rooms").keys(),
@@ -5470,9 +5471,9 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             exact=True,
         )
 
-    def test_initial_sync(self) -> None:
+    def test_global_account_data_initial_sync(self) -> None:
         """
-        Test that we return all account data on initial sync.
+        On initial sync, we should return all global account data on initial sync.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -5483,17 +5484,6 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
                 user_id=user1_id,
                 account_data_type="org.matrix.foobarbaz",
                 content={"foo": "bar"},
-            )
-        )
-
-        # Update the room account data
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
             )
         )
 
@@ -5513,6 +5503,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
+        # It should show us all of the global account data
         self.assertIncludes(
             {
                 global_event["type"]
@@ -5520,14 +5511,528 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
                     "global"
                 )
             },
-            # Even though we don't have any global account data set, Synapse saves some
-            # default push rules for us.
-            {AccountDataTypes.PUSH_RULES},
+            {AccountDataTypes.PUSH_RULES, "org.matrix.foobarbaz"},
             exact=True,
         )
         self.assertIncludes(
             channel.json_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
+            exact=True,
+        )
+
+    def test_global_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we should only account data that has changed since the
+        `from_token`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Add some global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.foobarbaz",
+                content={"foo": "bar"},
+            )
+        )
+
+        from_token = self.event_sources.get_current_token()
+
+        # Add some other global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.doodardaz",
+                content={"doo": "dar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {},
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in channel.json_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            # We should only see the new global account data that happened after the `from_token`
+            {"org.matrix.doodardaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_room_account_data_initial_sync(self) -> None:
+        """
+        On initial sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {},
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        "rooms": [room_id1, room_id2],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("global")
+        )
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz"},
+            exact=True,
+        )
+
+    def test_room_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        from_token = self.event_sources.get_current_token()
+
+        # Add some other room account data
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint
+            + f"?pos={self.get_success(from_token.to_string(self.store))}",
+            {
+                "lists": {},
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        "rooms": [room_id1, room_id2],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("global")
+        )
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        # We should only see the new room account data that happened after the `from_token`
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz2"},
+            exact=True,
+        )
+
+    def test_room_account_data_relevant_rooms(self) -> None:
+        """
+        Test out different variations of `lists`/`rooms` we are requesting account data for.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id3,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id4 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id4,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id5 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id5,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        room_id_to_human_name_map = {
+            room_id1: "room1",
+            room_id2: "room2",
+            room_id3: "room3",
+            room_id4: "room4",
+            room_id5: "room5",
+        }
+
+        # Mix lists and rooms
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    # We expect this list range to include room5 and room4
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                    # We expect this list range to include room5, room4, room3
+                    "bar-list": {
+                        "ranges": [[0, 2]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        "lists": ["foo-list", "non-existent-list"],
+                        "rooms": [room_id1, room_id2, "!non-existent-room"],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # room1: ✅ Requested via `rooms` and a room subscription exists
+        # room2: ❌ Requested via `rooms` but not in the response (from lists or room subscriptions)
+        # room3: ❌ Not requested
+        # room4: ✅ Shows up because requested via `lists` and list exists in the response
+        # room5: ✅ Shows up because requested via `lists` and list exists in the response
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room4", "room5"},
+            exact=True,
+        )
+
+        # Try wildcards (this is the default)
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    # We expect this list range to include room5 and room4
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                    # We expect this list range to include room5, room4, room3
+                    "bar-list": {
+                        "ranges": [[0, 2]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        # "lists": ["*"],
+                        # "rooms": ["*"],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # room1: ✅ Shows up because of default `rooms` wildcard and is in one of the room subscriptions
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room3", "room4", "room5"},
+            exact=True,
+        )
+
+        # Empty list will return nothing
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    # We expect this list range to include room5 and room4
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                    # We expect this list range to include room5, room4, room3
+                    "bar-list": {
+                        "ranges": [[0, 2]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        "lists": [],
+                        "rooms": [],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ❌ Not requested
+        # room4: ❌ Not requested
+        # room5: ❌ Not requested
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            set(),
+            exact=True,
+        )
+
+        # Try wildcard and none
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    # We expect this list range to include room5 and room4
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                    # We expect this list range to include room5, room4, room3
+                    "bar-list": {
+                        "ranges": [[0, 2]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    }
+                },
+                "extensions": {
+                    "account_data": {
+                        "enabled": True,
+                        "lists": ["*"],
+                        "rooms": [],
+                    }
+                },
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in channel.json_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room3", "room4", "room5"},
             exact=True,
         )
 
