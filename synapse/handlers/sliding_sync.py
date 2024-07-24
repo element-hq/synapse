@@ -1979,7 +1979,7 @@ class SlidingSyncHandler:
         lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
+        from_token: Optional[SlidingSyncStreamToken],
     ) -> Optional[SlidingSyncResult.Extensions.AccountDataExtension]:
         """Handle Account Data extension (MSC3959)
 
@@ -2000,12 +2000,12 @@ class SlidingSyncHandler:
         if from_token is not None:
             global_account_data_map = (
                 await self.store.get_updated_global_account_data_for_user(
-                    user_id, from_token.account_data_key
+                    user_id, from_token.stream_token.account_data_key
                 )
             )
 
             have_push_rules_changed = await self.store.have_push_rules_changed_for_user(
-                user_id, from_token.push_rules_key
+                user_id, from_token.stream_token.push_rules_key
             )
             if have_push_rules_changed:
                 global_account_data_map = dict(global_account_data_map)
@@ -2075,7 +2075,7 @@ class SlidingSyncHandler:
             if from_token is not None:
                 account_data_by_room_map = (
                     await self.store.get_updated_room_account_data_for_user(
-                        user_id, from_token.account_data_key
+                        user_id, from_token.stream_token.account_data_key
                     )
                 )
             else:

@@ -5460,7 +5460,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
         )
 
 
-class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
+class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
     """Tests for the account_data sliding sync extension"""
 
     servlets = [
@@ -5547,25 +5547,20 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         user1_tok = self.login(user1_id, "pass")
 
         # Make an initial Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         self.assertIncludes(
             {
                 global_event["type"]
-                for global_event in channel.json_body["extensions"]["account_data"].get(
+                for global_event in response_body["extensions"]["account_data"].get(
                     "global"
                 )
             },
@@ -5575,7 +5570,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             exact=True,
         )
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
             exact=True,
         )
@@ -5588,31 +5583,25 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # There has been no account data changes since the `from_token` so we shouldn't
         # see any account data here.
         self.assertIncludes(
             {
                 global_event["type"]
-                for global_event in channel.json_body["extensions"]["account_data"].get(
+                for global_event in response_body["extensions"]["account_data"].get(
                     "global"
                 )
             },
@@ -5620,7 +5609,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             exact=True,
         )
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
             exact=True,
         )
@@ -5642,26 +5631,21 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Make an initial Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # It should show us all of the global account data
         self.assertIncludes(
             {
                 global_event["type"]
-                for global_event in channel.json_body["extensions"]["account_data"].get(
+                for global_event in response_body["extensions"]["account_data"].get(
                     "global"
                 )
             },
@@ -5669,7 +5653,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             exact=True,
         )
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
             exact=True,
         )
@@ -5691,7 +5675,15 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Add some other global account data
         self.get_success(
@@ -5703,26 +5695,12 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         self.assertIncludes(
             {
                 global_event["type"]
-                for global_event in channel.json_body["extensions"]["account_data"].get(
+                for global_event in response_body["extensions"]["account_data"].get(
                     "global"
                 )
             },
@@ -5731,7 +5709,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             exact=True,
         )
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
             exact=True,
         )
@@ -5767,43 +5745,36 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Make an initial Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {},
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        "rooms": [room_id1, room_id2],
-                    }
-                },
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
-        self.assertIsNotNone(
-            channel.json_body["extensions"]["account_data"].get("global")
-        )
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
         # Even though we requested room2, we only expect room1 to show up because that's
         # the only room in the Sliding Sync response (room2 is not one of our room
         # subscriptions or in a sliding window list).
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             {room_id1},
             exact=True,
         )
         self.assertIncludes(
             {
                 event["type"]
-                for event in channel.json_body["extensions"]["account_data"]
+                for event in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .get(room_id1)
             },
@@ -5841,7 +5812,22 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Add some other room account data
         self.get_success(
@@ -5862,37 +5848,14 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        "rooms": [room_id1, room_id2],
-                    }
-                },
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        self.assertIsNotNone(
-            channel.json_body["extensions"]["account_data"].get("global")
-        )
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
         # Even though we requested room2, we only expect room1 to show up because that's
         # the only room in the Sliding Sync response (room2 is not one of our room
         # subscriptions or in a sliding window list).
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["account_data"].get("rooms").keys(),
             {room_id1},
             exact=True,
         )
@@ -5900,7 +5863,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(
             {
                 event["type"]
-                for event in channel.json_body["extensions"]["account_data"]
+                for event in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .get(room_id1)
             },
@@ -5979,41 +5942,36 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         }
 
         # Mix lists and rooms
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    # We expect this list range to include room5 and room4
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
-                    # We expect this list range to include room5, room4, room3
-                    "bar-list": {
-                        "ranges": [[0, 2]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        "lists": ["foo-list", "non-existent-list"],
-                        "rooms": [room_id1, room_id2, "!non-existent-room"],
-                    }
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": ["foo-list", "non-existent-list"],
+                    "rooms": [room_id1, room_id2, "!non-existent-room"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # room1: ✅ Requested via `rooms` and a room subscription exists
         # room2: ❌ Requested via `rooms` but not in the response (from lists or room subscriptions)
@@ -6023,7 +5981,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(
             {
                 room_id_to_human_name_map[room_id]
-                for room_id in channel.json_body["extensions"]["account_data"]
+                for room_id in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .keys()
             },
@@ -6032,41 +5990,36 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Try wildcards (this is the default)
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    # We expect this list range to include room5 and room4
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
-                    # We expect this list range to include room5, room4, room3
-                    "bar-list": {
-                        "ranges": [[0, 2]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        # "lists": ["*"],
-                        # "rooms": ["*"],
-                    }
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    # "lists": ["*"],
+                    # "rooms": ["*"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # room1: ✅ Shows up because of default `rooms` wildcard and is in one of the room subscriptions
         # room2: ❌ Not requested
@@ -6076,7 +6029,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(
             {
                 room_id_to_human_name_map[room_id]
-                for room_id in channel.json_body["extensions"]["account_data"]
+                for room_id in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .keys()
             },
@@ -6085,41 +6038,36 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Empty list will return nothing
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    # We expect this list range to include room5 and room4
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
-                    # We expect this list range to include room5, room4, room3
-                    "bar-list": {
-                        "ranges": [[0, 2]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        "lists": [],
-                        "rooms": [],
-                    }
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": [],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # room1: ❌ Not requested
         # room2: ❌ Not requested
@@ -6129,7 +6077,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(
             {
                 room_id_to_human_name_map[room_id]
-                for room_id in channel.json_body["extensions"]["account_data"]
+                for room_id in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .keys()
             },
@@ -6138,41 +6086,36 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         )
 
         # Try wildcard and none
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    # We expect this list range to include room5 and room4
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
-                    # We expect this list range to include room5, room4, room3
-                    "bar-list": {
-                        "ranges": [[0, 2]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    },
+        sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
-                "room_subscriptions": {
-                    room_id1: {
-                        "required_state": [],
-                        "timeline_limit": 0,
-                    }
-                },
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                        "lists": ["*"],
-                        "rooms": [],
-                    }
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
                 },
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": ["*"],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # room1: ❌ Not requested
         # room2: ❌ Not requested
@@ -6182,7 +6125,7 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         self.assertIncludes(
             {
                 room_id_to_human_name_map[room_id]
-                for room_id in channel.json_body["extensions"]["account_data"]
+                for room_id in response_body["extensions"]["account_data"]
                 .get("rooms")
                 .keys()
             },
@@ -6204,22 +6147,21 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
-            },
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
             access_token=user1_tok,
             await_result=False,
         )
@@ -6264,22 +6206,21 @@ class SlidingSyncAccountDataExtensionTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "account_data": {
-                        "enabled": True,
-                    }
-                },
-            },
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
             access_token=user1_tok,
             await_result=False,
         )
