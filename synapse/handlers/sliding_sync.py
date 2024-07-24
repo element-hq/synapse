@@ -1758,8 +1758,14 @@ class SlidingSyncHandler:
         bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
         # But if we found a bump event, use that instead
         if last_bump_event_result is not None:
-            _, bump_event_pos = last_bump_event_result
-            bump_stamp = bump_event_pos.stream
+            _, new_bump_event_pos = last_bump_event_result
+
+            # If we've just joined a remote room, then the last bump event may
+            # have been backfilled (and so have a negative stream ordering).
+            # These negative stream orderings can't sensibly be compared, so
+            # instead we use the membership event position.
+            if new_bump_event_pos.stream > 0:
+                bump_stamp = new_bump_event_pos.stream
 
         return SlidingSyncResult.RoomResult(
             name=room_name,
