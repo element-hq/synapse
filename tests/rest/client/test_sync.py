@@ -1238,6 +1238,12 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
     sync_endpoint = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        # Enable sliding sync
+        config["experimental_features"] = {"msc3575_enabled": True}
+        return config
+
     def do_sync(
         self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
     ) -> Tuple[JsonDict, str]:
@@ -1281,12 +1287,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        # Enable sliding sync
-        config["experimental_features"] = {"msc3575_enabled": True}
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
@@ -4636,12 +4636,6 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
         sendtodevice.register_servlets,
     ]
 
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        # Enable sliding sync
-        config["experimental_features"] = {"msc3575_enabled": True}
-        return config
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
@@ -4967,12 +4961,6 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
         sync.register_servlets,
         devices.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        # Enable sliding sync
-        config["experimental_features"] = {"msc3575_enabled": True}
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
@@ -5470,12 +5458,6 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         sync.register_servlets,
         sendtodevice.register_servlets,
     ]
-
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        # Enable sliding sync
-        config["experimental_features"] = {"msc3575_enabled": True}
-        return config
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
