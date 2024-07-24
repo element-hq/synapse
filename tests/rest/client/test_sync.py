@@ -3540,19 +3540,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertEqual(channel.code, 200, channel.json_body)
 
         # Nothing to see for this banned user in the room in the token range
-        self.assertIsNone(channel.json_body["rooms"][room_id1].get("timeline"))
-        # No events returned in the timeline so nothing is "live"
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["num_live"],
-            0,
-            channel.json_body["rooms"][room_id1],
-        )
-        # There aren't anymore events to paginate to in this range
-        self.assertEqual(
-            channel.json_body["rooms"][room_id1]["limited"],
-            False,
-            channel.json_body["rooms"][room_id1],
-        )
+        self.assertIsNone(channel.json_body["rooms"].get(room_id1))
 
     def test_rooms_no_required_state(self) -> None:
         """
@@ -3662,11 +3650,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
                         # This one doesn't exist in the room
                         [EventTypes.Tombstone, ""],
                     ],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 }
             }
         }
         _, after_room_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send a message so the room comes down sync.
+        self.helper.send(room_id1, "msg", tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
@@ -4744,6 +4735,50 @@ class SlidingSyncTestCase(SlidingSyncBase):
             },
             exact=True,
         )
+
+    def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
+        """
+        Test that rooms with no updates are returned in subsequent incremental
+        syncs.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Tombstone, ""],
+                    ],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        _, after_room_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?pos={after_room_token}",
+            content=sync_body,
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Nothing has happened in the room, so the room should not come down
+        # /sync.
+        self.assertIsNone(channel.json_body["rooms"].get(room_id1))
 
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):

@@ -617,6 +617,31 @@ class SlidingSyncHandler:
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
 
+        # Filter out rooms that haven't received updates and we've sent down
+        # previously.
+        if from_token:
+            rooms_should_send = set()
+            for room_id in relevant_room_map:
+                status = await self.connection_store.have_sent_room(
+                    sync_config,
+                    from_token.connection_position,
+                    room_id,
+                )
+                if status.status != HaveSentRoomFlag.LIVE:
+                    rooms_should_send.add(room_id)
+
+            # We only need to check for any new events and not state changes, as
+            # state changes can only happen if an event has also been sent.
+            rooms_that_have_updates = (
+                self.store._events_stream_cache.get_entities_changed(
+                    relevant_room_map, from_token.stream_token.room_key.stream
+                )
+            )
+            rooms_should_send.update(rooms_that_have_updates)
+            relevant_room_map = {
+                r: c for r, c in relevant_room_map.items() if r in rooms_should_send
+            }
+
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
@@ -631,7 +656,9 @@ class SlidingSyncHandler:
                 to_token=to_token,
             )
 
-            rooms[room_id] = room_sync_result
+            # Filter out empty room results.
+            if room_sync_result:
+                rooms[room_id] = room_sync_result
 
         with start_active_span("sliding_sync.generate_room_entries"):
             await concurrently_execute(handle_room, relevant_room_map, 10)

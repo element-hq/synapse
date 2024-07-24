@@ -238,6 +238,14 @@ class SlidingSyncResult:
         notification_count: int
         highlight_count: int
 
+        def __bool__(self) -> bool:
+            return (
+                self.initial
+                or bool(self.required_state)
+                or bool(self.timeline_events)
+                or bool(self.stripped_state)
+            )
+
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
         """
