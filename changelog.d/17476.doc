@@ -1,0 +1,1 @@
+Change the example configuration of msisdn in allowed_local_3pids, which is a bit misleading that regex pattern has leading '+'.
