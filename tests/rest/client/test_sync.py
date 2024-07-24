@@ -37,6 +37,7 @@ from synapse.api.constants import (
     ReceiptTypes,
     RelationTypes,
 )
+from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import (
@@ -65,7 +66,7 @@ from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
 from tests.server import FakeChannel, TimedOutException
-from tests.test_utils.event_injection import mark_event_as_partial_state
+from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
 from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
@@ -2792,6 +2793,125 @@ class SlidingSyncTestCase(SlidingSyncBase):
             event_pos2.stream,
             channel.json_body["rooms"][room_id2],
         )
+
+    def test_rooms_bump_stamp_backfill(self) -> None:
+        """
+        Test that `bump_stamp` ignores backfilled events, i.e. events with a
+        negative stream ordering.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote room
+        creator = "@user:other"
+        room_id = "!foo:other"
+        shared_kwargs = {
+            "room_id": room_id,
+            "room_version": "10",
+        }
+
+        create_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[],
+                type=EventTypes.Create,
+                state_key="",
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        creator_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[create_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=creator,
+                content={"membership": Membership.JOIN},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        # We add a message event as a valid "bump type"
+        msg_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[creator_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id],
+                type=EventTypes.Message,
+                content={"body": "foo", "msgtype": "m.text"},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        invite_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[msg_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.INVITE},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+
+        remote_events_and_contexts = [
+            create_tuple,
+            creator_tuple,
+            msg_tuple,
+            invite_tuple,
+        ]
+
+        # Ensure the local HS knows the room version
+        self.get_success(
+            self.store.store_room(room_id, creator, False, RoomVersions.V10)
+        )
+
+        # Persist these events as backfilled events.
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+
+        for event, context in remote_events_and_contexts:
+            self.get_success(persistence.persist_event(event, context, backfilled=True))
+
+        # Now we join the local user to the room
+        join_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[invite_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id, invite_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.JOIN},
+                sender=user1_id,
+                **shared_kwargs,
+            )
+        )
+        self.get_success(persistence.persist_event(*join_tuple))
+
+        # Doing an SS request should return a positive `bump_stamp`, even though
+        # the only event that matches the bump types has as negative stream
+        # ordering.
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            content={
+                "lists": {
+                    "foo-list": {
+                        "ranges": [[0, 1]],
+                        "required_state": [],
+                        "timeline_limit": 5,
+                    }
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertGreater(channel.json_body["rooms"][room_id]["bump_stamp"], 0)
 
     def test_rooms_newly_joined_incremental_sync(self) -> None:
         """
