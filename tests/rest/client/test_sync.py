@@ -21,7 +21,7 @@
 import json
 import logging
 from http import HTTPStatus
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 from parameterized import parameterized, parameterized_class
 
@@ -60,6 +60,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.util import Clock
+from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.federation.transport.test_knocking import (
@@ -1274,6 +1275,88 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
         return channel.json_body, channel.json_body["pos"]
 
+    def _bump_notifier_wait_for_events(
+        self,
+        user_id: str,
+        wake_stream_key: Literal[
+            StreamKeyType.ACCOUNT_DATA,
+            StreamKeyType.PRESENCE,
+        ],
+    ) -> None:
+        """
+        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
+        Sync results.
+
+        Args:
+            user_id: The user ID to wake up the notifier for
+            wake_stream_key: The stream key to wake up. This will create an actual new
+                entity in that stream so it's best to choose one that won't affect the
+                Sliding Sync results you're testing for. In other words, if your testing
+                account data, choose `StreamKeyType.PRESENCE` instead. We support two
+                possible stream keys because you're probably testing one or the other so
+                one is always a "safe" option.
+        """
+        # We're expecting some new activity from this point onwards
+        from_token = self.hs.get_event_sources().get_current_token()
+
+        triggered_notifier_wait_for_events = False
+
+        async def _on_new_acivity(
+            before_token: StreamToken, after_token: StreamToken
+        ) -> bool:
+            nonlocal triggered_notifier_wait_for_events
+            triggered_notifier_wait_for_events = True
+            return True
+
+        notifier = self.hs.get_notifier()
+
+        # Listen for some new activity for the user. We're just trying to confirm that
+        # our bump below actually does what we think it does (triggers new activity for
+        # the user).
+        result_awaitable = notifier.wait_for_events(
+            user_id,
+            1000,
+            _on_new_acivity,
+            from_token=from_token,
+        )
+
+        # Update the account data or presence so that `notifier.wait_for_events(...)`
+        # wakes up. We chose these two options because they're least likely to show up
+        # in the Sliding Sync response so it won't affect whether we have results.
+        if wake_stream_key == StreamKeyType.ACCOUNT_DATA:
+            self.get_success(
+                self.hs.get_account_data_handler().add_account_data_for_user(
+                    user_id,
+                    "org.matrix.foobarbaz",
+                    {"foo": "bar"},
+                )
+            )
+        elif wake_stream_key == StreamKeyType.PRESENCE:
+            sending_user_id = self.register_user(
+                "user_bump_notifier_wait_for_events_" + random_string(10), "pass"
+            )
+            sending_user_tok = self.login(sending_user_id, "pass")
+            test_msg = {"foo": "bar"}
+            chan = self.make_request(
+                "PUT",
+                "/_matrix/client/r0/sendToDevice/m.test/1234",
+                content={"messages": {user_id: {"d1": test_msg}}},
+                access_token=sending_user_tok,
+            )
+            self.assertEqual(chan.code, 200, chan.result)
+        else:
+            raise AssertionError(
+                "Unable to wake that stream in _bump_notifier_wait_for_events(...)"
+            )
+
+        # Wait for our notifier result
+        self.get_success(result_awaitable)
+
+        if not triggered_notifier_wait_for_events:
+            raise AssertionError(
+                "Expected `notifier.wait_for_events(...)` to be triggered"
+            )
+
 
 class SlidingSyncTestCase(SlidingSyncBase):
     """
@@ -1292,8 +1375,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
-        self.account_data_handler = hs.get_account_data_handler()
-        self.notifier = hs.get_notifier()
 
     def _assertRequiredStateIncludes(
         self,
@@ -1418,52 +1499,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
 
         return room_id
-
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-        # We're expecting some new activity from this point onwards
-        from_token = self.event_sources.get_current_token()
-
-        triggered_notifier_wait_for_events = False
-
-        async def _on_new_acivity(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> bool:
-            nonlocal triggered_notifier_wait_for_events
-            triggered_notifier_wait_for_events = True
-            return True
-
-        # Listen for some new activity for the user. We're just trying to confirm that
-        # our bump below actually does what we think it does (triggers new activity for
-        # the user).
-        result_awaitable = self.notifier.wait_for_events(
-            user_id,
-            1000,
-            _on_new_acivity,
-            from_token=from_token,
-        )
-
-        # Update the account data so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping account data because it won't show up in the Sliding Sync
-        # response so it won't affect whether we have results.
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
-        )
-
-        # Wait for our notifier result
-        self.get_success(result_awaitable)
-
-        if not triggered_notifier_wait_for_events:
-            raise AssertionError(
-                "Expected `notifier.wait_for_events(...)` to be triggered"
-            )
 
     def test_sync_list(self) -> None:
         """
@@ -1671,7 +1706,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
             channel.await_result(timeout_ms=5000)
         # Wake-up `notifier.wait_for_events(...)` that will cause us test
         # `SlidingSyncResult.__bool__` for new results.
-        self._bump_notifier_wait_for_events(user1_id)
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
         # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
@@ -4638,58 +4675,9 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.event_sources = hs.get_event_sources()
-        self.account_data_handler = hs.get_account_data_handler()
-        self.notifier = hs.get_notifier()
         self.sync_endpoint = (
             "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
         )
-
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-        # We're expecting some new activity from this point onwards
-        from_token = self.event_sources.get_current_token()
-
-        triggered_notifier_wait_for_events = False
-
-        async def _on_new_acivity(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> bool:
-            nonlocal triggered_notifier_wait_for_events
-            triggered_notifier_wait_for_events = True
-            return True
-
-        # Listen for some new activity for the user. We're just trying to confirm that
-        # our bump below actually does what we think it does (triggers new activity for
-        # the user).
-        result_awaitable = self.notifier.wait_for_events(
-            user_id,
-            1000,
-            _on_new_acivity,
-            from_token=from_token,
-        )
-
-        # Update the account data so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping account data because it won't show up in the Sliding Sync
-        # response so it won't affect whether we have results.
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
-        )
-
-        # Wait for our notifier result
-        self.get_success(result_awaitable)
-
-        if not triggered_notifier_wait_for_events:
-            raise AssertionError(
-                "Expected `notifier.wait_for_events(...)` to be triggered"
-            )
 
     def _assert_to_device_response(
         self, channel: FakeChannel, expected_messages: List[JsonDict]
@@ -4939,7 +4927,9 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
             channel.await_result(timeout_ms=5000)
         # Wake-up `notifier.wait_for_events(...)` that will cause us test
         # `SlidingSyncResult.__bool__` for new results.
-        self._bump_notifier_wait_for_events(user1_id)
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
         # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
@@ -4964,59 +4954,10 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.event_sources = hs.get_event_sources()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
-        self.account_data_handler = hs.get_account_data_handler()
-        self.notifier = hs.get_notifier()
         self.sync_endpoint = (
             "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
         )
-
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-        # We're expecting some new activity from this point onwards
-        from_token = self.event_sources.get_current_token()
-
-        triggered_notifier_wait_for_events = False
-
-        async def _on_new_acivity(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> bool:
-            nonlocal triggered_notifier_wait_for_events
-            triggered_notifier_wait_for_events = True
-            return True
-
-        # Listen for some new activity for the user. We're just trying to confirm that
-        # our bump below actually does what we think it does (triggers new activity for
-        # the user).
-        result_awaitable = self.notifier.wait_for_events(
-            user_id,
-            1000,
-            _on_new_acivity,
-            from_token=from_token,
-        )
-
-        # Update the account data so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping account data because it won't show up in the Sliding Sync
-        # response so it won't affect whether we have results.
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
-        )
-
-        # Wait for our notifier result
-        self.get_success(result_awaitable)
-
-        if not triggered_notifier_wait_for_events:
-            raise AssertionError(
-                "Expected `notifier.wait_for_events(...)` to be triggered"
-            )
 
     def test_no_data_initial_sync(self) -> None:
         """
@@ -5219,7 +5160,9 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             channel.await_result(timeout_ms=5000)
         # Wake-up `notifier.wait_for_events(...)` that will cause us test
         # `SlidingSyncResult.__bool__` for new results.
-        self._bump_notifier_wait_for_events(user1_id)
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
         # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
@@ -5461,64 +5404,11 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.event_sources = hs.get_event_sources()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.account_data_handler = hs.get_account_data_handler()
-        self.notifier = hs.get_notifier()
         self.sync_endpoint = (
             "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
         )
-
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-        # We're expecting some new activity from this point onwards
-        from_token = self.event_sources.get_current_token()
-
-        triggered_notifier_wait_for_events = False
-
-        async def _on_new_acivity(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> bool:
-            nonlocal triggered_notifier_wait_for_events
-            triggered_notifier_wait_for_events = True
-            return True
-
-        # Listen for some new activity for the user. We're just trying to confirm that
-        # our bump below actually does what we think it does (triggers new activity for
-        # the user).
-        result_awaitable = self.notifier.wait_for_events(
-            user_id,
-            1000,
-            _on_new_acivity,
-            from_token=from_token,
-        )
-
-        # Send a new To-Device message so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping to-device because it won't show up in the Sliding Sync response
-        # for this extension so it won't affect whether we have results.
-        sending_user_id = self.register_user(
-            "user_bump_notifier_wait_for_events", "pass"
-        )
-        sending_user_tok = self.login(sending_user_id, "pass")
-        test_msg = {"foo": "bar"}
-        chan = self.make_request(
-            "PUT",
-            "/_matrix/client/r0/sendToDevice/m.test/1234",
-            content={"messages": {user_id: {"d1": test_msg}}},
-            access_token=sending_user_tok,
-        )
-        self.assertEqual(chan.code, 200, chan.result)
-
-        # Wait for our notifier result
-        self.get_success(result_awaitable)
-
-        if not triggered_notifier_wait_for_events:
-            raise AssertionError(
-                "Expected `notifier.wait_for_events(...)` to be triggered"
-            )
 
     def test_no_data_initial_sync(self) -> None:
         """
@@ -6211,7 +6101,12 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             channel.await_result(timeout_ms=5000)
         # Wake-up `notifier.wait_for_events(...)` that will cause us test
         # `SlidingSyncResult.__bool__` for new results.
-        self._bump_notifier_wait_for_events(user1_id)
+        self._bump_notifier_wait_for_events(
+            user1_id,
+            # We choose presense because we're not testing for presence updates and
+            # don't want to contimainate the results.
+            wake_stream_key=StreamKeyType.PRESENCE,
+        )
         # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
