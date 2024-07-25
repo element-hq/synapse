@@ -65,7 +65,7 @@ from tests import unittest
 from tests.federation.transport.test_knocking import (
     KnockingStrippedStateEventHelperMixin,
 )
-from tests.server import FakeChannel, TimedOutException
+from tests.server import TimedOutException
 from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
 from tests.unittest import skip_unless
 
@@ -1641,22 +1641,20 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
         sync_body = {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 0]],
-                        "required_state": [],
-                        "timeline_limit": 1,
-                    }
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 1,
                 }
             }
+        }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
             content=sync_body,
             access_token=user1_tok,
             await_result=False,
@@ -4783,13 +4781,13 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
         # Make an initial Sliding Sync request with the e2ee extension enabled
         sync_body = {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
-            }
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Device list updates are only present for incremental syncs
@@ -4833,9 +4831,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
         # Device list shows up for incremental syncs
         self.assertEqual(
-            response_body["extensions"]["e2ee"]
-            .get("device_lists", {})
-            .get("changed"),
+            response_body["extensions"]["e2ee"].get("device_lists", {}).get("changed"),
             [],
         )
         self.assertEqual(
@@ -5053,9 +5049,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
         # Device list updates show up
         self.assertEqual(
-            response_body["extensions"]["e2ee"]
-            .get("device_lists", {})
-            .get("changed"),
+            response_body["extensions"]["e2ee"].get("device_lists", {}).get("changed"),
             [user3_id],
         )
         self.assertEqual(
@@ -5102,13 +5096,13 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
         # Make a Sliding Sync request with the e2ee extension enabled
         sync_body = {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
-            }
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Check for those one time key counts
@@ -5158,20 +5152,18 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
 
         # Make a Sliding Sync request with the e2ee extension enabled
         sync_body = {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
-            }
+            "lists": {},
+            "extensions": {
+                "e2ee": {
+                    "enabled": True,
+                }
+            },
+        }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Check for the unused fallback key types
         self.assertListEqual(
-            response_body["extensions"]["e2ee"].get(
-                "device_unused_fallback_key_types"
-            ),
+            response_body["extensions"]["e2ee"].get("device_unused_fallback_key_types"),
             ["alg1"],
         )
 
