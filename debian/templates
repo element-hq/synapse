@@ -5,7 +5,7 @@ _Description: Name of the server:
  servers via federation. This is normally the public hostname of the
  server running synapse, but can be different if you set up delegation.
  Please refer to the delegation documentation in this case:
- https://github.com/element-hq/synapse/blob/master/docs/delegate.md.
+ https://element-hq.github.io/synapse/latest/delegate.html.
 
 Template: matrix-synapse/report-stats
 Type: boolean
