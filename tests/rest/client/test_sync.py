@@ -4480,7 +4480,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
                 # Read last event
                 channel = self.make_request(
                     "POST",
-                    f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_response["event_id"]}",
+                    f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_response['event_id']}",
                     {},
                     access_token=user1_tok,
                 )
