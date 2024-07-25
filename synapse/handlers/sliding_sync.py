@@ -2205,7 +2205,7 @@ class SlidingSyncHandler:
                 room_id = receipt["room_id"]
                 type = receipt["type"]
                 content = receipt["content"]
-                room_id_to_receipt_map[room_id] = {type: type, content: content}
+                room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(
             room_id_to_receipt_map=room_id_to_receipt_map,
