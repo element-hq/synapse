@@ -4542,7 +4542,7 @@ class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
         user2_id = self.register_user("u2", "pass")
         user2_tok = self.login(user2_id, "pass", "d2")
 
-        sync_body = {
+        sync_body: JsonDict = {
             "lists": {},
             "extensions": {
                 "to_device": {
