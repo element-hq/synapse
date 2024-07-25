@@ -357,7 +357,7 @@ class SlidingSyncResult:
                 room_id_to_receipt_map: Mapping from room_id to `m.receipt` event (type, content)
             """
 
-            room_id_to_receipt_map: Mapping[str, Mapping[str, JsonMapping]]
+            room_id_to_receipt_map: Mapping[str, JsonMapping]
 
             def __bool__(self) -> bool:
                 return bool(self.room_id_to_receipt_map)

@@ -327,6 +327,7 @@ class AccountDataEventSource(EventSource[int, JsonDict]):
         explicit_room_id: Optional[str] = None,
     ) -> Tuple[List[JsonDict], int]:
         user_id = user.to_string()
+        # TODO: Take `to_key` into account
         last_stream_id = from_key
 
         current_stream_id = self.store.get_max_account_data_stream_id()

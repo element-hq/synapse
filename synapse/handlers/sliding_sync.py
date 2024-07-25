@@ -47,6 +47,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     PersistedEventPosition,
     Requester,
     RoomStreamToken,
@@ -631,7 +632,7 @@ class SlidingSyncHandler:
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
-            actual_room_ids=rooms.keys(),
+            actual_room_ids=set(rooms.keys()),
             from_token=from_token,
             to_token=to_token,
         )
@@ -1869,12 +1870,14 @@ class SlidingSyncHandler:
     def find_relevant_room_ids_for_extension(
         self,
         requested_lists: Optional[List[str]],
-        requested_rooms: Optional[List[str]],
+        requested_room_ids: Optional[List[str]],
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
     ) -> Set[str]:
         """
-        Handle the reserved `lists`/`rooms` keys for extensions.
+        Handle the reserved `lists`/`rooms` keys for extensions. Extensions should only
+        return results for rooms in the Sliding Sync response. This matches up the
+        requested rooms/lists with the actual lists/rooms in the Sliding Sync response.
 
         {"lists": []}                    // Do not process any lists.
         {"lists": ["rooms", "dms"]}      // Process only a subset of lists.
@@ -1886,9 +1889,9 @@ class SlidingSyncHandler:
 
         Args:
             requested_lists: The `lists` from the extension request.
-            requested_rooms: The `rooms` from the extension request.
+            requested_room_ids: The `rooms` from the extension request.
             actual_lists: The actual lists from the Sliding Sync response.
-            actual_room_subscriptions: The actual room subscriptions from the Sliding Sync request.
+            actual_room_ids: The actual room subscriptions from the Sliding Sync request.
         """
 
         # We only want to include account data for rooms that are already in the sliding
@@ -1896,8 +1899,8 @@ class SlidingSyncHandler:
         relevant_room_ids: Set[str] = set()
 
         # See what rooms from the room subscriptions we should get account data for
-        if requested_rooms is not None:
-            for room_id in requested_rooms:
+        if requested_room_ids is not None:
+            for room_id in requested_room_ids:
                 # A wildcard means we process all rooms from the room subscriptions
                 if room_id == "*":
                     relevant_room_ids.update(actual_room_ids)
@@ -2087,6 +2090,7 @@ class SlidingSyncHandler:
 
         global_account_data_map: Mapping[str, JsonMapping] = {}
         if from_token is not None:
+            # TODO: This should take into account the `from_token` and `to_token`
             global_account_data_map = (
                 await self.store.get_updated_global_account_data_for_user(
                     user_id, from_token.stream_token.account_data_key
@@ -2098,15 +2102,18 @@ class SlidingSyncHandler:
             )
             if have_push_rules_changed:
                 global_account_data_map = dict(global_account_data_map)
+                # TODO: This should take into account the `from_token` and `to_token`
                 global_account_data_map[AccountDataTypes.PUSH_RULES] = (
                     await self.push_rules_handler.push_rules_for_user(sync_config.user)
                 )
         else:
+            # TODO: This should take into account the `to_token`
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
             global_account_data_map = dict(all_global_account_data)
+            # TODO: This should take into account the  `to_token`
             global_account_data_map[AccountDataTypes.PUSH_RULES] = (
                 await self.push_rules_handler.push_rules_for_user(sync_config.user)
             )
@@ -2115,18 +2122,20 @@ class SlidingSyncHandler:
         account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {}
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
-            requested_rooms=account_data_request.rooms,
+            requested_room_ids=account_data_request.rooms,
             actual_lists=actual_lists,
             actual_room_ids=actual_room_ids,
         )
         if len(relevant_room_ids) > 0:
             if from_token is not None:
+                # TODO: This should take into account the `from_token` and `to_token`
                 account_data_by_room_map = (
                     await self.store.get_updated_room_account_data_for_user(
                         user_id, from_token.stream_token.account_data_key
                     )
                 )
             else:
+                # TODO: This should take into account the `to_token`
                 account_data_by_room_map = (
                     await self.store.get_room_account_data_for_user(user_id)
                 )
@@ -2163,21 +2172,41 @@ class SlidingSyncHandler:
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
-        user_id = sync_config.user.to_string()
-
         # Skip if the extension is not enabled
         if not receipts_request.enabled:
             return None
 
-        # receipt_source = self.event_sources.sources.receipt
-        # receipts, receipt_key = await receipt_source.get_new_events(
-        #     user=sync_config.user,
-        #     from_key=receipt_key,
-        #     limit=sync_config.filter_collection.ephemeral_limit(),
-        #     room_ids=room_ids,
-        #     is_guest=sync_config.is_guest,
-        # )
+        relevant_room_ids = self.find_relevant_room_ids_for_extension(
+            requested_lists=receipts_request.lists,
+            requested_room_ids=receipts_request.rooms,
+            actual_lists=actual_lists,
+            actual_room_ids=actual_room_ids,
+        )
+
+        room_id_to_receipt_map: Mapping[str, JsonMapping] = {}
+        if len(relevant_room_ids) > 0:
+            receipt_source = self.event_sources.sources.receipt
+            receipts, _ = await receipt_source.get_new_events(
+                user=sync_config.user,
+                from_key=(
+                    from_token.stream_token.receipt_key
+                    if from_token
+                    else MultiWriterStreamToken(stream=0)
+                ),
+                to_key=to_token.receipt_key,
+                # This is a dummy value and isn't used in the function
+                limit=0,
+                room_ids=relevant_room_ids,
+                is_guest=False,
+            )
+
+            for receipt in receipts:
+                # These fields should exist for every receipt
+                room_id = receipt["room_id"]
+                type = receipt["type"]
+                content = receipt["content"]
+                room_id_to_receipt_map[room_id] = {type: type, content: content}
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(
-            room_id_to_receipt_map=TODO,
+            room_id_to_receipt_map=room_id_to_receipt_map,
         )
