@@ -5799,21 +5799,8 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         receipts.register_servlets,
     ]
 
-    def default_config(self) -> JsonDict:
-        config = super().default_config()
-        # Enable sliding sync
-        config["experimental_features"] = {"msc3575_enabled": True}
-        return config
-
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
-        self.event_sources = hs.get_event_sources()
-        self.e2e_keys_handler = hs.get_e2e_keys_handler()
-        self.account_data_handler = hs.get_account_data_handler()
-        self.notifier = hs.get_notifier()
-        self.sync_endpoint = (
-            "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
-        )
 
     def test_no_data_initial_sync(self) -> None:
         """
@@ -6103,7 +6090,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         self.assertEqual(channel.code, 200, channel.json_body)
         # No activity for room4 after the `from_token`
 
-        # Make an incremental Sliding Sync request with the account_data extension enabled
+        # Make an incremental Sliding Sync request with the receipts extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # Even though we requested room2, we only expect rooms to show up if they are
@@ -6201,7 +6188,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Make an incremental Sliding Sync request with the account_data extension enabled
+        # Make an incremental Sliding Sync request with the receipts extension enabled
         channel = self.make_request(
             "POST",
             self.sync_endpoint + f"?timeout=10000&pos={from_token}",
