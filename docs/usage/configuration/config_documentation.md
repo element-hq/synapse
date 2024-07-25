@@ -2386,7 +2386,7 @@ enable_registration_without_verification: true
 ---
 ### `registrations_require_3pid`
 
-If this is set, users must provide all of the specified types of 3PID when registering an account.
+If this is set, users must provide all of the specified types of [3PID](https://spec.matrix.org/latest/appendices/#3pid-types) when registering an account.
 
 Note that [`enable_registration`](#enable_registration) must also be set to allow account registration.
 
@@ -2411,6 +2411,9 @@ disable_msisdn_registration: true
 
 Mandate that users are only allowed to associate certain formats of
 3PIDs with accounts on this server, as specified by the `medium` and `pattern` sub-options.
+`pattern` is a [Perl-like regular expression](https://docs.python.org/3/library/re.html#module-re).
+
+More information about 3PIDs, allowed `medium` types and their `address` syntax can be found [in the Matrix spec](https://spec.matrix.org/latest/appendices/#3pid-types).
 
 Example configuration:
 ```yaml
@@ -2420,7 +2423,7 @@ allowed_local_3pids:
   - medium: email
     pattern: '^[^@]+@vector\.im$'
   - medium: msisdn
-    pattern: '\+44'
+    pattern: '^44\d{10}$'
 ```
 ---
 ### `enable_3pid_lookup`
