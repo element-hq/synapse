@@ -2386,7 +2386,7 @@ enable_registration_without_verification: true
 ---
 ### `registrations_require_3pid`
 
-If this is set, users must provide all of the specified types of 3PID when registering an account.
+If this is set, users must provide all of the specified types of [3PID](https://spec.matrix.org/latest/appendices/#3pid-types) when registering an account.
 
 Note that [`enable_registration`](#enable_registration) must also be set to allow account registration.
 
@@ -2411,6 +2411,8 @@ disable_msisdn_registration: true
 
 Mandate that users are only allowed to associate certain formats of
 3PIDs with accounts on this server, as specified by the `medium` and `pattern` sub-options.
+
+You can get more information about 3PID and the expected types of `medium` [here](https://spec.matrix.org/latest/appendices/#3pid-types).
 
 Example configuration:
 ```yaml
