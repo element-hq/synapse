@@ -59,8 +59,8 @@ from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
-    MutableStateMap,
     JsonMapping,
+    MutableStateMap,
     PersistedEventPosition,
     Requester,
     RoomStreamToken,
@@ -1206,15 +1206,11 @@ class SlidingSyncHandler:
 
     async def _bulk_get_partial_current_state_content_for_rooms(
         self,
-        # These should be restricted to the possible stripped state events and
-        # non-sensitive details (see bulk shortcut note below for more details). For
-        # example, even though the room name/avatar/topic are stripped state, they seem
-        # a lot more senstive to leak the current state value of.
-        event_type: Literal[
-            # EventTypes.Create
-            "m.room.create",
-            # EventTypes.RoomEncryption
-            "m.room.encryption",
+        content_type: Literal[
+            # `content.type` from `EventTypes.Create``
+            "room_type",
+            # `content.algorithm` from `EventTypes.RoomEncryption`
+            "room_encryption",
         ],
         room_ids: Set[str],
         sync_room_map: Dict[str, _RoomMembershipForUser],
@@ -1222,14 +1218,14 @@ class SlidingSyncHandler:
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
         ],
-    ) -> Mapping[str, Union[Optional[Dict[str, Any]], StateSentinel]]:
+    ) -> Mapping[str, Union[Optional[str], StateSentinel]]:
         """
         Get the given state event content for a list of rooms. First we check the
         current state of the room, then fallback to stripped state if available, then
         historical state.
 
         Args:
-            event_type: State event type to fetch (event_type, "")
+            content_type: Which content to grab
             room_ids: Room IDs to fetch the given content field for.
             sync_room_map: Dictionary of room IDs to sort along with membership
                 information in the room at the time of `to_token`.
@@ -1244,9 +1240,7 @@ class SlidingSyncHandler:
             the given state event (event_type, ""), otherwise `None`. Rooms unknown to
             this server will return `ROOM_UNKNOWN_SENTINEL`.
         """
-        room_id_to_content: Dict[
-            str, Union[Optional[Dict[str, Any]], StateSentinel]
-        ] = {}
+        room_id_to_content: Dict[str, Union[Optional[str], StateSentinel]] = {}
 
         # As a bulk shortcut, use the current state if the server is particpating in the
         # room (meaning we have current state). Ideally, for leave/ban rooms, we would
@@ -1255,41 +1249,26 @@ class SlidingSyncHandler:
         # not be a secret given they are often set at the start of the room and they are
         # normally handed out on invite/knock.
         #
+        # Be mindful to only use this for non-sensitive details. For example, even
+        # though the room name/avatar/topic are also stripped state, they seem a lot
+        # more senstive to leak the current state value of.
+        #
         # Since this function is cached, we need to make a mutable copy via
         # `dict(...)`.
-        room_id_to_state_event_id = dict(
-            await self.store.bulk_get_partial_current_state_ids_for_event_type(
-                room_ids=room_ids, event_type=event_type, state_key=""
+        event_type = ""
+        event_content_field = ""
+        if content_type == "room_type":
+            event_type = EventTypes.Create
+            event_content_field = EventContentFields.ROOM_TYPE
+            room_id_to_content = dict(await self.store.bulk_get_room_type(room_ids))
+        elif content_type == "room_encryption":
+            event_type = EventTypes.RoomEncryption
+            event_content_field = EventContentFields.ENCRYPTION_ALGORITHM
+            room_id_to_content = dict(
+                await self.store.bulk_get_room_encryption(room_ids)
             )
-        )
-
-        # We need to fetch the full event to look at the content field.
-        state_events = await self.store.get_events(
-            [
-                state_event_id
-                for state_event_id in room_id_to_state_event_id.values()
-                # Dont waste our time fetching `None` or ROOM_UNKNOWN_SENTINEL values
-                if isinstance(state_event_id, str)
-            ]
-        )
-        for room_id in room_ids:
-            state_event_id = room_id_to_state_event_id.get(room_id)
-            if state_event_id is ROOM_UNKNOWN_SENTINEL:
-                room_id_to_content[room_id] = ROOM_UNKNOWN_SENTINEL
-                continue
-            elif state_event_id is None:
-                room_id_to_content[room_id] = None
-                continue
-
-            # Given the above checks, we can assume `state_event_id` is a string now
-            assert isinstance(state_event_id, str)
-
-            state_event = state_events.get(state_event_id)
-            # If the curent state says there is a state event, we should have it in
-            # the database.
-            assert state_event is not None
-
-            room_id_to_content[room_id] = state_event.content
+        else:
+            raise AssertionError(f"Unexpected content type {content_type}")
 
         room_ids_with_results = [
             room_id
@@ -1337,7 +1316,9 @@ class SlidingSyncHandler:
                 # Sanity check that we at-least have the create event
                 if create_stripped_event is not None:
                     if stripped_event is not None:
-                        room_id_to_content[room_id] = stripped_event.content
+                        room_id_to_content[room_id] = stripped_event.content.get(
+                            event_content_field
+                        )
                     else:
                         # Didn't see the state event we're looking for in the stripped
                         # state so we can assume relevant content field is `None`.
@@ -1382,7 +1363,9 @@ class SlidingSyncHandler:
                 continue
 
             if state_event is not None:
-                room_id_to_content[room_id] = state_event.content
+                room_id_to_content[room_id] = state_event.content.get(
+                    event_content_field
+                )
             else:
                 # Didn't see the state event we're looking for in the stripped
                 # state so we can assume relevant content field is `None`.
@@ -1439,9 +1422,9 @@ class SlidingSyncHandler:
 
         # Filter for encrypted rooms
         if filters.is_encrypted is not None:
-            room_id_to_encrypted_content = (
+            room_id_to_encryption = (
                 await self._bulk_get_partial_current_state_content_for_rooms(
-                    event_type=EventTypes.RoomEncryption,
+                    content_type="room_encryption",
                     room_ids=filtered_room_id_set,
                     to_token=to_token,
                     sync_room_map=sync_room_map,
@@ -1452,18 +1435,16 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                encrypted_content = room_id_to_encrypted_content.get(
-                    room_id, ROOM_UNKNOWN_SENTINEL
-                )
+                encryption = room_id_to_encryption.get(room_id, ROOM_UNKNOWN_SENTINEL)
 
                 # Just remove rooms if we can't determine their encryption status
-                if encrypted_content is ROOM_UNKNOWN_SENTINEL:
+                if encryption is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
                 # If we're looking for encrypted rooms, filter out rooms that are not
                 # encrypted and vice versa
-                is_encrypted = encrypted_content is not None
+                is_encrypted = encryption is not None
                 if (filters.is_encrypted and not is_encrypted) or (
                     not filters.is_encrypted and is_encrypted
                 ):
@@ -1489,9 +1470,9 @@ class SlidingSyncHandler:
         # provided in the list. `None` is a valid type for rooms which do not have a
         # room type.
         if filters.room_types is not None or filters.not_room_types is not None:
-            room_id_to_create_content = (
+            room_id_to_type = (
                 await self._bulk_get_partial_current_state_content_for_rooms(
-                    event_type=EventTypes.Create,
+                    content_type="room_type",
                     room_ids=filtered_room_id_set,
                     to_token=to_token,
                     sync_room_map=sync_room_map,
@@ -1502,19 +1483,13 @@ class SlidingSyncHandler:
             # Make a copy so we don't run into an error: `Set changed size during
             # iteration`, when we filter out and remove items
             for room_id in filtered_room_id_set.copy():
-                create_content = room_id_to_create_content.get(
-                    room_id, ROOM_UNKNOWN_SENTINEL
-                )
+                room_type = room_id_to_type.get(room_id, ROOM_UNKNOWN_SENTINEL)
 
                 # Just remove rooms if we can't determine their type
-                if create_content is ROOM_UNKNOWN_SENTINEL:
+                if room_type is ROOM_UNKNOWN_SENTINEL:
                     filtered_room_id_set.remove(room_id)
                     continue
 
-                # We assume that the room is either unknown or has a create event
-                assert isinstance(create_content, dict)
-
-                room_type = create_content.get(EventContentFields.ROOM_TYPE)
                 if (
                     filters.room_types is not None
                     and room_type not in filters.room_types
@@ -1533,7 +1508,7 @@ class SlidingSyncHandler:
             # historical state before implementing this.
             #
             # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms(
-            #     event_type=EventTypes.Name,
+            #     content_type="room_name",
             #     room_ids=filtered_room_id_set,
             #     to_token=to_token,
             #     sync_room_map=sync_room_map,
