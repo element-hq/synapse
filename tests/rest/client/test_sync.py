@@ -5995,7 +5995,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         On incremental sync, we return all receipts for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
         """
-        
+
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
@@ -6050,7 +6050,6 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-
         sync_body = {
             "lists": {},
             "room_subscriptions": {
@@ -6065,7 +6064,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
                 room_id4: {
                     "required_state": [],
                     "timeline_limit": 0,
-                }
+                },
             },
             "extensions": {
                 "receipts": {
@@ -6227,10 +6226,13 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
 
         # We should see the new receipt
         self.assertIncludes(
-            channel.json_body.get("extensions", {}).get("receipts", {}).get("rooms", {}).keys(),
+            channel.json_body.get("extensions", {})
+            .get("receipts", {})
+            .get("rooms", {})
+            .keys(),
             {room_id},
             exact=True,
-            message=channel.json_body,
+            message=str(channel.json_body),
         )
         self.assertIncludes(
             channel.json_body["extensions"]["receipts"]["rooms"][room_id]["content"][
