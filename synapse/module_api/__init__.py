@@ -1110,10 +1110,10 @@ class ModuleApi:
 
             # Set the profile where it needs to be set.
             if "avatar_url" not in content:
-                content["avatar_url"] = profile["avatar_url"]
+                content["avatar_url"] = profile.get("avatar_url")
 
             if "displayname" not in content:
-                content["displayname"] = profile["displayname"]
+                content["displayname"] = profile.get("displayname")
 
         event_id, _ = await self._hs.get_room_member_handler().update_membership(
             requester=requester,

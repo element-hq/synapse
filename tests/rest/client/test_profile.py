@@ -479,6 +479,89 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             # The client requested ?propagate=true, so it should have happened.
             self.assertEqual(channel.json_body.get(prop), "http://my.server/pic.gif")
 
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_get_missing_custom_field(self) -> None:
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_get_custom_field_rejects_bad_username(self) -> None:
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{urllib.parse.quote('@alice:')}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"custom_field": "test"})
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_noauth(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field": "test"},
+        )
+        self.assertEqual(channel.code, 401, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_too_long(self) -> None:
+        """Attempts to set a stupid custom_field should get a 400"""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field" * 100: "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field": "test" * 100},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_invalid(self) -> None:
+        """Attempts to set an invalid value for custom_field should get a 400"""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field": {"test": "bar"}},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_other(self) -> None:
+        """Setting someone else's profile field should fail"""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.other}/custom_field",
+            content={"custom_field": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
     def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
         """Stores metadata about files in the database.
 

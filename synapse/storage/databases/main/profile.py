@@ -18,8 +18,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
+from synapse.api.errors import StoreError
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -173,6 +174,45 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_avatar_url",
         )
 
+    async def get_profile_field(
+        self, user_id: UserID, field_name: str
+    ) -> Optional[str]:
+        """
+        Get a custom profile field for a user.
+
+        Args:
+            user_id: The user's ID.
+            field_name: The custom profile filed name.
+
+        Returns:
+            The string value if the field exists, otherwise raises 404.
+        """
+        result = await self.get_profile_fields(user_id)
+        if field_name not in result:
+            raise StoreError(404, "No row found")
+        return result[field_name]
+
+    async def get_profile_fields(self, user_id: UserID) -> Dict[str, str]:
+        """
+        Get all custom profile fields for a user.
+
+        Args:
+            user_id: The user's ID.
+
+        Returns:
+            A dictionary of custom profile fields.
+        """
+        result = cast(
+            List[Tuple[str, str]],
+            await self.db_pool.simple_select_list(
+                table="profile_fields",
+                keyvalues={"user_id": user_id.to_string()},
+                retcols=("name", "value"),
+                desc="get_profile_fields",
+            ),
+        )
+        return dict(result)
+
     async def create_profile(self, user_id: UserID) -> None:
         user_localpart = user_id.localpart
         await self.db_pool.simple_insert(
@@ -220,6 +260,24 @@ class ProfileWorkerStore(SQLBaseStore):
             keyvalues={"user_id": user_localpart},
             values={"avatar_url": new_avatar_url, "full_user_id": user_id.to_string()},
             desc="set_profile_avatar_url",
+        )
+
+    async def set_profile_field(
+        self, user_id: UserID, field_name: str, new_value: str
+    ) -> None:
+        """
+        Set a custom profile field for a user.
+
+        Args:
+            user_id: The user's ID.
+            field_name: The name of the custom profile field.
+            new_value: The value of the custom profile field.
+        """
+        await self.db_pool.simple_upsert(
+            table="profile_fields",
+            keyvalues={"user_id": user_id.to_string(), "name": field_name},
+            values={"value": new_value},
+            desc="set_profile_field",
         )
 
 
