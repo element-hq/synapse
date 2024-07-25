@@ -2411,8 +2411,9 @@ disable_msisdn_registration: true
 
 Mandate that users are only allowed to associate certain formats of
 3PIDs with accounts on this server, as specified by the `medium` and `pattern` sub-options.
+`pattern` is a [Perl-like regular expression](https://docs.python.org/3/library/re.html#module-re).
 
-You can get more information about 3PID and the expected types of `medium` [here](https://spec.matrix.org/latest/appendices/#3pid-types).
+More information about 3PIDs, allowed `medium` types and their `address` syntax can be found [in the Matrix spec](https://spec.matrix.org/latest/appendices/#3pid-types).
 
 Example configuration:
 ```yaml
