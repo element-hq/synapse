@@ -247,6 +247,8 @@ class WaitingLock:
                             timeout=self._get_next_retry_interval(),
                             reactor=self.reactor,
                         )
+                        # Let's reset retry interval since we got notified, we
+                        # should only increase it if we hit the previous one
                         self._retry_interval = 0.1
                 except Exception:
                     pass
