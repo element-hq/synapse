@@ -5941,8 +5941,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             room_id5: "room5",
         }
 
-        # Mix lists and rooms
-        sync_body = {
+        main_sync_body = {
             "lists": {
                 # We expect this list range to include room5 and room4
                 "foo-list": {
@@ -5963,6 +5962,11 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                     "timeline_limit": 0,
                 }
             },
+        }
+
+        # Mix lists and rooms
+        sync_body = {
+            **main_sync_body,
             "extensions": {
                 "account_data": {
                     "enabled": True,
@@ -5991,26 +5995,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
         # Try wildcards (this is the default)
         sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
+            **main_sync_body,
             "extensions": {
                 "account_data": {
                     "enabled": True,
@@ -6039,26 +6024,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
         # Empty list will return nothing
         sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
+            **main_sync_body,
             "extensions": {
                 "account_data": {
                     "enabled": True,
@@ -6087,26 +6053,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
         # Try wildcard and none
         sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
+            **main_sync_body,
             "extensions": {
                 "account_data": {
                     "enabled": True,
@@ -6130,6 +6077,35 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 .keys()
             },
             {"room3", "room4", "room5"},
+            exact=True,
+        )
+
+        # Try requesting a room that is only in a list
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": [],
+                    "rooms": [room_id5],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ❌ Not requested
+        # room4: ❌ Not requested
+        # room5: ✅ Requested via `rooms` and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .keys()
+            },
+            {"room5"},
             exact=True,
         )
 
