@@ -54,7 +54,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
-from synapse.types import JsonDict, Requester, StreamToken
+from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
@@ -889,7 +889,9 @@ class SlidingSyncRestServlet(RestServlet):
 
         from_token = None
         if from_token_string is not None:
-            from_token = await StreamToken.from_string(self.store, from_token_string)
+            from_token = await SlidingSyncStreamToken.from_string(
+                self.store, from_token_string
+            )
 
         # TODO: We currently don't know whether we're going to use sticky params or
         # maybe some filters like sync v2  where they are built up once and referenced
@@ -927,7 +929,6 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
-    # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
         requester: Requester,
@@ -1114,6 +1115,24 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_extensions["e2ee"]["device_lists"]["left"] = list(
                     extensions.e2ee.device_list_updates.left
                 )
+
+        if extensions.account_data is not None:
+            serialized_extensions["account_data"] = {
+                # Same as the the top-level `account_data.events` field in Sync v2.
+                "global": [
+                    {"type": account_data_type, "content": content}
+                    for account_data_type, content in extensions.account_data.global_account_data_map.items()
+                ],
+                # Same as the joined room's account_data field in Sync v2, e.g the path
+                # `rooms.join["!foo:bar"].account_data.events`.
+                "rooms": {
+                    room_id: [
+                        {"type": account_data_type, "content": content}
+                        for account_data_type, content in event_map.items()
+                    ]
+                    for room_id, event_map in extensions.account_data.account_data_by_room_map.items()
+                },
+            }
 
         return serialized_extensions
 

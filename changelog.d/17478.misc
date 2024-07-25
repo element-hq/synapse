@@ -1,0 +1,1 @@
+Ensure we don't send down negative `bump_stamp` in experimental sliding sync endpoint.
