@@ -3695,47 +3695,27 @@ class SlidingSyncTestCase(SlidingSyncBase):
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [],
-                        "timeline_limit": 4,
-                    }
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Tombstone, ""],
+                    ],
+                    "timeline_limit": 1,
                 }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
-        after_room_token = channel.json_body["pos"]
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Reset the in-memory cache
         self.hs.get_sliding_sync_handler().connection_store._connections.clear()
 
         # Make the Sliding Sync request
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint + f"?pos={after_room_token}",
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            # This one doesn't exist in the room
-                            [EventTypes.Tombstone, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
-                }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # If the cache has been cleared then we do expect the state to come down
         state_map = self.get_success(
@@ -4507,35 +4487,29 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         # Make the Sliding Sync request
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            # This one doesn't exist in the room
-                            [EventTypes.Name, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 0,
                 }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            }
+        }
 
-        from_token = channel.json_body["pos"]
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
         self._assertRequiredStateIncludes(
-            channel.json_body["rooms"][room_id1]["required_state"],
+            response_body["rooms"][room_id1]["required_state"],
             {
                 state_map[(EventTypes.Create, "")],
                 state_map[(EventTypes.RoomHistoryVisibility, "")],
@@ -4548,32 +4522,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
             room_id1, EventTypes.Name, body={"name": "foo"}, tok=user2_tok
         )
 
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint + f"?pos={from_token}",
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 1]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            [EventTypes.Name, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
-                }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
         self._assertRequiredStateIncludes(
-            channel.json_body["rooms"][room_id1]["required_state"],
+            response_body["rooms"][room_id1]["required_state"],
             {
                 state_map[(EventTypes.Name, "")],
             },
@@ -4597,42 +4553,36 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         # Make the Sliding Sync request, we'll only receive room_id2
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 0]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            # This one doesn't exist in the room
-                            [EventTypes.Name, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 0,
                 }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+            }
+        }
 
-        from_token = channel.json_body["pos"]
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id2)
         )
 
         self._assertRequiredStateIncludes(
-            channel.json_body["rooms"][room_id2]["required_state"],
+            response_body["rooms"][room_id2]["required_state"],
             {
                 state_map[(EventTypes.Create, "")],
                 state_map[(EventTypes.RoomHistoryVisibility, "")],
             },
             exact=True,
         )
-        self.assertNotIn(room_id1, channel.json_body["rooms"])
+        self.assertNotIn(room_id1, response_body["rooms"])
 
         # Send a state event in room 1
         self.helper.send_state(
@@ -4640,32 +4590,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
 
         # We should get room_id1 down sync, with the full state.
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint + f"?pos={from_token}",
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 0]],
-                        "required_state": [
-                            [EventTypes.Create, ""],
-                            [EventTypes.RoomHistoryVisibility, ""],
-                            [EventTypes.Name, ""],
-                        ],
-                        "timeline_limit": 0,
-                    }
-                }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
         self._assertRequiredStateIncludes(
-            channel.json_body["rooms"][room_id1]["required_state"],
+            response_body["rooms"][room_id1]["required_state"],
             {
                 state_map[(EventTypes.Create, "")],
                 state_map[(EventTypes.RoomHistoryVisibility, "")],
