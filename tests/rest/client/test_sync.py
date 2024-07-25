@@ -30,6 +30,7 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import (
     AccountDataTypes,
+    EduTypes,
     EventContentFields,
     EventTypes,
     HistoryVisibility,
@@ -1376,6 +1377,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
+        self.account_data_handler = hs.get_account_data_handler()
 
     def _assertRequiredStateIncludes(
         self,
@@ -5786,7 +5788,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         )
 
 
-class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
+class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
     """Tests for the receipts sliding sync extension"""
 
     servlets = [
@@ -5794,6 +5796,7 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        receipts.register_servlets,
     ]
 
     def default_config(self) -> JsonDict:
@@ -5812,62 +5815,15 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
             "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
         )
 
-    # TODO: Remove once https://github.com/element-hq/synapse/pull/17481 lands
-    def _bump_notifier_wait_for_events(self, user_id: str) -> None:
-        """
-        Wake-up a `notifier.wait_for_events(user_id)` call without affecting the Sliding
-        Sync results.
-        """
-        # We're expecting some new activity from this point onwards
-        from_token = self.event_sources.get_current_token()
-
-        triggered_notifier_wait_for_events = False
-
-        async def _on_new_acivity(
-            before_token: StreamToken, after_token: StreamToken
-        ) -> bool:
-            nonlocal triggered_notifier_wait_for_events
-            triggered_notifier_wait_for_events = True
-            return True
-
-        # Listen for some new activity for the user. We're just trying to confirm that
-        # our bump below actually does what we think it does (triggers new activity for
-        # the user).
-        result_awaitable = self.notifier.wait_for_events(
-            user_id,
-            1000,
-            _on_new_acivity,
-            from_token=from_token,
-        )
-
-        # Update the account data so that `notifier.wait_for_events(...)` wakes up.
-        # We're bumping account data because it won't show up in the Sliding Sync
-        # response so it won't affect whether we have results.
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
-        )
-
-        # Wait for our notifier result
-        self.get_success(result_awaitable)
-
-        if not triggered_notifier_wait_for_events:
-            raise AssertionError(
-                "Expected `notifier.wait_for_events(...)` to be triggered"
-            )
-
     def test_no_data_initial_sync(self) -> None:
         """
-        Test that enabling the account_data extension works during an intitial sync,
+        Test that enabling the receipts extension works during an intitial sync,
         even if there is no-data.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Make an initial Sliding Sync request with the account_data extension enabled
+        # Make an initial Sliding Sync request with the receipts extension enabled
         sync_body = {
             "lists": {},
             "extensions": {
@@ -5879,26 +5835,14 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
-            # Even though we don't have any global account data set, Synapse saves some
-            # default push rules for us.
-            {AccountDataTypes.PUSH_RULES},
-            exact=True,
-        )
-        self.assertIncludes(
-            response_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["receipts"].get("rooms").keys(),
             set(),
             exact=True,
         )
 
     def test_no_data_incremental_sync(self) -> None:
         """
-        Test that enabling account_data extension works during an incremental sync, even
+        Test that enabling receipts extension works during an incremental sync, even
         if there is no-data.
         """
         user1_id = self.register_user("user1", "pass")
@@ -5914,58 +5858,88 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Make an incremental Sliding Sync request with the account_data extension enabled
+        # Make an incremental Sliding Sync request with the receipts extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # There has been no account data changes since the `from_token` so we shouldn't
-        # see any account data here.
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
-            set(),
-            exact=True,
-        )
-        self.assertIncludes(
-            response_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["receipts"].get("rooms").keys(),
             set(),
             exact=True,
         )
 
-    def test_room_account_data_initial_sync(self) -> None:
+    def test_receipts_initial_sync(self) -> None:
         """
-        On initial sync, we return all account data for a given room but only for
+        On initial sync, we return all receipts for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
 
-        # Create a room and add some room account data
-        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
+        # Create a room
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        event_response1 = self.helper.send(room_id1, body="new event", tok=user2_tok)
+        # User1 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
         )
-
-        # Create another room with some room account data
-        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User2 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{event_response1['event_id']}",
+            {},
+            access_token=user2_tok,
         )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User3 privately reads the last event (make sure this doesn't leak to the other users)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ_PRIVATE}/{event_response1['event_id']}",
+            {},
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Make an initial Sliding Sync request with the account_data extension enabled
+        # Create another room
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        self.helper.join(room_id2, user3_id, tok=user3_tok)
+        event_response2 = self.helper.send(room_id2, body="new event", tok=user2_tok)
+        # User1 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{event_response2['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User2 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{event_response1['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User3 privately reads the last event (make sure this doesn't leak to the other users)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ_PRIVATE}/{event_response2['event_id']}",
+            {},
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make an initial Sliding Sync request with the receipts extension enabled
         sync_body = {
             "lists": {},
             "room_subscriptions": {
@@ -5983,55 +5957,99 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
-        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
         # Even though we requested room2, we only expect room1 to show up because that's
         # the only room in the Sliding Sync response (room2 is not one of our room
         # subscriptions or in a sliding window list).
         self.assertIncludes(
-            response_body["extensions"]["account_data"].get("rooms").keys(),
+            response_body["extensions"]["receipts"].get("rooms").keys(),
             {room_id1},
             exact=True,
         )
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We can see user1 and user2 read receipts
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
-            {"org.matrix.roorarraz"},
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                event_response1["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user1_id, user2_id},
+            exact=True,
+        )
+        # User1 did not have a private read receipt and we shouldn't leak others'
+        # private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                event_response1["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
             exact=True,
         )
 
-    def test_room_account_data_incremental_sync(self) -> None:
+    def test_receipts_incremental_sync(self) -> None:
         """
-        On incremental sync, we return all account data for a given room but only for
+        On incremental sync, we return all receipts for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
         """
+        
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
 
-        # Create a room and add some room account data
-        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
+        # Create room1
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        event_response1 = self.helper.send(room_id1, body="new event", tok=user2_tok)
+        # User2 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{event_response1['event_id']}",
+            {},
+            access_token=user2_tok,
         )
+        self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Create another room with some room account data
-        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
+        # Create room2
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        event_response2 = self.helper.send(room_id2, body="new event", tok=user2_tok)
+        # User1 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{event_response2['event_id']}",
+            {},
+            access_token=user1_tok,
         )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Create room3
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        self.helper.join(room_id3, user3_id, tok=user3_tok)
+        event_response3 = self.helper.send(room_id3, body="new event", tok=user2_tok)
+
+        # Create room4
+        room_id4 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id4, user1_id, tok=user1_tok)
+        self.helper.join(room_id4, user3_id, tok=user3_tok)
+        event_response4 = self.helper.send(room_id4, body="new event", tok=user2_tok)
+        # User1 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id4}/receipt/{ReceiptTypes.READ}/{event_response4['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
 
         sync_body = {
             "lists": {},
@@ -6039,56 +6057,116 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
                 room_id1: {
                     "required_state": [],
                     "timeline_limit": 0,
+                },
+                room_id3: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                room_id4: {
+                    "required_state": [],
+                    "timeline_limit": 0,
                 }
             },
             "extensions": {
                 "receipts": {
                     "enabled": True,
-                    "rooms": [room_id1, room_id2],
+                    "rooms": [room_id1, room_id2, room_id3, room_id4],
                 }
             },
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Add some other room account data
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                account_data_type="org.matrix.roorarraz2",
-                content={"roo": "rar"},
-            )
+        # Add some more read receipts after the `from_token`
+        #
+        # User1 reads room1
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
         )
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                account_data_type="org.matrix.roorarraz2",
-                content={"roo": "rar"},
-            )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User1 privately reads room2
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ_PRIVATE}/{event_response2['event_id']}",
+            {},
+            access_token=user1_tok,
         )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User3 reads room3
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id3}/receipt/{ReceiptTypes.READ}/{event_response3['event_id']}",
+            {},
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # No activity for room4 after the `from_token`
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
-        # Even though we requested room2, we only expect room1 to show up because that's
-        # the only room in the Sliding Sync response (room2 is not one of our room
-        # subscriptions or in a sliding window list).
+        # Even though we requested room2, we only expect rooms to show up if they are
+        # already in the Sliding Sync response. room4 doesn't show up because there is
+        # no activity after the `from_token`.
         self.assertIncludes(
-            response_body["extensions"]["account_data"].get("rooms").keys(),
-            {room_id1},
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1, room_id3},
             exact=True,
         )
-        # We should only see the new room account data that happened after the `from_token`
+
+        # Check room1:
+        #
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We only see that user1 has read something in room1 since the `from_token`
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
-            {"org.matrix.roorarraz2"},
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                event_response1["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user1_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                event_response1["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
+            exact=True,
+        )
+
+        # Check room3:
+        #
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We only see that user3 has read something in room1 since the `from_token`
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["content"][
+                event_response3["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user3_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["content"][
+                event_response3["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
             exact=True,
         )
 
@@ -6105,12 +6183,20 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
 
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
+        event_response = self.helper.send(room_id, body="new event", tok=user2_tok)
 
         sync_body = {
             "lists": {},
+            "room_subscriptions": {
+                room_id: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
             "extensions": {
                 "receipts": {
                     "enabled": True,
+                    "rooms": [room_id],
                 }
             },
         }
@@ -6127,31 +6213,40 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=5000)
-        # Bump the global account data to trigger new results
-        self.get_success(
-            self.account_data_handler.add_account_data_for_user(
-                user1_id,
-                "org.matrix.foobarbaz",
-                {"foo": "bar"},
-            )
+        # Bump the receipts to trigger new results
+        receipt_channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_response['event_id']}",
+            {},
+            access_token=user2_tok,
         )
+        self.assertEqual(receipt_channel.code, 200, receipt_channel.json_body)
         # Should respond before the 10 second timeout
         channel.await_result(timeout_ms=3000)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # We should see the global account data update
+        # We should see the new receipt
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in channel.json_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
-            {"org.matrix.foobarbaz"},
+            channel.json_body.get("extensions", {}).get("receipts", {}).get("rooms", {}).keys(),
+            {room_id},
             exact=True,
+            message=channel.json_body,
         )
         self.assertIncludes(
-            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            channel.json_body["extensions"]["receipts"]["rooms"][room_id]["content"][
+                event_response["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user2_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            channel.json_body["extensions"]["receipts"]["rooms"][room_id]["content"][
+                event_response["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
             set(),
             exact=True,
         )
@@ -6160,7 +6255,7 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
         no data ever arrives so we timeout. We're also making sure that the default data
-        from the account_data extension doesn't trigger a false-positive for new data.
+        from the receipts extension doesn't trigger a false-positive for new data.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -6188,7 +6283,9 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
             channel.await_result(timeout_ms=5000)
         # Wake-up `notifier.wait_for_events(...)` that will cause us test
         # `SlidingSyncResult.__bool__` for new results.
-        self._bump_notifier_wait_for_events(user1_id)
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
         # Block for a little bit more to ensure we don't see any new results.
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=4000)
@@ -6197,9 +6294,8 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        self.assertIsNotNone(
-            channel.json_body["extensions"]["account_data"].get("global")
-        )
-        self.assertIsNotNone(
-            channel.json_body["extensions"]["account_data"].get("rooms")
+        self.assertIncludes(
+            channel.json_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
         )

@@ -2183,7 +2183,7 @@ class SlidingSyncHandler:
             actual_room_ids=actual_room_ids,
         )
 
-        room_id_to_receipt_map: Mapping[str, JsonMapping] = {}
+        room_id_to_receipt_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
             receipt_source = self.event_sources.sources.receipt
             receipts, _ = await receipt_source.get_new_events(
