@@ -2207,8 +2207,8 @@ class SlidingSyncConnectionStore:
 
         user_id = sync_config.user.to_string()
 
-        # If this is missing, only one sliding sync connection is allowed per
-        # given conn_id.
+        # Only one sliding sync connection is allowed per given conn_id (empty
+        # or not).
         conn_id = sync_config.conn_id or ""
 
         if sync_config.requester.device_id:
