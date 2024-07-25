@@ -6279,102 +6279,335 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
 
     def test_no_data_initial_sync(self) -> None:
         """
-        Test that enabling e2ee extension works during an intitial sync, even if there
-        is no-data
+        Test that enabling the account_data extension works during an intitial sync,
+        even if there is no-data.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        # Make an initial Sliding Sync request with the e2ee extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {},
-                "extensions": {
-                    "receipts": {
-                        "enabled": True,
-                    }
-                },
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
-        # Device list updates are only present for incremental syncs
-        self.assertIsNone(channel.json_body["extensions"]["e2ee"].get("device_lists"))
-
-        # Both of these should be present even when empty
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_one_time_keys_count"],
+        self.assertIncludes(
             {
-                # This is always present because of
-                # https://github.com/element-hq/element-android/issues/3725 and
-                # https://github.com/matrix-org/synapse/issues/10456
-                "signed_curve25519": 0
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
             },
+            # Even though we don't have any global account data set, Synapse saves some
+            # default push rules for us.
+            {AccountDataTypes.PUSH_RULES},
+            exact=True,
         )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
-            [],
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
         )
 
     def test_no_data_incremental_sync(self) -> None:
         """
-        Test that enabling e2ee extension works during an incremental sync, even if
-        there is no-data
+        Test that enabling account_data extension works during an incremental sync, even
+        if there is no-data.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
-
-        # Make an incremental Sliding Sync request with the e2ee extension enabled
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint
-            + f"?pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
             },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Device list shows up for incremental syncs
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]
-            .get("device_lists", {})
-            .get("changed"),
-            [],
-        )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
-            [],
-        )
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # Both of these should be present even when empty
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_one_time_keys_count"],
+        # There has been no account data changes since the `from_token` so we shouldn't
+        # see any account data here.
+        self.assertIncludes(
             {
-                # Note that "signed_curve25519" is always returned in key count responses
-                # regardless of whether we uploaded any keys for it. This is necessary until
-                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
-                #
-                # Also related:
-                # https://github.com/element-hq/element-android/issues/3725 and
-                # https://github.com/matrix-org/synapse/issues/10456
-                "signed_curve25519": 0
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
             },
+            set(),
+            exact=True,
         )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
-            [],
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_global_account_data_initial_sync(self) -> None:
+        """
+        On initial sync, we should return all global account data on initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Update the global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.foobarbaz",
+                content={"foo": "bar"},
+            )
+        )
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # It should show us all of the global account data
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            {AccountDataTypes.PUSH_RULES, "org.matrix.foobarbaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_global_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we should only account data that has changed since the
+        `from_token`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Add some global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.foobarbaz",
+                content={"foo": "bar"},
+            )
+        )
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add some other global account data
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user_id=user1_id,
+                account_data_type="org.matrix.doodardaz",
+                content={"doo": "dar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in response_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            # We should only see the new global account data that happened after the `from_token`
+            {"org.matrix.doodardaz"},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_room_account_data_initial_sync(self) -> None:
+        """
+        On initial sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an initial Sliding Sync request with the account_data extension enabled
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz"},
+            exact=True,
+        )
+
+    def test_room_account_data_incremental_sync(self) -> None:
+        """
+        On incremental sync, we return all account data for a given room but only for
+        rooms that we request and are being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add some other room account data
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        # We should only see the new room account data that happened after the `from_token`
+        self.assertIncludes(
+            {
+                event["type"]
+                for event in response_body["extensions"]["account_data"]
+                .get("rooms")
+                .get(room_id1)
+            },
+            {"org.matrix.roorarraz2"},
+            exact=True,
         )
 
     def test_wait_for_new_data(self) -> None:
@@ -6387,91 +6620,84 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
-        test_device_id = "TESTDEVICE"
-        user3_id = self.register_user("user3", "pass")
-        user3_tok = self.login(user3_id, "pass", device_id=test_device_id)
 
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
-        self.helper.join(room_id, user3_id, tok=user3_tok)
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Make the Sliding Sync request
+        # Make an incremental Sliding Sync request with the account_data extension enabled
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
-            },
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
             access_token=user1_tok,
             await_result=False,
         )
         # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
         with self.assertRaises(TimedOutException):
             channel.await_result(timeout_ms=5000)
-        # Bump the device lists to trigger new results
-        # Have user3 update their device list
-        device_update_channel = self.make_request(
-            "PUT",
-            f"/devices/{test_device_id}",
-            {
-                "display_name": "New Device Name",
-            },
-            access_token=user3_tok,
-        )
-        self.assertEqual(
-            device_update_channel.code, 200, device_update_channel.json_body
+        # Bump the global account data to trigger new results
+        self.get_success(
+            self.account_data_handler.add_account_data_for_user(
+                user1_id,
+                "org.matrix.foobarbaz",
+                {"foo": "bar"},
+            )
         )
         # Should respond before the 10 second timeout
         channel.await_result(timeout_ms=3000)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # We should see the device list update
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]
-            .get("device_lists", {})
-            .get("changed"),
-            [user3_id],
+        # We should see the global account data update
+        self.assertIncludes(
+            {
+                global_event["type"]
+                for global_event in channel.json_body["extensions"]["account_data"].get(
+                    "global"
+                )
+            },
+            {"org.matrix.foobarbaz"},
+            exact=True,
         )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
-            [],
+        self.assertIncludes(
+            channel.json_body["extensions"]["account_data"].get("rooms").keys(),
+            set(),
+            exact=True,
         )
 
     def test_wait_for_new_data_timeout(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
         no data ever arrives so we timeout. We're also making sure that the default data
-        from the E2EE extension doesn't trigger a false-positive for new data (see
-        `device_one_time_keys_count.signed_curve25519`).
+        from the account_data extension doesn't trigger a false-positive for new data.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {},
-                "extensions": {
-                    "e2ee": {
-                        "enabled": True,
-                    }
-                },
-            },
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
             access_token=user1_tok,
             await_result=False,
         )
@@ -6489,33 +6715,9 @@ class SlidingSyncReceiptsExtensionTestCase(unittest.HomeserverTestCase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Device lists are present for incremental syncs but empty because no device changes
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]
-            .get("device_lists", {})
-            .get("changed"),
-            [],
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("global")
         )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"].get("device_lists", {}).get("left"),
-            [],
-        )
-
-        # Both of these should be present even when empty
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_one_time_keys_count"],
-            {
-                # Note that "signed_curve25519" is always returned in key count responses
-                # regardless of whether we uploaded any keys for it. This is necessary until
-                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
-                #
-                # Also related:
-                # https://github.com/element-hq/element-android/issues/3725 and
-                # https://github.com/matrix-org/synapse/issues/10456
-                "signed_curve25519": 0
-            },
-        )
-        self.assertEqual(
-            channel.json_body["extensions"]["e2ee"]["device_unused_fallback_key_types"],
-            [],
+        self.assertIsNotNone(
+            channel.json_body["extensions"]["account_data"].get("rooms")
         )
