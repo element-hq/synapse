@@ -4476,7 +4476,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
     def test_incremental_sync_incremental_state(self) -> None:
         """Test that we only get state updates in incremental sync for rooms
-        we've already seen.
+        we've already seen (LIVE).
         """
 
         user1_id = self.register_user("user1", "pass")
@@ -4611,8 +4611,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
     def test_incremental_sync_full_state_previously(self, limited: bool) -> None:
         """
         Test getting room data where we have previously sent down the room, but
-        we missed sending down some data previously and so its state is
-        considered PREVIOUSLY.
+        we missed sending down some timeline events previously and so its status
+        is considered PREVIOUSLY.
 
         There are two versions of this test, one where there are more messages
         than the timeline limit, and one where there isn't.
@@ -4645,7 +4645,10 @@ class SlidingSyncTestCase(SlidingSyncBase):
         }
 
         # The first room gets sent down the initial sync
-        _, initial_from_token = self.do_sync(sync_body, tok=user1_tok)
+        response_body, initial_from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
 
         # We now send down some events in room1 (depending on the test param).
         expected_events = []  # The set of events in the timeline
@@ -4661,7 +4664,13 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.send(room_id2, "msg", tok=user1_tok)
 
         # Only the second room gets sent down sync.
-        _, from_token = self.do_sync(sync_body, since=initial_from_token, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=initial_from_token, tok=user1_tok
+        )
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
 
         # FIXME: This is a hack to record that the first room wasn't sent down
         # sync, as we don't implement that currently.
@@ -4673,16 +4682,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             user=requester.user,
             requester=requester,
             conn_id=conn_id,
-            lists={
-                "list": SlidingSyncConfig.SlidingSyncList(
-                    timeline_limit=1,
-                    required_state=[
-                        (EventTypes.Name, ""),
-                    ],
-                ),
-            },
-            room_subscriptions={},
-            extensions=None,
         )
 
         parsed_initial_from_token = self.get_success(
@@ -4713,6 +4712,10 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # This sync should contain the messages from room1 not yet sent down.
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
 
         self.assertEqual(
             [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],

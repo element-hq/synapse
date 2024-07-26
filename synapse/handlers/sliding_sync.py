@@ -1750,6 +1750,9 @@ class SlidingSyncHandler:
         else:
             assert from_bound is not None
 
+            # TODO: Limit the number of state events we're about to send down
+            # the room, if its too many we should change this to an
+            # `initial=True`?
             deltas = await self.store.get_current_state_deltas_for_room(
                 room_id=room_id,
                 from_token=from_bound,
