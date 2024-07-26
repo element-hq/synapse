@@ -66,7 +66,6 @@ from tests.federation.transport.test_knocking import (
 )
 from tests.server import FakeChannel, TimedOutException
 from tests.test_utils.event_injection import mark_event_as_partial_state
-from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
 
@@ -1625,12 +1624,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             channel.json_body["rooms"][room_id]["timeline"],
         )
 
-    # TODO: Once we remove `ops`, we should be able to add a `RoomResult.__bool__` to
-    # check if there are any updates since the `from_token`.
-    @skip_unless(
-        False,
-        "Once we remove ops from the Sliding Sync response, this test should pass",
-    )
     def test_wait_for_new_data_timeout(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
@@ -1645,23 +1638,22 @@ class SlidingSyncTestCase(SlidingSyncBase):
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
 
-        from_token = self.event_sources.get_current_token()
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
         channel = self.make_request(
             "POST",
-            self.sync_endpoint
-            + "?timeout=10000"
-            + f"&pos={self.get_success(from_token.to_string(self.store))}",
-            {
-                "lists": {
-                    "foo-list": {
-                        "ranges": [[0, 0]],
-                        "required_state": [],
-                        "timeline_limit": 1,
-                    }
-                }
-            },
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
             access_token=user1_tok,
             await_result=False,
         )
@@ -1679,12 +1671,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # We still see rooms because that's how Sliding Sync lists work but we reached
-        # the timeout before seeing them
-        self.assertEqual(
-            [event["event_id"] for event in channel.json_body["rooms"].keys()],
-            [room_id],
-        )
+        # There should be no room sent down.
+        self.assertFalse(channel.json_body["rooms"])
 
     def test_filter_list(self) -> None:
         """

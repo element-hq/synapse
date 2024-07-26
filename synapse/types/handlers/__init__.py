@@ -355,7 +355,7 @@ class SlidingSyncResult:
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        return bool(self.lists or self.rooms or self.extensions)
+        return bool(self.rooms or self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
