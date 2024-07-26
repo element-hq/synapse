@@ -4744,11 +4744,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
 
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         sync_body = {
             "lists": {
@@ -4763,17 +4760,38 @@ class SlidingSyncTestCase(SlidingSyncBase):
         _, after_room_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the Sliding Sync request
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint + f"?pos={after_room_token}",
-            content=sync_body,
-            access_token=user1_tok,
+        response_body, _ = self.do_sync(
+            sync_body, since=after_room_token, tok=user1_tok
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
 
         # Nothing has happened in the room, so the room should not come down
         # /sync.
-        self.assertIsNone(channel.json_body["rooms"].get(room_id1))
+        self.assertIsNone(response_body["rooms"].get(room_id1))
+
+    def test_empty_room_comes_down_sync(self) -> None:
+        """
+        Test that rooms come down /sync even with empty required state and
+        timeline limit in initial sync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
