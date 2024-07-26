@@ -4722,6 +4722,117 @@ class SlidingSyncTestCase(SlidingSyncBase):
             expected_events[-timeline_limit:],
         )
         self.assertEqual(response_body["rooms"][room_id1]["limited"], limited)
+        self.assertEqual(response_body["rooms"][room_id1].get("required_state"), None)
+
+    def test_incremental_sync_full_state_previously_state(self) -> None:
+        """
+        Test getting room data where we have previously sent down the room, but
+        we missed sending down some state previously and so its status is
+        considered PREVIOUSLY.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        timeline_limit = 5
+        conn_id = "conn_id"
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": timeline_limit,
+                }
+            },
+            "conn_id": "conn_id",
+        }
+
+        # The first room gets sent down the initial sync
+        response_body, initial_from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        # We now send down some state in room1 (depending on the test param).
+        resp = self.helper.send_state(
+            room_id1, EventTypes.Name, {"name": "foo"}, tok=user1_tok
+        )
+        name_change_id = resp["event_id"]
+
+        # A second messages happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(
+            sync_body, since=initial_from_token, tok=user1_tok
+        )
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # FIXME: This is a hack to record that the first room wasn't sent down
+        # sync, as we don't implement that currently.
+        sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        requester = self.get_success(
+            self.hs.get_auth().get_user_by_access_token(user1_tok)
+        )
+        sync_config = SlidingSyncConfig(
+            user=requester.user,
+            requester=requester,
+            conn_id=conn_id,
+        )
+
+        parsed_initial_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, initial_from_token)
+        )
+        connection_position = self.get_success(
+            sliding_sync_handler.connection_store.record_rooms(
+                sync_config,
+                parsed_initial_from_token,
+                sent_room_ids=[],
+                unsent_room_ids=[room_id1],
+            )
+        )
+
+        # FIXME: Now fix up `from_token` with new connect position above.
+        parsed_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        )
+        parsed_from_token = SlidingSyncStreamToken(
+            stream_token=parsed_from_token.stream_token,
+            connection_position=connection_position,
+        )
+        from_token = self.get_success(parsed_from_token.to_string(self.store))
+
+        # We now send another event to room1, so we should sync all the missing state.
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        # This sync should contain the state changes from room1.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        # We should only see the name change.
+        self.assertEqual(
+            [
+                ev["event_id"]
+                for ev in response_body["rooms"][room_id1]["required_state"]
+            ],
+            [name_change_id],
+        )
 
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
