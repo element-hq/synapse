@@ -658,8 +658,8 @@ class SlidingSyncHandler:
                 to_token=to_token,
             )
 
-            # Filter out empty room results.
-            if room_sync_result:
+            # Filter out empty room results during incremental sync
+            if room_sync_result or not from_token:
                 rooms[room_id] = room_sync_result
 
         with start_active_span("sliding_sync.generate_room_entries"):
