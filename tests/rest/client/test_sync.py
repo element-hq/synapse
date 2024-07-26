@@ -4834,6 +4834,76 @@ class SlidingSyncTestCase(SlidingSyncBase):
             [name_change_id],
         )
 
+    def test_incremental_sync_full_state_never(self) -> None:
+        """
+        Test getting room data where we have not previously sent down the room
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 1,
+                }
+            },
+        }
+
+        # A message happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # We now send another event to room1, so we should send down the full
+        # room.
+        resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
+        latest_message_event = resp["event_id"]
+
+        # This sync should contain the messages from room1 not yet sent down.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        self.assertEqual(
+            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
+            [latest_message_event],
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
+            exact=True,
+        )
+
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
     """Tests for the to-device sliding sync extension"""
