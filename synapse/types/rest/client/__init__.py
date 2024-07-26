@@ -120,8 +120,9 @@ class SlidingSyncBody(RequestBodyModel):
     Sliding Sync API request body.
 
     Attributes:
-        conn_id: An optional string to identify this connection to the server. If this
-            is missing, only one sliding sync connection is allowed per given conn_id.
+        conn_id: An optional string to identify this connection to the server.
+            Only one sliding sync connection is allowed per given conn_id (empty
+            or not).
         lists: Sliding window API. A map of list key to list information
             (:class:`SlidingSyncList`). Max lists: 100. The list keys should be
             arbitrary strings which the client is using to refer to the list. Keep this
@@ -324,8 +325,26 @@ class SlidingSyncBody(RequestBodyModel):
 
             enabled: Optional[StrictBool] = False
 
+        class AccountDataExtension(RequestBodyModel):
+            """The Account Data extension (MSC3959)
+
+            Attributes:
+                enabled
+                lists: List of list keys (from the Sliding Window API) to apply this
+                    extension to.
+                rooms: List of room IDs (from the Room Subscription API) to apply this
+                    extension to.
+            """
+
+            enabled: Optional[StrictBool] = False
+            # Process all lists defined in the Sliding Window API. (This is the default.)
+            lists: Optional[List[StrictStr]] = ["*"]
+            # Process all room subscriptions defined in the Room Subscription API. (This is the default.)
+            rooms: Optional[List[StrictStr]] = ["*"]
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
+        account_data: Optional[AccountDataExtension] = None
 
     conn_id: Optional[str]
 
