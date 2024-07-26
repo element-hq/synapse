@@ -634,10 +634,8 @@ class SlidingSyncHandler:
 
             # We only need to check for any new events and not state changes, as
             # state changes can only happen if an event has also been sent.
-            rooms_that_have_updates = (
-                self.store._events_stream_cache.get_entities_changed(
-                    relevant_room_map, from_token.stream_token.room_key.stream
-                )
+            rooms_that_have_updates = self.store.get_rooms_that_might_have_updates(
+                relevant_room_map.keys(), from_token.stream_token.room_key
             )
             rooms_should_send.update(rooms_that_have_updates)
             relevant_room_map = {
