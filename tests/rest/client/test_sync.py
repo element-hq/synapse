@@ -4754,12 +4754,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Tombstone, ""],
-                    ],
+                    "required_state": [],
                     "timeline_limit": 0,
                 }
             }

@@ -639,7 +639,9 @@ class SlidingSyncHandler:
             )
             rooms_should_send.update(rooms_that_have_updates)
             relevant_room_map = {
-                r: c for r, c in relevant_room_map.items() if r in rooms_should_send
+                room_id: room_sync_config
+                for room_id, room_sync_config in relevant_room_map.items()
+                if room_id in rooms_should_send
             }
 
         @trace
