@@ -4529,7 +4529,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
-        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
@@ -4642,7 +4642,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
-        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
 
         self.assertEqual(
             [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
@@ -4750,7 +4750,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
-        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
 
         # We should only see the name change.
         self.assertEqual(
