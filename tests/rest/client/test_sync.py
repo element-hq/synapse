@@ -4905,18 +4905,18 @@ class SlidingSyncTestCase(SlidingSyncBase):
             }
         }
 
-        _, after_room_token = self.do_sync(sync_body, tok=user1_tok)
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Make the Sliding Sync request
+        # Make the incremental Sliding Sync request
         response_body, _ = self.do_sync(
-            sync_body, since=after_room_token, tok=user1_tok
+            sync_body, since=from_token, tok=user1_tok
         )
 
         # Nothing has happened in the room, so the room should not come down
         # /sync.
         self.assertIsNone(response_body["rooms"].get(room_id1))
 
-    def test_empty_room_comes_down_sync(self) -> None:
+    def test_empty_initial_room_comes_down_sync(self) -> None:
         """
         Test that rooms come down /sync even with empty required state and
         timeline limit in initial sync.

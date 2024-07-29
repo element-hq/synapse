@@ -240,7 +240,10 @@ class SlidingSyncResult:
 
         def __bool__(self) -> bool:
             return (
+                // If this is the first time the client is seeing the room, we should not filter it out
+                // under any circumstance.
                 self.initial
+                // We need to let the client know if there are any new events
                 or bool(self.required_state)
                 or bool(self.timeline_events)
                 or bool(self.stripped_state)

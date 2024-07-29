@@ -632,8 +632,8 @@ class SlidingSyncHandler:
                 if status.status != HaveSentRoomFlag.LIVE:
                     rooms_should_send.add(room_id)
 
-            # We only need to check for any new events and not state changes, as
-            # state changes can only happen if an event has also been sent.
+            # We only need to check for new events since any state changes
+            # will also come down as new events.
             rooms_that_have_updates = self.store.get_rooms_that_might_have_updates(
                 relevant_room_map.keys(), from_token.stream_token.room_key
             )
