@@ -4529,6 +4529,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
@@ -4562,12 +4563,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 0]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Name, ""],
-                    ],
+                    "required_state": [],
                     "timeline_limit": timeline_limit,
                 }
             },
@@ -4646,6 +4642,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
 
         self.assertEqual(
             [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
@@ -4669,7 +4666,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         self.helper.send(room_id1, "msg", tok=user1_tok)
 
-        timeline_limit = 5
         conn_id = "conn_id"
         sync_body = {
             "lists": {
@@ -4681,7 +4677,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
                         # This one doesn't exist in the room
                         [EventTypes.Name, ""],
                     ],
-                    "timeline_limit": timeline_limit,
+                    "timeline_limit": 0,
                 }
             },
             "conn_id": "conn_id",
@@ -4693,7 +4689,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
 
-        # We now send down some state in room1 (depending on the test param).
+        # We now send down some state in room1
         resp = self.helper.send_state(
             room_id1, EventTypes.Name, {"name": "foo"}, tok=user1_tok
         )
@@ -4754,6 +4750,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], False)
 
         # We should only see the name change.
         self.assertEqual(
@@ -4766,7 +4763,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
     def test_rooms_required_state_incremental_sync_NEVER(self) -> None:
         """
-        Test getting room data where we have NEVER sent down the room before
+        Test getting `required_state` where we have NEVER sent down the room before
         """
 
         user1_id = self.register_user("user1", "pass")
@@ -4814,11 +4811,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
 
-        self.assertEqual(
-            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
-            [latest_message_event],
-        )
-        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
         state_map = self.get_success(
