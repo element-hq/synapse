@@ -378,9 +378,10 @@ class SlidingSyncResult:
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        # We don't include list changes here, as a) `lists` is always non-empty
-        # even if there are no changes, and b) any changes that happen should
-        # result in an entry added to `rooms`.
+        # We don't include `self.lists` here, as a) `lists` is always non-empty even if
+        # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
+        # the latest activity, anything that would cause the order to change would end
+        # up in `self.rooms` and cause us to send down the change.
         return bool(self.rooms or self.extensions)
 
     @staticmethod
