@@ -302,10 +302,10 @@ class E2eKeysHandler:
                     retry_due_within_ms=60 * 1000,
                 )
             )
-            failures |= {
-                dest: _NOT_READY_FOR_RETRY_FAILURE
+            failures.update(
+                (dest, _NOT_READY_FOR_RETRY_FAILURE)
                 for dest in (unfiltered_destinations - filtered_destinations)
-            }
+            )
 
             await concurrently_execute(
                 _query,
