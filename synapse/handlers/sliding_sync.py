@@ -646,7 +646,7 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
-            connection_token = await self.connection_store.record_rooms(
+            connection_position = await self.connection_store.record_rooms(
                 sync_config=sync_config,
                 from_token=from_token,
                 sent_room_ids=relevant_room_map.keys(),
@@ -654,13 +654,13 @@ class SlidingSyncHandler:
                 unsent_room_ids=[],
             )
         elif from_token:
-            connection_token = from_token.connection_position
+            connection_position = from_token.connection_position
         else:
             # Initial sync without a `from_token` starts at `0`
-            connection_token = 0
+            connection_position = 0
 
         return SlidingSyncResult(
-            next_pos=SlidingSyncStreamToken(to_token, connection_token),
+            next_pos=SlidingSyncStreamToken(to_token, connection_position),
             lists=lists,
             rooms=rooms,
             extensions=extensions,
