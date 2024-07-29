@@ -4454,7 +4454,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # `world_readable` but currently we don't support this.
         self.assertIsNone(response_body["rooms"].get(room_id1), response_body["rooms"])
 
-    def test_incremental_sync_incremental_state(self) -> None:
+    def test_rooms_required_state_incremental_sync_LIVE(self) -> None:
         """Test that we only get state updates in incremental sync for rooms
         we've already seen (LIVE).
         """
@@ -4509,86 +4509,17 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
-                state_map[(EventTypes.Name, "")],
-            },
-            exact=True,
-        )
-
-    def test_incremental_sync_full_state_new_room(self) -> None:
-        """Test that we get all state in incremental sync for rooms that
-        we haven't seen before.
-        """
-
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id2, user1_id, tok=user1_tok)
-
-        # Make the Sliding Sync request, we'll only receive room_id2
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 0]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Name, ""],
-                    ],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-
-        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id2)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id2]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
-            },
-            exact=True,
-        )
-        self.assertNotIn(room_id1, response_body["rooms"])
-
-        # Send a state event in room 1
-        self.helper.send_state(
-            room_id1, EventTypes.Name, body={"name": "foo"}, tok=user2_tok
-        )
-
-        # We should get room_id1 down sync, with the full state.
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
                 state_map[(EventTypes.Name, "")],
             },
             exact=True,
         )
 
     @parameterized.expand([(False,), (True,)])
-    def test_incremental_sync_full_state_previously(self, limited: bool) -> None:
+    def test_rooms_timeline_incremental_sync_PREVIOUSLY(self, limited: bool) -> None:
         """
         Test getting room data where we have previously sent down the room, but
         we missed sending down some timeline events previously and so its status
@@ -4612,12 +4543,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 0]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Name, ""],
-                    ],
+                    "required_state": [],
                     "timeline_limit": timeline_limit,
                 }
             },
@@ -4696,6 +4622,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
 
         self.assertEqual(
             [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
@@ -4704,7 +4631,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertEqual(response_body["rooms"][room_id1]["limited"], limited)
         self.assertEqual(response_body["rooms"][room_id1].get("required_state"), None)
 
-    def test_incremental_sync_full_state_previously_state(self) -> None:
+    def test_rooms_required_state_incremental_sync_PREVIOUSLY(self) -> None:
         """
         Test getting room data where we have previously sent down the room, but
         we missed sending down some state previously and so its status is
@@ -4719,7 +4646,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         self.helper.send(room_id1, "msg", tok=user1_tok)
 
-        timeline_limit = 5
         conn_id = "conn_id"
         sync_body = {
             "lists": {
@@ -4731,7 +4657,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
                         # This one doesn't exist in the room
                         [EventTypes.Name, ""],
                     ],
-                    "timeline_limit": timeline_limit,
+                    "timeline_limit": 0,
                 }
             },
             "conn_id": "conn_id",
@@ -4743,7 +4669,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
 
-        # We now send down some state in room1 (depending on the test param).
+        # We now send down some state in room1
         resp = self.helper.send_state(
             room_id1, EventTypes.Name, {"name": "foo"}, tok=user1_tok
         )
@@ -4804,6 +4730,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertCountEqual(
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
 
         # We should only see the name change.
         self.assertEqual(
@@ -4814,9 +4741,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
             [name_change_id],
         )
 
-    def test_incremental_sync_full_state_never(self) -> None:
+    def test_rooms_required_state_incremental_sync_NEVER(self) -> None:
         """
-        Test getting room data where we have not previously sent down the room
+        Test getting `required_state` where we have NEVER sent down the room before
         """
 
         user1_id = self.register_user("user1", "pass")
@@ -4854,8 +4781,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # We now send another event to room1, so we should send down the full
         # room.
-        resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
-        latest_message_event = resp["event_id"]
+        self.helper.send(room_id1, "msg2", tok=user1_tok)
 
         # This sync should contain the messages from room1 not yet sent down.
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -4864,11 +4790,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
         )
 
-        self.assertEqual(
-            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
-            [latest_message_event],
-        )
-        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
         state_map = self.get_success(
@@ -4883,6 +4804,61 @@ class SlidingSyncTestCase(SlidingSyncBase):
             },
             exact=True,
         )
+
+    def test_rooms_timeline_incremental_sync_NEVER(self) -> None:
+        """
+        Test getting timeline room data where we have NEVER sent down the room
+        before
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            },
+        }
+
+        expected_events = []
+        for _ in range(4):
+            resp = self.helper.send(room_id1, "msg", tok=user1_tok)
+            expected_events.append(resp["event_id"])
+
+        # A message happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # We now send another event to room1 so it comes down sync
+        resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
+        expected_events.append(resp["event_id"])
+
+        # This sync should contain the messages from room1 not yet sent down.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        self.assertEqual(
+            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
+            expected_events,
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
     def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
         """
@@ -4908,9 +4884,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make the incremental Sliding Sync request
-        response_body, _ = self.do_sync(
-            sync_body, since=from_token, tok=user1_tok
-        )
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # Nothing has happened in the room, so the room should not come down
         # /sync.

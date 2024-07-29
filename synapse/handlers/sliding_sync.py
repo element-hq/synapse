@@ -678,7 +678,7 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
-            connection_token = await self.connection_store.record_rooms(
+            connection_position = await self.connection_store.record_rooms(
                 sync_config=sync_config,
                 from_token=from_token,
                 sent_room_ids=relevant_room_map.keys(),
@@ -686,13 +686,13 @@ class SlidingSyncHandler:
                 unsent_room_ids=[],
             )
         elif from_token:
-            connection_token = from_token.connection_position
+            connection_position = from_token.connection_position
         else:
             # Initial sync without a `from_token` starts at `0`
-            connection_token = 0
+            connection_position = 0
 
         return SlidingSyncResult(
-            next_pos=SlidingSyncStreamToken(to_token, connection_token),
+            next_pos=SlidingSyncStreamToken(to_token, connection_position),
             lists=lists,
             rooms=rooms,
             extensions=extensions,
@@ -2225,10 +2225,13 @@ class SlidingSyncConnectionStore:
     """In-memory store of per-connection state, including what rooms we have
     previously sent down a sliding sync connection.
 
-    Note: This is NOT safe to run in a worker setup.
+    Note: This is NOT safe to run in a worker setup because connection positions will
+    point to different sets of rooms on different workers. e.g. for the same connection,
+    a connection position of 5 might have totally different states on worker A and
+    worker B.
 
-    The complication here is that we need to handle requests being resent, i.e.
-    if we sent down a room in a response that the client received, we must
+    One complication that we need to deal with here is needing to handle requests being
+    resent, i.e. if we sent down a room in a response that the client received, we must
     consider the room *not* sent when we get the request again.
 
     This is handled by using an integer "token", which is returned to the client
