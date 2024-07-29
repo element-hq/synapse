@@ -623,6 +623,11 @@ class SlidingSyncHandler:
         # previously.
         if from_token:
             rooms_should_send = set()
+
+            # First we check if there are rooms that match a list/room
+            # subscription and have updates we need to send (i.e. either because
+            # we haven't sent the room down, or we have but there are missing
+            # updates).
             for room_id in relevant_room_map:
                 status = await self.connection_store.have_sent_room(
                     sync_config,
