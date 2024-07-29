@@ -4836,7 +4836,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
     def test_incremental_sync_full_state_never(self) -> None:
         """
-        Test getting room data where we have not previously sent down the room
+        Test getting room data where we have NEVER sent down the room before
         """
 
         user1_id = self.register_user("user1", "pass")
