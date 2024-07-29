@@ -4802,7 +4802,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We now send another event to room1, so we should send down the full
         # room.
         resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
-        latest_message_event = resp["event_id"]
 
         # This sync should contain the messages from room1 not yet sent down.
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
