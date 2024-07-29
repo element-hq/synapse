@@ -35,6 +35,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    Requester,
     SlidingSyncStreamToken,
     StreamToken,
     UserID,
@@ -109,7 +110,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     """
 
     user: UserID
-    device_id: Optional[str]
+    requester: Requester
 
     # Pydantic config
     class Config:
