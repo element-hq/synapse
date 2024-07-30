@@ -69,7 +69,6 @@ from tests.federation.transport.test_knocking import (
 )
 from tests.server import TimedOutException
 from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
-from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
 
@@ -1656,12 +1655,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             channel.json_body["rooms"][room_id]["timeline"],
         )
 
-    # TODO: Once we remove `ops`, we should be able to add a `RoomResult.__bool__` to
-    # check if there are any updates since the `from_token`.
-    @skip_unless(
-        False,
-        "Once we remove ops from the Sliding Sync response, this test should pass",
-    )
     def test_wait_for_new_data_timeout(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
@@ -1711,12 +1704,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # We still see rooms because that's how Sliding Sync lists work but we reached
-        # the timeout before seeing them
-        self.assertEqual(
-            [event["event_id"] for event in channel.json_body["rooms"].keys()],
-            [room_id],
-        )
+        # There should be no room sent down.
+        self.assertFalse(channel.json_body["rooms"])
 
     def test_filter_list(self) -> None:
         """
@@ -3556,19 +3545,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # Nothing to see for this banned user in the room in the token range
-        self.assertIsNone(response_body["rooms"][room_id1].get("timeline"))
-        # No events returned in the timeline so nothing is "live"
-        self.assertEqual(
-            response_body["rooms"][room_id1]["num_live"],
-            0,
-            response_body["rooms"][room_id1],
-        )
-        # There aren't anymore events to paginate to in this range
-        self.assertEqual(
-            response_body["rooms"][room_id1]["limited"],
-            False,
-            response_body["rooms"][room_id1],
-        )
+        self.assertIsNone(response_body["rooms"].get(room_id1))
 
     def test_rooms_no_required_state(self) -> None:
         """
@@ -3668,11 +3645,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
                         # This one doesn't exist in the room
                         [EventTypes.Tombstone, ""],
                     ],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 }
             }
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send a message so the room comes down sync.
+        self.helper.send(room_id1, "msg", tok=user1_tok)
 
         # Make the incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -4878,6 +4858,61 @@ class SlidingSyncTestCase(SlidingSyncBase):
             expected_events,
         )
         self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+    def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
+        """
+        Test that rooms with no updates are returned in subsequent incremental
+        syncs.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Nothing has happened in the room, so the room should not come down
+        # /sync.
+        self.assertIsNone(response_body["rooms"].get(room_id1))
+
+    def test_empty_initial_room_comes_down_sync(self) -> None:
+        """
+        Test that rooms come down /sync even with empty required state and
+        timeline limit in initial sync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
 
