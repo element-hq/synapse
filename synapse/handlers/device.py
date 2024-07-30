@@ -39,6 +39,7 @@ from synapse.metrics.background_process_metrics import (
 )
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
 from synapse.types import (
+    DeviceListUpdates,
     JsonDict,
     JsonMapping,
     ScheduledTask,
@@ -214,7 +215,7 @@ class DeviceWorkerHandler:
     @cancellable
     async def get_user_ids_changed(
         self, user_id: str, from_token: StreamToken
-    ) -> JsonDict:
+    ) -> DeviceListUpdates:
         """Get list of users that have had the devices updated, or have newly
         joined a room, that `user_id` may be interested in.
         """
@@ -341,11 +342,19 @@ class DeviceWorkerHandler:
             possibly_joined = set()
             possibly_left = set()
 
-        result = {"changed": list(possibly_joined), "left": list(possibly_left)}
+        device_list_updates = DeviceListUpdates(
+            changed=possibly_joined,
+            left=possibly_left,
+        )
 
-        log_kv(result)
+        log_kv(
+            {
+                "changed": device_list_updates.changed,
+                "left": device_list_updates.left,
+            }
+        )
 
-        return result
+        return device_list_updates
 
     async def on_federation_query_user_devices(self, user_id: str) -> JsonDict:
         if not self.hs.is_mine(UserID.from_string(user_id)):

@@ -1188,6 +1188,8 @@ class RoomCreationHandler:
             )
             events_to_send.append((power_event, power_context))
         else:
+            # Please update the docs for `default_power_level_content_override` when
+            # updating the `events` dict below
             power_level_content: JsonDict = {
                 "users": {creator_id: 100},
                 "users_default": 0,

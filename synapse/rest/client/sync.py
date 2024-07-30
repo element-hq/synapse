@@ -942,7 +942,9 @@ class SlidingSyncRestServlet(RestServlet):
         response["rooms"] = await self.encode_rooms(
             requester, sliding_sync_result.rooms
         )
-        response["extensions"] = {}  # TODO: sliding_sync_result.extensions
+        response["extensions"] = await self.encode_extensions(
+            requester, sliding_sync_result.extensions
+        )
 
         return response
 
@@ -995,8 +997,21 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.avatar:
                 serialized_rooms[room_id]["avatar"] = room_result.avatar
 
-            if room_result.heroes:
-                serialized_rooms[room_id]["heroes"] = room_result.heroes
+            if room_result.heroes is not None and len(room_result.heroes) > 0:
+                serialized_heroes = []
+                for hero in room_result.heroes:
+                    serialized_hero = {
+                        "user_id": hero.user_id,
+                    }
+                    if hero.display_name is not None:
+                        # Not a typo, just how "displayname" is spelled in the spec
+                        serialized_hero["displayname"] = hero.display_name
+
+                    if hero.avatar_url is not None:
+                        serialized_hero["avatar_url"] = hero.avatar_url
+
+                    serialized_heroes.append(serialized_hero)
+                serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
             # The absense of this flag means `False`.
@@ -1004,7 +1019,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
             # This will be omitted for invite/knock rooms with `stripped_state`
-            if room_result.required_state is not None:
+            if (
+                room_result.required_state is not None
+                and len(room_result.required_state) > 0
+            ):
                 serialized_required_state = (
                     await self.event_serializer.serialize_events(
                         room_result.required_state,
@@ -1015,7 +1033,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["required_state"] = serialized_required_state
 
             # This will be omitted for invite/knock rooms with `stripped_state`
-            if room_result.timeline_events is not None:
+            if (
+                room_result.timeline_events is not None
+                and len(room_result.timeline_events) > 0
+            ):
                 serialized_timeline = await self.event_serializer.serialize_events(
                     room_result.timeline_events,
                     time_now,
@@ -1043,7 +1064,10 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["is_dm"] = room_result.is_dm
 
             # Stripped state only applies to invite/knock rooms
-            if room_result.stripped_state is not None:
+            if (
+                room_result.stripped_state is not None
+                and len(room_result.stripped_state) > 0
+            ):
                 # TODO: `knocked_state` but that isn't specced yet.
                 #
                 # TODO: Instead of adding `knocked_state`, it would be good to rename
@@ -1053,6 +1077,45 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["invite_state"] = room_result.stripped_state
 
         return serialized_rooms
+
+    async def encode_extensions(
+        self, requester: Requester, extensions: SlidingSyncResult.Extensions
+    ) -> JsonDict:
+        serialized_extensions: JsonDict = {}
+
+        if extensions.to_device is not None:
+            serialized_extensions["to_device"] = {
+                "next_batch": extensions.to_device.next_batch,
+                "events": extensions.to_device.events,
+            }
+
+        if extensions.e2ee is not None:
+            serialized_extensions["e2ee"] = {
+                # We always include this because
+                # https://github.com/vector-im/element-android/issues/3725. The spec
+                # isn't terribly clear on when this can be omitted and how a client
+                # would tell the difference between "no keys present" and "nothing
+                # changed" in terms of whole field absent / individual key type entry
+                # absent Corresponding synapse issue:
+                # https://github.com/matrix-org/synapse/issues/10456
+                "device_one_time_keys_count": extensions.e2ee.device_one_time_keys_count,
+                # https://github.com/matrix-org/matrix-doc/blob/54255851f642f84a4f1aaf7bc063eebe3d76752b/proposals/2732-olm-fallback-keys.md
+                # states that this field should always be included, as long as the
+                # server supports the feature.
+                "device_unused_fallback_key_types": extensions.e2ee.device_unused_fallback_key_types,
+            }
+
+            if extensions.e2ee.device_list_updates is not None:
+                serialized_extensions["e2ee"]["device_lists"] = {}
+
+                serialized_extensions["e2ee"]["device_lists"]["changed"] = list(
+                    extensions.e2ee.device_list_updates.changed
+                )
+                serialized_extensions["e2ee"]["device_lists"]["left"] = list(
+                    extensions.e2ee.device_list_updates.left
+                )
+
+        return serialized_extensions
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:

@@ -2270,7 +2270,11 @@ class SyncHandler:
             user=user,
             from_key=presence_key,
             is_guest=sync_config.is_guest,
-            include_offline=include_offline,
+            include_offline=(
+                True
+                if self.hs_config.server.presence_include_offline_users_on_sync
+                else include_offline
+            ),
         )
         assert presence_key
         sync_result_builder.now_token = now_token.copy_and_replace(
