@@ -2712,8 +2712,11 @@ class SlidingSyncHandler:
 
         room_id_to_typing_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
-            # TODO: Take connection tracking into account so that when a room comes back
-            # into range we can send the typing notifications that were missed.
+            # Note: We don't need to take connection tracking into account for typing
+            # notifications because they'll get anything still relevant and hasn't timed
+            # out when the room comes back in range. We consider the gap where the room
+            # fell out of range, as long enough for any typing notifications to have
+            # timed out (it's not worth the 30 seconds of data we may have missed).
             typing_source = self.event_sources.sources.typing
             typing_notifications, _ = await typing_source.get_new_events(
                 user=sync_config.user,
