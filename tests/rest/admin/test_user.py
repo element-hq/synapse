@@ -5089,3 +5089,129 @@ class UserSuspensionTestCase(unittest.HomeserverTestCase):
 
         res5 = self.get_success(self.store.get_user_suspended_status(self.bad_user))
         self.assertEqual(True, res5)
+
+
+class UserRedactionTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+        self.store = hs.get_datastores().main
+
+    def test_redact_messages_all_rooms(self) -> None:
+        """
+        Test that request to redact events in all rooms user is member of is successful
+        """
+        # create rooms, some with updated redaction rules
+        rm1 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        rm2 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="11"
+        )
+        rm3 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+
+        # join rooms, send some messages
+        originals = []
+        for rm in [rm1, rm2, rm3]:
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
+            for i in range(5):
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(
+                    rm, "m.text", event, tok=self.bad_user_tok, expect_code=200
+                )
+                originals.append(res["event_id"])
+
+        # redact all events in all rooms
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": {}},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        for rm in [rm1, rm2, rm3]:
+            channel = self.make_request("GET", "sync", access_token=self.admin_tok)
+            self.assertEqual(channel.code, 200)
+            room_sync = channel.json_body["rooms"]["join"][rm]
+            timeline = room_sync["timeline"]["events"]
+
+            matches = []
+            for event in timeline:
+                for event_id in originals:
+                    if (
+                        event["type"] == "m.room.redaction"
+                        and event["redacts"] == event_id
+                    ):
+                        matches.append((event_id, event))
+
+            self.assertEqual(len(matches), 6)
+
+    def test_redact_messages_specific_rooms(self) -> None:
+        """
+        Test that request to redact events in specified rooms user is member of is successful
+        """
+        rm1 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+        rm3 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="11"
+        )
+
+        originals = []
+        for rm in [rm1, rm2, rm3]:
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
+            for i in range(5):
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(rm, "m.text", event, tok=self.bad_user_tok)
+                originals.append(res["event_id"])
+
+        # redact messages in rooms 1 and 3
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [rm1, rm3]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        # messages in requested rooms are redacted
+        for rm in [rm1, rm3]:
+            channel = self.make_request("GET", "sync", access_token=self.admin_tok)
+            self.assertEqual(channel.code, 200)
+            room_sync = channel.json_body["rooms"]["join"][rm]
+            timeline = room_sync["timeline"]["events"]
+
+            matches = []
+            for event in timeline:
+                for event_id in originals:
+                    if (
+                        event["type"] == "m.room.redaction"
+                        and event["redacts"] == event_id
+                    ):
+                        matches.append((event_id, event))
+
+            self.assertEqual(len(matches), 6)
+
+        rm2_sync = channel.json_body["rooms"]["join"][rm2]
+        rm2_timeline = rm2_sync["timeline"]["events"]
+
+        # messages in remaining room are not
+        for event in rm2_timeline:
+            if event["type"] == "m.room.redaction":
+                self.fail("found redaction in room 2")
