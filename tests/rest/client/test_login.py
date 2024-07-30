@@ -969,9 +969,8 @@ class CASTestCase(unittest.HomeserverTestCase):
         # Test that the response is HTML.
         self.assertEqual(channel.code, 200, channel.result)
         content_type_header_value = ""
-        for header in channel.result.get("headers", []):
-            if header[0] == b"Content-Type":
-                content_type_header_value = header[1].decode("utf8")
+        for header in channel.headers.getRawHeaders("Content-Type", []):
+            content_type_header_value = header
 
         self.assertTrue(content_type_header_value.startswith("text/html"))
 

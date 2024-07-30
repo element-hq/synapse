@@ -198,17 +198,35 @@ class FakeChannel:
     def headers(self) -> Headers:
         if not self.result:
             raise Exception("No result yet.")
-        h = Headers()
-        for i in self.result["headers"]:
-            h.addRawHeader(*i)
+
+        h = self.result["headers"]
+        assert isinstance(h, Headers)
         return h
 
     def writeHeaders(
-        self, version: bytes, code: bytes, reason: bytes, headers: Headers
+        self,
+        version: bytes,
+        code: bytes,
+        reason: bytes,
+        headers: Union[Headers, List[Tuple[bytes, bytes]]],
     ) -> None:
         self.result["version"] = version
         self.result["code"] = code
         self.result["reason"] = reason
+
+        if isinstance(headers, list):
+            # Support prior to Twisted 24.7.0rc1
+            new_headers = Headers()
+            for k, v in headers:
+                assert isinstance(k, bytes), f"key is not of type bytes: {k!r}"
+                assert isinstance(v, bytes), f"value is not of type bytes: {v!r}"
+                new_headers.addRawHeader(k, v)
+            headers = new_headers
+
+        assert isinstance(
+            headers, Headers
+        ), f"headers are of the wrong type: {headers!r}"
+
         self.result["headers"] = headers
 
     def write(self, data: bytes) -> None:
