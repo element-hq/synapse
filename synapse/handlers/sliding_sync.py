@@ -1268,7 +1268,7 @@ class SlidingSyncHandler:
                 await self.store.bulk_get_room_encryption(room_ids)
             )
         else:
-            raise AssertionError(f"Unexpected content type {content_type}")
+            assert_never(content_type)
 
         room_ids_with_results = [
             room_id
