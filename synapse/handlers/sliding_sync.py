@@ -41,7 +41,7 @@ from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membe
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
-from synapse.logging.opentracing import start_active_span, tag_args, trace
+from synapse.logging.opentracing import log_kv, start_active_span, tag_args, trace
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.storage.roommember import MemberSummary
@@ -445,6 +445,7 @@ class SlidingSyncHandler:
 
         return result
 
+    @trace
     async def current_sync_for_user(
         self,
         sync_config: SlidingSyncConfig,
@@ -620,6 +621,51 @@ class SlidingSyncHandler:
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
 
+        # Filter out rooms that haven't received updates and we've sent down
+        # previously.
+        if from_token:
+            rooms_should_send = set()
+
+            # First we check if there are rooms that match a list/room
+            # subscription and have updates we need to send (i.e. either because
+            # we haven't sent the room down, or we have but there are missing
+            # updates).
+            for room_id in relevant_room_map:
+                status = await self.connection_store.have_sent_room(
+                    sync_config,
+                    from_token.connection_position,
+                    room_id,
+                )
+                if (
+                    # The room was never sent down before so the client needs to know
+                    # about it regardless of any updates.
+                    status.status == HaveSentRoomFlag.NEVER
+                    # `PREVIOUSLY` literally means the "room was sent down before *AND*
+                    # there are updates we haven't sent down" so we already know this
+                    # room has updates.
+                    or status.status == HaveSentRoomFlag.PREVIOUSLY
+                ):
+                    rooms_should_send.add(room_id)
+                elif status.status == HaveSentRoomFlag.LIVE:
+                    # We know that we've sent all updates up until `from_token`,
+                    # so we just need to check if there have been updates since
+                    # then.
+                    pass
+                else:
+                    assert_never(status.status)
+
+            # We only need to check for new events since any state changes
+            # will also come down as new events.
+            rooms_that_have_updates = self.store.get_rooms_that_might_have_updates(
+                relevant_room_map.keys(), from_token.stream_token.room_key
+            )
+            rooms_should_send.update(rooms_that_have_updates)
+            relevant_room_map = {
+                room_id: room_sync_config
+                for room_id, room_sync_config in relevant_room_map.items()
+                if room_id in rooms_should_send
+            }
+
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
@@ -634,10 +680,13 @@ class SlidingSyncHandler:
                 to_token=to_token,
             )
 
-            rooms[room_id] = room_sync_result
+            # Filter out empty room results during incremental sync
+            if room_sync_result or not from_token:
+                rooms[room_id] = room_sync_result
 
-        with start_active_span("sliding_sync.generate_room_entries"):
-            await concurrently_execute(handle_room, relevant_room_map, 10)
+        if relevant_room_map:
+            with start_active_span("sliding_sync.generate_room_entries"):
+                await concurrently_execute(handle_room, relevant_room_map, 10)
 
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
@@ -1120,6 +1169,7 @@ class SlidingSyncHandler:
 
         # return None
 
+    @trace
     async def filter_rooms(
         self,
         user: UserID,
@@ -1243,6 +1293,7 @@ class SlidingSyncHandler:
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
 
+    @trace
     async def sort_rooms(
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
@@ -1450,6 +1501,10 @@ class SlidingSyncHandler:
                 initial = True
             else:
                 assert_never(room_status.status)
+
+            log_kv({"sliding_sync.room_status": room_status})
+
+        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
 
         # Assemble the list of timeline events
         #
@@ -1849,6 +1904,7 @@ class SlidingSyncHandler:
             highlight_count=0,
         )
 
+    @trace
     async def get_extensions_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -1992,6 +2048,7 @@ class SlidingSyncHandler:
 
         return relevant_room_ids
 
+    @trace
     async def get_to_device_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2066,6 +2123,7 @@ class SlidingSyncHandler:
             events=messages,
         )
 
+    @trace
     async def get_e2ee_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2116,6 +2174,7 @@ class SlidingSyncHandler:
             device_unused_fallback_key_types=device_unused_fallback_key_types,
         )
 
+    @trace
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2343,7 +2402,7 @@ class SlidingSyncConnectionStore:
     a connection position of 5 might have totally different states on worker A and
     worker B.
 
-     One complication that we need to deal with here is needing to handle requests being
+    One complication that we need to deal with here is needing to handle requests being
     resent, i.e. if we sent down a room in a response that the client received, we must
     consider the room *not* sent when we get the request again.
 

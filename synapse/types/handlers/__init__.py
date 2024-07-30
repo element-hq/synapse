@@ -238,6 +238,17 @@ class SlidingSyncResult:
         notification_count: int
         highlight_count: int
 
+        def __bool__(self) -> bool:
+            return (
+                # If this is the first time the client is seeing the room, we should not filter it out
+                # under any circumstance.
+                self.initial
+                # We need to let the client know if there are any new events
+                or bool(self.required_state)
+                or bool(self.timeline_events)
+                or bool(self.stripped_state)
+            )
+
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
         """
@@ -383,7 +394,11 @@ class SlidingSyncResult:
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        return bool(self.lists or self.rooms or self.extensions)
+        # We don't include `self.lists` here, as a) `lists` is always non-empty even if
+        # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
+        # the latest activity, anything that would cause the order to change would end
+        # up in `self.rooms` and cause us to send down the change.
+        return bool(self.rooms or self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
