@@ -653,6 +653,13 @@ class SlidingSyncHandler:
                 else:
                     assert_never(status.status)
 
+                if status.timeline_limit is not None and (
+                    status.timeline_limit < relevant_room_map[room_id].timeline_limit
+                ):
+                    # If the timeline limit has increased we want to send down
+                    # more historic events (even if nothing has since changed).
+                    rooms_should_send.add(room_id)
+
             # We only need to check for new events since any state changes
             # will also come down as new events.
             rooms_that_have_updates = self.store.get_rooms_that_might_have_updates(
@@ -1476,7 +1483,12 @@ class SlidingSyncHandler:
         #  - When users `newly_joined`
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
+        #
+        # We also decide if we should ignore the timeline bound or not. This is
+        # to handle the case where the client has requested more historical
+        # messages in the room by increasing the timeline limit.
         from_bound = None
+        ignore_timeline_bound = False
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
             room_status = await self.connection_store.have_sent_room(
@@ -1484,6 +1496,7 @@ class SlidingSyncHandler:
                 connection_token=from_token.connection_position,
                 room_id=room_id,
             )
+
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
@@ -1497,9 +1510,24 @@ class SlidingSyncHandler:
             else:
                 assert_never(room_status.status)
 
+            if room_status.timeline_limit is not None and (
+                room_status.timeline_limit < room_sync_config.timeline_limit
+            ):
+                # If the timeline limit has been increased since previous
+                # requests then we treat it as request for more events. We do
+                # this by sending down a `limited` sync, ignoring the from
+                # bound.
+                ignore_timeline_bound = True
+
             log_kv({"sliding_sync.room_status": room_status})
 
-        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
+        log_kv(
+            {
+                "sliding_sync.from_bound": from_bound,
+                "sliding_sync.ignore_timeline_bound": ignore_timeline_bound,
+                "sliding_sync.initial": initial,
+            }
+        )
 
         # Assemble the list of timeline events
         #
@@ -1542,7 +1570,7 @@ class SlidingSyncHandler:
                 # (from newer to older events) starting at to_bound.
                 # This ensures we fill the `limit` with the newest events first,
                 from_key=to_bound,
-                to_key=from_bound,
+                to_key=from_bound if not ignore_timeline_bound else None,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)

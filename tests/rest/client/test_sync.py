@@ -4940,6 +4940,76 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
+    def test_increasing_timeline_range_sends_more_messages(self) -> None:
+        """
+        Test that increasing the timeline limit via room subscriptions sends the
+        room down with more messages in a limited sync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [[EventTypes.Create, ""]],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        message_events = []
+        for _ in range(10):
+            resp = self.helper.send(room_id1, "msg", tok=user1_tok)
+            message_events.append(resp["event_id"])
+
+        # Make the first Sliding Sync request
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        room_response = response_body["rooms"][room_id1]
+
+        self.assertEqual(room_response["initial"], True)
+        self.assertEqual(room_response["limited"], True)
+
+        # We only expect the last message at first
+        self.assertEqual(
+            [event["event_id"] for event in room_response["timeline"]],
+            message_events[-1:],
+            room_response["timeline"],
+        )
+
+        # We also expect to get the create event state.
+        self.assertEqual(
+            [event["type"] for event in room_response["required_state"]],
+            [EventTypes.Create],
+        )
+
+        # Now do another request with a room subscription with an increased timeline limit
+        sync_body["room_subscriptions"] = {
+            room_id1: {
+                "required_state": [],
+                "timeline_limit": 10,
+            }
+        }
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        room_response = response_body["rooms"][room_id1]
+
+        self.assertNotIn("initial", room_response)
+        self.assertEqual(room_response["limited"], True)
+
+        # Now we expect all the messages
+        self.assertEqual(
+            [event["event_id"] for event in room_response["timeline"]],
+            message_events,
+            room_response["timeline"],
+        )
+
+        # We don't expect to get the room create down, as nothing has changed.
+        self.assertNotIn("required_state", room_response)
+
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
     """Tests for the to-device sliding sync extension"""
