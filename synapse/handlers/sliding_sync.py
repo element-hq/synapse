@@ -2342,8 +2342,10 @@ class SlidingSyncConnectionStore:
         # end we can treat this as a noop.
         have_updated = False
         for room_id in sent_room_ids:
+            prev_state = new_room_statuses.get(room_id)
             new_room_statuses[room_id] = HaveSentRoom.live()
-            have_updated = True
+            if prev_state != new_room_statuses[room_id]:
+                have_updated = True
 
         # Whether we add/update the entries for unsent rooms depends on the
         # existing entry:
