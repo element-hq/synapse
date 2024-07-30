@@ -646,6 +646,7 @@ class SlidingSyncHandler:
             # will need to be updated to make sure it includes everything before the
             # pre-filter on `relevant_room_map`.
             actual_room_ids=set(rooms.keys()),
+            actual_room_response_map=rooms,
             from_token=from_token,
             to_token=to_token,
         )
@@ -1853,6 +1854,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
+        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> SlidingSyncResult.Extensions:
@@ -1863,6 +1865,8 @@ class SlidingSyncHandler:
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results in the the
+                Sliding Sync response.
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
         """
@@ -1904,6 +1908,7 @@ class SlidingSyncHandler:
                 sync_config=sync_config,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
+                actual_room_response_map=actual_room_response_map,
                 receipts_request=sync_config.extensions.receipts,
                 to_token=to_token,
                 from_token=from_token,
@@ -2206,6 +2211,7 @@ class SlidingSyncHandler:
         sync_config: SlidingSyncConfig,
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
+        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
@@ -2217,6 +2223,8 @@ class SlidingSyncHandler:
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results in the the
+                Sliding Sync response.
             account_data_request: The account_data extension from the request
             to_token: The point in the stream to sync up to.
             from_token: The point in the stream to sync from.
@@ -2234,6 +2242,7 @@ class SlidingSyncHandler:
 
         room_id_to_receipt_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
+
             receipt_source = self.event_sources.sources.receipt
             receipts, _ = await receipt_source.get_new_events(
                 user=sync_config.user,
@@ -2254,6 +2263,24 @@ class SlidingSyncHandler:
                 room_id = receipt["room_id"]
                 type = receipt["type"]
                 content = receipt["content"]
+
+                room_result = actual_room_response_map.get(room_id)
+                if room_result is not None:
+                    if room_result.initial:
+                        # TODO: In the future, it would be good to fetch less receipts
+                        # out of the database in the first place but we would need to
+                        # add a new `event_id` index to `receipts_linearized`.
+                        relevant_event_ids = [
+                            event.event_id for event in room_result.timeline_events
+                        ]
+
+                        assert isinstance(content, dict)
+                        content = {
+                            event_id: content_value
+                            for event_id, content_value in content.items()
+                            if event_id in relevant_event_ids
+                        }
+
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(

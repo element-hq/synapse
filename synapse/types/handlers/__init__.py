@@ -152,7 +152,7 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room subscription to room results.
+        rooms: Room subscription API. A map of room ID to room results.
         extensions: Extensions API. A map of extension key to extension results.
     """
 
