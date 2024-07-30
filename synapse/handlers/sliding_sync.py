@@ -2354,18 +2354,21 @@ class SlidingSyncConnectionStore:
         #     given token, so we don't need to update the entry.
         #   - NEVER: We have never previously sent down the room, and we haven't
         #     sent anything down this time either so we leave it as NEVER.
+        #
+        # We only need to do this if `from_token` is not None, as if it is then
+        # we know that there are no existing entires.
 
-        # Work out the new state for unsent rooms that were `LIVE`.
         if from_token:
             new_unsent_state = HaveSentRoom.previously(from_token.stream_token.room_key)
-        else:
-            new_unsent_state = HAVE_SENT_ROOM_NEVER
 
-        for room_id in unsent_room_ids:
-            prev_state = new_room_statuses.get(room_id)
-            if prev_state is not None and prev_state.status == HaveSentRoomFlag.LIVE:
-                new_room_statuses[room_id] = new_unsent_state
-                have_updated = True
+            for room_id in unsent_room_ids:
+                prev_state = new_room_statuses.get(room_id)
+                if (
+                    prev_state is not None
+                    and prev_state.status == HaveSentRoomFlag.LIVE
+                ):
+                    new_room_statuses[room_id] = new_unsent_state
+                    have_updated = True
 
         if not have_updated:
             return prev_connection_token
