@@ -2238,13 +2238,16 @@ class HaveSentRoom:
     last_token: Optional[RoomStreamToken]
 
     @staticmethod
+    def live() -> "HaveSentRoom":
+        return HaveSentRoom(HaveSentRoomFlag.LIVE, None)
+
+    @staticmethod
     def previously(last_token: RoomStreamToken) -> "HaveSentRoom":
         """Constructor for `PREVIOUSLY` flag."""
         return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token)
 
 
 HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
-HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
 
 
 @attr.s(auto_attribs=True)
@@ -2339,7 +2342,7 @@ class SlidingSyncConnectionStore:
         # end we can treat this as a noop.
         have_updated = False
         for room_id in sent_room_ids:
-            new_room_statuses[room_id] = HAVE_SENT_ROOM_LIVE
+            new_room_statuses[room_id] = HaveSentRoom.live()
             have_updated = True
 
         # Whether we add/update the entries for unsent rooms depends on the
