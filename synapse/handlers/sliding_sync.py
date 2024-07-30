@@ -642,6 +642,9 @@ class SlidingSyncHandler:
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
+            # TODO: Once https://github.com/element-hq/synapse/pull/17479 merges, this
+            # will need to be updated to make sure it includes everything before the
+            # pre-filter on `relevant_room_map`.
             actual_room_ids=set(rooms.keys()),
             from_token=from_token,
             to_token=to_token,
