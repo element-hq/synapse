@@ -257,7 +257,11 @@ class SlidingSyncTypingExtensionTestCase(SlidingSyncBase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Advance so everything times out before we make our Sliding Sync requests
+        # Advance time so all of the typing notifications timeout before we make our
+        # Sliding Sync requests. Even though these are sent before the `from_token`, the
+        # typing code only keeps track of stream position of the latest typing
+        # notification so "old" typing notifications that are still "alive" (haven't
+        # timed out) can appear in the response.
         self.reactor.advance(36)
 
         sync_body = {
