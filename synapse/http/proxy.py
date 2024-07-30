@@ -64,7 +64,7 @@ HOP_BY_HOP_HEADERS = {
 
 if hasattr(Headers, "_canonicalNameCaps"):
     # Twisted < 24.7.0rc1
-    _canonicalHeaderName = Headers()._canonicalNameCaps
+    _canonicalHeaderName = Headers()._canonicalNameCaps  # type: ignore[attr-defined]
 else:
     # Twisted >= 24.7.0rc1
     # But note that `_encodeName` still exists on prior versions,
