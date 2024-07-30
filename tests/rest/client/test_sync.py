@@ -6657,15 +6657,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         # No events in the timeline since they were sent before the `from_token`
-        self.assertIncludes(
-            {
-                event["event_id"]
-                for event in response_body["rooms"][room_id1].get("timeline", [])
-            },
-            set(),
-            exact=True,
-            message=str(response_body["rooms"][room_id1]),
-        )
+        self.assertNotIn(room_id1, response_body["rooms"])
 
         # Check room3:
         #
@@ -6694,15 +6686,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         # No events in the timeline since they were sent before the `from_token`
-        self.assertIncludes(
-            {
-                event["event_id"]
-                for event in response_body["rooms"][room_id3].get("timeline", [])
-            },
-            set(),
-            exact=True,
-            message=str(response_body["rooms"][room_id3]),
-        )
+        self.assertNotIn(room_id3, response_body["rooms"])
 
     def test_receipts_incremental_sync_all_live_receipts(self) -> None:
         """
