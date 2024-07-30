@@ -881,7 +881,6 @@ class SlidingSyncRestServlet(RestServlet):
         )
 
         user = requester.user
-        device_id = requester.device_id
 
         timeout = parse_integer(request, "timeout", default=0)
         # Position in the stream
@@ -902,11 +901,12 @@ class SlidingSyncRestServlet(RestServlet):
 
         sync_config = SlidingSyncConfig(
             user=user,
-            device_id=device_id,
+            requester=requester,
             # FIXME: Currently, we're just manually copying the fields from the
-            # `SlidingSyncBody` into the config. How can we gurantee into the future
+            # `SlidingSyncBody` into the config. How can we guarantee into the future
             # that we don't forget any? I would like something more structured like
             # `copy_attributes(from=body, to=config)`
+            conn_id=body.conn_id,
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
@@ -929,7 +929,6 @@ class SlidingSyncRestServlet(RestServlet):
 
         return 200, response_content
 
-    # TODO: Is there a better way to encode things?
     async def encode_response(
         self,
         requester: Requester,
@@ -1116,6 +1115,24 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_extensions["e2ee"]["device_lists"]["left"] = list(
                     extensions.e2ee.device_list_updates.left
                 )
+
+        if extensions.account_data is not None:
+            serialized_extensions["account_data"] = {
+                # Same as the the top-level `account_data.events` field in Sync v2.
+                "global": [
+                    {"type": account_data_type, "content": content}
+                    for account_data_type, content in extensions.account_data.global_account_data_map.items()
+                ],
+                # Same as the joined room's account_data field in Sync v2, e.g the path
+                # `rooms.join["!foo:bar"].account_data.events`.
+                "rooms": {
+                    room_id: [
+                        {"type": account_data_type, "content": content}
+                        for account_data_type, content in event_map.items()
+                    ]
+                    for room_id, event_map in extensions.account_data.account_data_by_room_map.items()
+                },
+            }
 
         return serialized_extensions
 
