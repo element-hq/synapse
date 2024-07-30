@@ -70,6 +70,7 @@
       - [Users](admin_api/user_admin_api.md)
       - [Server Version](admin_api/version_api.md)
       - [Federation](usage/administration/admin_api/federation.md)
+      - [SCIM provisioning](usage/administration/admin_api/scim_api.md)
     - [Manhole](manhole.md)
     - [Monitoring](metrics-howto.md)
       - [Reporting Homeserver Usage Statistics](usage/administration/monitoring/reporting_homeserver_usage_statistics.md)

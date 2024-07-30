@@ -21,7 +21,7 @@
 from typing import TYPE_CHECKING, Callable
 
 from synapse.http.server import HttpServer, JsonResource
-from synapse.rest import admin
+from synapse.rest import admin, scim
 from synapse.rest.client import (
     account,
     account_data,
@@ -149,6 +149,7 @@ class ClientRestResource(JsonResource):
             from synapse.rest.client import media
 
             media.register_servlets(hs, client_resource)
+        scim.register_servlets(hs, client_resource)
 
         # moving to /_synapse/admin
         if is_main_process:
