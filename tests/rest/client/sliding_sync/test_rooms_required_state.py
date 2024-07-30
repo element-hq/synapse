@@ -61,7 +61,11 @@ from tests.test_utils.event_injection import create_event, mark_event_as_partial
 logger = logging.getLogger(__name__)
 
 
-class SlidingSyncRequiredStateTestCase(SlidingSyncBase):
+class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
+    """
+    Test `rooms.required_state` in the Sliding Sync API.
+    """
+
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
