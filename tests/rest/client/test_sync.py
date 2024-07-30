@@ -30,6 +30,7 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import (
     AccountDataTypes,
+    EduTypes,
     EventContentFields,
     EventTypes,
     HistoryVisibility,
@@ -60,6 +61,7 @@ from synapse.types import (
     StreamToken,
     UserID,
 )
+from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
 
@@ -69,7 +71,6 @@ from tests.federation.transport.test_knocking import (
 )
 from tests.server import TimedOutException
 from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
-from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
 
@@ -1370,12 +1371,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
         room.register_servlets,
         sync.register_servlets,
         devices.register_servlets,
+        receipts.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
+        self.account_data_handler = hs.get_account_data_handler()
 
     def _assertRequiredStateIncludes(
         self,
@@ -1656,12 +1659,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             channel.json_body["rooms"][room_id]["timeline"],
         )
 
-    # TODO: Once we remove `ops`, we should be able to add a `RoomResult.__bool__` to
-    # check if there are any updates since the `from_token`.
-    @skip_unless(
-        False,
-        "Once we remove ops from the Sliding Sync response, this test should pass",
-    )
     def test_wait_for_new_data_timeout(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive but
@@ -1711,12 +1708,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
         channel.await_result(timeout_ms=1200)
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # We still see rooms because that's how Sliding Sync lists work but we reached
-        # the timeout before seeing them
-        self.assertEqual(
-            [event["event_id"] for event in channel.json_body["rooms"].keys()],
-            [room_id],
-        )
+        # There should be no room sent down.
+        self.assertFalse(channel.json_body["rooms"])
 
     def test_filter_list(self) -> None:
         """
@@ -3700,19 +3693,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # Nothing to see for this banned user in the room in the token range
-        self.assertIsNone(response_body["rooms"][room_id1].get("timeline"))
-        # No events returned in the timeline so nothing is "live"
-        self.assertEqual(
-            response_body["rooms"][room_id1]["num_live"],
-            0,
-            response_body["rooms"][room_id1],
-        )
-        # There aren't anymore events to paginate to in this range
-        self.assertEqual(
-            response_body["rooms"][room_id1]["limited"],
-            False,
-            response_body["rooms"][room_id1],
-        )
+        self.assertIsNone(response_body["rooms"].get(room_id1))
 
     def test_rooms_no_required_state(self) -> None:
         """
@@ -3812,22 +3793,64 @@ class SlidingSyncTestCase(SlidingSyncBase):
                         # This one doesn't exist in the room
                         [EventTypes.Tombstone, ""],
                     ],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 }
             }
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
+        # Send a message so the room comes down sync.
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
         # Make the incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
+        # We only return updates but only if we've sent the room down the
+        # connection before.
+        self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
+        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_incremental_sync_restart(self) -> None:
+        """
+        Test `rooms.required_state` returns requested state events in the room during an
+        incremental sync, after a restart (and so the in memory caches are reset).
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Tombstone, ""],
+                    ],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Reset the in-memory cache
+        self.hs.get_sliding_sync_handler().connection_store._connections.clear()
+
+        # Make the Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # If the cache has been cleared then we do expect the state to come down
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
-        # The returned state doesn't change from initial to incremental sync. In the
-        # future, we will only return updates but only if we've sent the room down the
-        # connection before.
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
@@ -4578,6 +4601,686 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # FIXME: In the future, we should be able to see the room because it's
         # `world_readable` but currently we don't support this.
         self.assertIsNone(response_body["rooms"].get(room_id1), response_body["rooms"])
+
+    # Any extensions that use `lists`/`rooms` should be tested here
+    @parameterized.expand([("account_data",), ("receipts",)])
+    def test_extensions_lists_rooms_relevant_rooms(self, extension_name: str) -> None:
+        """
+        With various extensions, test out requesting different variations of
+        `lists`/`rooms`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create some rooms
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id4 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id5 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        room_id_to_human_name_map = {
+            room_id1: "room1",
+            room_id2: "room2",
+            room_id3: "room3",
+            room_id4: "room4",
+            room_id5: "room5",
+        }
+
+        for room_id in room_id_to_human_name_map.keys():
+            if extension_name == "account_data":
+                # Add some account data to each room
+                self.get_success(
+                    self.account_data_handler.add_account_data_to_room(
+                        user_id=user1_id,
+                        room_id=room_id,
+                        account_data_type="org.matrix.roorarraz",
+                        content={"roo": "rar"},
+                    )
+                )
+            elif extension_name == "receipts":
+                event_response = self.helper.send(
+                    room_id, body="new event", tok=user1_tok
+                )
+                # Read last event
+                channel = self.make_request(
+                    "POST",
+                    f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_response['event_id']}",
+                    {},
+                    access_token=user1_tok,
+                )
+                self.assertEqual(channel.code, 200, channel.json_body)
+            else:
+                raise AssertionError(f"Unknown extension name: {extension_name}")
+
+        main_sync_body = {
+            "lists": {
+                # We expect this list range to include room5 and room4
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                # We expect this list range to include room5, room4, room3
+                "bar-list": {
+                    "ranges": [[0, 2]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+        }
+
+        # Mix lists and rooms
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                extension_name: {
+                    "enabled": True,
+                    "lists": ["foo-list", "non-existent-list"],
+                    "rooms": [room_id1, room_id2, "!non-existent-room"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ✅ Requested via `rooms` and a room subscription exists
+        # room2: ❌ Requested via `rooms` but not in the response (from lists or room subscriptions)
+        # room3: ❌ Not requested
+        # room4: ✅ Shows up because requested via `lists` and list exists in the response
+        # room5: ✅ Shows up because requested via `lists` and list exists in the response
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"][extension_name]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room4", "room5"},
+            exact=True,
+        )
+
+        # Try wildcards (this is the default)
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                extension_name: {
+                    "enabled": True,
+                    # "lists": ["*"],
+                    # "rooms": ["*"],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ✅ Shows up because of default `rooms` wildcard and is in one of the room subscriptions
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"][extension_name]
+                .get("rooms")
+                .keys()
+            },
+            {"room1", "room3", "room4", "room5"},
+            exact=True,
+        )
+
+        # Empty list will return nothing
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                extension_name: {
+                    "enabled": True,
+                    "lists": [],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ❌ Not requested
+        # room4: ❌ Not requested
+        # room5: ❌ Not requested
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"][extension_name]
+                .get("rooms")
+                .keys()
+            },
+            set(),
+            exact=True,
+        )
+
+        # Try wildcard and none
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                extension_name: {
+                    "enabled": True,
+                    "lists": ["*"],
+                    "rooms": [],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
+        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"][extension_name]
+                .get("rooms")
+                .keys()
+            },
+            {"room3", "room4", "room5"},
+            exact=True,
+        )
+
+        # Try requesting a room that is only in a list
+        sync_body = {
+            **main_sync_body,
+            "extensions": {
+                extension_name: {
+                    "enabled": True,
+                    "lists": [],
+                    "rooms": [room_id5],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # room1: ❌ Not requested
+        # room2: ❌ Not requested
+        # room3: ❌ Not requested
+        # room4: ❌ Not requested
+        # room5: ✅ Requested via `rooms` and is in a list
+        self.assertIncludes(
+            {
+                room_id_to_human_name_map[room_id]
+                for room_id in response_body["extensions"][extension_name]
+                .get("rooms")
+                .keys()
+            },
+            {"room5"},
+            exact=True,
+        )
+
+    def test_rooms_required_state_incremental_sync_LIVE(self) -> None:
+        """Test that we only get state updates in incremental sync for rooms
+        we've already seen (LIVE).
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
+            exact=True,
+        )
+
+        # Send a state event
+        self.helper.send_state(
+            room_id1, EventTypes.Name, body={"name": "foo"}, tok=user2_tok
+        )
+
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Name, "")],
+            },
+            exact=True,
+        )
+
+    @parameterized.expand([(False,), (True,)])
+    def test_rooms_timeline_incremental_sync_PREVIOUSLY(self, limited: bool) -> None:
+        """
+        Test getting room data where we have previously sent down the room, but
+        we missed sending down some timeline events previously and so its status
+        is considered PREVIOUSLY.
+
+        There are two versions of this test, one where there are more messages
+        than the timeline limit, and one where there isn't.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        timeline_limit = 5
+        conn_id = "conn_id"
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": timeline_limit,
+                }
+            },
+            "conn_id": "conn_id",
+        }
+
+        # The first room gets sent down the initial sync
+        response_body, initial_from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        # We now send down some events in room1 (depending on the test param).
+        expected_events = []  # The set of events in the timeline
+        if limited:
+            for _ in range(10):
+                resp = self.helper.send(room_id1, "msg1", tok=user1_tok)
+                expected_events.append(resp["event_id"])
+        else:
+            resp = self.helper.send(room_id1, "msg1", tok=user1_tok)
+            expected_events.append(resp["event_id"])
+
+        # A second messages happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(
+            sync_body, since=initial_from_token, tok=user1_tok
+        )
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # FIXME: This is a hack to record that the first room wasn't sent down
+        # sync, as we don't implement that currently.
+        sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        requester = self.get_success(
+            self.hs.get_auth().get_user_by_access_token(user1_tok)
+        )
+        sync_config = SlidingSyncConfig(
+            user=requester.user,
+            requester=requester,
+            conn_id=conn_id,
+        )
+
+        parsed_initial_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, initial_from_token)
+        )
+        connection_position = self.get_success(
+            sliding_sync_handler.connection_store.record_rooms(
+                sync_config,
+                parsed_initial_from_token,
+                sent_room_ids=[],
+                unsent_room_ids=[room_id1],
+            )
+        )
+
+        # FIXME: Now fix up `from_token` with new connect position above.
+        parsed_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        )
+        parsed_from_token = SlidingSyncStreamToken(
+            stream_token=parsed_from_token.stream_token,
+            connection_position=connection_position,
+        )
+        from_token = self.get_success(parsed_from_token.to_string(self.store))
+
+        # We now send another event to room1, so we should sync all the missing events.
+        resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
+        expected_events.append(resp["event_id"])
+
+        # This sync should contain the messages from room1 not yet sent down.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
+
+        self.assertEqual(
+            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
+            expected_events[-timeline_limit:],
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["limited"], limited)
+        self.assertEqual(response_body["rooms"][room_id1].get("required_state"), None)
+
+    def test_rooms_required_state_incremental_sync_PREVIOUSLY(self) -> None:
+        """
+        Test getting room data where we have previously sent down the room, but
+        we missed sending down some state previously and so its status is
+        considered PREVIOUSLY.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        conn_id = "conn_id"
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 0,
+                }
+            },
+            "conn_id": "conn_id",
+        }
+
+        # The first room gets sent down the initial sync
+        response_body, initial_from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        # We now send down some state in room1
+        resp = self.helper.send_state(
+            room_id1, EventTypes.Name, {"name": "foo"}, tok=user1_tok
+        )
+        name_change_id = resp["event_id"]
+
+        # A second messages happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(
+            sync_body, since=initial_from_token, tok=user1_tok
+        )
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # FIXME: This is a hack to record that the first room wasn't sent down
+        # sync, as we don't implement that currently.
+        sliding_sync_handler = self.hs.get_sliding_sync_handler()
+        requester = self.get_success(
+            self.hs.get_auth().get_user_by_access_token(user1_tok)
+        )
+        sync_config = SlidingSyncConfig(
+            user=requester.user,
+            requester=requester,
+            conn_id=conn_id,
+        )
+
+        parsed_initial_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, initial_from_token)
+        )
+        connection_position = self.get_success(
+            sliding_sync_handler.connection_store.record_rooms(
+                sync_config,
+                parsed_initial_from_token,
+                sent_room_ids=[],
+                unsent_room_ids=[room_id1],
+            )
+        )
+
+        # FIXME: Now fix up `from_token` with new connect position above.
+        parsed_from_token = self.get_success(
+            SlidingSyncStreamToken.from_string(self.store, from_token)
+        )
+        parsed_from_token = SlidingSyncStreamToken(
+            stream_token=parsed_from_token.stream_token,
+            connection_position=connection_position,
+        )
+        from_token = self.get_success(parsed_from_token.to_string(self.store))
+
+        # We now send another event to room1, so we should sync all the missing state.
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        # This sync should contain the state changes from room1.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+        self.assertNotIn("initial", response_body["rooms"][room_id1])
+
+        # We should only see the name change.
+        self.assertEqual(
+            [
+                ev["event_id"]
+                for ev in response_body["rooms"][room_id1]["required_state"]
+            ],
+            [name_change_id],
+        )
+
+    def test_rooms_required_state_incremental_sync_NEVER(self) -> None:
+        """
+        Test getting `required_state` where we have NEVER sent down the room before
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        self.helper.send(room_id1, "msg", tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.RoomHistoryVisibility, ""],
+                        # This one doesn't exist in the room
+                        [EventTypes.Name, ""],
+                    ],
+                    "timeline_limit": 1,
+                }
+            },
+        }
+
+        # A message happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # We now send another event to room1, so we should send down the full
+        # room.
+        self.helper.send(room_id1, "msg2", tok=user1_tok)
+
+        # This sync should contain the messages from room1 not yet sent down.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Create, "")],
+                state_map[(EventTypes.RoomHistoryVisibility, "")],
+            },
+            exact=True,
+        )
+
+    def test_rooms_timeline_incremental_sync_NEVER(self) -> None:
+        """
+        Test getting timeline room data where we have NEVER sent down the room
+        before
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            },
+        }
+
+        expected_events = []
+        for _ in range(4):
+            resp = self.helper.send(room_id1, "msg", tok=user1_tok)
+            expected_events.append(resp["event_id"])
+
+        # A message happens in the other room, so room1 won't get sent down.
+        self.helper.send(room_id2, "msg", tok=user1_tok)
+
+        # Only the second room gets sent down sync.
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id2}, response_body["rooms"]
+        )
+
+        # We now send another event to room1 so it comes down sync
+        resp = self.helper.send(room_id1, "msg2", tok=user1_tok)
+        expected_events.append(resp["event_id"])
+
+        # This sync should contain the messages from room1 not yet sent down.
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertCountEqual(
+            response_body["rooms"].keys(), {room_id1}, response_body["rooms"]
+        )
+
+        self.assertEqual(
+            [ev["event_id"] for ev in response_body["rooms"][room_id1]["timeline"]],
+            expected_events,
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+    def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
+        """
+        Test that rooms with no updates are returned in subsequent incremental
+        syncs.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Nothing has happened in the room, so the room should not come down
+        # /sync.
+        self.assertIsNone(response_body["rooms"].get(room_id1))
+
+    def test_empty_initial_room_comes_down_sync(self) -> None:
+        """
+        Test that rooms come down /sync even with empty required state and
+        timeline limit in initial sync.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
 
 class SlidingSyncToDeviceExtensionTestCase(SlidingSyncBase):
@@ -5592,268 +6295,6 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_room_account_data_relevant_rooms(self) -> None:
-        """
-        Test out different variations of `lists`/`rooms` we are requesting account data for.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        # Create a room and add some room account data
-        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
-        )
-
-        # Create another room with some room account data
-        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
-        )
-
-        # Create another room with some room account data
-        room_id3 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id3,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
-        )
-
-        # Create another room with some room account data
-        room_id4 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id4,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
-        )
-
-        # Create another room with some room account data
-        room_id5 = self.helper.create_room_as(user1_id, tok=user1_tok)
-        self.get_success(
-            self.account_data_handler.add_account_data_to_room(
-                user_id=user1_id,
-                room_id=room_id5,
-                account_data_type="org.matrix.roorarraz",
-                content={"roo": "rar"},
-            )
-        )
-
-        room_id_to_human_name_map = {
-            room_id1: "room1",
-            room_id2: "room2",
-            room_id3: "room3",
-            room_id4: "room4",
-            room_id5: "room5",
-        }
-
-        # Mix lists and rooms
-        sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
-            "extensions": {
-                "account_data": {
-                    "enabled": True,
-                    "lists": ["foo-list", "non-existent-list"],
-                    "rooms": [room_id1, room_id2, "!non-existent-room"],
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # room1: ✅ Requested via `rooms` and a room subscription exists
-        # room2: ❌ Requested via `rooms` but not in the response (from lists or room subscriptions)
-        # room3: ❌ Not requested
-        # room4: ✅ Shows up because requested via `lists` and list exists in the response
-        # room5: ✅ Shows up because requested via `lists` and list exists in the response
-        self.assertIncludes(
-            {
-                room_id_to_human_name_map[room_id]
-                for room_id in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .keys()
-            },
-            {"room1", "room4", "room5"},
-            exact=True,
-        )
-
-        # Try wildcards (this is the default)
-        sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
-            "extensions": {
-                "account_data": {
-                    "enabled": True,
-                    # "lists": ["*"],
-                    # "rooms": ["*"],
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # room1: ✅ Shows up because of default `rooms` wildcard and is in one of the room subscriptions
-        # room2: ❌ Not requested
-        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
-        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
-        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
-        self.assertIncludes(
-            {
-                room_id_to_human_name_map[room_id]
-                for room_id in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .keys()
-            },
-            {"room1", "room3", "room4", "room5"},
-            exact=True,
-        )
-
-        # Empty list will return nothing
-        sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
-            "extensions": {
-                "account_data": {
-                    "enabled": True,
-                    "lists": [],
-                    "rooms": [],
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # room1: ❌ Not requested
-        # room2: ❌ Not requested
-        # room3: ❌ Not requested
-        # room4: ❌ Not requested
-        # room5: ❌ Not requested
-        self.assertIncludes(
-            {
-                room_id_to_human_name_map[room_id]
-                for room_id in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .keys()
-            },
-            set(),
-            exact=True,
-        )
-
-        # Try wildcard and none
-        sync_body = {
-            "lists": {
-                # We expect this list range to include room5 and room4
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-                # We expect this list range to include room5, room4, room3
-                "bar-list": {
-                    "ranges": [[0, 2]],
-                    "required_state": [],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            },
-            "extensions": {
-                "account_data": {
-                    "enabled": True,
-                    "lists": ["*"],
-                    "rooms": [],
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # room1: ❌ Not requested
-        # room2: ❌ Not requested
-        # room3: ✅ Shows up because of default `lists` wildcard and is in a list
-        # room4: ✅ Shows up because of default `lists` wildcard and is in a list
-        # room5: ✅ Shows up because of default `lists` wildcard and is in a list
-        self.assertIncludes(
-            {
-                room_id_to_human_name_map[room_id]
-                for room_id in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .keys()
-            },
-            {"room3", "room4", "room5"},
-            exact=True,
-        )
-
     def test_wait_for_new_data(self) -> None:
         """
         Test to make sure that the Sliding Sync request waits for new data to arrive.
@@ -5970,4 +6411,655 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         )
         self.assertIsNotNone(
             channel.json_body["extensions"]["account_data"].get("rooms")
+        )
+
+
+class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
+    """Tests for the receipts sliding sync extension"""
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        sync.register_servlets,
+        receipts.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    def test_no_data_initial_sync(self) -> None:
+        """
+        Test that enabling the receipts extension works during an intitial sync,
+        even if there is no-data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Make an initial Sliding Sync request with the receipts extension enabled
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_no_data_incremental_sync(self) -> None:
+        """
+        Test that enabling receipts extension works during an incremental sync, even
+        if there is no-data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the receipts extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_receipts_initial_sync_with_timeline(self) -> None:
+        """
+        On initial sync, we only return receipts for events in a given room's timeline.
+
+        We also make sure that we only return receipts for rooms that we request and are
+        already being returned in the Sliding Sync response.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+
+        # Create a room
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+        room1_event_response1 = self.helper.send(
+            room_id1, body="new event1", tok=user2_tok
+        )
+        room1_event_response2 = self.helper.send(
+            room_id1, body="new event2", tok=user2_tok
+        )
+        # User1 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response2['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User2 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response2['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User3 reads the first event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response1['event_id']}",
+            {},
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User4 privately reads the last event (make sure this doesn't leak to the other users)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ_PRIVATE}/{room1_event_response2['event_id']}",
+            {},
+            access_token=user4_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Create another room
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        self.helper.join(room_id2, user3_id, tok=user3_tok)
+        self.helper.join(room_id2, user4_id, tok=user4_tok)
+        room2_event_response1 = self.helper.send(
+            room_id2, body="new event2", tok=user2_tok
+        )
+        # User1 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{room2_event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User2 reads the last event
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{room2_event_response1['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User4 privately reads the last event (make sure this doesn't leak to the other users)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ_PRIVATE}/{room2_event_response1['event_id']}",
+            {},
+            access_token=user4_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make an initial Sliding Sync request with the receipts extension enabled
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    # On initial sync, we only have receipts for events in the timeline
+                    "timeline_limit": 1,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Only the latest event in the room is in the timelie because the `timeline_limit` is 1
+        self.assertIncludes(
+            {
+                event["event_id"]
+                for event in response_body["rooms"][room_id1].get("timeline", [])
+            },
+            {room1_event_response2["event_id"]},
+            exact=True,
+            message=str(response_body["rooms"][room_id1]),
+        )
+
+        # Even though we requested room2, we only expect room1 to show up because that's
+        # the only room in the Sliding Sync response (room2 is not one of our room
+        # subscriptions or in a sliding window list).
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We can see user1 and user2 read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response2["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user1_id, user2_id},
+            exact=True,
+        )
+        # User1 did not have a private read receipt and we shouldn't leak others'
+        # private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response2["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
+            exact=True,
+        )
+
+        # We shouldn't see receipts for event2 since it wasn't in the timeline and this is an initial sync
+        self.assertIsNone(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"].get(
+                room1_event_response1["event_id"]
+            )
+        )
+
+    def test_receipts_incremental_sync(self) -> None:
+        """
+        On incremental sync, we return all receipts in the token range for a given room
+        but only for rooms that we request and are being returned in the Sliding Sync
+        response.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        # Create room1
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        room1_event_response1 = self.helper.send(
+            room_id1, body="new event2", tok=user2_tok
+        )
+        # User2 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response1['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Create room2
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+        room2_event_response1 = self.helper.send(
+            room_id2, body="new event2", tok=user2_tok
+        )
+        # User1 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ}/{room2_event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Create room3
+        room_id3 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id3, user1_id, tok=user1_tok)
+        self.helper.join(room_id3, user3_id, tok=user3_tok)
+        room3_event_response1 = self.helper.send(
+            room_id3, body="new event", tok=user2_tok
+        )
+
+        # Create room4
+        room_id4 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id4, user1_id, tok=user1_tok)
+        self.helper.join(room_id4, user3_id, tok=user3_tok)
+        event_response4 = self.helper.send(room_id4, body="new event", tok=user2_tok)
+        # User1 reads the last event (before the `from_token`)
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id4}/receipt/{ReceiptTypes.READ}/{event_response4['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                room_id3: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                room_id4: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2, room_id3, room_id4],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Add some more read receipts after the `from_token`
+        #
+        # User1 reads room1
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User1 privately reads room2
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id2}/receipt/{ReceiptTypes.READ_PRIVATE}/{room2_event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User3 reads room3
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id3}/receipt/{ReceiptTypes.READ}/{room3_event_response1['event_id']}",
+            {},
+            access_token=user3_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # No activity for room4 after the `from_token`
+
+        # Make an incremental Sliding Sync request with the receipts extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Even though we requested room2, we only expect rooms to show up if they are
+        # already in the Sliding Sync response. room4 doesn't show up because there is
+        # no activity after the `from_token`.
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1, room_id3},
+            exact=True,
+        )
+
+        # Check room1:
+        #
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We only see that user1 has read something in room1 since the `from_token`
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response1["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user1_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response1["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
+            exact=True,
+        )
+        # No events in the timeline since they were sent before the `from_token`
+        self.assertNotIn(room_id1, response_body["rooms"])
+
+        # Check room3:
+        #
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We only see that user3 has read something in room1 since the `from_token`
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["content"][
+                room3_event_response1["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user3_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id3]["content"][
+                room3_event_response1["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
+            exact=True,
+        )
+        # No events in the timeline since they were sent before the `from_token`
+        self.assertNotIn(room_id3, response_body["rooms"])
+
+    def test_receipts_incremental_sync_all_live_receipts(self) -> None:
+        """
+        On incremental sync, we return all receipts in the token range for a given room
+        even if they are not in the timeline.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create room1
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    # The timeline will only include event2
+                    "timeline_limit": 1,
+                },
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id1],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        room1_event_response1 = self.helper.send(
+            room_id1, body="new event1", tok=user2_tok
+        )
+        room1_event_response2 = self.helper.send(
+            room_id1, body="new event2", tok=user2_tok
+        )
+
+        # User1 reads event1
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response1['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        # User2 reads event2
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{room1_event_response2['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make an incremental Sliding Sync request with the receipts extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # We should see room1 because it has receipts in the token range
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+        # Sanity check that it's the correct ephemeral event type
+        self.assertEqual(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["type"],
+            EduTypes.RECEIPT,
+        )
+        # We should see all receipts in the token range regardless of whether the events
+        # are in the timeline
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response1["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user1_id},
+            exact=True,
+        )
+        self.assertIncludes(
+            response_body["extensions"]["receipts"]["rooms"][room_id1]["content"][
+                room1_event_response2["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user2_id},
+            exact=True,
+        )
+        # Only the latest event in the timeline because the `timeline_limit` is 1
+        self.assertIncludes(
+            {
+                event["event_id"]
+                for event in response_body["rooms"][room_id1].get("timeline", [])
+            },
+            {room1_event_response2["event_id"]},
+            exact=True,
+            message=str(response_body["rooms"][room_id1]),
+        )
+
+    def test_wait_for_new_data(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive.
+
+        (Only applies to incremental syncs with a `timeout` specified)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        event_response = self.helper.send(room_id, body="new event", tok=user2_tok)
+
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                    "rooms": [room_id],
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the receipts extension enabled
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Bump the receipts to trigger new results
+        receipt_channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_response['event_id']}",
+            {},
+            access_token=user2_tok,
+        )
+        self.assertEqual(receipt_channel.code, 200, receipt_channel.json_body)
+        # Should respond before the 10 second timeout
+        channel.await_result(timeout_ms=3000)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # We should see the new receipt
+        self.assertIncludes(
+            channel.json_body.get("extensions", {})
+            .get("receipts", {})
+            .get("rooms", {})
+            .keys(),
+            {room_id},
+            exact=True,
+            message=str(channel.json_body),
+        )
+        self.assertIncludes(
+            channel.json_body["extensions"]["receipts"]["rooms"][room_id]["content"][
+                event_response["event_id"]
+            ][ReceiptTypes.READ].keys(),
+            {user2_id},
+            exact=True,
+        )
+        # User1 did not send a private read receipt in this room and we shouldn't leak
+        # others' private read receipts
+        self.assertIncludes(
+            channel.json_body["extensions"]["receipts"]["rooms"][room_id]["content"][
+                event_response["event_id"]
+            ]
+            .get(ReceiptTypes.READ_PRIVATE, {})
+            .keys(),
+            set(),
+            exact=True,
+        )
+
+    def test_wait_for_new_data_timeout(self) -> None:
+        """
+        Test to make sure that the Sliding Sync request waits for new data to arrive but
+        no data ever arrives so we timeout. We're also making sure that the default data
+        from the receipts extension doesn't trigger a false-positive for new data.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        sync_body = {
+            "lists": {},
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?timeout=10000&pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
+            await_result=False,
+        )
+        # Block for 5 seconds to make sure we are `notifier.wait_for_events(...)`
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=5000)
+        # Wake-up `notifier.wait_for_events(...)` that will cause us test
+        # `SlidingSyncResult.__bool__` for new results.
+        self._bump_notifier_wait_for_events(
+            user1_id, wake_stream_key=StreamKeyType.ACCOUNT_DATA
+        )
+        # Block for a little bit more to ensure we don't see any new results.
+        with self.assertRaises(TimedOutException):
+            channel.await_result(timeout_ms=4000)
+        # Wait for the sync to complete (wait for the rest of the 10 second timeout,
+        # 5000 + 4000 + 1200 > 10000)
+        channel.await_result(timeout_ms=1200)
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        self.assertIncludes(
+            channel.json_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
         )
