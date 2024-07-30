@@ -1,0 +1,1 @@
+Add some opentracing tags and logging to the experimental sliding sync implementation.
