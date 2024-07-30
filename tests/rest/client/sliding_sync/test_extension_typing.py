@@ -23,7 +23,7 @@ import logging
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EduTypes, ReceiptTypes
+from synapse.api.constants import EduTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import StreamKeyType
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 class SlidingSyncTypingExtensionTestCase(SlidingSyncBase):
-    """Tests for the typing sliding sync extension"""
+    """Tests for the typing notification sliding sync extension"""
 
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -100,7 +100,7 @@ class SlidingSyncTypingExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
 
-    def test_receipts_initial_sync(self) -> None:
+    def test_typing_initial_sync(self) -> None:
         """
         On initial sync, we return all typing notifications for rooms that we request
         and are being returned in the Sliding Sync response.
@@ -378,7 +378,6 @@ class SlidingSyncTypingExtensionTestCase(SlidingSyncBase):
 
         room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
         self.helper.join(room_id, user1_id, tok=user1_tok)
-        event_response = self.helper.send(room_id, body="new event", tok=user2_tok)
 
         sync_body = {
             "lists": {},
