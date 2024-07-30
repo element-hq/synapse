@@ -41,7 +41,7 @@ from synapse.api.constants import AccountDataTypes, Direction, EventTypes, Membe
 from synapse.events import EventBase
 from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
-from synapse.logging.opentracing import start_active_span, tag_args, trace
+from synapse.logging.opentracing import log_kv, start_active_span, tag_args, trace
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.storage.roommember import MemberSummary
@@ -444,6 +444,7 @@ class SlidingSyncHandler:
 
         return result
 
+    @trace
     async def current_sync_for_user(
         self,
         sync_config: SlidingSyncConfig,
@@ -682,8 +683,9 @@ class SlidingSyncHandler:
             if room_sync_result or not from_token:
                 rooms[room_id] = room_sync_result
 
-        with start_active_span("sliding_sync.generate_room_entries"):
-            await concurrently_execute(handle_room, relevant_room_map, 10)
+        if relevant_room_map:
+            with start_active_span("sliding_sync.generate_room_entries"):
+                await concurrently_execute(handle_room, relevant_room_map, 10)
 
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
@@ -1161,6 +1163,7 @@ class SlidingSyncHandler:
 
         # return None
 
+    @trace
     async def filter_rooms(
         self,
         user: UserID,
@@ -1284,6 +1287,7 @@ class SlidingSyncHandler:
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
 
+    @trace
     async def sort_rooms(
         self,
         sync_room_map: Dict[str, _RoomMembershipForUser],
@@ -1491,6 +1495,10 @@ class SlidingSyncHandler:
                 initial = True
             else:
                 assert_never(room_status.status)
+
+            log_kv({"sliding_sync.room_status": room_status})
+
+        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
 
         # Assemble the list of timeline events
         #
@@ -1890,6 +1898,7 @@ class SlidingSyncHandler:
             highlight_count=0,
         )
 
+    @trace
     async def get_extensions_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -1942,6 +1951,7 @@ class SlidingSyncHandler:
             account_data=account_data_response,
         )
 
+    @trace
     async def get_to_device_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2016,6 +2026,7 @@ class SlidingSyncHandler:
             events=messages,
         )
 
+    @trace
     async def get_e2ee_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2066,6 +2077,7 @@ class SlidingSyncHandler:
             device_unused_fallback_key_types=device_unused_fallback_key_types,
         )
 
+    @trace
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
