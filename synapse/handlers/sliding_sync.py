@@ -2284,11 +2284,24 @@ class SlidingSyncHandler:
                 from_token=from_token,
             )
 
+        typing_response = None
+        if sync_config.extensions.typing is not None:
+            typing_response = await self.get_typing_extension_response(
+                sync_config=sync_config,
+                actual_lists=actual_lists,
+                actual_room_ids=actual_room_ids,
+                actual_room_response_map=actual_room_response_map,
+                typing_request=sync_config.extensions.typing,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
         return SlidingSyncResult.Extensions(
             to_device=to_device_response,
             e2ee=e2ee_response,
             account_data=account_data_response,
             receipts=receipts_response,
+            typing=typing_response,
         )
 
     def find_relevant_room_ids_for_extension(
@@ -2615,6 +2628,8 @@ class SlidingSyncHandler:
 
         room_id_to_receipt_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
+            # TODO: Take connection tracking into account so that when a room comes back
+            # into range we can send the receipts that were missed.
             receipt_source = self.event_sources.sources.receipt
             receipts, _ = await receipt_source.get_new_events(
                 user=sync_config.user,
@@ -2636,6 +2651,8 @@ class SlidingSyncHandler:
                 type = receipt["type"]
                 content = receipt["content"]
 
+                # For `inital: True` rooms, we only want to include receipts for events
+                # in the timeline.
                 room_result = actual_room_response_map.get(room_id)
                 if room_result is not None:
                     if room_result.initial:
@@ -2657,6 +2674,67 @@ class SlidingSyncHandler:
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(
             room_id_to_receipt_map=room_id_to_receipt_map,
+        )
+
+    async def get_typing_extension_response(
+        self,
+        sync_config: SlidingSyncConfig,
+        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: Set[str],
+        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        typing_request: SlidingSyncConfig.Extensions.TypingExtension,
+        to_token: StreamToken,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> Optional[SlidingSyncResult.Extensions.TypingExtension]:
+        """Handle Typing Notification extension (MSC3961)
+
+        Args:
+            sync_config: Sync configuration
+            actual_lists: Sliding window API. A map of list key to list results in the
+                Sliding Sync response.
+            actual_room_ids: The actual room IDs in the the Sliding Sync response.
+            actual_room_response_map: A map of room ID to room results in the the
+                Sliding Sync response.
+            account_data_request: The account_data extension from the request
+            to_token: The point in the stream to sync up to.
+            from_token: The point in the stream to sync from.
+        """
+        # Skip if the extension is not enabled
+        if not typing_request.enabled:
+            return None
+
+        relevant_room_ids = self.find_relevant_room_ids_for_extension(
+            requested_lists=typing_request.lists,
+            requested_room_ids=typing_request.rooms,
+            actual_lists=actual_lists,
+            actual_room_ids=actual_room_ids,
+        )
+
+        room_id_to_typing_map: Dict[str, JsonMapping] = {}
+        if len(relevant_room_ids) > 0:
+            # TODO: Take connection tracking into account so that when a room comes back
+            # into range we can send the typing notifications that were missed.
+            typing_source = self.event_sources.sources.typing
+            typing_notifications, _ = await typing_source.get_new_events(
+                user=sync_config.user,
+                from_key=(from_token.stream_token.typing_key if from_token else 0),
+                to_key=to_token.typing_key,
+                # This is a dummy value and isn't used in the function
+                limit=0,
+                room_ids=relevant_room_ids,
+                is_guest=False,
+            )
+
+            for typing_notification in typing_notifications:
+                # These fields should exist for every typing notification
+                room_id = typing_notification["room_id"]
+                type = typing_notification["type"]
+                content = typing_notification["content"]
+
+                room_id_to_typing_map[room_id] = {"type": type, "content": content}
+
+        return SlidingSyncResult.Extensions.TypingExtension(
+            room_id_to_typing_map=room_id_to_typing_map,
         )
 
 
