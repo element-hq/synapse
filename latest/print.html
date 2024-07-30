@@ -441,7 +441,47 @@ header files for Python C extensions.</p>
                  libwebp-devel libxml2-devel libxslt-devel libpq-devel \
                  python3-virtualenv libffi-devel openssl-devel python3-devel \
                  libicu-devel
-sudo dnf groupinstall &quot;Development Tools&quot;
+sudo dnf group install &quot;Development Tools&quot;
+</code></pre>
+<h5 id="red-hat-enterprise-linux--rocky-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux">Red Hat Enterprise Linux / Rocky Linux</a></h5>
+<p><em>Note: The term &quot;RHEL&quot; below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.</em></p>
+<p>It's recommended to use the latest Python versions. </p>
+<p>RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.</p>
+<p>Python 3.11 and 3.12 are available for both RHEL 8 and 9.</p>
+<p>These commands should be run as root user.</p>
+<p>RHEL 8</p>
+<pre><code class="language-bash"># Enable PowerTools repository
+dnf config-manager --set-enabled powertools
+</code></pre>
+<p>RHEL 9</p>
+<pre><code class="language-bash"># Enable CodeReady Linux Builder repository
+crb enable
+</code></pre>
+<p>Install new version of Python. You only need one of these:</p>
+<pre><code class="language-bash"># Python 3.11
+dnf install python3.11 python3.11-devel
+</code></pre>
+<pre><code class="language-bash"># Python 3.12
+dnf install python3.12 python3.12-devel
+</code></pre>
+<p>Finally, install common prerequisites</p>
+<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf 
+dnf group install &quot;Development Tools&quot;
+</code></pre>
+<h6 id="using-venv-module-instead-of-virtualenv-command"><a class="header" href="#using-venv-module-instead-of-virtualenv-command">Using venv module instead of virtualenv command</a></h6>
+<p>It's recommended to use Python venv module directly rather than the virtualenv command.</p>
+<ul>
+<li>On RHEL 9, virtualenv is only available on <a href="https://docs.fedoraproject.org/en-US/epel/">EPEL</a>.</li>
+<li>On RHEL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.</li>
+</ul>
+<p>Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI. </p>
+<pre><code class="language-bash">mkdir -p ~/synapse
+# To use Python 3.11, simply use the command &quot;python3.11&quot; instead.
+python3.12 -m venv ~/synapse/env
+source ~/synapse/env/bin/activate
+pip install --upgrade pip
+pip install --upgrade setuptools
+pip install matrix-synapse
 </code></pre>
 <h5 id="macos"><a class="header" href="#macos">macOS</a></h5>
 <p>Installing prerequisites on macOS:</p>
@@ -1189,7 +1229,7 @@ it is most likely due to the proxy's certificates. To test this, the validation
 in Synapse can be deactivated.</p>
 <p><strong>NOTE</strong>: This has an impact on security and is for testing purposes only!</p>
 <p>To deactivate the certificate validation, the following setting must be added to
-your <a href="setup/../usage/configuration/homeserver_sample_config.html">homserver.yaml</a>.</p>
+your <a href="setup/../usage/configuration/homeserver_sample_config.html">homeserver.yaml</a>.</p>
 <pre><code class="language-yaml">use_insecure_ssl_client_just_for_testing_do_not_use: true
 </code></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="overview-1"><a class="header" href="#overview-1">Overview</a></h1>
@@ -1834,7 +1874,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.111.1</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.112.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -3968,11 +4008,15 @@ This option replaces the previous top-level 'use_presence' option.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">presence:
   enabled: false
+  include_offline_users_on_sync: false
 </code></pre>
 <p><code>enabled</code> can also be set to a special value of &quot;untracked&quot; which ignores updates
 received via clients and federation, while still accepting updates from the
 <a href="usage/configuration/../../modules/index.html">module API</a>.</p>
 <p><em>The &quot;untracked&quot; option was added in Synapse 1.96.0.</em></p>
+<p>When clients perform an initial or <code>full_state</code> sync, presence results for offline users are
+not included by default. Setting <code>include_offline_users_on_sync</code> to <code>true</code> will always include
+offline users in the results. Defaults to false.</p>
 <hr />
 <h3 id="require_auth_for_profile_requests"><a class="header" href="#require_auth_for_profile_requests"><code>require_auth_for_profile_requests</code></a></h3>
 <p>Whether to require authentication to retrieve profile data (avatars, display names) of other
@@ -5380,6 +5424,15 @@ into fewer transactions. Defaults to 50.</p>
 <hr />
 <h2 id="media-store"><a class="header" href="#media-store">Media Store</a></h2>
 <p>Config options related to Synapse's media store.</p>
+<hr />
+<h3 id="enable_authenticated_media"><a class="header" href="#enable_authenticated_media"><code>enable_authenticated_media</code></a></h3>
+<p>When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
+unauthenticated media endpoints (<code>/_matrix/media/(r0|v3|v1)/download</code> and <code>/_matrix/media/(r0|v3|v1)/thumbnail</code>) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints <code>_matrix/client/v1/media/download</code> and <code>_matrix/client/v1/media/thumbnail</code>. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
+this will change to true in a future Synapse release.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">enable_authenticated_media: true
+</code></pre>
 <hr />
 <h3 id="enable_media_repo"><a class="header" href="#enable_media_repo"><code>enable_media_repo</code></a></h3>
 <p>Enable the media store service in the Synapse master. Defaults to true.
@@ -7331,6 +7384,33 @@ except <code>com.example.foo</code>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">default_power_level_content_override:
    private_chat: { &quot;events&quot;: { &quot;com.example.foo&quot; : 0 } }
+   trusted_private_chat: null
+   public_chat: null
+</code></pre>
+<p>The default power levels for each preset are:</p>
+<pre><code class="language-yaml">&quot;m.room.name&quot;: 50
+&quot;m.room.power_levels&quot;: 100
+&quot;m.room.history_visibility&quot;: 100
+&quot;m.room.canonical_alias&quot;: 50
+&quot;m.room.avatar&quot;: 50
+&quot;m.room.tombstone&quot;: 100
+&quot;m.room.server_acl&quot;: 100
+&quot;m.room.encryption&quot;: 100
+</code></pre>
+<p>So a complete example where the default power-levels for a preset are maintained
+but the power level for a new key is set is:</p>
+<pre><code class="language-yaml">default_power_level_content_override:
+   private_chat:
+    events:
+      &quot;com.example.foo&quot;: 0
+      &quot;m.room.name&quot;: 50
+      &quot;m.room.power_levels&quot;: 100
+      &quot;m.room.history_visibility&quot;: 100
+      &quot;m.room.canonical_alias&quot;: 50
+      &quot;m.room.avatar&quot;: 50
+      &quot;m.room.tombstone&quot;: 100
+      &quot;m.room.server_acl&quot;: 100
+      &quot;m.room.encryption&quot;: 100
    trusted_private_chat: null
    public_chat: null
 </code></pre>
