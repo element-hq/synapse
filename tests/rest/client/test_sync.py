@@ -37,6 +37,7 @@ from synapse.api.constants import (
     Membership,
     ReceiptTypes,
     RelationTypes,
+    RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
@@ -1848,6 +1849,150 @@ class SlidingSyncTestCase(SlidingSyncBase):
                 invited_dm_room_id: True,
                 joined_dm_room_id: True,
             },
+        )
+
+    def test_filter_regardless_of_membership_server_left_room(self) -> None:
+        """
+        Test that filters apply to rooms regardless of membership. We're also
+        compounding the problem by having all of the local users leave the room causing
+        our server to leave the room.
+
+        We want to make sure that if someone is filtering rooms, and leaves, you still
+        get that final update down sync that you left.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(user1_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create an encrypted space room
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+        self.helper.join(space_room_id, user1_id, tok=user1_tok)
+
+        # Make an initial Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint,
+            {
+                "lists": {
+                    "all-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                        "filters": {},
+                    },
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {
+                            "is_encrypted": True,
+                            "room_types": [RoomTypes.SPACE],
+                        },
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+        from_token = channel.json_body["pos"]
+
+        # Make sure the response has the lists we requested
+        self.assertListEqual(
+            list(channel.json_body["lists"].keys()),
+            ["all-list", "foo-list"],
+            channel.json_body["lists"].keys(),
+        )
+
+        # Make sure the lists have the correct rooms
+        self.assertListEqual(
+            list(channel.json_body["lists"]["all-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [space_room_id, room_id],
+                }
+            ],
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [space_room_id],
+                }
+            ],
+        )
+
+        # Everyone leaves the encrypted space room
+        self.helper.leave(space_room_id, user1_id, tok=user1_tok)
+        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
+
+        # Make an incremental Sliding Sync request
+        channel = self.make_request(
+            "POST",
+            self.sync_endpoint + f"?pos={from_token}",
+            {
+                "lists": {
+                    "all-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 0,
+                        "filters": {},
+                    },
+                    "foo-list": {
+                        "ranges": [[0, 99]],
+                        "required_state": [],
+                        "timeline_limit": 1,
+                        "filters": {
+                            "is_encrypted": True,
+                            "room_types": [RoomTypes.SPACE],
+                        },
+                    },
+                }
+            },
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        # Make sure the lists have the correct rooms even though we `newly_left`
+        self.assertListEqual(
+            list(channel.json_body["lists"]["all-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [space_room_id, room_id],
+                }
+            ],
+        )
+        self.assertListEqual(
+            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 99],
+                    "room_ids": [space_room_id],
+                }
+            ],
         )
 
     def test_sort_list(self) -> None:
