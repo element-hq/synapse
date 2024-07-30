@@ -60,15 +60,13 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
     @parameterized.expand([("account_data",), ("receipts",), ("typing",)])
     def test_extensions_lists_rooms_relevant_rooms(
         self,
-        extension_name: Literal[
-            "account_data",
-            "receipts",
-            "typing",
-        ],
+        extension_name: Literal["account_data", "receipts", "typing"],
     ) -> None:
         """
         With various extensions, test out requesting different variations of
         `lists`/`rooms`.
+
+        Stresses `SlidingSyncHandler.find_relevant_room_ids_for_extension(...)`
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -112,9 +110,6 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
                 )
                 self.assertEqual(channel.code, 200, channel.json_body)
             elif extension_name == "typing":
-                event_response = self.helper.send(
-                    room_id, body="new event", tok=user1_tok
-                )
                 # Start a typing notification
                 channel = self.make_request(
                     "PUT",
