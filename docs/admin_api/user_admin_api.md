@@ -1361,3 +1361,26 @@ Returns a `404` HTTP status code if no user was found, with a response body like
 ```
 
 _Added in Synapse 1.72.0._
+
+
+## Redact all the events of a user
+
+The API is 
+```
+POST /_synapse/admin/v1/user/$user_id/redact
+
+{
+  "rooms": [!roomid1, !roomid2]
+}
+```
+If an empty dict is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted, 
+otherwise all the events in the rooms provided in the request will be redacted. 
+
+An empty JSON dict is returned. 
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+- `user_id` - The fully qualified MXID of the user: for example, `@user:server.com`.
+

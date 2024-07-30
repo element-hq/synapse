@@ -1410,3 +1410,33 @@ class UserByThreePid(RestServlet):
             raise NotFoundError("User not found")
 
         return HTTPStatus.OK, {"user_id": user_id}
+
+
+class RedactUser(RestServlet):
+    """
+    Redact all the events of a given user in the given rooms or if empty dict is provided
+    then all events in all rooms user is member of
+    """
+
+    PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._store = hs.get_datastores().main
+        self.admin_handler = hs.get_admin_handler()
+
+    async def on_POST(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        body = parse_json_object_from_request(request, allow_empty_body=True)
+        rooms = body["rooms"]
+
+        if rooms == {}:
+            rooms = await self._store.get_rooms_for_user(user_id)
+
+        await self.admin_handler.redact_events(user_id, rooms, requester)
+
+        return HTTPStatus.OK, {}

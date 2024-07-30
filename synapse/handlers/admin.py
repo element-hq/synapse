@@ -25,9 +25,16 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, 
 
 import attr
 
-from synapse.api.constants import Direction, Membership
+from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.events import EventBase
-from synapse.types import JsonMapping, RoomStreamToken, StateMap, UserID, UserInfo
+from synapse.types import (
+    JsonMapping,
+    Requester,
+    RoomStreamToken,
+    StateMap,
+    UserID,
+    UserInfo,
+)
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -43,6 +50,7 @@ class AdminHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
+        self.event_creation_handler = hs.get_event_creation_handler()
 
     async def get_whois(self, user: UserID) -> JsonMapping:
         connections = []
@@ -304,6 +312,37 @@ class AdminHandler:
             start += limit
 
         return writer.finished()
+
+    async def redact_events(
+        self, user_id: str, rooms: list, requester: Requester
+    ) -> None:
+        """
+        For a given set of rooms, redact all the events in those rooms sent by the user
+
+        Args:
+            user_id: user ID of the user whose events should be redacted
+            rooms: list of rooms to redact their events in
+            requester: the user requesting the redactions
+        """
+        for room in rooms:
+            room_version = await self._store.get_room_version(room)
+            events = await self._store.get_events_sent_by_user(user_id, room)
+
+            for event in events:
+                event_dict = {
+                    "type": EventTypes.Redaction,
+                    "content": {},
+                    "room_id": room,
+                    "sender": requester.user.to_string(),
+                }
+                if room_version.updated_redaction_rules:
+                    event_dict["content"]["redacts"] = event[0]
+                else:
+                    event_dict["redacts"] = event[0]
+
+                await self.event_creation_handler.create_and_send_nonmember_event(
+                    requester, event_dict
+                )
 
 
 class ExfiltrationWriter(metaclass=abc.ABCMeta):

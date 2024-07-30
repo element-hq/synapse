@@ -2439,3 +2439,24 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
+
+    async def get_events_sent_by_user(self, user_id: str, room_id: str) -> List[tuple]:
+        """
+        Get a list of event ids of events sent by user in room
+        """
+
+        def _get_events_by_user_txn(
+            txn: LoggingTransaction, user_id: str, room_id: str
+        ) -> List[tuple]:
+            return self.db_pool.simple_select_many_txn(
+                txn,
+                "events",
+                "sender",
+                [user_id],
+                {"room_id": room_id},
+                retcols=["event_id"],
+            )
+
+        return await self.db_pool.runInteraction(
+            "get_events_by_user", _get_events_by_user_txn, user_id, room_id
+        )
