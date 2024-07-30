@@ -21,6 +21,7 @@
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
+from typing_extensions import assert_never
 
 from parameterized import parameterized
 
@@ -101,6 +102,43 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 
         return channel.json_body, channel.json_body["pos"]
 
+    def _assertRequiredStateIncludes(
+        self,
+        actual_required_state: Any,
+        expected_state_events: Iterable[EventBase],
+        exact: bool = False,
+    ) -> None:
+        """
+        Wrapper around `assertIncludes` to give slightly better looking diff error
+        messages that include some context "$event_id (type, state_key)".
+
+        Args:
+            actual_required_state: The "required_state" of a room from a Sliding Sync
+                request response.
+            expected_state_events: The expected state events to be included in the
+                `actual_required_state`.
+            exact: Whether the actual state should be exactly equal to the expected
+                state (no extras).
+        """
+
+        assert isinstance(actual_required_state, list)
+        for event in actual_required_state:
+            assert isinstance(event, dict)
+
+        self.assertIncludes(
+            {
+                f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
+                for event in actual_required_state
+            },
+            {
+                f'{event.event_id} ("{event.type}", "{event.state_key}")'
+                for event in expected_state_events
+            },
+            exact=exact,
+            # Message to help understand the diff in context
+            message=str(actual_required_state),
+        )
+
     def _bump_notifier_wait_for_events(
         self,
         user_id: str,
@@ -171,9 +209,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             )
             self.assertEqual(chan.code, 200, chan.result)
         else:
-            raise AssertionError(
-                "Unable to wake that stream in _bump_notifier_wait_for_events(...)"
-            )
+            assert_never(wake_stream_key)
 
         # Wait for our notifier result
         self.get_success(result_awaitable)
@@ -203,43 +239,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
         self.account_data_handler = hs.get_account_data_handler()
-
-    def _assertRequiredStateIncludes(
-        self,
-        actual_required_state: Any,
-        expected_state_events: Iterable[EventBase],
-        exact: bool = False,
-    ) -> None:
-        """
-        Wrapper around `assertIncludes` to give slightly better looking diff error
-        messages that include some context "$event_id (type, state_key)".
-
-        Args:
-            actual_required_state: The "required_state" of a room from a Sliding Sync
-                request response.
-            expected_state_events: The expected state events to be included in the
-                `actual_required_state`.
-            exact: Whether the actual state should be exactly equal to the expected
-                state (no extras).
-        """
-
-        assert isinstance(actual_required_state, list)
-        for event in actual_required_state:
-            assert isinstance(event, dict)
-
-        self.assertIncludes(
-            {
-                f'{event["event_id"]} ("{event["type"]}", "{event["state_key"]}")'
-                for event in actual_required_state
-            },
-            {
-                f'{event.event_id} ("{event.type}", "{event.state_key}")'
-                for event in expected_state_events
-            },
-            exact=exact,
-            # Message to help understand the diff in context
-            message=str(actual_required_state),
-        )
 
     def _add_new_dm_to_global_account_data(
         self, source_user_id: str, target_user_id: str, target_room_id: str
@@ -342,11 +341,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 99]],
-                    "required_state": [
-                        ["m.room.join_rules", ""],
-                        ["m.room.history_visibility", ""],
-                        ["m.space.child", "*"],
-                    ],
+                    "required_state": [],
                     "timeline_limit": 1,
                 }
             }
@@ -400,11 +395,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 99]],
-                    "required_state": [
-                        ["m.room.join_rules", ""],
-                        ["m.room.history_visibility", ""],
-                        ["m.space.child", "*"],
-                    ],
+                    "required_state": [],
                     "timeline_limit": 1,
                 }
             }
@@ -840,11 +831,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 99]],
-                    "required_state": [
-                        ["m.room.join_rules", ""],
-                        ["m.room.history_visibility", ""],
-                        ["m.space.child", "*"],
-                    ],
+                    "required_state": [],
                     "timeline_limit": 1,
                 }
             }
@@ -2518,672 +2505,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # Nothing to see for this banned user in the room in the token range
         self.assertIsNone(response_body["rooms"].get(room_id1))
-
-    def test_rooms_no_required_state(self) -> None:
-        """
-        Empty `rooms.required_state` should not return any state events in the room
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        # Make the Sliding Sync request
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    # Empty `required_state`
-                    "required_state": [],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # No `required_state` in response
-        self.assertIsNone(
-            response_body["rooms"][room_id1].get("required_state"),
-            response_body["rooms"][room_id1],
-        )
-
-    def test_rooms_required_state_initial_sync(self) -> None:
-        """
-        Test `rooms.required_state` returns requested state events in the room during an
-        initial sync.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        # Make the Sliding Sync request
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Tombstone, ""],
-                    ],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_incremental_sync(self) -> None:
-        """
-        Test `rooms.required_state` returns requested state events in the room during an
-        incremental sync.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Tombstone, ""],
-                    ],
-                    "timeline_limit": 1,
-                }
-            }
-        }
-        _, from_token = self.do_sync(sync_body, tok=user1_tok)
-
-        # Send a message so the room comes down sync.
-        self.helper.send(room_id1, "msg", tok=user1_tok)
-
-        # Make the incremental Sliding Sync request
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
-
-        # We only return updates but only if we've sent the room down the
-        # connection before.
-        self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_incremental_sync_restart(self) -> None:
-        """
-        Test `rooms.required_state` returns requested state events in the room during an
-        incremental sync, after a restart (and so the in memory caches are reset).
-        """
-
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.RoomHistoryVisibility, ""],
-                        # This one doesn't exist in the room
-                        [EventTypes.Tombstone, ""],
-                    ],
-                    "timeline_limit": 1,
-                }
-            }
-        }
-        _, from_token = self.do_sync(sync_body, tok=user1_tok)
-
-        # Reset the in-memory cache
-        self.hs.get_sliding_sync_handler().connection_store._connections.clear()
-
-        # Make the Sliding Sync request
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
-
-        # If the cache has been cleared then we do expect the state to come down
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_wildcard(self) -> None:
-        """
-        Test `rooms.required_state` returns all state events when using wildcard `["*", "*"]`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="",
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="namespaced",
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-
-        # Make the Sliding Sync request with wildcards for the `event_type` and `state_key`
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [StateValues.WILDCARD, StateValues.WILDCARD],
-                    ],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            # We should see all the state events in the room
-            state_map.values(),
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_wildcard_event_type(self) -> None:
-        """
-        Test `rooms.required_state` returns relevant state events when using wildcard in
-        the event_type `["*", "foobarbaz"]`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="",
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key=user2_id,
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-
-        # Make the Sliding Sync request with wildcards for the `event_type`
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [StateValues.WILDCARD, user2_id],
-                    ],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        # We expect at-least any state event with the `user2_id` as the `state_key`
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Member, user2_id)],
-                state_map[("org.matrix.foo_state", user2_id)],
-            },
-            # Ideally, this would be exact but we're currently returning all state
-            # events when the `event_type` is a wildcard.
-            exact=False,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_wildcard_state_key(self) -> None:
-        """
-        Test `rooms.required_state` returns relevant state events when using wildcard in
-        the state_key `["foobarbaz","*"]`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        # Make the Sliding Sync request with wildcards for the `state_key`
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Member, StateValues.WILDCARD],
-                    ],
-                    "timeline_limit": 0,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Member, user1_id)],
-                state_map[(EventTypes.Member, user2_id)],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_lazy_loading_room_members(self) -> None:
-        """
-        Test `rooms.required_state` returns people relevant to the timeline when
-        lazy-loading room members, `["m.room.member","$LAZY"]`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-        user3_id = self.register_user("user3", "pass")
-        user3_tok = self.login(user3_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.join(room_id1, user3_id, tok=user3_tok)
-
-        self.helper.send(room_id1, "1", tok=user2_tok)
-        self.helper.send(room_id1, "2", tok=user3_tok)
-        self.helper.send(room_id1, "3", tok=user2_tok)
-
-        # Make the Sliding Sync request with lazy loading for the room members
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.Member, StateValues.LAZY],
-                    ],
-                    "timeline_limit": 3,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.Member, user2_id)],
-                state_map[(EventTypes.Member, user3_id)],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_me(self) -> None:
-        """
-        Test `rooms.required_state` correctly handles $ME.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        self.helper.send(room_id1, "1", tok=user2_tok)
-
-        # Also send normal state events with state keys of the users, first
-        # change the power levels to allow this.
-        self.helper.send_state(
-            room_id1,
-            event_type=EventTypes.PowerLevels,
-            body={"users": {user1_id: 50, user2_id: 100}},
-            tok=user2_tok,
-        )
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo",
-            state_key=user1_id,
-            body={},
-            tok=user1_tok,
-        )
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo",
-            state_key=user2_id,
-            body={},
-            tok=user2_tok,
-        )
-
-        # Make the Sliding Sync request with a request for '$ME'.
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.Member, StateValues.ME],
-                        ["org.matrix.foo", StateValues.ME],
-                    ],
-                    "timeline_limit": 3,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.Member, user1_id)],
-                state_map[("org.matrix.foo", user1_id)],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
-    def test_rooms_required_state_leave_ban(self, stop_membership: str) -> None:
-        """
-        Test `rooms.required_state` should not return state past a leave/ban event.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-        user3_id = self.register_user("user3", "pass")
-        user3_tok = self.login(user3_id, "pass")
-
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.Member, "*"],
-                        ["org.matrix.foo_state", ""],
-                    ],
-                    "timeline_limit": 3,
-                }
-            }
-        }
-        _, from_token = self.do_sync(sync_body, tok=user1_tok)
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-        self.helper.join(room_id1, user3_id, tok=user3_tok)
-
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="",
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-
-        if stop_membership == Membership.LEAVE:
-            # User 1 leaves
-            self.helper.leave(room_id1, user1_id, tok=user1_tok)
-        elif stop_membership == Membership.BAN:
-            # User 1 is banned
-            self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        # Change the state after user 1 leaves
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="",
-            body={"foo": "qux"},
-            tok=user2_tok,
-        )
-        self.helper.leave(room_id1, user3_id, tok=user3_tok)
-
-        # Make the Sliding Sync request with lazy loading for the room members
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
-
-        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.Member, user1_id)],
-                state_map[(EventTypes.Member, user2_id)],
-                state_map[(EventTypes.Member, user3_id)],
-                state_map[("org.matrix.foo_state", "")],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_combine_superset(self) -> None:
-        """
-        Test `rooms.required_state` is combined across lists and room subscriptions.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.join(room_id1, user1_id, tok=user1_tok)
-
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.foo_state",
-            state_key="",
-            body={"foo": "bar"},
-            tok=user2_tok,
-        )
-        self.helper.send_state(
-            room_id1,
-            event_type="org.matrix.bar_state",
-            state_key="",
-            body={"bar": "qux"},
-            tok=user2_tok,
-        )
-
-        # Make the Sliding Sync request with wildcards for the `state_key`
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        [EventTypes.Member, user1_id],
-                    ],
-                    "timeline_limit": 0,
-                },
-                "bar-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Member, StateValues.WILDCARD],
-                        ["org.matrix.foo_state", ""],
-                    ],
-                    "timeline_limit": 0,
-                },
-            },
-            "room_subscriptions": {
-                room_id1: {
-                    "required_state": [["org.matrix.bar_state", ""]],
-                    "timeline_limit": 0,
-                }
-            },
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.Member, user1_id)],
-                state_map[(EventTypes.Member, user2_id)],
-                state_map[("org.matrix.foo_state", "")],
-                state_map[("org.matrix.bar_state", "")],
-            },
-            exact=True,
-        )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
-
-    def test_rooms_required_state_partial_state(self) -> None:
-        """
-        Test partially-stated room are excluded unless `rooms.required_state` is
-        lazy-loading room members.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        _join_response1 = self.helper.join(room_id1, user1_id, tok=user1_tok)
-        join_response2 = self.helper.join(room_id2, user1_id, tok=user1_tok)
-
-        # Mark room2 as partial state
-        self.get_success(
-            mark_event_as_partial_state(self.hs, join_response2["event_id"], room_id2)
-        )
-
-        # Make the Sliding Sync request (NOT lazy-loading room members)
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                    ],
-                    "timeline_limit": 0,
-                },
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # Make sure the list includes room1 but room2 is excluded because it's still
-        # partially-stated
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id1],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
-
-        # Make the Sliding Sync request (with lazy-loading room members)
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        # Lazy-load room members
-                        [EventTypes.Member, StateValues.LAZY],
-                    ],
-                    "timeline_limit": 0,
-                },
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # The list should include both rooms now because we're lazy-loading room members
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id2, room_id1],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
 
     def test_room_subscriptions_with_join_membership(self) -> None:
         """
