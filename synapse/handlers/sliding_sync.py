@@ -1595,6 +1595,12 @@ class SlidingSyncHandler:
                     stream=timeline_events[0].internal_metadata.stream_ordering - 1
                 )
 
+            if ignore_timeline_bound:
+                # If we're ignoring the timeline bound we *must* set limited to
+                # true, as otherwise the client will append the received events
+                # to the timeline, rather than replacing it.
+                limited = True
+
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_events_for_client(
                 self.storage_controllers,
