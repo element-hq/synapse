@@ -19,11 +19,9 @@
 #
 #
 import logging
-from http import HTTPStatus
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
-from typing_extensions import assert_never
 
-from parameterized import parameterized
+from typing_extensions import assert_never
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -32,14 +30,9 @@ from synapse.api.constants import (
     AccountDataTypes,
     EventContentFields,
     EventTypes,
-    HistoryVisibility,
-    Membership,
-    ReceiptTypes,
     RoomTypes,
 )
-from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
-from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
@@ -48,15 +41,12 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StreamKeyType,
     StreamToken,
-    UserID,
 )
-from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.server import TimedOutException
-from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
 
 logger = logging.getLogger(__name__)
 
@@ -223,6 +213,9 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
 class SlidingSyncTestCase(SlidingSyncBase):
     """
     Tests regarding MSC3575 Sliding Sync `/sync` endpoint.
+
+    Please put tests in more specific test files if applicable. This test class is meant
+    for generic behavior of the endpoint.
     """
 
     servlets = [

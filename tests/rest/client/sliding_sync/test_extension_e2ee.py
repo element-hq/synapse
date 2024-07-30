@@ -20,16 +20,12 @@
 #
 import logging
 
-
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.rest.client import devices, login, room, sync
 from synapse.server import HomeServer
-from synapse.types import (
-    JsonDict,
-    StreamKeyType,
-)
+from synapse.types import JsonDict, StreamKeyType
 from synapse.util import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase

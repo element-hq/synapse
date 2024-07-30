@@ -19,51 +19,36 @@
 #
 #
 import logging
-from http import HTTPStatus
-from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
-from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.api.constants import (
-    AccountDataTypes,
-    EventContentFields,
     EventTypes,
     HistoryVisibility,
-    Membership,
-    ReceiptTypes,
-    RoomTypes,
 )
-from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase
-from synapse.handlers.sliding_sync import StateValues
-from synapse.rest.client import devices, login, receipts, room, sync
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
-    JsonDict,
-    RoomStreamToken,
-    SlidingSyncStreamToken,
-    StreamKeyType,
-    StreamToken,
     UserID,
 )
-from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
-from synapse.util.stringutils import random_string
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
-from tests import unittest
-from tests.server import TimedOutException
-from tests.test_utils.event_injection import create_event, mark_event_as_partial_state
 
 logger = logging.getLogger(__name__)
 
 
-class SlidingSyncInvitesTestCase(SlidingSyncBase):
+class SlidingSyncRoomsInvitesTestCase(SlidingSyncBase):
     """
-    Test invites in the Sliding Sync API.
+    Test to make sure the `rooms` response looks good for invites in the Sliding Sync API.
+
+    Invites behave a lot different than other rooms because we don't include the
+    `timeline` (`num_live`, `limited`, `prev_batch`) or `required_state` in favor of
+    some stripped state under the `invite_state` key.
+
+    Knocks probably have the same behavior but the spec doesn't mention knocks yet.
     """
 
     servlets = [
