@@ -25,14 +25,10 @@ from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import (
-    EventTypes,
-)
+from synapse.api.constants import EventTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import (
-    SlidingSyncStreamToken,
-)
+from synapse.types import SlidingSyncStreamToken
 from synapse.types.handlers import SlidingSyncConfig
 from synapse.util import Clock
 

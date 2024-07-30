@@ -21,14 +21,10 @@
 import logging
 from http import HTTPStatus
 
-
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import (
-    EventTypes,
-    HistoryVisibility,
-)
+from synapse.api.constants import EventTypes, HistoryVisibility
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.util import Clock

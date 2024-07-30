@@ -25,10 +25,7 @@ from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import (
-    EventTypes,
-    Membership,
-)
+from synapse.api.constants import EventTypes, Membership
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer

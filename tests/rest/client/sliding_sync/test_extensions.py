@@ -25,9 +25,7 @@ from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import (
-    ReceiptTypes,
-)
+from synapse.api.constants import ReceiptTypes
 from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.util import Clock

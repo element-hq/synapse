@@ -20,14 +20,10 @@
 #
 import logging
 
-
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import (
-    EventTypes,
-    Membership,
-)
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
