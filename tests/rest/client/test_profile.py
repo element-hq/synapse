@@ -523,7 +523,9 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_too_long(self) -> None:
-        """Attempts to set a stupid custom_field should get a 400"""
+        """Attempts to set a custom_field name or value that is too
+        long should get a 400
+        """
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
