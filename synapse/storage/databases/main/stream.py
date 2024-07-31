@@ -663,25 +663,26 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_key: RoomStreamToken,
         to_key: RoomStreamToken,
         limit: int = 0,
-        order: str = "DESC",
+        direction: Direction = Direction.BACKWARDS,
     ) -> Dict[str, Tuple[List[EventBase], RoomStreamToken]]:
         """Get new room events in stream ordering since `from_key`.
 
         Args:
             room_ids
-            from_key: Token from which no events are returned before
-            to_key: Token from which no events are returned after. (This
-                is typically the current stream token)
+            from_key: The token to stream from (starting point and heading in the given
+                direction)
+            to_key: The token representing the end stream position (end point)
             limit: Maximum number of events to return
-            order: Either "DESC" or "ASC". Determines which events are
-                returned when the result is limited. If "DESC" then the most
-                recent `limit` events are returned, otherwise returns the
-                oldest `limit` events.
+            direction: Indicates whether we are paginating forwards or backwards
+                from `from_key`.
 
         Returns:
             A map from room id to a tuple containing:
                 - list of recent events in the room
                 - stream ordering key for the start of the chunk of events returned.
+
+            When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
+            When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
         room_ids = self._events_stream_cache.get_entities_changed(
             room_ids, from_key.stream
@@ -702,7 +703,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                             from_key,
                             to_key,
                             limit,
-                            order=order,
+                            direction=direction,
                         )
                         for room_id in rm_ids
                     ],
@@ -740,7 +741,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         Args:
             room_id
-            from_key: The token to stream from (starting point and heading in the given direction)
+            from_key: The token to stream from (starting point and heading in the given
+                direction)
             to_key: The token representing the end stream position (end point)
             limit: Maximum number of events to return
             direction: Indicates whether we are paginating forwards or backwards
