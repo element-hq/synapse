@@ -13,12 +13,13 @@
 #
 import logging
 
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import StreamToken
+from synapse.types import StreamToken, StrSequence
 from synapse.util import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -41,6 +42,82 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
+
+    def _assertListEqual(
+        self,
+        actual_items: StrSequence,
+        expected_items: StrSequence,
+        message: Optional[str] = None,
+    ):
+        """
+        Like `self.assertListEqual(...)` but with an actually understandable diff message.
+        """
+
+        if actual_items == expected_items:
+            return
+
+        expected_lines: List[str] = []
+        for expected_item in expected_items:
+            is_expected_in_actual = expected_item in actual_items
+            expected_lines.append(
+                "{}  {}".format(" " if is_expected_in_actual else "?", expected_item)
+            )
+
+        actual_lines: List[str] = []
+        for actual_item in actual_items:
+            is_actual_in_expected = actual_item in expected_items
+            actual_lines.append(
+                "{}  {}".format("+" if is_actual_in_expected else " ", actual_item)
+            )
+
+        newline = "\n"
+        expected_string = f"Expected items to be in actual ('?' = missing expected items):\n [\n{newline.join(expected_lines)}\n ]"
+        actual_string = f"Actual ('+' = found expected items):\n [\n{newline.join(actual_lines)}\n ]"
+        first_message = "Items must"
+        diff_message = f"{first_message}\n{expected_string}\n{actual_string}"
+
+        self.fail(f"{diff_message}\n{message}")
+
+    def _assertTimelineEqual(
+        self,
+        *,
+        room_id: str,
+        actual_event_ids: StrSequence,
+        expected_event_ids: StrSequence,
+        message: Optional[str] = None,
+    ):
+        """
+        Like `self.assertListEqual(...)` for event IDs in a room but will give a nicer
+        output with context for what each event_id is (type, stream_ordering, content,
+        etc).
+        """
+        if actual_event_ids == expected_event_ids:
+            return
+
+        event_id_set = set(actual_event_ids + expected_event_ids)
+        events = self.get_success(self.store.get_events(event_id_set))
+
+        def event_id_to_string(event_id: str) -> str:
+            event = events.get(event_id)
+            if event:
+                state_key = event.get_state_key()
+                state_key_piece = f", {state_key}" if state_key is not None else ""
+                return (
+                    f"({event.internal_metadata.stream_ordering: >2}, {event.internal_metadata.instance_name}) "
+                    + f"{event.event_id} ({event.type}{state_key_piece}) {event.content.get('membership', '')}{event.content.get('body', '')}"
+                )
+
+            return f"{event_id} <event not found in room_id={room_id}>"
+
+        self._assertListEqual(
+            actual_items=[
+                event_id_to_string(event_id) for event_id in actual_event_ids
+            ],
+            expected_items=[
+                event_id_to_string(event_id) for event_id in expected_event_ids
+            ],
+            message=message,
+        )
 
     def test_rooms_limited_initial_sync(self) -> None:
         """
@@ -85,18 +162,46 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # Check to make sure the latest events are returned
-        self.assertEqual(
+        logger.info(
+            "list a %s",
             [
                 event["event_id"]
                 for event in response_body["rooms"][room_id1]["timeline"]
             ],
+        )
+        logger.info(
+            "list b %s",
             [
                 event_response4["event_id"],
                 event_response5["event_id"],
                 user1_join_response["event_id"],
             ],
-            response_body["rooms"][room_id1]["timeline"],
         )
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
+                event["event_id"]
+                for event in response_body["rooms"][room_id1]["timeline"]
+            ],
+            expected_event_ids=[
+                event_response4["event_id"],
+                event_response5["event_id"],
+                user1_join_response["event_id"],
+            ],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
+        )
+        # self.assertListEqual(
+        #     [
+        #         event["event_id"]
+        #         for event in response_body["rooms"][room_id1]["timeline"]
+        #     ],
+        #     [
+        #         event_response4["event_id"],
+        #         event_response5["event_id"],
+        #         user1_join_response["event_id"],
+        #     ],
+        #     response_body["rooms"][room_id1]["timeline"],
+        # )
 
         # Check to make sure the `prev_batch` points at the right place
         prev_batch_token = self.get_success(

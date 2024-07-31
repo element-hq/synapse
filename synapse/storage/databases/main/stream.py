@@ -59,7 +59,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from typing_extensions import Literal
+from typing_extensions import Literal, assert_never
 
 from twisted.internet import defer
 
@@ -447,7 +447,6 @@ def _filter_results_by_stream(
     The `instance_name` arg is optional to handle historic rows, and is
     interpreted as if it was "master".
     """
-
     if instance_name is None:
         instance_name = "master"
 
@@ -731,65 +730,87 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         from_key: RoomStreamToken,
-        to_key: RoomStreamToken,
+        to_key: Optional[RoomStreamToken] = None,
         limit: int = 0,
-        order: str = "DESC",
+        direction: Direction = Direction.BACKWARDS,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """Get new room events in stream ordering since `from_key`.
 
+        When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
+        When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
+
         Args:
             room_id
-            from_key: Token from which no events are returned before
-            to_key: Token from which no events are returned after. (This
-                is typically the current stream token)
+            from_key: The token to stream from (starting point and heading in the given direction)
+            to_key: The token representing the end stream position (end point)
             limit: Maximum number of events to return
-            order: Either "DESC" or "ASC". Determines which events are
-                returned when the result is limited. If "DESC" then the most
-                recent `limit` events are returned, otherwise returns the
-                oldest `limit` events.
+            direction: Indicates whether we are paginating forwards or backwards
+                from `from_key`.
 
         Returns:
-            The list of events (in ascending stream order) and the token from the start
-            of the chunk of events returned.
+            TODO
         """
+        # We should only be working with `stream_ordering` tokens here
+        assert from_key is None or from_key.topological is None
+        assert to_key is None or to_key.topological is None
+
         if from_key == to_key:
             return [], from_key
 
-        has_changed = self._events_stream_cache.has_entity_changed(
-            room_id, from_key.stream
-        )
+        has_changed = True
+        if direction == Direction.FORWARDS:
+            has_changed = self._events_stream_cache.has_entity_changed(
+                room_id, from_key.stream
+            )
+        elif direction == Direction.BACKWARDS:
+            if to_key is not None:
+                has_changed = self._events_stream_cache.has_entity_changed(
+                    room_id, to_key.stream
+                )
+        else:
+            assert_never(direction)
 
         if not has_changed:
             return [], from_key
 
-        def f(txn: LoggingTransaction) -> List[_EventDictReturn]:
-            # To handle tokens with a non-empty instance_map we fetch more
-            # results than necessary and then filter down
-            min_from_id = from_key.stream
-            max_to_id = to_key.get_max_stream_pos()
+        order, from_bound, to_bound = generate_pagination_bounds(
+            direction, from_key, to_key
+        )
 
-            sql = """
-                SELECT event_id, instance_name, topological_ordering, stream_ordering
+        bounds = generate_pagination_where_clause(
+            direction=direction,
+            column_names=(None, "stream_ordering"),
+            from_token=from_bound,
+            to_token=to_bound,
+            engine=self.database_engine,
+        )
+
+        def f(txn: LoggingTransaction) -> List[_EventDictReturn]:
+            sql = f"""
+                SELECT event_id, instance_name, stream_ordering
                 FROM events
                 WHERE
                     room_id = ?
                     AND not outlier
-                    AND stream_ordering > ? AND stream_ordering <= ?
-                ORDER BY stream_ordering %s LIMIT ?
-            """ % (
-                order,
-            )
-            txn.execute(sql, (room_id, min_from_id, max_to_id, 2 * limit))
+                    AND {bounds}
+                ORDER BY stream_ordering {order} LIMIT ?
+            """
+            txn.execute(sql, (room_id, 2 * limit))
+
+            logger.info("asdf sql %s", sql)
 
             rows = [
                 _EventDictReturn(event_id, None, stream_ordering)
-                for event_id, instance_name, topological_ordering, stream_ordering in txn
-                if _filter_results(
-                    from_key,
-                    to_key,
-                    instance_name,
-                    topological_ordering,
-                    stream_ordering,
+                for event_id, instance_name, stream_ordering in txn
+                if _filter_results_by_stream(
+                    lower_token=(
+                        to_key if direction == Direction.BACKWARDS else from_key
+                    ),
+                    upper_token=(
+                        from_key if direction == Direction.BACKWARDS else to_key
+                    ),
+                    instance_name=instance_name,
+                    stream_ordering=stream_ordering,
                 )
             ][:limit]
             return rows
@@ -800,17 +821,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             [r.event_id for r in rows], get_prev_content=True
         )
 
-        if order.lower() == "desc":
-            ret.reverse()
-
         if rows:
-            key = RoomStreamToken(stream=min(r.stream_ordering for r in rows))
+            next_key = generate_next_token(
+                direction=direction,
+                last_topo_ordering=None,
+                last_stream_ordering=rows[-1].stream_ordering,
+            )
         else:
-            # Assume we didn't get anything because there was nothing to
-            # get.
-            key = from_key
+            # TODO (erikj): We should work out what to do here instead.
+            next_key = to_key if to_key else from_key
 
-        return ret, key
+        return ret, next_key
 
     async def get_current_state_delta_membership_changes_for_user(
         self,
@@ -1908,7 +1929,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             "bounds": bounds,
             "order": order,
         }
-
+        logger.info("asdf sql %s", sql)
         txn.execute(sql, args)
 
         # Filter the result set.

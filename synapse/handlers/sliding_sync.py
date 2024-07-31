@@ -1855,19 +1855,34 @@ class SlidingSyncHandler:
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
-            timeline_events, new_room_key = await self.store.paginate_room_events(
-                room_id=room_id,
-                # The bounds are reversed so we can paginate backwards
-                # (from newer to older events) starting at to_bound.
-                # This ensures we fill the `limit` with the newest events first,
-                from_key=to_bound,
-                to_key=from_bound,
-                direction=Direction.BACKWARDS,
-                # We add one so we can determine if there are enough events to saturate
-                # the limit or not (see `limited`)
-                limit=room_sync_config.timeline_limit + 1,
-                event_filter=None,
+            timeline_events, new_room_key = (
+                await self.store.get_room_events_stream_for_room(
+                    room_id=room_id,
+                    # The bounds are reversed so we can paginate backwards
+                    # (from newer to older events) starting at to_bound.
+                    # This ensures we fill the `limit` with the newest events first,
+                    from_key=to_bound,
+                    to_key=from_bound,
+                    direction=Direction.BACKWARDS,
+                    # We add one so we can determine if there are enough events to saturate
+                    # the limit or not (see `limited`)
+                    limit=room_sync_config.timeline_limit + 1,
+                )
             )
+            # timeline_events, new_room_key = await self.store.paginate_room_events(
+            #     room_id=room_id,
+            #     # The bounds are reversed so we can paginate backwards
+            #     # (from newer to older events) starting at to_bound.
+            #     # This ensures we fill the `limit` with the newest events first,
+            #     from_key=to_bound,
+            #     to_key=from_bound,
+            #     direction=Direction.BACKWARDS,
+            #     # We add one so we can determine if there are enough events to saturate
+            #     # the limit or not (see `limited`)
+            #     limit=room_sync_config.timeline_limit + 1,
+            #     event_filter=None,
+            # )
+            logger.info("timeline_events %s", timeline_events)
 
             # We want to return the events in ascending order (the last event is the
             # most recent).
