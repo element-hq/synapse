@@ -182,7 +182,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
         Args:
             user_id: The user's ID.
-            field_name: The custom profile filed name.
+            field_name: The custom profile field name.
 
         Returns:
             The string value if the field exists, otherwise raises 404.
