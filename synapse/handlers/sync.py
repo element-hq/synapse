@@ -895,7 +895,7 @@ class SyncHandler:
                     )
                     # We want to return the events in ascending order (the last event is the
                     # most recent).
-                    events = events.reverse()
+                    events.reverse()
                 else:
                     # TODO: This should return events in `stream_ordering` order
                     events, end_key = await self.store.get_recent_events_for_room(
@@ -2663,7 +2663,7 @@ class SyncHandler:
                 events, start_key = room_entry
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
-                events = events.reverse()
+                events.reverse()
 
                 prev_batch_token = now_token.copy_and_replace(
                     StreamKeyType.ROOM, start_key
