@@ -307,7 +307,7 @@ class UnstableProfileRestServlet(RestServlet):
         if requester_suspended:
             raise SynapseError(
                 403,
-                "Updating avatar URL while account is suspended is not allowed.",
+                "Updating profile information while account is suspended is not allowed.",
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
