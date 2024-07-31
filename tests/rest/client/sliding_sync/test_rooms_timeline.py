@@ -12,8 +12,8 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+from typing import List, Optional
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
@@ -48,7 +48,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         actual_items: StrSequence,
         expected_items: StrSequence,
         message: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Like `self.assertListEqual(...)` but with an actually understandable diff message.
         """
@@ -82,10 +82,10 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self,
         *,
         room_id: str,
-        actual_event_ids: StrSequence,
-        expected_event_ids: StrSequence,
+        actual_event_ids: List[str],
+        expected_event_ids: List[str],
         message: Optional[str] = None,
-    ):
+    ) -> None:
         """
         Like `self.assertListEqual(...)` for event IDs in a room but will give a nicer
         output with context for what each event_id is (type, stream_ordering, content,

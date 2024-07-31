@@ -280,7 +280,7 @@ def generate_pagination_bounds(
 
 
 def generate_next_token(
-    direction: Direction, last_topo_ordering: int, last_stream_ordering: int
+    direction: Direction, last_topo_ordering: Optional[int], last_stream_ordering: int
 ) -> RoomStreamToken:
     """
     Generate the next room stream token based on the currently returned data.
@@ -734,10 +734,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         limit: int = 0,
         direction: Direction = Direction.BACKWARDS,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
-        """Get new room events in stream ordering since `from_key`.
-
-        When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
-        When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
+        """
+        Paginate events by `stream_ordering` in the room from the `from_key` in the
+        given `direction` to the `to_key` or `limit`.
 
         Args:
             room_id
@@ -748,15 +747,39 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 from `from_key`.
 
         Returns:
-            TODO
+            The results as a list of events and a token that points to the end
+            of the result set. If no events are returned then the end of the
+            stream has been reached (i.e. there are no events between `from_key`
+            and `to_key`).
+
+            When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
+            When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
         # We should only be working with `stream_ordering` tokens here
         assert from_key is None or from_key.topological is None
         assert to_key is None or to_key.topological is None
 
-        if from_key == to_key:
-            return [], from_key
+        # We can bail early if we're looking forwards, and our `to_key` is already
+        # before our `from_key`.
+        if (
+            direction == Direction.FORWARDS
+            and to_key is not None
+            and to_key.is_before_or_eq(from_key)
+        ):
+            # Token selection matches what we do below if there are no rows
+            return [], to_key if to_key else from_key
+        # Or vice-versa, if we're looking backwards and our `from_key` is already before
+        # our `to_key`.
+        elif (
+            direction == Direction.BACKWARDS
+            and to_key is not None
+            and from_key.is_before_or_eq(to_key)
+        ):
+            # Token selection matches what we do below if there are no rows
+            return [], to_key if to_key else from_key
 
+        # We can do a quick sanity check to see if any events have been sent in the room
+        # since the earlier token.
         has_changed = True
         if direction == Direction.FORWARDS:
             has_changed = self._events_stream_cache.has_entity_changed(
@@ -771,7 +794,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             assert_never(direction)
 
         if not has_changed:
-            return [], from_key
+            # Token selection matches what we do below if there are no rows
+            return [], to_key if to_key else from_key
 
         order, from_bound, to_bound = generate_pagination_bounds(
             direction, from_key, to_key
@@ -779,7 +803,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         bounds = generate_pagination_where_clause(
             direction=direction,
-            column_names=(None, "stream_ordering"),
+            # The empty string will shortcut downstream code to only use the
+            # `stream_ordering` column
+            column_names=("", "stream_ordering"),
             from_token=from_bound,
             to_token=to_bound,
             engine=self.database_engine,
@@ -796,8 +822,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 ORDER BY stream_ordering {order} LIMIT ?
             """
             txn.execute(sql, (room_id, 2 * limit))
-
-            logger.info("asdf sql %s", sql)
 
             rows = [
                 _EventDictReturn(event_id, None, stream_ordering)
@@ -828,7 +852,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 last_stream_ordering=rows[-1].stream_ordering,
             )
         else:
-            # TODO (erikj): We should work out what to do here instead.
+            # TODO (erikj): We should work out what to do here instead. (same as
+            # `_paginate_room_events_txn(...)`)
             next_key = to_key if to_key else from_key
 
         return ret, next_key
@@ -1845,6 +1870,24 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             been reached (i.e. there are no events between `from_token` and
             `to_token`), or `limit` is zero.
         """
+        # We can bail early if we're looking forwards, and our `to_key` is already
+        # before our `from_token`.
+        if (
+            direction == Direction.FORWARDS
+            and to_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            # Token selection matches what we do below if there are no rows
+            return [], to_token if to_token else from_token
+        # Or vice-versa, if we're looking backwards and our `from_token` is already before
+        # our `to_token`.
+        elif (
+            direction == Direction.BACKWARDS
+            and to_token is not None
+            and from_token.is_before_or_eq(to_token)
+        ):
+            # Token selection matches what we do below if there are no rows
+            return [], to_token if to_token else from_token
 
         args: List[Any] = [room_id]
 
@@ -1929,7 +1972,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             "bounds": bounds,
             "order": order,
         }
-        logger.info("asdf sql %s", sql)
         txn.execute(sql, args)
 
         # Filter the result set.
@@ -1990,28 +2032,6 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             stream has been reached (i.e. there are no events between `from_key`
             and `to_key`).
         """
-
-        # We can bail early if we're looking forwards, and our `to_key` is already
-        # before our `from_key`.
-        if (
-            direction == Direction.FORWARDS
-            and to_key is not None
-            and to_key.is_before_or_eq(from_key)
-        ):
-            # Token selection matches what we do in `_paginate_room_events_txn` if there
-            # are no rows
-            return [], to_key if to_key else from_key
-        # Or vice-versa, if we're looking backwards and our `from_key` is already before
-        # our `to_key`.
-        elif (
-            direction == Direction.BACKWARDS
-            and to_key is not None
-            and from_key.is_before_or_eq(to_key)
-        ):
-            # Token selection matches what we do in `_paginate_room_events_txn` if there
-            # are no rows
-            return [], to_key if to_key else from_key
-
         rows, token = await self.db_pool.runInteraction(
             "paginate_room_events",
             self._paginate_room_events_txn,
