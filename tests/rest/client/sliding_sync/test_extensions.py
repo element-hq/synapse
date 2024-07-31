@@ -12,8 +12,10 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
+from typing import Literal
 
 from parameterized import parameterized
+from typing_extensions import assert_never
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -48,11 +50,16 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
         self.account_data_handler = hs.get_account_data_handler()
 
     # Any extensions that use `lists`/`rooms` should be tested here
-    @parameterized.expand([("account_data",), ("receipts",)])
-    def test_extensions_lists_rooms_relevant_rooms(self, extension_name: str) -> None:
+    @parameterized.expand([("account_data",), ("receipts",), ("typing",)])
+    def test_extensions_lists_rooms_relevant_rooms(
+        self,
+        extension_name: Literal["account_data", "receipts", "typing"],
+    ) -> None:
         """
         With various extensions, test out requesting different variations of
         `lists`/`rooms`.
+
+        Stresses `SlidingSyncHandler.find_relevant_room_ids_for_extension(...)`
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -95,8 +102,17 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
                     access_token=user1_tok,
                 )
                 self.assertEqual(channel.code, 200, channel.json_body)
+            elif extension_name == "typing":
+                # Start a typing notification
+                channel = self.make_request(
+                    "PUT",
+                    f"/rooms/{room_id}/typing/{user1_id}",
+                    b'{"typing": true, "timeout": 30000}',
+                    access_token=user1_tok,
+                )
+                self.assertEqual(channel.code, 200, channel.json_body)
             else:
-                raise AssertionError(f"Unknown extension name: {extension_name}")
+                assert_never(extension_name)
 
         main_sync_body = {
             "lists": {
