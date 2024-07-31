@@ -162,21 +162,6 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
         # Check to make sure the latest events are returned
-        logger.info(
-            "list a %s",
-            [
-                event["event_id"]
-                for event in response_body["rooms"][room_id1]["timeline"]
-            ],
-        )
-        logger.info(
-            "list b %s",
-            [
-                event_response4["event_id"],
-                event_response5["event_id"],
-                user1_join_response["event_id"],
-            ],
-        )
         self._assertTimelineEqual(
             room_id=room_id1,
             actual_event_ids=[
@@ -190,18 +175,6 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             ],
             message=str(response_body["rooms"][room_id1]["timeline"]),
         )
-        # self.assertListEqual(
-        #     [
-        #         event["event_id"]
-        #         for event in response_body["rooms"][room_id1]["timeline"]
-        #     ],
-        #     [
-        #         event_response4["event_id"],
-        #         event_response5["event_id"],
-        #         user1_join_response["event_id"],
-        #     ],
-        #     response_body["rooms"][room_id1]["timeline"],
-        # )
 
         # Check to make sure the `prev_batch` points at the right place
         prev_batch_token = self.get_success(
@@ -332,16 +305,17 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             + str(response_body["rooms"][room_id1]),
         )
         # Check to make sure the latest events are returned
-        self.assertEqual(
-            [
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
                 event["event_id"]
                 for event in response_body["rooms"][room_id1]["timeline"]
             ],
-            [
+            expected_event_ids=[
                 event_response2["event_id"],
                 event_response3["event_id"],
             ],
-            response_body["rooms"][room_id1]["timeline"],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
         )
 
         # All events are "live"
@@ -408,18 +382,19 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
             + str(response_body["rooms"][room_id1]),
         )
         # Check to make sure that the "live" and historical events are returned
-        self.assertEqual(
-            [
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
                 event["event_id"]
                 for event in response_body["rooms"][room_id1]["timeline"]
             ],
-            [
+            expected_event_ids=[
                 event_response2["event_id"],
                 user1_join_response["event_id"],
                 event_response3["event_id"],
                 event_response4["event_id"],
             ],
-            response_body["rooms"][room_id1]["timeline"],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
         )
 
         # Only events after the `from_token` are "live" (join, event3, event4)
@@ -466,17 +441,18 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # We should see events before the ban but not after
-        self.assertEqual(
-            [
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
                 event["event_id"]
                 for event in response_body["rooms"][room_id1]["timeline"]
             ],
-            [
+            expected_event_ids=[
                 event_response3["event_id"],
                 event_response4["event_id"],
                 user1_ban_response["event_id"],
             ],
-            response_body["rooms"][room_id1]["timeline"],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
         )
         # No "live" events in an initial sync (no `from_token` to define the "live"
         # range)
@@ -533,17 +509,18 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # We should see events before the ban but not after
-        self.assertEqual(
-            [
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[
                 event["event_id"]
                 for event in response_body["rooms"][room_id1]["timeline"]
             ],
-            [
+            expected_event_ids=[
                 event_response3["event_id"],
                 event_response4["event_id"],
                 user1_ban_response["event_id"],
             ],
-            response_body["rooms"][room_id1]["timeline"],
+            message=str(response_body["rooms"][room_id1]["timeline"]),
         )
         # All live events in the incremental sync
         self.assertEqual(
