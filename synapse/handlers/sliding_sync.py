@@ -675,6 +675,13 @@ class SlidingSyncHandler:
                 else:
                     assert_never(status.status)
 
+                if status.timeline_limit is not None and (
+                    status.timeline_limit < relevant_room_map[room_id].timeline_limit
+                ):
+                    # If the timeline limit has increased we want to send down
+                    # more historic events (even if nothing has since changed).
+                    rooms_should_send.add(room_id)
+
             # We only need to check for new events since any state changes
             # will also come down as new events.
             rooms_that_have_updates = self.store.get_rooms_that_might_have_updates(
@@ -726,6 +733,7 @@ class SlidingSyncHandler:
         if has_lists or has_room_subscriptions:
             connection_position = await self.connection_store.record_rooms(
                 sync_config=sync_config,
+                room_configs=relevant_room_map,
                 from_token=from_token,
                 sent_room_ids=relevant_rooms_to_send_map.keys(),
                 # TODO: We need to calculate which rooms have had updates since the `from_token` but were not included in the `sent_room_ids`
@@ -1795,7 +1803,12 @@ class SlidingSyncHandler:
         #  - When users `newly_joined`
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
+        #
+        # We also decide if we should ignore the timeline bound or not. This is
+        # to handle the case where the client has requested more historical
+        # messages in the room by increasing the timeline limit.
         from_bound = None
+        ignore_timeline_bound = False
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
             room_status = await self.connection_store.have_sent_room(
@@ -1803,6 +1816,7 @@ class SlidingSyncHandler:
                 connection_token=from_token.connection_position,
                 room_id=room_id,
             )
+
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
@@ -1816,9 +1830,24 @@ class SlidingSyncHandler:
             else:
                 assert_never(room_status.status)
 
+            if room_status.timeline_limit is not None and (
+                room_status.timeline_limit < room_sync_config.timeline_limit
+            ):
+                # If the timeline limit has been increased since previous
+                # requests then we treat it as request for more events. We do
+                # this by sending down a `limited` sync, ignoring the from
+                # bound.
+                ignore_timeline_bound = True
+
             log_kv({"sliding_sync.room_status": room_status})
 
-        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
+        log_kv(
+            {
+                "sliding_sync.from_bound": from_bound,
+                "sliding_sync.ignore_timeline_bound": ignore_timeline_bound,
+                "sliding_sync.initial": initial,
+            }
+        )
 
         # Assemble the list of timeline events
         #
@@ -1861,7 +1890,7 @@ class SlidingSyncHandler:
                 # (from newer to older events) starting at to_bound.
                 # This ensures we fill the `limit` with the newest events first,
                 from_key=to_bound,
-                to_key=from_bound,
+                to_key=from_bound if not ignore_timeline_bound else None,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -1885,6 +1914,12 @@ class SlidingSyncHandler:
                 new_room_key = RoomStreamToken(
                     stream=timeline_events[0].internal_metadata.stream_ordering - 1
                 )
+
+            if ignore_timeline_bound:
+                # If we're ignoring the timeline bound we *must* set limited to
+                # true, as otherwise the client will append the received events
+                # to the timeline, rather than replacing it.
+                limited = True
 
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_events_for_client(
@@ -2691,19 +2726,26 @@ class HaveSentRoom:
             contains the last stream token of the last updates we sent down
             the room, i.e. we still need to send everything since then to the
             client.
+        timeline_limit: The timeline limit config for the room, if LIVE or
+            PREVIOUSLY. This is used to track if the client has increased
+            the timeline limit to request more events.
     """
 
     status: HaveSentRoomFlag
     last_token: Optional[RoomStreamToken]
+    timeline_limit: Optional[int]
 
     @staticmethod
-    def previously(last_token: RoomStreamToken) -> "HaveSentRoom":
+    def live(timeline_limit: int) -> "HaveSentRoom":
+        return HaveSentRoom(HaveSentRoomFlag.LIVE, None, timeline_limit)
+
+    @staticmethod
+    def previously(last_token: RoomStreamToken, timeline_limit: int) -> "HaveSentRoom":
         """Constructor for `PREVIOUSLY` flag."""
-        return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token)
+        return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token, timeline_limit)
 
 
-HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
-HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
+HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None, None)
 
 
 @attr.s(auto_attribs=True)
@@ -2758,6 +2800,7 @@ class SlidingSyncConnectionStore:
     async def record_rooms(
         self,
         sync_config: SlidingSyncConfig,
+        room_configs: Dict[str, RoomSyncConfig],
         from_token: Optional[SlidingSyncStreamToken],
         *,
         sent_room_ids: StrCollection,
@@ -2798,8 +2841,12 @@ class SlidingSyncConnectionStore:
         # end we can treat this as a noop.
         have_updated = False
         for room_id in sent_room_ids:
-            new_room_statuses[room_id] = HAVE_SENT_ROOM_LIVE
-            have_updated = True
+            prev_state = new_room_statuses.get(room_id)
+            new_room_statuses[room_id] = HaveSentRoom.live(
+                room_configs[room_id].timeline_limit
+            )
+            if prev_state != new_room_statuses[room_id]:
+                have_updated = True
 
         # Whether we add/update the entries for unsent rooms depends on the
         # existing entry:
@@ -2810,18 +2857,22 @@ class SlidingSyncConnectionStore:
         #     given token, so we don't need to update the entry.
         #   - NEVER: We have never previously sent down the room, and we haven't
         #     sent anything down this time either so we leave it as NEVER.
+        #
+        # We only need to do this if `from_token` is not None, as if it is then
+        # we know that there are no existing entires.
 
-        # Work out the new state for unsent rooms that were `LIVE`.
         if from_token:
-            new_unsent_state = HaveSentRoom.previously(from_token.stream_token.room_key)
-        else:
-            new_unsent_state = HAVE_SENT_ROOM_NEVER
-
-        for room_id in unsent_room_ids:
-            prev_state = new_room_statuses.get(room_id)
-            if prev_state is not None and prev_state.status == HaveSentRoomFlag.LIVE:
-                new_room_statuses[room_id] = new_unsent_state
-                have_updated = True
+            for room_id in unsent_room_ids:
+                prev_state = new_room_statuses.get(room_id)
+                if (
+                    prev_state is not None
+                    and prev_state.status == HaveSentRoomFlag.LIVE
+                ):
+                    new_room_statuses[room_id] = HaveSentRoom.previously(
+                        from_token.stream_token.room_key,
+                        room_configs[room_id].timeline_limit,
+                    )
+                    have_updated = True
 
         if not have_updated:
             return prev_connection_token
