@@ -182,8 +182,8 @@ class SlidingSyncResult:
                 absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
-            limited: True if their are more events than fit between the given position and now.
-                Sync again to get more.
+            limited: True if there are more events than `timeline_limit` looking
+                backwards from the `response.pos` to the `request.pos`.
             num_live: The number of timeline events which have just occurred and are not historical.
                 The last N events are 'live' and should be treated as such. This is mostly
                 useful to determine whether a given @mention event should make a noise or not.
