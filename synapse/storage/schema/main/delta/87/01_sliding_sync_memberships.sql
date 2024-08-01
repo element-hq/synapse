@@ -12,7 +12,7 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
-    room_id TEXT NOT NULL REFERENCES rooms(room_id),
+    FOREIGN KEY(room_id) REFERENCES rooms(room_id),
     room_type TEXT,
     room_name TEXT,
     is_encrypted BOOLEAN,
@@ -23,8 +23,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
 CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_joined_rooms_room_id ON sliding_sync_joined_rooms(room_id);
 
 CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
-    membership_event_id TEXT NOT NULL REFERENCES events(event_id),
-    room_id TEXT NOT NULL REFERENCES rooms(room_id),
+    FOREIGN KEY(membership_event_id) REFERENCES events(event_id),
+    FOREIGN KEY(room_id) REFERENCES rooms(room_id),
     room_type TEXT,
     room_name TEXT,
     is_encrypted BOOLEAN,
