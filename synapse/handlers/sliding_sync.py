@@ -764,12 +764,18 @@ class SlidingSyncHandler:
             # Initial sync without a `from_token` starts at `0`
             connection_position = 0
 
-        return SlidingSyncResult(
+        sliding_sync_result = SlidingSyncResult(
             next_pos=SlidingSyncStreamToken(to_token, connection_position),
             lists=lists,
             rooms=rooms,
             extensions=extensions,
         )
+
+        # Make it easy to find traces for syncs that aren't empty
+        set_tag(SynapseTags.RESULT_PREFIX + "result", bool(sliding_sync_result))
+        set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
+
+        return sliding_sync_result
 
     @trace
     async def get_room_membership_for_user_at_to_token(
