@@ -1833,8 +1833,12 @@ class SlidingSyncHandler:
         user = sync_config.user
 
         set_tag(
-            SynapseTags.RESULT_PREFIX + "membership",
+            SynapseTags.FUNC_ARG_PREFIX + "membership",
             room_membership_for_user_at_to_token.membership,
+        )
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "timeline_limit",
+            room_sync_config.timeline_limit,
         )
 
         # Determine whether we should limit the timeline to the token range.
@@ -2104,6 +2108,10 @@ class SlidingSyncHandler:
             if StateValues.WILDCARD in room_sync_config.required_state_map.get(
                 StateValues.WILDCARD, set()
             ):
+                set_tag(
+                    SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard",
+                    True,
+                )
                 required_state_filter = StateFilter.all()
             # TODO: `StateFilter` currently doesn't support wildcard event types. We're
             # currently working around this by returning all state to the client but it
@@ -2113,6 +2121,10 @@ class SlidingSyncHandler:
                 room_sync_config.required_state_map.get(StateValues.WILDCARD)
                 is not None
             ):
+                set_tag(
+                    SynapseTags.FUNC_ARG_PREFIX + "required_state_wildcard_event_type",
+                    True,
+                )
                 required_state_filter = StateFilter.all()
             else:
                 required_state_types: List[Tuple[str, Optional[str]]] = []
@@ -2120,8 +2132,12 @@ class SlidingSyncHandler:
                     state_type,
                     state_key_set,
                 ) in room_sync_config.required_state_map.items():
+                    num_wild_state_keys = 0
+                    lazy_load_room_members = False
+                    num_others = 0
                     for state_key in state_key_set:
                         if state_key == StateValues.WILDCARD:
+                            num_wild_state_keys += 1
                             # `None` is a wildcard in the `StateFilter`
                             required_state_types.append((state_type, None))
                         # We need to fetch all relevant people when we're lazy-loading membership
@@ -2129,6 +2145,7 @@ class SlidingSyncHandler:
                             state_type == EventTypes.Member
                             and state_key == StateValues.LAZY
                         ):
+                            lazy_load_room_members = True
                             # Everyone in the timeline is relevant
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
@@ -2143,9 +2160,25 @@ class SlidingSyncHandler:
                             # FIXME: We probably also care about invite, ban, kick, targets, etc
                             # but the spec only mentions "senders".
                         elif state_key == StateValues.ME:
+                            num_others += 1
                             required_state_types.append((state_type, user.to_string()))
                         else:
+                            num_others += 1
                             required_state_types.append((state_type, state_key))
+
+                    set_tag(
+                        SynapseTags.FUNC_ARG_PREFIX
+                        + "required_state_wildcard_state_key_count",
+                        num_wild_state_keys,
+                    )
+                    set_tag(
+                        SynapseTags.FUNC_ARG_PREFIX + "required_state_lazy",
+                        lazy_load_room_members,
+                    )
+                    set_tag(
+                        SynapseTags.FUNC_ARG_PREFIX + "required_state_other_count",
+                        num_others,
+                    )
 
                 required_state_filter = StateFilter.from_types(required_state_types)
 
