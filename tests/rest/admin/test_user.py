@@ -5109,6 +5109,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
         self.store = hs.get_datastores().main
 
+        self.spam_checker = hs.get_module_api_callbacks().spam_checker
+
     def test_redact_messages_all_rooms(self) -> None:
         """
         Test that request to redact events in all rooms user is member of is successful
@@ -5215,3 +5217,66 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         for event in rm2_timeline:
             if event["type"] == "m.room.redaction":
                 self.fail("found redaction in room 2")
+
+    def test_redact_status(self) -> None:
+        rm1 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+        rm3 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="11"
+        )
+
+        originals = []
+        for rm in [rm1, rm2, rm3]:
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            if rm == rm2:
+                originals.append(join["event_id"])
+            for i in range(5):
+                event = {"body": f"hello{i}", "msgtype": "m.text"}
+                res = self.helper.send_event(rm, "m.text", event, tok=self.bad_user_tok)
+                if rm == rm2:
+                    originals.append(res["event_id"])
+
+        # redact messages in rooms 1 and 3
+        channel = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [rm1, rm3]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel.json_body.get("redact_id")
+
+        channel2 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel2.code, 200)
+        self.assertEqual(channel2.json_body.get("status"), "complete")
+        self.assertEqual(channel2.json_body.get("failed_redactions"), [])
+
+        # mock that will cause persisting the redaction events to fail
+        async def check_event_for_spam(event: str) -> str:
+            return "spam"
+
+        self.spam_checker.check_event_for_spam = check_event_for_spam  # type: ignore
+
+        channel3 = self.make_request(
+            "POST",
+            f"/_synapse/admin/v1/user/{self.bad_user}/redact",
+            content={"rooms": [rm2]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel3.json_body.get("redact_id")
+
+        channel4 = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel4.code, 200)
+        self.assertEqual(channel4.json_body.get("status"), "complete")
+        self.assertEqual(channel4.json_body.get("failed_redactions"), originals)
