@@ -899,6 +899,9 @@ class SlidingSyncRestServlet(RestServlet):
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
 
         # Tag and log useful data to differentiate requests.
+        set_tag(
+            "sliding_sync.sync_type", "initial" if from_token is None else "incremental"
+        )
         set_tag("sliding_sync.conn_id", body.conn_id or "")
         log_kv(
             {

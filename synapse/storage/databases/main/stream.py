@@ -812,6 +812,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return ret, key
 
+    @trace
     async def get_current_state_delta_membership_changes_for_user(
         self,
         user_id: str,
@@ -1186,6 +1187,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return None
 
+    @trace
     async def get_last_event_pos_in_room_before_stream_ordering(
         self,
         room_id: str,
@@ -2105,6 +2107,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return None
 
+    @trace
     def get_rooms_that_might_have_updates(
         self, room_ids: StrCollection, from_token: RoomStreamToken
     ) -> StrCollection:
