@@ -1415,7 +1415,8 @@ class UserByThreePid(RestServlet):
 class RedactUser(RestServlet):
     """
     Redact all the events of a given user in the given rooms or if empty dict is provided
-    then all events in all rooms user is member of
+    then all events in all rooms user is member of. Kicks off a background process and
+    returns an id that can be used to check on the progress of the redaction progress
     """
 
     PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
@@ -1437,6 +1438,37 @@ class RedactUser(RestServlet):
         if rooms == {}:
             rooms = await self._store.get_rooms_for_user(user_id)
 
-        await self.admin_handler.redact_events(user_id, rooms, requester)
+        redact_id = await self.admin_handler.start_redact_events(
+            user_id, list(rooms), requester.serialize()
+        )
 
-        return HTTPStatus.OK, {}
+        return HTTPStatus.OK, {"redact_id": redact_id}
+
+
+class RedactUserStatus(RestServlet):
+    """
+    Check on the progress of the redaction request represented by the provided ID, returning
+    the status of the process and a list of events that were unable to be redacted, if any
+    """
+
+    PATTERNS = admin_patterns("/user/redact_status/(?P<redact_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.admin_handler = hs.get_admin_handler()
+
+    async def on_GET(
+        self, request: SynapseRequest, redact_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+
+        task = await self.admin_handler.get_redact_task(redact_id)
+
+        if task:
+            assert task.result is not None
+            return HTTPStatus.OK, {
+                "status": task.status,
+                "failed_redactions": task.result["result"],
+            }
+        else:
+            raise NotFoundError("redact id '%s' not found" % redact_id)

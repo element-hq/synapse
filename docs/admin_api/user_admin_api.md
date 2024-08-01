@@ -1376,7 +1376,14 @@ POST /_synapse/admin/v1/user/$user_id/redact
 If an empty dict is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted, 
 otherwise all the events in the rooms provided in the request will be redacted. 
 
-An empty JSON dict is returned. 
+The API starts redaction process running, and returns immediately with a JSON body with
+a redact id which can be used to query the status of the redaction process:
+
+```json
+{
+    "redact_id": "<opaque id>"
+}
+```
 
 **Parameters**
 
@@ -1384,3 +1391,43 @@ The following parameters should be set in the URL:
 
 - `user_id` - The fully qualified MXID of the user: for example, `@user:server.com`.
 
+The following JSON body parameter must be provided:
+
+-  `rooms` - A list of rooms to redact the user's events in, if an empty list is provided all events in all rooms
+  the user is a member of will be redacted
+
+
+## Check the status of a redaction process
+
+It is possible to query the status of the background task for redacting a user's events.
+The status can be queried up to 24 hours after completion of the task,
+or until Synapse is restarted (whichever happens first).
+
+The API is:
+
+```
+GET /_synapse/admin/v1/user/redact_status/$redact_id
+```
+
+A response body like the following is returned:
+
+```
+{
+  "status": "active",
+  "failed_redactions": [],
+}
+```
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+* `redact_id` - The ID for this redaction, provided when the redaction was requested.
+
+
+**Response**
+
+The following fields are returned in the JSON response body:
+
+- status: one of scheduled/active/completed/failed, indicating the status of the redaction job
+- failed: a list of event ids the process was unable to redact, if any

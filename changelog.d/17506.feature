@@ -1,1 +1,1 @@
-Add an Admin API endpoint to redact all a user's events.
+Add an asynchronous Admin API endpoint to redact all a user's events, and an endpoint to check on the status of that redaction task.
