@@ -915,6 +915,12 @@ class SlidingSyncRestServlet(RestServlet):
                 "sliding_sync.room_subscriptions": list(
                     (body.room_subscriptions or {}).keys()
                 ),
+                # We also include the number of room subscriptions because logs are
+                # limited to 1024 characters and the large room ID list above can be cut
+                # off.
+                "sliding_sync.num_room_subscriptions": len(
+                    (body.room_subscriptions or {}).keys()
+                ),
             }
         )
 
