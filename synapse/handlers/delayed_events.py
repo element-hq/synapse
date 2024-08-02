@@ -27,6 +27,8 @@ from typing import (
     Dict,
     List,
     Optional,
+    Set,
+    Tuple,
 )
 
 import attr
@@ -100,11 +102,35 @@ class DelayedEventsHandler:
             events, remaining_timeout_delays = await self.store.process_all_delays(
                 self._get_current_ts()
             )
-            for args in events:
+            sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
+            for (
+                user_localpart,
+                room_id,
+                event_type,
+                state_key,
+                timestamp,
+                content,
+            ) in events:
+                if state_key is not None:
+                    state_info = (room_id, event_type, state_key)
+                    if state_info in sent_state:
+                        continue
+                else:
+                    state_info = None
                 try:
-                    await self._send_event(*args)
+                    await self._send_event(
+                        user_localpart,
+                        room_id,
+                        event_type,
+                        state_key,
+                        timestamp,
+                        content,
+                    )
+                    if state_info is not None:
+                        sent_state.add(state_info)
                 except Exception:
                     logger.exception("Failed to send delayed event on startup")
+            sent_state.clear()
 
             for delay_id, user_localpart, relative_delay in remaining_timeout_delays:
                 self._schedule(delay_id, user_localpart, relative_delay)
