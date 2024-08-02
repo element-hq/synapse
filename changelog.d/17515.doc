@@ -1,0 +1,3 @@
+Clarify default behaviour of the
+[`auto_accept_invites.worker_to_run_on`](https://element-hq.github.io/synapse/develop/usage/configuration/config_documentation.html#auto-accept-invites)
+option.
