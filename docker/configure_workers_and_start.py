@@ -959,6 +959,7 @@ def generate_worker_files(
         shared_worker_config=yaml.dump(shared_config),
         appservice_registrations=appservice_registrations,
         enable_redis=workers_in_use,
+        enable_mas=False,
         workers_in_use=workers_in_use,
         using_unix_sockets=using_unix_sockets,
     )
@@ -981,6 +982,7 @@ def generate_worker_files(
         "/etc/supervisor/supervisord.conf",
         main_config_path=config_path,
         enable_redis=workers_in_use,
+        enable_mas=False,
         using_unix_sockets=using_unix_sockets,
     )
 

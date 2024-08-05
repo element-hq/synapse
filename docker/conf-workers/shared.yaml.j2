@@ -20,4 +20,15 @@ app_service_config_files:
 {%- endfor %}
 {%- endif %}
 
+{% if enable_mas %}
+experimental_features:
+  msc3861:
+    enabled: true
+    issuer: "http://localhost:8008/"
+    client_id: "0000000000000000000SYNAPSE"
+    client_auth_method: client_secret_basic
+    client_secret: choozia3ThiefahZaofeiveish1kahr0
+    admin_token: eeShoo4ceebae4Lo4Che1hoofoophaiz
+{% endif %}
+
 {{ shared_worker_config }}
