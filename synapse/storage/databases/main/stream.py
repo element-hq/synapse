@@ -720,7 +720,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 defer.gatherResults(
                     [
                         run_in_background(
-                            self.get_room_events_stream_for_room,
+                            self.paginate_room_events_by_stream_ordering,
                             room_id=room_id,
                             from_key=from_key,
                             to_key=to_key,
@@ -749,7 +749,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if self._events_stream_cache.has_entity_changed(room_id, from_id)
         }
 
-    async def get_room_events_stream_for_room(
+    async def paginate_room_events_by_stream_ordering(
         self,
         *,
         room_id: str,

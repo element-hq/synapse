@@ -899,15 +899,15 @@ class SyncHandler:
                 paginate_room_events_by_topological_ordering: PaginateFunction = (
                     self.store.paginate_room_events_by_topological_ordering
                 )
-                get_room_events_stream_for_room: PaginateFunction = (
-                    self.store.get_room_events_stream_for_room
+                paginate_room_events_by_stream_ordering: PaginateFunction = (
+                    self.store.paginate_room_events_by_stream_ordering
                 )
                 pagination_method: PaginateFunction = (
                     # Use `topographical_ordering` for historical events
                     paginate_room_events_by_topological_ordering
                     if since_key is None
                     # Use `stream_ordering` for updates
-                    else get_room_events_stream_for_room
+                    else paginate_room_events_by_stream_ordering
                 )
                 events, end_key = await pagination_method(
                     room_id=room_id,
