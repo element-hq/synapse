@@ -51,6 +51,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Protocol,
     Set,
     Tuple,
     cast,
@@ -95,6 +96,18 @@ MAX_STREAM_SIZE = 1000
 
 _STREAM_TOKEN = "stream"
 _TOPOLOGICAL_TOKEN = "topological"
+
+
+class PaginateFunction(Protocol):
+    async def __call__(
+        self,
+        *,
+        room_id: str,
+        from_key: RoomStreamToken,
+        to_key: Optional[RoomStreamToken] = None,
+        direction: Direction = Direction.BACKWARDS,
+        limit: int = 0,
+    ) -> Tuple[List[EventBase], RoomStreamToken]: ...
 
 
 # Used as return values for pagination APIs
@@ -659,11 +672,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_room_events_stream_for_rooms(
         self,
+        *,
         room_ids: Collection[str],
         from_key: RoomStreamToken,
         to_key: Optional[RoomStreamToken] = None,
-        limit: int = 0,
         direction: Direction = Direction.BACKWARDS,
+        limit: int = 0,
     ) -> Dict[str, Tuple[List[EventBase], RoomStreamToken]]:
         """Get new room events in stream ordering since `from_key`.
 
@@ -707,11 +721,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     [
                         run_in_background(
                             self.get_room_events_stream_for_room,
-                            room_id,
-                            from_key,
-                            to_key,
-                            limit,
+                            room_id=room_id,
+                            from_key=from_key,
+                            to_key=to_key,
                             direction=direction,
+                            limit=limit,
                         )
                         for room_id in rm_ids
                     ],
@@ -737,11 +751,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
     async def get_room_events_stream_for_room(
         self,
+        *,
         room_id: str,
         from_key: RoomStreamToken,
         to_key: Optional[RoomStreamToken] = None,
-        limit: int = 0,
         direction: Direction = Direction.BACKWARDS,
+        limit: int = 0,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """
         Paginate events by `stream_ordering` in the room from the `from_key` in the
@@ -1858,7 +1873,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_token: RoomStreamToken,
         to_token: Optional[RoomStreamToken] = None,
         direction: Direction = Direction.BACKWARDS,
-        limit: int = -1,
+        limit: int = 0,
         event_filter: Optional[Filter] = None,
     ) -> Tuple[List[_EventDictReturn], RoomStreamToken]:
         """Returns list of events before or after a given token.
@@ -2015,11 +2030,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     @trace
     async def paginate_room_events(
         self,
+        *,
         room_id: str,
         from_key: RoomStreamToken,
         to_key: Optional[RoomStreamToken] = None,
         direction: Direction = Direction.BACKWARDS,
-        limit: int = -1,
+        limit: int = 0,
         event_filter: Optional[Filter] = None,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
         """Returns list of events before or after a given token.

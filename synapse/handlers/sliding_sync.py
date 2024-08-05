@@ -56,7 +56,10 @@ from synapse.storage.databases.main.state import (
     ROOM_UNKNOWN_SENTINEL,
     Sentinel as StateSentinel,
 )
-from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
+from synapse.storage.databases.main.stream import (
+    CurrentStateDeltaMembership,
+    PaginateFunction,
+)
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -1791,10 +1794,13 @@ class SlidingSyncHandler:
         # We should return historical messages (before token range) in the
         # following cases because we want clients to be able to show a basic
         # screen of information:
+        #
         #  - Initial sync (because no `from_token` to limit us anyway)
         #  - When users `newly_joined`
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
+        #
+        # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
         from_bound = None
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
@@ -1855,19 +1861,40 @@ class SlidingSyncHandler:
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
-            timeline_events, new_room_key = (
-                await self.store.get_room_events_stream_for_room(
-                    room_id=room_id,
-                    # The bounds are reversed so we can paginate backwards
-                    # (from newer to older events) starting at to_bound.
-                    # This ensures we fill the `limit` with the newest events first,
-                    from_key=to_bound,
-                    to_key=from_bound,
-                    direction=Direction.BACKWARDS,
-                    # We add one so we can determine if there are enough events to saturate
-                    # the limit or not (see `limited`)
-                    limit=room_sync_config.timeline_limit + 1,
-                )
+            # For initial `/sync` (and other historical scenarios mentioned above), we
+            # want to view a historical section of the timeline; to fetch events by
+            # `topological_ordering` (best representation of the room DAG as others were
+            # seeing it at the time). This also aligns with the order that `/messages`
+            # returns events in.
+            #
+            # For incremental `/sync`, we want to get all updates for rooms since
+            # the last `/sync` (regardless if those updates arrived late or happened
+            # a while ago in the past); to fetch events by `stream_ordering` (in the
+            # order they were received by the server).
+            #
+            # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+            paginate_room_events: PaginateFunction = self.store.paginate_room_events
+            get_room_events_stream_for_room: PaginateFunction = (
+                self.store.get_room_events_stream_for_room
+            )
+            pagination_method: PaginateFunction = (
+                # Use `topographical_ordering` for historical events
+                paginate_room_events
+                if from_bound is None
+                # Use `stream_ordering` for updates
+                else get_room_events_stream_for_room
+            )
+            timeline_events, new_room_key = await pagination_method(
+                room_id=room_id,
+                # The bounds are reversed so we can paginate backwards
+                # (from newer to older events) starting at to_bound.
+                # This ensures we fill the `limit` with the newest events first,
+                from_key=to_bound,
+                to_key=from_bound,
+                direction=Direction.BACKWARDS,
+                # We add one so we can determine if there are enough events to saturate
+                # the limit or not (see `limited`)
+                limit=room_sync_config.timeline_limit + 1,
             )
 
             # We want to return the events in ascending order (the last event is the

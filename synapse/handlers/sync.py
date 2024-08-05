@@ -894,7 +894,7 @@ class SyncHandler:
                 if since_key:
                     # Fetch events by `stream_ordering` for incremental sync
                     events, end_key = await self.store.get_room_events_stream_for_room(
-                        room_id,
+                        room_id=room_id,
                         limit=load_limit + 1,
                         from_key=end_key,
                         to_key=since_key,
