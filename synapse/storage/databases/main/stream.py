@@ -878,7 +878,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             )
         else:
             # TODO (erikj): We should work out what to do here instead. (same as
-            # `_paginate_room_events_txn(...)`)
+            # `_paginate_room_events_by_topological_ordering_txn(...)`)
             next_key = to_key if to_key else from_key
 
         return ret, next_key
@@ -1188,7 +1188,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         rows, token = await self.db_pool.runInteraction(
             "get_recent_event_ids_for_room",
-            self._paginate_room_events_txn,
+            self._paginate_room_events_by_topological_ordering_txn,
             room_id,
             from_token=end_token,
             limit=limit,
@@ -1693,7 +1693,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             topological=topological_ordering, stream=stream_ordering
         )
 
-        rows, start_token = self._paginate_room_events_txn(
+        rows, start_token = self._paginate_room_events_by_topological_ordering_txn(
             txn,
             room_id,
             before_token,
@@ -1703,7 +1703,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         )
         events_before = [r.event_id for r in rows]
 
-        rows, end_token = self._paginate_room_events_txn(
+        rows, end_token = self._paginate_room_events_by_topological_ordering_txn(
             txn,
             room_id,
             after_token,
@@ -1866,7 +1866,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     def has_room_changed_since(self, room_id: str, stream_id: int) -> bool:
         return self._events_stream_cache.has_entity_changed(room_id, stream_id)
 
-    def _paginate_room_events_txn(
+    def _paginate_room_events_by_topological_ordering_txn(
         self,
         txn: LoggingTransaction,
         room_id: str,
@@ -2028,7 +2028,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         return rows, next_token
 
     @trace
-    async def paginate_room_events(
+    async def paginate_room_events_by_topological_ordering(
         self,
         *,
         room_id: str,
@@ -2059,8 +2059,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             and `to_key`).
         """
         rows, token = await self.db_pool.runInteraction(
-            "paginate_room_events",
-            self._paginate_room_events_txn,
+            "paginate_room_events_by_topological_ordering",
+            self._paginate_room_events_by_topological_ordering_txn,
             room_id,
             from_key,
             to_key,

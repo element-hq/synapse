@@ -1877,13 +1877,15 @@ class SlidingSyncHandler:
             # FIXME: Using workaround for mypy,
             # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
             # https://github.com/python/mypy/issues/17479
-            paginate_room_events: PaginateFunction = self.store.paginate_room_events
+            paginate_room_events_by_topological_ordering: PaginateFunction = (
+                self.store.paginate_room_events_by_topological_ordering
+            )
             get_room_events_stream_for_room: PaginateFunction = (
                 self.store.get_room_events_stream_for_room
             )
             pagination_method: PaginateFunction = (
                 # Use `topographical_ordering` for historical events
-                paginate_room_events
+                paginate_room_events_by_topological_ordering
                 if from_bound is None
                 # Use `stream_ordering` for updates
                 else get_room_events_stream_for_room
