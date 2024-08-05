@@ -1873,6 +1873,10 @@ class SlidingSyncHandler:
             # order they were received by the server).
             #
             # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+            #
+            # FIXME: Using workaround for mypy,
+            # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
+            # https://github.com/python/mypy/issues/17479
             paginate_room_events: PaginateFunction = self.store.paginate_room_events
             get_room_events_stream_for_room: PaginateFunction = (
                 self.store.get_room_events_stream_for_room

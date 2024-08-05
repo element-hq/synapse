@@ -65,6 +65,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -891,23 +892,36 @@ class SyncHandler:
                 # order they were received by the server).
                 #
                 # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
-                if since_key:
-                    # Fetch events by `stream_ordering` for incremental sync
-                    events, end_key = await self.store.get_room_events_stream_for_room(
-                        room_id=room_id,
-                        limit=load_limit + 1,
-                        from_key=end_key,
-                        to_key=since_key,
-                        direction=Direction.BACKWARDS,
-                    )
-                    # We want to return the events in ascending order (the last event is the
-                    # most recent).
-                    events.reverse()
-                else:
-                    # Fetch events by `topological_ordering` for initial sync
-                    events, end_key = await self.store.get_recent_events_for_room(
-                        room_id, limit=load_limit + 1, end_token=end_key
-                    )
+                #
+                # FIXME: Using workaround for mypy,
+                # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
+                # https://github.com/python/mypy/issues/17479
+                paginate_room_events: PaginateFunction = self.store.paginate_room_events
+                get_room_events_stream_for_room: PaginateFunction = (
+                    self.store.get_room_events_stream_for_room
+                )
+                pagination_method: PaginateFunction = (
+                    # Use `topographical_ordering` for historical events
+                    paginate_room_events
+                    if since_key is None
+                    # Use `stream_ordering` for updates
+                    else get_room_events_stream_for_room
+                )
+                events, end_key = await pagination_method(
+                    room_id=room_id,
+                    # The bounds are reversed so we can paginate backwards
+                    # (from newer to older events) starting at to_bound.
+                    # This ensures we fill the `limit` with the newest events first,
+                    from_key=end_key,
+                    to_key=since_key,
+                    direction=Direction.BACKWARDS,
+                    # We add one so we can determine if there are enough events to saturate
+                    # the limit or not (see `limited`)
+                    limit=load_limit + 1,
+                )
+                # We want to return the events in ascending order (the last event is the
+                # most recent).
+                events.reverse()
 
                 log_kv({"loaded_recents": len(events)})
 
