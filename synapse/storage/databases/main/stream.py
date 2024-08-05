@@ -767,9 +767,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             from_key: The token to stream from (starting point and heading in the given
                 direction)
             to_key: The token representing the end stream position (end point)
-            limit: Maximum number of events to return
             direction: Indicates whether we are paginating forwards or backwards
                 from `from_key`.
+            limit: Maximum number of events to return
 
         Returns:
             The results as a list of events and a token that points to the end
@@ -2038,18 +2038,19 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         limit: int = 0,
         event_filter: Optional[Filter] = None,
     ) -> Tuple[List[EventBase], RoomStreamToken]:
-        """Returns list of events before or after a given token.
-
-        When Direction.FORWARDS: from_key < x <= to_key
-        When Direction.BACKWARDS: from_key >= x > to_key
+        """
+        Paginate events by `topological_ordering` (tie-break with `stream_ordering`) in
+        the room from the `from_key` in the given `direction` to the `to_key` or
+        `limit`.
 
         Args:
             room_id
-            from_key: The token used to stream from
-            to_key: A token which if given limits the results to only those before
+            from_key: The token to stream from (starting point and heading in the given
+                direction)
+            to_key: The token representing the end stream position (end point)
             direction: Indicates whether we are paginating forwards or backwards
                 from `from_key`.
-            limit: The maximum number of events to return.
+            limit: Maximum number of events to return
             event_filter: If provided filters the events to those that match the filter.
 
         Returns:
@@ -2057,6 +2058,9 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             of the result set. If no events are returned then the end of the
             stream has been reached (i.e. there are no events between `from_key`
             and `to_key`).
+
+            When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
+            When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
         rows, token = await self.db_pool.runInteraction(
             "paginate_room_events_by_topological_ordering",
