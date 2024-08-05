@@ -661,7 +661,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_ids: Collection[str],
         from_key: RoomStreamToken,
-        to_key: RoomStreamToken,
+        to_key: Optional[RoomStreamToken] = None,
         limit: int = 0,
         direction: Direction = Direction.BACKWARDS,
     ) -> Dict[str, Tuple[List[EventBase], RoomStreamToken]]:
