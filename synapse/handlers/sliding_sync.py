@@ -47,6 +47,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
+from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event, strip_event
 from synapse.handlers.relations import BundledAggregations
@@ -490,6 +491,14 @@ class SlidingSyncHandler:
             # We no longer support AS users using /sync directly.
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
+
+        if from_token:
+            # Check that we recognize the connection position, if not tell the
+            # clients that they need to start again.
+            if not await self.connection_store.is_valid_token(
+                sync_config, from_token.connection_position
+            ):
+                raise SlidingSyncUnknownPosition()
 
         await self.connection_store.mark_token_seen(
             sync_config=sync_config,
@@ -2820,6 +2829,16 @@ class SlidingSyncConnectionStore:
     _connections: Dict[Tuple[str, str], Dict[int, Dict[str, HaveSentRoom]]] = (
         attr.Factory(dict)
     )
+
+    async def is_valid_token(
+        self, sync_config: SlidingSyncConfig, connection_token: int
+    ) -> bool:
+        """Return whether the connection token is valid/recognized"""
+        if connection_token == 0:
+            return True
+
+        conn_key = self._get_connection_key(sync_config)
+        return connection_token in self._connections.get(conn_key, {})
 
     async def have_sent_room(
         self, sync_config: SlidingSyncConfig, connection_token: int, room_id: str
