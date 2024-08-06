@@ -780,6 +780,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
+
+        # FIXME: When going forwards, we should enforce that the `to_key` is not `None`
+        # because we always need an upper bound when querying the events stream (as
+        # otherwise we'll potentially pick up events that are not fully persisted).
+
         # We should only be working with `stream_ordering` tokens here
         assert from_key is None or from_key.topological is None
         assert to_key is None or to_key.topological is None
@@ -2065,6 +2070,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
+
+        # FIXME: When going forwards, we should enforce that the `to_key` is not `None`
+        # because we always need an upper bound when querying the events stream (as
+        # otherwise we'll potentially pick up events that are not fully persisted).
+
         # We have these checks outside of the transaction function (txn) to save getting
         # a DB connection and switching threads if we don't need to.
         #
