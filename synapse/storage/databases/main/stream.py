@@ -2062,6 +2062,30 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
+        # We have these checks outside of the transaction function (txn) to save getting
+        # a DB connection and switching threads if we don't need to.
+        #
+        # We can bail early if we're looking forwards, and our `to_key` is already
+        # before our `from_key`.
+        if (
+            direction == Direction.FORWARDS
+            and to_key is not None
+            and to_key.is_before_or_eq(from_key)
+        ):
+            # Token selection matches what we do in `_paginate_room_events_txn` if there
+            # are no rows
+            return [], to_key if to_key else from_key
+        # Or vice-versa, if we're looking backwards and our `from_key` is already before
+        # our `to_key`.
+        elif (
+            direction == Direction.BACKWARDS
+            and to_key is not None
+            and from_key.is_before_or_eq(to_key)
+        ):
+            # Token selection matches what we do in `_paginate_room_events_txn` if there
+            # are no rows
+            return [], to_key if to_key else from_key
+
         rows, token = await self.db_pool.runInteraction(
             "paginate_room_events_by_topological_ordering",
             self._paginate_room_events_by_topological_ordering_txn,
