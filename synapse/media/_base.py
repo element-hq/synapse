@@ -26,7 +26,6 @@ import urllib
 from abc import ABC, abstractmethod
 from types import TracebackType
 from typing import (
-    TYPE_CHECKING,
     Awaitable,
     Dict,
     Generator,
@@ -48,10 +47,6 @@ from synapse.http.site import SynapseRequest
 from synapse.logging.context import make_deferred_yieldable
 from synapse.util import Clock
 from synapse.util.stringutils import is_ascii
-
-if TYPE_CHECKING:
-    from synapse.storage.databases.main.media_repository import LocalMedia
-
 
 logger = logging.getLogger(__name__)
 
@@ -279,7 +274,9 @@ async def respond_with_multipart_responder(
     clock: Clock,
     request: SynapseRequest,
     responder: "Optional[Responder]",
-    media_info: "LocalMedia",
+    media_type: str,
+    media_length: Optional[int],
+    upload_name: Optional[str],
 ) -> None:
     """
     Responds to requests originating from the federation media `/download` endpoint by
@@ -303,7 +300,7 @@ async def respond_with_multipart_responder(
             )
             return
 
-        if media_info.media_type.lower().split(";", 1)[0] in INLINE_CONTENT_TYPES:
+        if media_type.lower().split(";", 1)[0] in INLINE_CONTENT_TYPES:
             disposition = "inline"
         else:
             disposition = "attachment"
@@ -311,16 +308,16 @@ async def respond_with_multipart_responder(
         def _quote(x: str) -> str:
             return urllib.parse.quote(x.encode("utf-8"))
 
-        if media_info.upload_name:
-            if _can_encode_filename_as_token(media_info.upload_name):
+        if upload_name:
+            if _can_encode_filename_as_token(upload_name):
                 disposition = "%s; filename=%s" % (
                     disposition,
-                    media_info.upload_name,
+                    upload_name,
                 )
             else:
                 disposition = "%s; filename*=utf-8''%s" % (
                     disposition,
-                    _quote(media_info.upload_name),
+                    _quote(upload_name),
                 )
 
         from synapse.media.media_storage import MultipartFileConsumer
@@ -330,14 +327,14 @@ async def respond_with_multipart_responder(
         multipart_consumer = MultipartFileConsumer(
             clock,
             request,
-            media_info.media_type,
+            media_type,
             {},
             disposition,
-            media_info.media_length,
+            media_length,
         )
 
         logger.debug("Responding to media request with responder %s", responder)
-        if media_info.media_length is not None:
+        if media_length is not None:
             content_length = multipart_consumer.content_length()
             assert content_length is not None
             request.setHeader(b"Content-Length", b"%d" % (content_length,))
