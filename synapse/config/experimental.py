@@ -443,6 +443,20 @@ class ExperimentalConfig(Config):
             "msc3823_account_suspension", False
         )
 
+        # MSC4140: Delayed events
+        # The maximum allowed duration for delayed events.
+        try:
+            self.msc4140_max_delay = int(experimental["msc4140_max_delay"])
+            if self.msc4140_max_delay <= 0:
+                raise ValueError
+        except ValueError:
+            raise ConfigError(
+                "msc4140_max_delay must be a positive integer",
+                ("experimental", "msc4140_max_delay"),
+            )
+        except KeyError:
+            self.msc4140_max_delay = 10 * 365 * 24 * 60 * 60 * 1000  # 10 years
+
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
 
