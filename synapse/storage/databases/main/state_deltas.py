@@ -24,6 +24,7 @@ from typing import List, Optional, Tuple
 
 import attr
 
+from synapse.logging.opentracing import trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.databases.main.stream import _filter_results_by_stream
@@ -159,6 +160,7 @@ class StateDeltasStore(SQLBaseStore):
             self._get_max_stream_id_in_current_state_deltas_txn,
         )
 
+    @trace
     async def get_current_state_deltas_for_room(
         self, room_id: str, from_token: RoomStreamToken, to_token: RoomStreamToken
     ) -> List[StateDelta]:
