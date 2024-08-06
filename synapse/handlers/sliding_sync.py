@@ -495,6 +495,14 @@ class SlidingSyncHandler:
         if from_token:
             # Check that we recognize the connection position, if not tell the
             # clients that they need to start again.
+            #
+            # If we don't do this and the client asks for the full range of
+            # rooms, we end up sending down all rooms and their state from
+            # scratch (which can be very slow). By expiring the connection we
+            # allow the client a chance to do an initial request with a smaller
+            # range of rooms to get them some results sooner but will end up
+            # taking the same amount of time (more with round-trips and
+            # re-processing) in the end to get everything again.
             if not await self.connection_store.is_valid_token(
                 sync_config, from_token.connection_position
             ):

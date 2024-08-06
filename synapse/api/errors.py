@@ -854,7 +854,7 @@ class PartialStateConflictError(SynapseError):
 
 
 class SlidingSyncUnknownPosition(SynapseError):
-    """An error that Synapse can return to signal to the client to reset their
+    """An error that Synapse can return to signal to the client to expire their
     sliding sync connection (i.e. send a new request without a `?since=`
     param).
     """
