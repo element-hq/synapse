@@ -1,1 +1,0 @@
-Reset the sliding sync connection if we don't recognize the per-connection state position.
