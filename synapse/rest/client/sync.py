@@ -1150,6 +1150,16 @@ class SlidingSyncRestServlet(RestServlet):
                 },
             }
 
+        if extensions.receipts is not None:
+            serialized_extensions["receipts"] = {
+                "rooms": extensions.receipts.room_id_to_receipt_map,
+            }
+
+        if extensions.typing is not None:
+            serialized_extensions["typing"] = {
+                "rooms": extensions.typing.room_id_to_typing_map,
+            }
+
         return serialized_extensions
 
 
