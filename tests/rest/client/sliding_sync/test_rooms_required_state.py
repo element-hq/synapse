@@ -164,7 +164,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
     def test_rooms_incremental_sync_restart(self) -> None:
         """
         Test that after a restart (and so the in memory caches are reset) that
-        we correctly return an `M_UNKNOWN_POST`
+        we correctly return an `M_UNKNOWN_POS`
         """
 
         user1_id = self.register_user("user1", "pass")
