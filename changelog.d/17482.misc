@@ -1,1 +1,0 @@
-Refactor Sliding Sync tests to better utilize the `SlidingSyncBase`.
