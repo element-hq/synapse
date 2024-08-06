@@ -17,16 +17,24 @@
 #
 
 import logging
+from contextlib import asynccontextmanager
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import (
+    TYPE_CHECKING,
+    AsyncContextManager,
+    AsyncIterator,
+    Dict,
+    List,
+    Optional,
+)
 
 import attr
 
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, ShadowBanError, SynapseError
+from synapse.api.errors import Codes, NotFoundError, ShadowBanError, SynapseError
 from synapse.events import EventBase
 from synapse.logging.opentracing import set_tag
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -46,12 +54,15 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.util.async_helpers import Linearizer, ReadWriteLock
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+_STATE_LOCK_KEY = "STATE_LOCK_KEY"
 
 
 class _UpdateDelayedEventAction(Enum):
@@ -79,6 +90,10 @@ class DelayedEventsHandler:
         self.room_member_handler = hs.get_room_member_handler()
 
         self._delayed_calls: Dict[_DelayedCallKey, IDelayedCall] = {}
+        # This is for making delayed event actions atomic
+        self._linearizer = Linearizer("delayed_events_handler")
+        # This is to prevent running actions on delayed events removed due to state changes
+        self._state_lock = ReadWriteLock()
 
         async def _schedule_db_events() -> None:
             # TODO: Sync all state first, so that affected delayed state events will be cancelled
@@ -111,18 +126,19 @@ class DelayedEventsHandler:
         """
         state_key = event.get_state_key()
         if state_key is not None:
-            for (
-                removed_timeout_delay_id,
-                removed_timeout_delay_user_localpart,
-            ) in await self.store.remove_state_events(
-                event.room_id,
-                event.type,
-                state_key,
-            ):
-                self._unschedule(
+            async with self._get_state_context():
+                for (
                     removed_timeout_delay_id,
                     removed_timeout_delay_user_localpart,
-                )
+                ) in await self.store.remove_state_events(
+                    event.room_id,
+                    event.type,
+                    state_key,
+                ):
+                    self._unschedule(
+                        removed_timeout_delay_id,
+                        removed_timeout_delay_user_localpart,
+                    )
 
     async def add(
         self,
@@ -219,46 +235,55 @@ class DelayedEventsHandler:
         user_localpart = UserLocalpart(requester.user.localpart)
 
         await self.request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
 
-        if enum_action == _UpdateDelayedEventAction.CANCEL:
-            for removed_timeout_delay_id in await self.store.remove(
-                delay_id, user_localpart
-            ):
-                self._unschedule(removed_timeout_delay_id, user_localpart)
+        async with self._get_delay_context(delay_id, user_localpart):
+            if enum_action == _UpdateDelayedEventAction.CANCEL:
+                for removed_timeout_delay_id in await self.store.remove(
+                    delay_id, user_localpart
+                ):
+                    self._unschedule(removed_timeout_delay_id, user_localpart)
 
-        elif enum_action == _UpdateDelayedEventAction.RESTART:
-            delay = await self.store.restart(
-                delay_id,
-                user_localpart,
-                self._get_current_ts(),
-            )
+            elif enum_action == _UpdateDelayedEventAction.RESTART:
+                delay = await self.store.restart(
+                    delay_id,
+                    user_localpart,
+                    self._get_current_ts(),
+                )
 
-            self._unschedule(delay_id, user_localpart)
-            self._schedule(delay_id, user_localpart, delay)
+                self._unschedule(delay_id, user_localpart)
+                self._schedule(delay_id, user_localpart, delay)
 
-        elif enum_action == _UpdateDelayedEventAction.SEND:
-            args, removed_timeout_delay_ids = await self.store.pop_event(
-                delay_id, user_localpart
-            )
+            elif enum_action == _UpdateDelayedEventAction.SEND:
+                args, removed_timeout_delay_ids = await self.store.pop_event(
+                    delay_id, user_localpart
+                )
 
-            for timeout_delay_id in removed_timeout_delay_ids:
-                self._unschedule(timeout_delay_id, user_localpart)
-            await self._send_event(user_localpart, *args)
+                for timeout_delay_id in removed_timeout_delay_ids:
+                    self._unschedule(timeout_delay_id, user_localpart)
+                await self._send_event(user_localpart, *args)
 
     async def _send_on_timeout(
         self, delay_id: DelayID, user_localpart: UserLocalpart
     ) -> None:
         del self._delayed_calls[_DelayedCallKey(delay_id, user_localpart)]
 
-        args, removed_timeout_delay_ids = await self.store.pop_event(
-            delay_id, user_localpart
-        )
+        async with self._get_delay_context(delay_id, user_localpart):
+            try:
+                args, removed_timeout_delay_ids = await self.store.pop_event(
+                    delay_id, user_localpart
+                )
+            except NotFoundError:
+                logger.debug(
+                    "delay_id %s for local user %s was removed after it timed out, but before it was sent on timeout",
+                    delay_id,
+                    user_localpart,
+                )
+                return
 
-        removed_timeout_delay_ids.remove(delay_id)
-        for timeout_delay_id in removed_timeout_delay_ids:
-            self._unschedule(timeout_delay_id, user_localpart)
-        await self._send_event(user_localpart, *args)
+            removed_timeout_delay_ids.remove(delay_id)
+            for timeout_delay_id in removed_timeout_delay_ids:
+                self._unschedule(timeout_delay_id, user_localpart)
+            await self._send_event(user_localpart, *args)
 
     def _schedule(
         self,
@@ -359,3 +384,17 @@ class DelayedEventsHandler:
 
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self.clock.time_msec())
+
+    @asynccontextmanager
+    async def _get_delay_context(
+        self, delay_id: DelayID, user_localpart: UserLocalpart
+    ) -> AsyncIterator[None]:
+        await self._initialized_from_db
+        # TODO: Use parenthesized context manager once the minimum supported Python version is 3.10
+        async with self._state_lock.read(_STATE_LOCK_KEY), self._linearizer.queue(
+            _DelayedCallKey(delay_id, user_localpart)
+        ):
+            yield
+
+    def _get_state_context(self) -> AsyncContextManager:
+        return self._state_lock.write(_STATE_LOCK_KEY)
