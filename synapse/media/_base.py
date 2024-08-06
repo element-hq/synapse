@@ -25,15 +25,7 @@ import os
 import urllib
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import (
-    Awaitable,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Tuple,
-    Type,
-)
+from typing import Awaitable, Dict, Generator, List, Optional, Tuple, Type
 
 import attr
 
