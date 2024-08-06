@@ -53,6 +53,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.event_federation import EventFederationStore
 from synapse.storage.databases.main.events_worker import EventCacheEntry
@@ -1159,12 +1160,11 @@ class PersistEventsStore:
         # We find out which membership events we may have deleted
         # and which we have added, then we invalidate the caches for all
         # those users.
-        members_changed = {
+        members_to_cache_bust = {
             state_key
             for ev_type, state_key in itertools.chain(to_delete, to_insert)
             if ev_type == EventTypes.Member
         }
-        members_to_cache_bust = members_changed.copy()
 
         if delta_state.no_longer_in_room:
             # Server is no longer in the room so we delete the room from
@@ -1317,7 +1317,9 @@ class PersistEventsStore:
                     )
                     sliding_sync_joined_rooms_insert_map["is_encrypted"] = is_encrypted
                 elif event_id == room_name_event_id:
-                    room_name = event_json.get("content", {}).get("name")
+                    room_name = event_json.get("content", {}).get(
+                        EventContentFields.ROOM_NAME
+                    )
                     sliding_sync_joined_rooms_insert_map["room_name"] = room_name
                 else:
                     raise AssertionError(
@@ -1325,13 +1327,14 @@ class PersistEventsStore:
                     )
 
             # Update the `sliding_sync_joined_rooms` table
-            insert_keys, insert_values = sliding_sync_joined_rooms_insert_map.items()
+            insert_keys = sliding_sync_joined_rooms_insert_map.keys()
+            insert_values = sliding_sync_joined_rooms_insert_map.values()
             if len(insert_keys) > 0:
                 # TODO: Should we add `bump_stamp` on insert?
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_joined_rooms
-                        (room_id, stream_ordering, {", ".join(insert_keys)})
+                        (room_id, event_stream_ordering, {", ".join(insert_keys)})
                     VALUES (
                         ?,
                         (SELECT stream_ordering FROM events WHERE event_id = ?)
@@ -1381,9 +1384,97 @@ class PersistEventsStore:
 
         # We now update `sliding_sync_non_join_memberships`. We do this regardless of
         # whether the server is still in the room or not because we still want a row if
-        # we just left/kicked or got banned from the room.
-        #
-        # TODO
+        # a local user was just left/kicked or got banned from the room.
+        if to_insert:
+            membership_event_ids: List[str] = []
+            for state_key, event_id in to_insert.items():
+                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
+                    membership_event_ids.append(event_id)
+
+            # Fetch the events from the database
+            (
+                event_type_and_state_key_in_list_clause,
+                event_type_and_state_key_args,
+            ) = make_tuple_in_list_sql_clause(
+                self.database_engine,
+                ("type", "state_key"),
+                [
+                    (EventTypes.Create, ""),
+                    (EventTypes.RoomEncryption, ""),
+                    (EventTypes.Name, ""),
+                ],
+            )
+            txn.execute(
+                f"""
+                SELECT event_id, type, state_key, json
+                FROM current_state_events
+                INNER JOIN event_json USING (event_id)
+                WHERE
+                    room_id = ?
+                    AND {event_type_and_state_key_in_list_clause}
+                """,
+                [room_id] + event_type_and_state_key_args,
+            )
+
+            # Parse the raw event JSON
+            sliding_sync_non_joined_rooms_insert_map: Dict[
+                str, Optional[Union[str, bool]]
+            ] = {}
+            for row in txn:
+                event_id, event_type, state_key, json = row
+                event_json = db_to_json(json)
+
+                if event_type == EventTypes.Create:
+                    room_type = event_json.get("content", {}).get(
+                        EventContentFields.ROOM_TYPE
+                    )
+                    sliding_sync_non_joined_rooms_insert_map["room_type"] = room_type
+                elif event_type == EventTypes.RoomEncryption:
+                    is_encrypted = event_json.get("content", {}).get(
+                        EventContentFields.ENCRYPTION_ALGORITHM
+                    )
+                    sliding_sync_non_joined_rooms_insert_map["is_encrypted"] = (
+                        is_encrypted
+                    )
+                elif event_type == EventTypes.Name:
+                    room_name = event_json.get("content", {}).get(
+                        EventContentFields.ROOM_NAME
+                    )
+                    sliding_sync_non_joined_rooms_insert_map["room_name"] = room_name
+                else:
+                    raise AssertionError(
+                        f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
+                    )
+
+            # Update the `sliding_sync_non_join_memberships` table
+            insert_keys = sliding_sync_non_joined_rooms_insert_map.keys()
+            insert_values = sliding_sync_non_joined_rooms_insert_map.values()
+            # We `DO NOTHING` on conflict because if the row is already in the database,
+            # we just assume that it was already processed (values should be the same anyways).
+            txn.execute_batch(
+                f"""
+                INSERT INTO sliding_sync_non_join_memberships
+                    (room_id, membership_event_id, user_id, membership, event_stream_ordering, {", ".join(insert_keys)})
+                VALUES (
+                    ?, ?, ?,
+                    (SELECT membership FROM room_memberships WHERE event_id = ?),
+                    (SELECT stream_ordering FROM events WHERE event_id = ?)
+                    {", ".join("?" for _ in insert_values)}
+                )
+                ON CONFLICT (room_id)
+                DO NOTHING
+                """,
+                [
+                    (
+                        room_id,
+                        membership_event_id,
+                        state_key[1],
+                        membership_event_id,
+                        membership_event_id,
+                    )
+                    for membership_event_id in membership_event_ids
+                ],
+            )
 
         txn.call_after(
             self.store._curr_state_delta_stream_cache.entity_has_changed,
