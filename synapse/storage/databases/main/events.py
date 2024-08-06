@@ -1330,20 +1330,20 @@ class PersistEventsStore:
             insert_keys = sliding_sync_joined_rooms_insert_map.keys()
             insert_values = sliding_sync_joined_rooms_insert_map.values()
             if len(insert_keys) > 0:
-                # TODO: Should we add `bump_stamp` on insert?
+                # TODO: Should we add `event_stream_ordering`, `bump_stamp` on insert?
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_joined_rooms
-                        (room_id, event_stream_ordering, {", ".join(insert_keys)})
+                        (room_id, {", ".join(insert_keys)})
                     VALUES (
                         ?,
-                        (SELECT stream_ordering FROM events WHERE event_id = ?)
                         {", ".join("?" for _ in insert_values)}
                     )
                     ON CONFLICT (room_id)
                     DO UPDATE SET
                         {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
                     """,
+                    [room_id] + list(insert_values),
                 )
 
         # We now update `local_current_membership`. We do this regardless
@@ -1386,12 +1386,15 @@ class PersistEventsStore:
         # whether the server is still in the room or not because we still want a row if
         # a local user was just left/kicked or got banned from the room.
         if to_insert:
-            membership_event_ids: List[str] = []
+            membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
                 if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
-                    membership_event_ids.append(event_id)
+                    membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             # Fetch the events from the database
+            #
+            # TODO: We should gather this data before we delete the
+            # `current_state_events` in a `no_longer_in_room` situation.
             (
                 event_type_and_state_key_in_list_clause,
                 event_type_and_state_key_args,
@@ -1406,11 +1409,11 @@ class PersistEventsStore:
             )
             txn.execute(
                 f"""
-                SELECT event_id, type, state_key, json
-                FROM current_state_events
-                INNER JOIN event_json USING (event_id)
+                SELECT c.event_id, c.type, c.state_key, j.json
+                FROM current_state_events AS c
+                INNER JOIN event_json AS j USING (event_id)
                 WHERE
-                    room_id = ?
+                    c.room_id = ?
                     AND {event_type_and_state_key_in_list_clause}
                 """,
                 [room_id] + event_type_and_state_key_args,
@@ -1451,6 +1454,8 @@ class PersistEventsStore:
             insert_values = sliding_sync_non_joined_rooms_insert_map.values()
             # We `DO NOTHING` on conflict because if the row is already in the database,
             # we just assume that it was already processed (values should be the same anyways).
+            #
+            # TODO: Only do this for non-join membership
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_non_join_memberships
@@ -1458,21 +1463,22 @@ class PersistEventsStore:
                 VALUES (
                     ?, ?, ?,
                     (SELECT membership FROM room_memberships WHERE event_id = ?),
-                    (SELECT stream_ordering FROM events WHERE event_id = ?)
+                    (SELECT stream_ordering FROM events WHERE event_id = ?),
                     {", ".join("?" for _ in insert_values)}
                 )
-                ON CONFLICT (room_id)
+                ON CONFLICT (room_id, membership_event_id)
                 DO NOTHING
                 """,
                 [
-                    (
+                    [
                         room_id,
                         membership_event_id,
-                        state_key[1],
+                        user_id,
                         membership_event_id,
                         membership_event_id,
-                    )
-                    for membership_event_id in membership_event_ids
+                    ]
+                    + list(insert_values)
+                    for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
                 ],
             )
 

@@ -19,6 +19,7 @@
 #
 #
 
+import logging
 from typing import List, Optional
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -34,6 +35,8 @@ from synapse.types import StateMap
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
+
+logger = logging.getLogger(__name__)
 
 
 class ExtremPruneTestCase(HomeserverTestCase):
@@ -481,3 +484,31 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         users = self.get_success(self.store.get_users_in_room(room_id))
         self.assertEqual(users, [])
+
+
+class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
+    """
+    Tests to make sure the
+    `sliding_sync_joined_rooms`/`sliding_sync_non_join_memberships` database tables are
+    populated correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def test_rooms_invite_shared_history_initial_sync(self) -> None:
+        """
+        TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # user1 joins the room
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
