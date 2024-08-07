@@ -21,8 +21,10 @@ incrementing integer, but backfilled events start with `stream_ordering=-1` and 
 
 ---
 
- - `/sync` returns things in the order they arrive at the server (`stream_ordering`).
- - `/messages` (and `/backfill` in the federation API) return them in the order determined by the event graph `(topological_ordering, stream_ordering)`.
+ - Incremental `/sync?since=xxx` returns things in the order they arrive at the server
+   (`stream_ordering`).
+ - Initial `/sync`, `/messages` (and `/backfill` in the federation API) return them in
+   the order determined by the event graph `(topological_ordering, stream_ordering)`.
 
 The general idea is that, if you're following a room in real-time (i.e.
 `/sync`), you probably want to see the messages as they arrive at your server,
