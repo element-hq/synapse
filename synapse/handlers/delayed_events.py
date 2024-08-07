@@ -19,7 +19,7 @@
 import logging
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 import attr
 
@@ -238,6 +238,13 @@ class DelayedEventsHandler:
             _DelayedCallKey(delay_id, user_localpart)
         )
         self.clock.cancel_call_later(delayed_call)
+
+    async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
+        """Return all pending delayed events requested by the given user."""
+        await self.request_ratelimiter.ratelimit(requester)
+        return await self.store.get_all_for_user(
+            UserLocalpart(requester.user.localpart)
+        )
 
     async def _send_event(
         self,

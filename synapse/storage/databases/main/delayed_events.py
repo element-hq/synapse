@@ -262,6 +262,48 @@ class DelayedEventsStore(SQLBaseStore):
 
         return await self.db_pool.runInteraction("restart", restart_txn)
 
+    async def get_all_for_user(
+        self,
+        user_localpart: UserLocalpart,
+    ) -> List[JsonDict]:
+        """Returns all pending delayed events owned by the given user."""
+        # TODO: Store and return "transaction_id"
+        # TODO: Support Pagination stream API ("next_batch" field)
+        rows = await self.db_pool.execute(
+            "get_all_for_user",
+            """
+            SELECT
+                delay_id,
+                room_id, event_type, state_key,
+                delay, parent_id,
+                running_since,
+                content
+            FROM delayed_events
+            LEFT JOIN delayed_event_timeouts USING (delay_rowid)
+            LEFT JOIN (
+                SELECT delay_id AS parent_id, child_rowid
+                FROM delayed_event_children
+                JOIN delayed_events ON parent_rowid = delay_rowid
+            ) ON delay_rowid = child_rowid
+            WHERE user_localpart = ?
+            """,
+            user_localpart,
+        )
+        return [
+            {
+                "delay_id": DelayID(row[0]),
+                "room_id": str(RoomID.from_string(row[1])),
+                "type": EventType(row[2]),
+                **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
+                **({"delay": Delay(row[4])} if row[4] is not None else {}),
+                **({"parent_delay_id": DelayID(row[5])} if row[5] is not None else {}),
+                "running_since": Timestamp(row[6]),
+                # TODO: Verify contents?
+                "content": db_to_json(row[7]),
+            }
+            for row in rows
+        ]
+
     async def pop_event(
         self,
         delay_id: DelayID,

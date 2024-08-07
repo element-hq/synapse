@@ -19,7 +19,7 @@
 """ This module contains REST servlets to do with delayed events: /delayed_events/<paths> """
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, List, Tuple
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
@@ -66,5 +66,26 @@ class UpdateDelayedEventServlet(RestServlet):
         return 200, {}
 
 
+# TODO: Needs unit testing
+class DelayedEventsServlet(RestServlet):
+    PATTERNS = client_patterns(
+        r"/org\.matrix\.msc4140/delayed_events$",
+        releases=(),
+    )
+    CATEGORY = "Delayed event management requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.auth = hs.get_auth()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
+
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, List[JsonDict]]:
+        requester = await self.auth.get_user_by_req(request)
+        # TODO: Support Pagination stream API ("from" query parameter)
+        data = await self.delayed_events_handler.get_all_for_user(requester)
+        return 200, data
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UpdateDelayedEventServlet(hs).register(http_server)
+    DelayedEventsServlet(hs).register(http_server)
