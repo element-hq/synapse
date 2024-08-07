@@ -789,7 +789,7 @@ class SpaceSummaryTestCase(unittest.HomeserverTestCase):
         async def summarize_remote_room_hierarchy(
             _self: Any, room: Any, suggested_only: bool
         ) -> Tuple[Optional[_RoomEntry], Dict[str, JsonDict], Set[str]]:
-            return requested_room_entry, {child_room: child_room}, set()
+            return requested_room_entry, {subroom: child_room}, set()
 
         expected = [
             (fed_space, [fed_subroom]),
