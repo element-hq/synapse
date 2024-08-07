@@ -171,23 +171,22 @@ class ClientRestResource(JsonResource):
                 )
 
             for servletfunc in SERVLET_GROUPS[servlet_group]:
-                if (
-                    servletfunc == pusher.register_servlets
-                    or servletfunc == logout.register_servlets
-                    or servletfunc == auth.register_servlets
-                    or servletfunc == tokenrefresh.register_servlets
-                    or servletfunc == reporting.register_servlets
-                    or servletfunc == openid.register_servlets
-                    or servletfunc == thirdparty.register_servlets
-                    or servletfunc == room_upgrade_rest_servlet.register_servlets
-                    or servletfunc == account_validity.register_servlets
-                    or servletfunc == admin.register_servlets_for_client_rest_resource
-                    or servletfunc == mutual_rooms.register_servlets
-                    or servletfunc == login_token_request.register_servlets
-                    or servletfunc == rendezvous.register_servlets
-                    or servletfunc == auth_issuer.register_servlets
-                ):
-                    if not is_main_process:
-                        continue
+                if not is_main_process and servletfunc in [
+                    pusher.register_servlets,
+                    logout.register_servlets,
+                    auth.register_servlets,
+                    tokenrefresh.register_servlets,
+                    reporting.register_servlets,
+                    openid.register_servlets,
+                    thirdparty.register_servlets,
+                    room_upgrade_rest_servlet.register_servlets,
+                    account_validity.register_servlets,
+                    admin.register_servlets_for_client_rest_resource,
+                    mutual_rooms.register_servlets,
+                    login_token_request.register_servlets,
+                    rendezvous.register_servlets,
+                    auth_issuer.register_servlets,
+                ]:
+                    continue
 
                 servletfunc(hs, client_resource)
