@@ -631,8 +631,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
     def test_rooms_required_state_partial_state(self) -> None:
         """
-        Test partially-stated room are excluded unless `rooms.required_state` is
-        lazy-loading room members.
+        Test partially-stated room are excluded if they require full state.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
