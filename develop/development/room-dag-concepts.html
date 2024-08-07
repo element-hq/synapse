@@ -174,8 +174,10 @@ messages are added to the DAG. Normally, <code>stream_ordering</code> is an auto
 incrementing integer, but backfilled events start with <code>stream_ordering=-1</code> and decrement.</p>
 <hr />
 <ul>
-<li><code>/sync</code> returns things in the order they arrive at the server (<code>stream_ordering</code>).</li>
-<li><code>/messages</code> (and <code>/backfill</code> in the federation API) return them in the order determined by the event graph <code>(topological_ordering, stream_ordering)</code>.</li>
+<li>Incremental <code>/sync?since=xxx</code> returns things in the order they arrive at the server
+(<code>stream_ordering</code>).</li>
+<li>Initial <code>/sync</code>, <code>/messages</code> (and <code>/backfill</code> in the federation API) return them in
+the order determined by the event graph <code>(topological_ordering, stream_ordering)</code>.</li>
 </ul>
 <p>The general idea is that, if you're following a room in real-time (i.e.
 <code>/sync</code>), you probably want to see the messages as they arrive at your server,
