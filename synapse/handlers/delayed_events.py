@@ -17,6 +17,7 @@
 #
 
 import logging
+from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Dict, Optional
 
@@ -43,6 +44,12 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class _UpdateDelayedEventAction(Enum):
+    CANCEL = "cancel"
+    RESTART = "restart"
+    SEND = "send"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -132,6 +139,58 @@ class DelayedEventsHandler:
             self._schedule(delay_id, user_localpart, Delay(delay))
 
         return delay_id
+
+    async def update(self, requester: Requester, delay_id: str, action: str) -> None:
+        """
+        Executes the appropriate action for the matching delayed event.
+
+        Params:
+            delay_id: The ID of the delayed event to act on.
+            action: What to do with the delayed event.
+
+        Raises:
+            SynapseError if the provided action is unknown, or is unsupported for the target delayed event.
+            NotFoundError if no matching delayed event could be found.
+        """
+        try:
+            enum_action = _UpdateDelayedEventAction(action)
+        except ValueError:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "'action' is not one of "
+                + ", ".join(f"'{m.value}'" for m in _UpdateDelayedEventAction),
+                Codes.INVALID_PARAM,
+            )
+
+        delay_id = DelayID(delay_id)
+        user_localpart = UserLocalpart(requester.user.localpart)
+
+        await self.request_ratelimiter.ratelimit(requester)
+
+        if enum_action == _UpdateDelayedEventAction.CANCEL:
+            for removed_timeout_delay_id in await self.store.remove(
+                delay_id, user_localpart
+            ):
+                self._unschedule(removed_timeout_delay_id, user_localpart)
+
+        elif enum_action == _UpdateDelayedEventAction.RESTART:
+            delay = await self.store.restart(
+                delay_id,
+                user_localpart,
+                self._get_current_ts(),
+            )
+
+            self._unschedule(delay_id, user_localpart)
+            self._schedule(delay_id, user_localpart, delay)
+
+        elif enum_action == _UpdateDelayedEventAction.SEND:
+            args, removed_timeout_delay_ids = await self.store.pop_event(
+                delay_id, user_localpart
+            )
+
+            for timeout_delay_id in removed_timeout_delay_ids:
+                self._unschedule(timeout_delay_id, user_localpart)
+            await self._send_event(user_localpart, *args)
 
     async def _send_on_timeout(
         self, delay_id: DelayID, user_localpart: UserLocalpart

@@ -30,6 +30,7 @@ from synapse.rest.client import (
     auth,
     auth_issuer,
     capabilities,
+    delayed_events,
     devices,
     directory,
     events,
@@ -103,6 +104,7 @@ class ClientRestResource(JsonResource):
         events.register_servlets(hs, client_resource)
 
         room.register_servlets(hs, client_resource)
+        delayed_events.register_servlets(hs, client_resource)
         login.register_servlets(hs, client_resource)
         profile.register_servlets(hs, client_resource)
         presence.register_servlets(hs, client_resource)

@@ -20,7 +20,13 @@ from binascii import crc32
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, NewType, Optional, Set, Tuple
 
-from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.api.errors import (
+    Codes,
+    InvalidAPICallError,
+    NotFoundError,
+    StoreError,
+    SynapseError,
+)
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import (
     DatabasePool,
@@ -200,6 +206,62 @@ class DelayedEventsStore(SQLBaseStore):
                 else:
                     raise e
 
+    async def restart(
+        self,
+        delay_id: DelayID,
+        user_localpart: UserLocalpart,
+        current_ts: Timestamp,
+    ) -> Delay:
+        """
+        Resets the matching delayed event, as long as it has a timeout.
+
+        Params:
+            delay_id: The ID of the delayed event to restart.
+            user_localpart: The localpart of the delayed event's owner.
+            current_ts: The current time, to which the delayed event's "running_since" will be set to.
+
+        Returns: The delay at which the delayed event will be sent (unless it is reset again).
+
+        Raises:
+            NotFoundError if there is no matching delayed event.
+            SynapseError if the matching delayed event has no timeout.
+        """
+
+        def restart_txn(txn: LoggingTransaction) -> Delay:
+            keyvalues = {
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+            }
+            row = self.db_pool.simple_select_one_txn(
+                txn,
+                table="delayed_events JOIN delayed_event_timeouts USING (delay_rowid)",
+                keyvalues=keyvalues,
+                retcols=("delay_rowid", "delay"),
+                allow_none=True,
+            )
+            if row is None:
+                try:
+                    self.db_pool.simple_select_one_onecol_txn(
+                        txn,
+                        table="delayed_events",
+                        keyvalues=keyvalues,
+                        retcol="1",
+                    )
+                except StoreError:
+                    raise NotFoundError("Delayed event not found")
+                else:
+                    raise InvalidAPICallError("Delayed event has no timeout")
+
+            self.db_pool.simple_update_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={"delay_rowid": row[0]},
+                updatevalues={"running_since": current_ts},
+            )
+            return Delay(row[1])
+
+        return await self.db_pool.runInteraction("restart", restart_txn)
+
     async def pop_event(
         self,
         delay_id: DelayID,
@@ -286,6 +348,32 @@ class DelayedEventsStore(SQLBaseStore):
             ),
             {DelayID(r[0]) for r in removed_timeout_delay_ids},
         )
+
+    async def remove(
+        self,
+        delay_id: DelayID,
+        user_localpart: UserLocalpart,
+    ) -> Set[DelayID]:
+        """
+        Removes the matching delayed event, as well as all of its child events if it is a parent.
+
+        Returns:
+            The IDs of all removed delayed events with a timeout that must be unscheduled.
+
+        Raises:
+            NotFoundError if there is no matching delayed event.
+        """
+
+        removed_timeout_delay_ids = await self.db_pool.runInteraction(
+            "remove",
+            self._remove_txn,
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+            },
+            retcols=("delay_id",),
+        )
+        return {DelayID(r[0]) for r in removed_timeout_delay_ids}
 
     def _remove_txn(
         self,
