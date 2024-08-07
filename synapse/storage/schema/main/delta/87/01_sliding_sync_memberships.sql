@@ -36,8 +36,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
 -- the membership event itself as the `bump_stamp`.
 CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
-    membership_event_id TEXT NOT NULL REFERENCES events(event_id),
     user_id TEXT NOT NULL,
+    membership_event_id TEXT NOT NULL REFERENCES events(event_id),
     membership TEXT NOT NULL,
     -- `stream_ordering` of the `membership_event_id`
     event_stream_ordering BIGINT REFERENCES events(stream_ordering),
@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
     -- `m.room.encryption` -> `content.algorithm` (according to the current state at the
     -- time of the membership)
     is_encrypted BOOLEAN,
-    PRIMARY KEY (room_id, membership_event_id)
+    PRIMARY KEY (room_id, user_id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_non_join_memberships_event_stream_ordering ON sliding_sync_non_join_memberships(event_stream_ordering);
+CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_non_join_memberships_membership_event_id ON sliding_sync_non_join_memberships(membership_event_id);
