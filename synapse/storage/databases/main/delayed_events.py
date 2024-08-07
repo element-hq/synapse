@@ -494,6 +494,30 @@ class DelayedEventsStore(SQLBaseStore):
         )
         return {DelayID(r[0]) for r in removed_timeout_delay_ids}
 
+    async def remove_state_events(
+        self,
+        room_id: str,
+        event_type: str,
+        state_key: str,
+    ) -> List[Tuple[DelayID, UserLocalpart]]:
+        """
+        Removes all matching delayed state events from the DB, as well as their children.
+
+        Returns:
+            The ID & owner of every removed delayed event with a timeout that must be unscheduled.
+        """
+        return await self.db_pool.runInteraction(
+            "remove_state_events",
+            self._remove_txn,
+            keyvalues={
+                "room_id": room_id,
+                "event_type": event_type,
+                "state_key": state_key,
+            },
+            retcols=("delay_id", "user_localpart"),
+            allow_none=True,
+        )
+
     def _remove_txn(
         self,
         txn: LoggingTransaction,

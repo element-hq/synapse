@@ -27,6 +27,7 @@ from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import Codes, ShadowBanError, SynapseError
+from synapse.events import EventBase
 from synapse.logging.opentracing import set_tag
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.databases.main.delayed_events import (
@@ -37,7 +38,14 @@ from synapse.storage.databases.main.delayed_events import (
     Timestamp,
     UserLocalpart,
 )
-from synapse.types import JsonDict, Requester, RoomID, UserID, create_requester
+from synapse.types import (
+    JsonDict,
+    Requester,
+    RoomID,
+    StateMap,
+    UserID,
+    create_requester,
+)
 from synapse.util.stringutils import random_string
 
 if TYPE_CHECKING:
@@ -86,9 +94,35 @@ class DelayedEventsHandler:
             for delay_id, user_localpart, relative_delay in remaining_timeout_delays:
                 self._schedule(delay_id, user_localpart, relative_delay)
 
+            hs.get_module_api().register_third_party_rules_callbacks(
+                on_new_event=self.on_new_event,
+            )
+
         self._initialized_from_db = run_as_background_process(
             "_schedule_db_events", _schedule_db_events
         )
+
+    async def on_new_event(
+        self, event: EventBase, _state_events: StateMap[EventBase]
+    ) -> None:
+        """
+        Checks if a received event is a state event, and if so,
+        cancels any delayed events that target the same state.
+        """
+        state_key = event.get_state_key()
+        if state_key is not None:
+            for (
+                removed_timeout_delay_id,
+                removed_timeout_delay_user_localpart,
+            ) in await self.store.remove_state_events(
+                event.room_id,
+                event.type,
+                state_key,
+            ):
+                self._unschedule(
+                    removed_timeout_delay_id,
+                    removed_timeout_delay_user_localpart,
+                )
 
     async def add(
         self,
