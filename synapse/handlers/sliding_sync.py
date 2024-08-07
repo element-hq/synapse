@@ -377,23 +377,26 @@ class RoomSyncConfig:
 
         Also see `StateFilter.must_await_full_state(...)` for comparison
 
+        Partially-stated rooms should have all state events except for remote membership
+        events so if we require a remote membership event anywhere, then we need to
+        return `False`.
+
         Args:
             is_mine_id: a callable which confirms if a given state_key matches a mxid
                of a local user
             is_mine_server_name: a callable which confirms if a given server name
                 matches the local server name
         """
-        # Partially-stated rooms should have all state events except for remote
-        # membership events so if we require a remote membership event anywhere, then we
-        # need to return `False`.
-
         wildcard_state_keys = self.required_state_map.get(StateValues.WILDCARD)
+        # Requesting *all* state in the room so we have to wait
         if (
             wildcard_state_keys is not None
             and StateValues.WILDCARD in wildcard_state_keys
         ):
             return True
 
+        # If the wildcards don't refer to remote user IDs, then we don't need to wait
+        # for full state.
         if wildcard_state_keys is not None:
             for possible_user_id in wildcard_state_keys:
                 if not possible_user_id[0].startswith(UserID.SIGIL):
@@ -409,11 +412,12 @@ class RoomSyncConfig:
                     return True
 
         membership_state_keys = self.required_state_map.get(EventTypes.Member)
-        # We aren't requesting any membership events at all
+        # We aren't requesting any membership events at all so the partial state will
+        # cover us.
         if membership_state_keys is None:
             return False
 
-        # If we're requesting entirely local users, TODO
+        # If we're requesting entirely local users, the partial state will cover us.
         for user_id in membership_state_keys:
             if user_id == StateValues.ME:
                 continue
@@ -428,7 +432,7 @@ class RoomSyncConfig:
             elif not is_mine_id(user_id):
                 return True
 
-        # local users only
+        # Local users only so the partial state will cover us.
         return False
 
 
