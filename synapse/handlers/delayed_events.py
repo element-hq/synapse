@@ -72,6 +72,24 @@ class DelayedEventsHandler:
 
         self._delayed_calls: Dict[_DelayedCallKey, IDelayedCall] = {}
 
+        async def _schedule_db_events() -> None:
+            # TODO: Sync all state first, so that affected delayed state events will be cancelled
+            events, remaining_timeout_delays = await self.store.process_all_delays(
+                self._get_current_ts()
+            )
+            for args in events:
+                try:
+                    await self._send_event(*args)
+                except Exception:
+                    logger.exception("Failed to send delayed event on startup")
+
+            for delay_id, user_localpart, relative_delay in remaining_timeout_delays:
+                self._schedule(delay_id, user_localpart, relative_delay)
+
+        self._initialized_from_db = run_as_background_process(
+            "_schedule_db_events", _schedule_db_events
+        )
+
     async def add(
         self,
         requester: Requester,
@@ -119,6 +137,7 @@ class DelayedEventsHandler:
         assert delay or parent_id
 
         await self.request_ratelimiter.ratelimit(requester)
+        await self._initialized_from_db
 
         # TODO: Validate that the event is valid before scheduling it
 
@@ -166,6 +185,7 @@ class DelayedEventsHandler:
         user_localpart = UserLocalpart(requester.user.localpart)
 
         await self.request_ratelimiter.ratelimit(requester)
+        await self._initialized_from_db
 
         if enum_action == _UpdateDelayedEventAction.CANCEL:
             for removed_timeout_delay_id in await self.store.remove(
@@ -242,6 +262,7 @@ class DelayedEventsHandler:
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self.request_ratelimiter.ratelimit(requester)
+        await self._initialized_from_db
         return await self.store.get_all_for_user(
             UserLocalpart(requester.user.localpart)
         )

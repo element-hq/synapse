@@ -58,6 +58,16 @@ DelayedPartialEvent = Tuple[
     JsonDict,
 ]
 
+# TODO: If a Tuple type hint can be extended, extend the above one
+DelayedPartialEventWithUser = Tuple[
+    UserLocalpart,
+    RoomID,
+    EventType,
+    Optional[StateKey],
+    Optional[Timestamp],
+    JsonDict,
+]
+
 
 # TODO: Try to support workers
 class DelayedEventsStore(SQLBaseStore):
@@ -303,6 +313,73 @@ class DelayedEventsStore(SQLBaseStore):
             }
             for row in rows
         ]
+
+    async def process_all_delays(self, current_ts: Timestamp) -> Tuple[
+        List[DelayedPartialEventWithUser],
+        List[Tuple[DelayID, UserLocalpart, Delay]],
+    ]:
+        """
+        Pops all delayed events that should have timed out prior to the provided time,
+        and returns all remaining timeout delayed events along with
+        how much later from the provided time they should time out at.
+        """
+
+        def process_all_delays_txn(txn: LoggingTransaction) -> Tuple[
+            List[DelayedPartialEventWithUser],
+            List[Tuple[DelayID, UserLocalpart, Delay]],
+        ]:
+            events: List[DelayedPartialEventWithUser] = []
+            removed_timeout_delay_ids: Set[DelayID] = set()
+
+            txn.execute(
+                """
+                WITH delay_send_times AS (
+                    SELECT *, running_since + delay AS send_ts
+                    FROM delayed_events
+                    JOIN delayed_event_timeouts USING (delay_rowid)
+                )
+                SELECT delay_rowid, user_localpart
+                FROM delay_send_times
+                WHERE send_ts < ?
+                ORDER BY send_ts
+                """,
+                (current_ts,),
+            )
+            for row in txn.fetchall():
+                try:
+                    event, removed_timeout_delay_id = self._pop_event_txn(
+                        txn,
+                        keyvalues={"delay_rowid": row[0]},
+                    )
+                except NotFoundError:
+                    pass
+                events.append((UserLocalpart(row[1]), *event))
+                removed_timeout_delay_ids |= removed_timeout_delay_id
+
+            txn.execute(
+                """
+                SELECT
+                    delay_id,
+                    user_localpart,
+                    running_since + delay - ? AS relative_delay
+                FROM delayed_events
+                JOIN delayed_event_timeouts USING (delay_rowid)
+                """,
+                (current_ts,),
+            )
+            remaining_timeout_delays = [
+                (
+                    DelayID(row[0]),
+                    UserLocalpart(row[1]),
+                    Delay(row[2]),
+                )
+                for row in txn
+            ]
+            return events, remaining_timeout_delays
+
+        return await self.db_pool.runInteraction(
+            "process_all_delays", process_all_delays_txn
+        )
 
     async def pop_event(
         self,
