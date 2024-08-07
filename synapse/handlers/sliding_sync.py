@@ -377,7 +377,7 @@ class RoomSyncConfig:
 
         Partially-stated rooms should have all state events except for remote membership
         events so if we require a remote membership event anywhere, then we need to
-        return `False`.
+        return `True` (requires full state).
 
         Args:
             is_mine_id: a callable which confirms if a given state_key matches a mxid
