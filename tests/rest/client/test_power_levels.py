@@ -19,10 +19,14 @@
 #
 #
 from http import HTTPStatus
+from typing import Optional
+
+from parameterized import parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
+from synapse.api.room_versions import RoomVersions
 from synapse.events.utils import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -32,9 +36,13 @@ from synapse.util import Clock
 from tests.unittest import HomeserverTestCase
 
 
+@parameterized_class(
+    ("room_version",), [(None,), (RoomVersions.MSC3757v10.identifier,)]
+)
 class PowerLevelsTestCase(HomeserverTestCase):
     """Tests that power levels are enforced in various situations"""
 
+    room_version: Optional[str]
     servlets = [
         admin.register_servlets,
         room.register_servlets,
@@ -58,7 +66,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # Invite the other users
@@ -149,7 +159,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
     def test_non_admins_cannot_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # have the mod try to send a tombstone event
@@ -203,7 +215,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
     def test_admins_can_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # have the admin try to send a tombstone event
