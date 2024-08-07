@@ -4685,7 +4685,9 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match the "worker_name".
+* `worker_to_run_on`: Which worker to run this module on. This must match 
+  the "worker_name". If not set or `null`, invites will be accepted on the
+  main process.
 
 NOTE: Care should be taken not to enable this setting if the `synapse_auto_accept_invite` module is enabled and installed.
 The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join

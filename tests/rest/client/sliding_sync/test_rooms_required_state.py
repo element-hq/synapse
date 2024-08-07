@@ -161,10 +161,10 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
-    def test_rooms_required_state_incremental_sync_restart(self) -> None:
+    def test_rooms_incremental_sync_restart(self) -> None:
         """
-        Test `rooms.required_state` returns requested state events in the room during an
-        incremental sync, after a restart (and so the in memory caches are reset).
+        Test that after a restart (and so the in memory caches are reset) that
+        we correctly return an `M_UNKNOWN_POS`
         """
 
         user1_id = self.register_user("user1", "pass")
@@ -195,22 +195,16 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.hs.get_sliding_sync_handler().connection_store._connections.clear()
 
         # Make the Sliding Sync request
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
-
-        # If the cache has been cleared then we do expect the state to come down
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
+        channel = self.make_request(
+            method="POST",
+            path=self.sync_endpoint + f"?pos={from_token}",
+            content=sync_body,
+            access_token=user1_tok,
         )
-
-        self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
-            {
-                state_map[(EventTypes.Create, "")],
-                state_map[(EventTypes.RoomHistoryVisibility, "")],
-            },
-            exact=True,
+        self.assertEqual(channel.code, 400, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], "M_UNKNOWN_POS", channel.json_body
         )
-        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
     def test_rooms_required_state_wildcard(self) -> None:
         """

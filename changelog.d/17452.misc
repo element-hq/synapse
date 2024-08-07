@@ -1,1 +1,0 @@
-Change sliding sync to use their own token format in preparation for storing per-connection state.
