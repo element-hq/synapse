@@ -1511,9 +1511,9 @@ class PersistEventsStore:
                             membership_event_id,
                             membership_event_id,
                             membership_event_id,
-                            Membership.JOIN,
                         ]
                         + list(insert_values)
+                        + [Membership.JOIN]
                         for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
                     ],
                 )
