@@ -1779,8 +1779,15 @@ class SyncHandler:
                     )
 
                 if include_device_list_updates:
+                    # include_device_list_updates can only be True if we have a
+                    # since token.
+                    assert since_token is not None
+
                     device_lists = await self._generate_sync_entry_for_device_list(
-                        sync_result_builder,
+                        user_id=user_id,
+                        since_token=since_token,
+                        now_token=sync_result_builder.now_token,
+                        joined_room_ids=sync_result_builder.joined_room_ids,
                         newly_joined_rooms=newly_joined_rooms,
                         newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                         newly_left_rooms=newly_left_rooms,
@@ -1892,8 +1899,14 @@ class SyncHandler:
                 newly_left_users,
             ) = sync_result_builder.calculate_user_changes()
 
+            # include_device_list_updates can only be True if we have a
+            # since token.
+            assert since_token is not None
             device_lists = await self._generate_sync_entry_for_device_list(
-                sync_result_builder,
+                user_id=user_id,
+                since_token=since_token,
+                now_token=sync_result_builder.now_token,
+                joined_room_ids=sync_result_builder.joined_room_ids,
                 newly_joined_rooms=newly_joined_rooms,
                 newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                 newly_left_rooms=newly_left_rooms,
@@ -2073,7 +2086,10 @@ class SyncHandler:
     @measure_func("_generate_sync_entry_for_device_list")
     async def _generate_sync_entry_for_device_list(
         self,
-        sync_result_builder: "SyncResultBuilder",
+        user_id: str,
+        since_token: StreamToken,
+        now_token: StreamToken,
+        joined_room_ids: AbstractSet[str],
         newly_joined_rooms: AbstractSet[str],
         newly_joined_or_invited_or_knocked_users: AbstractSet[str],
         newly_left_rooms: AbstractSet[str],
@@ -2091,11 +2107,6 @@ class SyncHandler:
             newly_left_users: Set of users that have left a room we're in since
                 previous sync
         """
-
-        user_id = sync_result_builder.sync_config.user.to_string()
-        since_token = sync_result_builder.since_token
-        assert since_token is not None
-
         # Take a copy since these fields will be mutated later.
         newly_joined_or_invited_or_knocked_users = set(
             newly_joined_or_invited_or_knocked_users
@@ -2118,8 +2129,6 @@ class SyncHandler:
 
         users_that_have_changed = set()
 
-        joined_room_ids = sync_result_builder.joined_room_ids
-
         # Step 1a, check for changes in devices of users we share a room
         # with
         users_that_have_changed = (
@@ -2127,7 +2136,7 @@ class SyncHandler:
                 user_id,
                 joined_room_ids,
                 from_token=since_token,
-                now_token=sync_result_builder.now_token,
+                now_token=now_token,
             )
         )
 
