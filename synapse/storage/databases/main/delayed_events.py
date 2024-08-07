@@ -1,0 +1,358 @@
+#
+# This file is licensed under the Affero General Public License (AGPL) version 3.
+#
+# Copyright (C) 2024 New Vector, Ltd
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+#
+# See the GNU Affero General Public License for more details:
+# <https://www.gnu.org/licenses/agpl-3.0.html>.
+#
+# Originally licensed under the Apache License, Version 2.0:
+# <http://www.apache.org/licenses/LICENSE-2.0>.
+#
+#
+
+from binascii import crc32
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, Dict, List, NewType, Optional, Set, Tuple
+
+from synapse.api.errors import Codes, NotFoundError, SynapseError
+from synapse.storage._base import SQLBaseStore, db_to_json
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    LoggingTransaction,
+)
+from synapse.storage.engines import PostgresEngine
+from synapse.types import JsonDict, RoomID, StrCollection
+from synapse.util import json_encoder, stringutils as stringutils
+from synapse.util.stringutils import base62_encode
+
+if TYPE_CHECKING:
+    from synapse.server import HomeServer
+
+
+DelayID = NewType("DelayID", str)
+UserLocalpart = NewType("UserLocalpart", str)
+EventType = NewType("EventType", str)
+StateKey = NewType("StateKey", str)
+
+Delay = NewType("Delay", int)
+Timestamp = NewType("Timestamp", int)
+
+DelayedPartialEvent = Tuple[
+    RoomID,
+    EventType,
+    Optional[StateKey],
+    Optional[Timestamp],
+    JsonDict,
+]
+
+
+# TODO: Try to support workers
+class DelayedEventsStore(SQLBaseStore):
+    def __init__(
+        self,
+        database: DatabasePool,
+        db_conn: LoggingDatabaseConnection,
+        hs: "HomeServer",
+    ):
+        super().__init__(database, db_conn, hs)
+        # TODO: Always use RETURNING once the minimum supported Sqlite version is 3.35.0
+        self._use_returning = isinstance(self.database_engine, PostgresEngine)
+
+    async def add(
+        self,
+        *,
+        user_localpart: UserLocalpart,
+        current_ts: Timestamp,
+        room_id: RoomID,
+        event_type: str,
+        state_key: Optional[str],
+        origin_server_ts: Optional[int],
+        content: JsonDict,
+        delay: Optional[int],
+        parent_id: Optional[str],
+    ) -> DelayID:
+        """
+        Inserts a new delayed event in the DB.
+
+        Returns: The generated ID assigned to the added delayed event.
+
+        Raises:
+            SynapseError if the delayed event failed to be added.
+        """
+
+        def add_txn(txn: LoggingTransaction) -> DelayID:
+            delay_id = _generate_delay_id()
+            try:
+                sql = """
+                    INSERT INTO delayed_events (
+                        delay_id, user_localpart, running_since,
+                        room_id, event_type, state_key, origin_server_ts,
+                        content
+                    ) VALUES (
+                        ?, ?, ?,
+                        ?, ?, ?, ?,
+                        ?
+                    )
+                    """
+                if self._use_returning:
+                    sql += "RETURNING delay_rowid"
+                txn.execute(
+                    sql,
+                    (
+                        delay_id,
+                        user_localpart,
+                        current_ts,
+                        room_id.to_string(),
+                        event_type,
+                        state_key,
+                        origin_server_ts,
+                        json_encoder.encode(content),
+                    ),
+                )
+            # TODO: Handle only the error for DB key collisions
+            except Exception as e:
+                raise SynapseError(
+                    HTTPStatus.INTERNAL_SERVER_ERROR,
+                    f"Couldn't generate a unique delay_id for user_localpart {user_localpart}",
+                    # TODO: Maybe remove this
+                    additional_fields={"db_error": str(e)},
+                )
+
+            if not self._use_returning:
+                txn.execute(
+                    """
+                    SELECT delay_rowid
+                    FROM delayed_events
+                    WHERE delay_id = ? AND user_localpart = ?
+                    """,
+                    (
+                        delay_id,
+                        user_localpart,
+                    ),
+                )
+            row = txn.fetchone()
+            assert row is not None
+            delay_rowid = row[0]
+
+            if delay is not None:
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    table="delayed_event_timeouts",
+                    values={
+                        "delay_rowid": delay_rowid,
+                        "delay": delay,
+                    },
+                )
+
+            if parent_id is None:
+                self.db_pool.simple_insert_txn(
+                    txn,
+                    table="delayed_event_parents",
+                    values={"delay_rowid": delay_rowid},
+                )
+            else:
+                try:
+                    txn.execute(
+                        """
+                        INSERT INTO delayed_event_children (child_rowid, parent_rowid)
+                        SELECT ?, delay_rowid
+                        FROM delayed_events
+                        WHERE delay_id = ? AND user_localpart = ?
+                        """,
+                        (
+                            delay_rowid,
+                            parent_id,
+                            user_localpart,
+                        ),
+                    )
+                # TODO: Handle only the error for the relevant foreign key / check violation
+                except Exception as e:
+                    raise SynapseError(
+                        HTTPStatus.BAD_REQUEST,
+                        # TODO: Improve the wording for this
+                        "Invalid parent delayed event",
+                        Codes.INVALID_PARAM,
+                        # TODO: Maybe remove this
+                        additional_fields={"db_error": str(e)},
+                    )
+                if txn.rowcount != 1:
+                    raise NotFoundError("Parent delayed event not found")
+
+            return delay_id
+
+        attempts_remaining = 10
+        while True:
+            try:
+                return await self.db_pool.runInteraction("add", add_txn)
+            except SynapseError as e:
+                if (
+                    e.code == HTTPStatus.INTERNAL_SERVER_ERROR
+                    and attempts_remaining > 0
+                ):
+                    attempts_remaining -= 1
+                else:
+                    raise e
+
+    async def pop_event(
+        self,
+        delay_id: DelayID,
+        user_localpart: UserLocalpart,
+    ) -> Tuple[
+        DelayedPartialEvent,
+        Set[DelayID],
+    ]:
+        """
+        Get the partial event of the matching delayed event,
+        and remove it and all of its parent/child/sibling events from the DB.
+
+        Returns:
+            A tuple of:
+                - The partial event to send for the matching delayed event.
+                - The IDs of all removed delayed events with a timeout that must be unscheduled.
+
+        Raises:
+            NotFoundError if there is no matching delayed event.
+        """
+        return await self.db_pool.runInteraction(
+            "pop_event",
+            self._pop_event_txn,
+            keyvalues={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+            },
+        )
+
+    def _pop_event_txn(
+        self,
+        txn: LoggingTransaction,
+        keyvalues: Dict[str, Any],
+    ) -> Tuple[
+        DelayedPartialEvent,
+        Set[DelayID],
+    ]:
+        row = self.db_pool.simple_select_one_txn(
+            txn,
+            table="delayed_events",
+            keyvalues=keyvalues,
+            retcols=(
+                "delay_rowid",
+                "room_id",
+                "event_type",
+                "state_key",
+                "origin_server_ts",
+                "content",
+            ),
+            allow_none=True,
+        )
+        if row is None:
+            raise NotFoundError("Delayed event not found")
+        target_delay_rowid = row[0]
+        event_row = row[1:]
+
+        parent_rowid = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="delayed_event_children JOIN delayed_events ON child_rowid = delay_rowid",
+            keyvalues={"delay_rowid": target_delay_rowid},
+            retcol="parent_rowid",
+            allow_none=True,
+        )
+
+        removed_timeout_delay_ids = self._remove_txn(
+            txn,
+            keyvalues={
+                "delay_rowid": (
+                    parent_rowid if parent_rowid is not None else target_delay_rowid
+                ),
+            },
+            retcols=("delay_id",),
+        )
+
+        contents: JsonDict = db_to_json(event_row[4])
+        return (
+            (
+                RoomID.from_string(event_row[0]),
+                EventType(event_row[1]),
+                StateKey(event_row[2]) if event_row[2] is not None else None,
+                Timestamp(event_row[3]) if event_row[3] is not None else None,
+                # TODO: Verify contents?
+                contents,
+            ),
+            {DelayID(r[0]) for r in removed_timeout_delay_ids},
+        )
+
+    def _remove_txn(
+        self,
+        txn: LoggingTransaction,
+        keyvalues: Dict[str, Any],
+        retcols: StrCollection,
+        allow_none: bool = False,
+    ) -> List[Tuple]:
+        """
+        Removes delayed events matching the keyvalues, and any children they may have.
+
+        Returns:
+            The specified columns for each delayed event with a timeout that was removed.
+
+        Raises:
+            NotFoundError if allow_none is False and no delayed events match the keyvalues.
+        """
+        sql_with = f"""
+            WITH target_rowids AS (
+                SELECT delay_rowid
+                FROM delayed_events
+                WHERE {" AND ".join("%s = ?" % k for k in keyvalues)}
+            )
+        """
+        sql_where = """
+            WHERE delay_rowid IN (SELECT * FROM target_rowids)
+            OR delay_rowid IN (
+                SELECT child_rowid
+                FROM delayed_event_children
+                JOIN target_rowids ON parent_rowid = delay_rowid
+            )
+        """
+        args = list(keyvalues.values())
+        txn.execute(
+            f"""
+            {sql_with}
+            SELECT {", ".join(retcols)}
+            FROM delayed_events
+            JOIN delayed_event_timeouts USING (delay_rowid)
+            {sql_where}
+            """,
+            args,
+        )
+        rows = txn.fetchall()
+        txn.execute(
+            f"""
+            {sql_with}
+            DELETE FROM delayed_events
+            {sql_where}
+            """,
+            args,
+        )
+        if not allow_none and txn.rowcount == 0:
+            raise NotFoundError("No delayed event found")
+        return rows
+
+
+def _generate_delay_id() -> DelayID:
+    """Generates an opaque string, for use as a delay ID"""
+
+    # We use the following format for delay IDs:
+    #    syf_<random string>_<base62 crc check>
+    # They are scoped to user localparts, so it is possible for
+    # the same ID to exist for multiple users.
+
+    random_string = stringutils.random_string(20)
+    base = f"syd_{random_string}"
+
+    crc = base62_encode(crc32(base.encode("ascii")), minwidth=6)
+    return DelayID(f"{base}_{crc}")

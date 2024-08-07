@@ -43,6 +43,7 @@ from .appservice import ApplicationServiceStore, ApplicationServiceTransactionSt
 from .cache import CacheInvalidationWorkerStore
 from .censor_events import CensorEventsStore
 from .client_ips import ClientIpWorkerStore
+from .delayed_events import DelayedEventsStore
 from .deviceinbox import DeviceInboxStore
 from .devices import DeviceStore
 from .directory import DirectoryStore
@@ -156,6 +157,7 @@ class DataStore(
     LockStore,
     SessionStore,
     TaskSchedulerWorkerStore,
+    DelayedEventsStore,
 ):
     def __init__(
         self,

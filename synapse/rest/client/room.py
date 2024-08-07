@@ -193,6 +193,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.room_member_handler = hs.get_room_member_handler()
         self.message_handler = hs.get_message_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
 
     def register(self, http_server: HttpServer) -> None:
@@ -289,6 +290,24 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
+        delay = parse_integer(request, "org.matrix.msc4140.delay")
+        parent_id = parse_string(request, "org.matrix.msc4140.parent_delay_id")
+        if delay is not None or parent_id is not None:
+            delay_id = await self.delayed_events_handler.add(
+                requester,
+                room_id=room_id,
+                event_type=event_type,
+                state_key=state_key,
+                origin_server_ts=origin_server_ts,
+                content=content,
+                delay=delay,
+                parent_id=parent_id,
+            )
+
+            set_tag("delay_id", delay_id)
+            ret = {"delay_id": delay_id}
+            return 200, ret
+
         try:
             if event_type == EventTypes.Member:
                 membership = content.get("membership", None)
@@ -339,6 +358,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
         self.event_creation_handler = hs.get_event_creation_handler()
+        self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
 
     def register(self, http_server: HttpServer) -> None:
@@ -356,6 +376,28 @@ class RoomSendEventRestServlet(TransactionRestServlet):
     ) -> Tuple[int, JsonDict]:
         content = parse_json_object_from_request(request)
 
+        origin_server_ts = None
+        if requester.app_service:
+            origin_server_ts = parse_integer(request, "ts")
+
+        delay = parse_integer(request, "org.matrix.msc4140.delay")
+        parent_id = parse_string(request, "org.matrix.msc4140.parent_delay_id")
+        if delay is not None or parent_id is not None:
+            delay_id = await self.delayed_events_handler.add(
+                requester,
+                room_id=room_id,
+                event_type=event_type,
+                state_key=None,
+                origin_server_ts=origin_server_ts,
+                content=content,
+                delay=delay,
+                parent_id=parent_id,
+            )
+
+            set_tag("delay_id", delay_id)
+            ret = {"delay_id": delay_id}
+            return 200, ret
+
         event_dict: JsonDict = {
             "type": event_type,
             "content": content,
@@ -363,10 +405,8 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             "sender": requester.user.to_string(),
         }
 
-        if requester.app_service:
-            origin_server_ts = parse_integer(request, "ts")
-            if origin_server_ts is not None:
-                event_dict["origin_server_ts"] = origin_server_ts
+        if origin_server_ts is not None:
+            event_dict["origin_server_ts"] = origin_server_ts
 
         try:
             (
