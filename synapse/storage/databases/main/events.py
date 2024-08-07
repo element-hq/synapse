@@ -1324,9 +1324,10 @@ class PersistEventsStore:
                     )
                     sliding_sync_joined_rooms_insert_map["room_type"] = room_type
                 elif event_id == room_encryption_event_id:
-                    is_encrypted = event_json.get("content", {}).get(
+                    encryption_algorithm = event_json.get("content", {}).get(
                         EventContentFields.ENCRYPTION_ALGORITHM
                     )
+                    is_encrypted = encryption_algorithm is not None
                     sliding_sync_joined_rooms_insert_map["is_encrypted"] = is_encrypted
                 elif event_id == room_name_event_id:
                     room_name = event_json.get("content", {}).get(
@@ -1459,9 +1460,10 @@ class PersistEventsStore:
                             room_type
                         )
                     elif event_type == EventTypes.RoomEncryption:
-                        is_encrypted = event_json.get("content", {}).get(
+                        encryption_algorithm = event_json.get("content", {}).get(
                             EventContentFields.ENCRYPTION_ALGORITHM
                         )
+                        is_encrypted = encryption_algorithm is not None
                         sliding_sync_non_joined_rooms_insert_map["is_encrypted"] = (
                             is_encrypted
                         )
@@ -1483,14 +1485,18 @@ class PersistEventsStore:
                 # TODO: Only do this for non-join membership
                 txn.execute_batch(
                     f"""
+                    WITH data_table (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)}) AS (
+                        VALUES (
+                            ?, ?, ?,
+                            (SELECT membership FROM room_memberships WHERE event_id = ?),
+                            (SELECT stream_ordering FROM events WHERE event_id = ?),
+                            {", ".join("?" for _ in insert_values)}
+                        )
+                    )
                     INSERT INTO sliding_sync_non_join_memberships
                         (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)})
-                    VALUES (
-                        ?, ?, ?,
-                        (SELECT membership FROM room_memberships WHERE event_id = ?),
-                        (SELECT stream_ordering FROM events WHERE event_id = ?),
-                        {", ".join("?" for _ in insert_values)}
-                    )
+                    SELECT * FROM data_table
+                    WHERE membership != ?
                     ON CONFLICT (room_id, user_id)
                     DO UPDATE SET
                         membership_event_id = EXCLUDED.membership_event_id,
@@ -1505,6 +1511,7 @@ class PersistEventsStore:
                             membership_event_id,
                             membership_event_id,
                             membership_event_id,
+                            Membership.JOIN,
                         ]
                         + list(insert_values)
                         for membership_event_id, user_id in membership_event_id_to_user_id_map.items()

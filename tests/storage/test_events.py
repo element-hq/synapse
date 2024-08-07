@@ -24,7 +24,7 @@ from typing import List, Optional
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, EventContentFields, RoomTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.federation.federation_base import event_from_pdu_json
@@ -499,9 +499,14 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def test_TODO(self) -> None:
+    def prepare(
+        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
+    ) -> None:
+        self.store = self.hs.get_datastores().main
+
+    def test_room_with_no_info(self) -> None:
         """
-        TODO
+        Test room that doesn't have a room type, encryption, or name.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -512,6 +517,121 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
         # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sliding_sync_joined_rooms_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_joined_rooms", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_joined_rooms %s",
+            sliding_sync_joined_rooms_results,
+        )
+
+        sliding_sync_non_join_memberships_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_non_join_memberships", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_non_join_memberships %s",
+            sliding_sync_non_join_memberships_results,
+        )
+
+    def test_room_with_info(self) -> None:
+        """
+        TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sliding_sync_joined_rooms_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_joined_rooms", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_joined_rooms %s",
+            sliding_sync_joined_rooms_results,
+        )
+
+        sliding_sync_non_join_memberships_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_non_join_memberships", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_non_join_memberships %s",
+            sliding_sync_non_join_memberships_results,
+        )
+
+    def test_space_room_with_info(self) -> None:
+        """
+        TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        self.helper.join(space_room_id, user1_id, tok=user1_tok)
+
+        sliding_sync_joined_rooms_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_joined_rooms", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_joined_rooms %s",
+            sliding_sync_joined_rooms_results,
+        )
+
+        sliding_sync_non_join_memberships_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_non_join_memberships", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_non_join_memberships %s",
+            sliding_sync_non_join_memberships_results,
+        )
 
     def test_server_left_room(self) -> None:
         """
@@ -533,4 +653,22 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         # User1 leaves the room
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-    # TODO: Server left room test
+        sliding_sync_joined_rooms_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_joined_rooms", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_joined_rooms %s",
+            sliding_sync_joined_rooms_results,
+        )
+
+        sliding_sync_non_join_memberships_results = self.get_success(
+            self.store.db_pool.simple_select_list(
+                "sliding_sync_non_join_memberships", None, retcols=("*",)
+            )
+        )
+        logger.info(
+            "sliding_sync_non_join_memberships %s",
+            sliding_sync_non_join_memberships_results,
+        )
