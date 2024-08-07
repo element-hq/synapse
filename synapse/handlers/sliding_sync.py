@@ -366,9 +366,7 @@ class RoomSyncConfig:
 
     def must_await_full_state(
         self,
-        *,
         is_mine_id: Callable[[str], bool],
-        is_mine_server_name: Callable[[str], bool],
     ) -> bool:
         """
         Check if we have a we're only requesting `required_state` which is completely
@@ -384,8 +382,6 @@ class RoomSyncConfig:
         Args:
             is_mine_id: a callable which confirms if a given state_key matches a mxid
                of a local user
-            is_mine_server_name: a callable which confirms if a given server name
-                matches the local server name
         """
         wildcard_state_keys = self.required_state_map.get(StateValues.WILDCARD)
         # Requesting *all* state in the room so we have to wait
@@ -408,7 +404,7 @@ class RoomSyncConfig:
                     # Not a user ID
                     continue
 
-                if not is_mine_server_name(localpart_hostname[1]):
+                if not is_mine_id(possible_user_id):
                     return True
 
         membership_state_keys = self.required_state_map.get(EventTypes.Member)
@@ -465,7 +461,6 @@ class SlidingSyncHandler:
         self.push_rules_handler = hs.get_push_rules_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
-        self.is_mine_server_name = hs.is_mine_server_name
 
         self.connection_store = SlidingSyncConnectionStore()
 
@@ -647,13 +642,9 @@ class SlidingSyncHandler:
                     # once and make a copy whenever we need it.
                     room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
-                    if room_sync_config.must_await_full_state(
-                        is_mine_id=self.is_mine_id,
-                        is_mine_server_name=self.is_mine_server_name,
-                    ):
-                        # Exclude partially-stated rooms unless the `required_state`
-                        # only has `["m.room.member", "$LAZY"]` for membership
-                        # (lazy-loading room members).
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
@@ -720,6 +711,12 @@ class SlidingSyncHandler:
         # Handle room subscriptions
         if has_room_subscriptions and sync_config.room_subscriptions is not None:
             with start_active_span("assemble_room_subscriptions"):
+                # Find which rooms are partially stated and may need to be filtered out
+                # depending on the `required_state` requested (see below).
+                partial_state_room_map = await self.store.is_partial_state_room_batched(
+                    sync_config.room_subscriptions.keys()
+                )
+
                 for (
                     room_id,
                     room_subscription,
@@ -736,19 +733,25 @@ class SlidingSyncHandler:
                     if not room_membership_for_user_at_to_token:
                         continue
 
-                    all_rooms.add(room_id)
-
                     room_membership_for_user_map[room_id] = (
                         room_membership_for_user_at_to_token
                     )
 
                     # Take the superset of the `RoomSyncConfig` for each room.
-                    #
-                    # Update our `relevant_room_map` with the room we're going to display
-                    # and need to fetch more info about.
                     room_sync_config = RoomSyncConfig.from_room_config(
                         room_subscription
                     )
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        if partial_state_room_map.get(room_id):
+                            continue
+
+                    all_rooms.add(room_id)
+
+                    # Update our `relevant_room_map` with the room we're going to display
+                    # and need to fetch more info about.
                     existing_room_sync_config = relevant_room_map.get(room_id)
                     if existing_room_sync_config is not None:
                         existing_room_sync_config.combine_room_sync_config(

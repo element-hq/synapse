@@ -723,6 +723,36 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
                 + str(response_body["lists"][list_key]),
             )
 
+        # Take each of the list variants and apply them to room subscriptions to make
+        # sure the same rules apply
+        for list_key in sync_body["lists"].keys():
+            sync_body_for_subscriptions = {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                    room_id2: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
+            }
+            response_body, _ = self.do_sync(sync_body_for_subscriptions, tok=user1_tok)
+
+            self.assertIncludes(
+                set(response_body["rooms"].keys()),
+                {room_id2, room_id1},
+                exact=True,
+                message=f"Expected all rooms to show up for test_key={list_key}.",
+            )
+
+        # =====================================================================
+
         # Make the Sliding Sync request with examples where `must_await_full_state()` is
         # `True`
         sync_body = {
@@ -782,4 +812,32 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
                 exact=True,
                 message=f"Expected only fully-stated rooms to show up for list_key={list_key}. Response "
                 + str(response_body["lists"][list_key]),
+            )
+
+        # Take each of the list variants and apply them to room subscriptions to make
+        # sure the same rules apply
+        for list_key in sync_body["lists"].keys():
+            sync_body_for_subscriptions = {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                    room_id2: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
+            }
+            response_body, _ = self.do_sync(sync_body_for_subscriptions, tok=user1_tok)
+
+            self.assertIncludes(
+                set(response_body["rooms"].keys()),
+                {room_id1},
+                exact=True,
+                message=f"Expected only fully-stated rooms to show up for test_key={list_key}.",
             )
