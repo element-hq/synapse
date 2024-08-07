@@ -298,22 +298,6 @@ class MatrixConnectionAdapter(HTTPAdapter):
 
         return super().send(request, *args, **kwargs)
 
-    # def get_connection(
-    #     self, url: str, proxies: Optional[Dict[str, str]] = None,
-    # ) -> HTTPConnectionPool:
-    #     # overrides the get_connection() method in the base class
-    #     parsed = urlparse.urlsplit(url)
-    #     (host, port, ssl_server_name) = self._lookup(parsed.netloc)
-    #     print(
-    #         f"Connecting to {host}:{port} with SNI {ssl_server_name}", file=sys.stderr
-    #     )
-    #     return self.poolmanager.connection_from_host(
-    #         host,
-    #         port=port,
-    #         scheme="https",
-    #         pool_kwargs={"server_hostname": ssl_server_name},
-    #     )
-
     def get_connection_with_tls_context(
         self,
         request: PreparedRequest,
@@ -322,11 +306,9 @@ class MatrixConnectionAdapter(HTTPAdapter):
         cert: Optional[Union[Tuple[str, str], str]] = None,
     ) -> HTTPConnectionPool:
         # overrides the get_connection_with_tls_context() method in the base class
-        # return self.get_connection(request.url, proxies)
-        # overrides the get_connection() method in the base class
         parsed = urlparse.urlsplit(request.url)
 
-        # Extract the hostname from the request URL and ensure it's a str.
+        # Extract the server name from the request URL, and ensure it's a str.
         hostname = parsed.netloc
         if isinstance(hostname, bytes):
             hostname = hostname.decode("utf-8")
