@@ -128,7 +128,7 @@ class Codes(str, Enum):
     # MSC2677
     DUPLICATE_ANNOTATION = "M_DUPLICATE_ANNOTATION"
 
-    # MSC3575 we are telling the client they need to reset their sliding sync
+    # MSC3575 we are telling the client they need to expire their sliding sync
     # connection.
     UNKNOWN_POS = "M_UNKNOWN_POS"
 
