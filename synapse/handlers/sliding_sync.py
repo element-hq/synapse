@@ -561,8 +561,6 @@ class SlidingSyncHandler:
                             to_token,
                         )
 
-                    all_rooms.update(filtered_sync_room_map)
-
                     # Sort the list
                     sorted_room_info = await self.sort_rooms(
                         filtered_sync_room_map, to_token
@@ -588,6 +586,18 @@ class SlidingSyncHandler:
                         and StateValues.LAZY in membership_state_keys
                     )
 
+                    if lazy_loading:
+                        # Exclude partially-stated rooms unless the `required_state`
+                        # only has `["m.room.member", "$LAZY"]` for membership
+                        # (lazy-loading room members).
+                        filtered_sync_room_map = {
+                            room_id: room
+                            for room_id, room in filtered_sync_room_map.items()
+                            if room_id not in partial_state_room_map
+                        }
+
+                    all_rooms.update(filtered_sync_room_map)
+
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                     if list_config.ranges:
                         for range in list_config.ranges:
@@ -604,15 +614,6 @@ class SlidingSyncHandler:
 
                                 if len(room_ids_in_list) >= max_num_rooms:
                                     break
-
-                                # Exclude partially-stated rooms unless the `required_state`
-                                # only has `["m.room.member", "$LAZY"]` for membership
-                                # (lazy-loading room members).
-                                if (
-                                    partial_state_room_map.get(room_id)
-                                    and not lazy_loading
-                                ):
-                                    continue
 
                                 # Take the superset of the `RoomSyncConfig` for each room.
                                 #
