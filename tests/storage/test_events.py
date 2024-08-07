@@ -499,7 +499,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def test_rooms_invite_shared_history_initial_sync(self) -> None:
+    def test_TODO(self) -> None:
         """
         TODO
         """
@@ -510,5 +510,27 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
 
-        # user1 joins the room
+        # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+    def test_server_left_room(self) -> None:
+        """
+        TODO
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 joins the room
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # User2 leaves the room
+        self.helper.leave(room_id1, user2_id, tok=user2_tok)
+
+        # User1 leaves the room
+        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+
+    # TODO: Server left room test

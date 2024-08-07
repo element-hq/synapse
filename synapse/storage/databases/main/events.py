@@ -1155,6 +1155,13 @@ class PersistEventsStore:
         to_delete = delta_state.to_delete
         to_insert = delta_state.to_insert
 
+        logger.info(
+            "asdf _update_current_state_txn no_longer_in_room=%s to_insert=%s to_delete=%s",
+            delta_state.no_longer_in_room,
+            to_insert,
+            to_delete,
+        )
+
         # Figure out the changes of membership to invalidate the
         # `get_rooms_for_user` cache.
         # We find out which membership events we may have deleted
