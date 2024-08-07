@@ -52,7 +52,7 @@ from synapse.http.servlet import (
     parse_string,
 )
 from synapse.http.site import SynapseRequest
-from synapse.logging.opentracing import trace_with_opname
+from synapse.logging.opentracing import log_kv, set_tag, trace_with_opname
 from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamToken
 from synapse.types.rest.client import SlidingSyncBody
@@ -881,7 +881,6 @@ class SlidingSyncRestServlet(RestServlet):
         )
 
         user = requester.user
-        device_id = requester.device_id
 
         timeout = parse_integer(request, "timeout", default=0)
         # Position in the stream
@@ -898,15 +897,41 @@ class SlidingSyncRestServlet(RestServlet):
         # by filter ID. For now, we will just prototype with always passing everything
         # in.
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
-        logger.info("Sliding sync request: %r", body)
+
+        # Tag and log useful data to differentiate requests.
+        set_tag(
+            "sliding_sync.sync_type", "initial" if from_token is None else "incremental"
+        )
+        set_tag("sliding_sync.conn_id", body.conn_id or "")
+        log_kv(
+            {
+                "sliding_sync.lists": {
+                    list_name: {
+                        "ranges": list_config.ranges,
+                        "timeline_limit": list_config.timeline_limit,
+                    }
+                    for list_name, list_config in (body.lists or {}).items()
+                },
+                "sliding_sync.room_subscriptions": list(
+                    (body.room_subscriptions or {}).keys()
+                ),
+                # We also include the number of room subscriptions because logs are
+                # limited to 1024 characters and the large room ID list above can be cut
+                # off.
+                "sliding_sync.num_room_subscriptions": len(
+                    (body.room_subscriptions or {}).keys()
+                ),
+            }
+        )
 
         sync_config = SlidingSyncConfig(
             user=user,
-            device_id=device_id,
+            requester=requester,
             # FIXME: Currently, we're just manually copying the fields from the
-            # `SlidingSyncBody` into the config. How can we gurantee into the future
+            # `SlidingSyncBody` into the config. How can we guarantee into the future
             # that we don't forget any? I would like something more structured like
             # `copy_attributes(from=body, to=config)`
+            conn_id=body.conn_id,
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
@@ -1132,6 +1157,16 @@ class SlidingSyncRestServlet(RestServlet):
                     ]
                     for room_id, event_map in extensions.account_data.account_data_by_room_map.items()
                 },
+            }
+
+        if extensions.receipts is not None:
+            serialized_extensions["receipts"] = {
+                "rooms": extensions.receipts.room_id_to_receipt_map,
+            }
+
+        if extensions.typing is not None:
+            serialized_extensions["typing"] = {
+                "rooms": extensions.typing.room_id_to_typing_map,
             }
 
         return serialized_extensions

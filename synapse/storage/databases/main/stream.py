@@ -67,7 +67,7 @@ from synapse.api.constants import Direction, EventTypes, Membership
 from synapse.api.filtering import Filter
 from synapse.events import EventBase
 from synapse.logging.context import make_deferred_yieldable, run_in_background
-from synapse.logging.opentracing import trace
+from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -812,6 +812,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return ret, key
 
+    @trace
     async def get_current_state_delta_membership_changes_for_user(
         self,
         user_id: str,
@@ -1186,6 +1187,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
 
         return None
 
+    @trace
     async def get_last_event_pos_in_room_before_stream_ordering(
         self,
         room_id: str,
@@ -1940,6 +1942,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         return rows, next_token
 
     @trace
+    @tag_args
     async def paginate_room_events(
         self,
         room_id: str,
@@ -2104,3 +2107,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             return RoomStreamToken(stream=last_position.stream - 1)
 
         return None
+
+    @trace
+    def get_rooms_that_might_have_updates(
+        self, room_ids: StrCollection, from_token: RoomStreamToken
+    ) -> StrCollection:
+        """Filters given room IDs down to those that might have updates, i.e.
+        removes rooms that definitely do not have updates.
+        """
+        return self._events_stream_cache.get_entities_changed(
+            room_ids, from_token.stream
+        )

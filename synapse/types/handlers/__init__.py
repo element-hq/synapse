@@ -35,6 +35,7 @@ from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    Requester,
     SlidingSyncStreamToken,
     StreamToken,
     UserID,
@@ -109,7 +110,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     """
 
     user: UserID
-    device_id: Optional[str]
+    requester: Requester
 
     # Pydantic config
     class Config:
@@ -151,7 +152,7 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room subscription to room results.
+        rooms: Room subscription API. A map of room ID to room results.
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -181,8 +182,8 @@ class SlidingSyncResult:
                 absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
-            limited: True if their are more events than fit between the given position and now.
-                Sync again to get more.
+            limited: True if there are more events than `timeline_limit` looking
+                backwards from the `response.pos` to the `request.pos`.
             num_live: The number of timeline events which have just occurred and are not historical.
                 The last N events are 'live' and should be treated as such. This is mostly
                 useful to determine whether a given @mention event should make a noise or not.
@@ -236,6 +237,17 @@ class SlidingSyncResult:
         invited_count: int
         notification_count: int
         highlight_count: int
+
+        def __bool__(self) -> bool:
+            return (
+                # If this is the first time the client is seeing the room, we should not filter it out
+                # under any circumstance.
+                self.initial
+                # We need to let the client know if there are any new events
+                or bool(self.required_state)
+                or bool(self.timeline_events)
+                or bool(self.stripped_state)
+            )
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
@@ -349,12 +361,48 @@ class SlidingSyncResult:
                     self.global_account_data_map or self.account_data_by_room_map
                 )
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ReceiptsExtension:
+            """The Receipts extension (MSC3960)
+
+            Attributes:
+                room_id_to_receipt_map: Mapping from room_id to `m.receipt` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_receipt_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_receipt_map)
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class TypingExtension:
+            """The Typing Notification extension (MSC3961)
+
+            Attributes:
+                room_id_to_typing_map: Mapping from room_id to `m.typing` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_typing_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_typing_map)
+
         to_device: Optional[ToDeviceExtension] = None
         e2ee: Optional[E2eeExtension] = None
         account_data: Optional[AccountDataExtension] = None
+        receipts: Optional[ReceiptsExtension] = None
+        typing: Optional[TypingExtension] = None
 
         def __bool__(self) -> bool:
-            return bool(self.to_device or self.e2ee or self.account_data)
+            return bool(
+                self.to_device
+                or self.e2ee
+                or self.account_data
+                or self.receipts
+                or self.typing
+            )
 
     next_pos: SlidingSyncStreamToken
     lists: Dict[str, SlidingWindowList]
@@ -366,7 +414,11 @@ class SlidingSyncResult:
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        return bool(self.lists or self.rooms or self.extensions)
+        # We don't include `self.lists` here, as a) `lists` is always non-empty even if
+        # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
+        # the latest activity, anything that would cause the order to change would end
+        # up in `self.rooms` and cause us to send down the change.
+        return bool(self.rooms or self.extensions)
 
     @staticmethod
     def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":

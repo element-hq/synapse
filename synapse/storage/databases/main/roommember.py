@@ -39,6 +39,7 @@ from typing import (
 import attr
 
 from synapse.api.constants import EventTypes, Membership
+from synapse.logging.opentracing import trace
 from synapse.metrics import LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -422,6 +423,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 return invite
         return None
 
+    @trace
     async def get_rooms_for_local_user_where_membership_is(
         self,
         user_id: str,
