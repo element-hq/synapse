@@ -1286,15 +1286,29 @@ class PersistEventsStore:
             room_encryption_event_id = None
             room_name_event_id = None
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Create:
+                if state_key[0] == EventTypes.Create and state_key[1] == "":
                     create_event_id = event_id
                     event_ids_to_fetch.append(event_id)
-                elif state_key[0] == EventTypes.RoomEncryption:
+                elif state_key[0] == EventTypes.RoomEncryption and state_key[1] == "":
                     room_encryption_event_id = event_id
                     event_ids_to_fetch.append(event_id)
-                elif state_key[0] == EventTypes.Name:
+                elif state_key[0] == EventTypes.Name and state_key[1] == "":
                     room_name_event_id = event_id
                     event_ids_to_fetch.append(event_id)
+
+            # Map of values to insert/update in the `sliding_sync_joined_rooms` table
+            sliding_sync_joined_rooms_insert_map: Dict[
+                str, Optional[Union[str, bool]]
+            ] = {}
+
+            # If something is being deleted from the state, we need to clear it out
+            for event_type, state_key in to_delete:
+                if event_type == EventTypes.Create and state_key == "":
+                    sliding_sync_joined_rooms_insert_map["room_type"] = None
+                elif event_type == EventTypes.RoomEncryption and state_key == "":
+                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = False
+                elif event_type == EventTypes.Name and state_key == "":
+                    sliding_sync_joined_rooms_insert_map["room_name"] = None
 
             # Fetch the events from the database
             event_json_rows = cast(
@@ -1309,9 +1323,6 @@ class PersistEventsStore:
                 ),
             )
             # Parse the raw event JSON
-            sliding_sync_joined_rooms_insert_map: Dict[
-                str, Optional[Union[str, bool]]
-            ] = {}
             for event_id, json in event_json_rows:
                 event_json = db_to_json(json)
 
@@ -1413,6 +1424,11 @@ class PersistEventsStore:
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             if len(membership_event_id_to_user_id_map) > 0:
+                # Map of values to insert/update in the `sliding_sync_non_join_memberships` table
+                sliding_sync_non_joined_rooms_insert_map: Dict[
+                    str, Optional[Union[str, bool]]
+                ] = {}
+
                 # Fetch the events from the database
                 #
                 # TODO: We should gather this data before we delete the
@@ -1442,9 +1458,6 @@ class PersistEventsStore:
                 )
 
                 # Parse the raw event JSON
-                sliding_sync_non_joined_rooms_insert_map: Dict[
-                    str, Optional[Union[str, bool]]
-                ] = {}
                 for row in txn:
                     event_id, event_type, state_key, json = row
                     event_json = db_to_json(json)

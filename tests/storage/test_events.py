@@ -856,6 +856,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             exact=True,
         )
 
+    # TODO: test_joined_room_state_reset
+
     def test_non_join_space_room_with_info(self) -> None:
         """
         Test users who was invited shows up in `sliding_sync_non_join_memberships`.
@@ -1109,3 +1111,5 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             },
             exact=True,
         )
+
+    # TODO: test_non_join_state_reset
