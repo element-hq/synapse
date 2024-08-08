@@ -160,7 +160,7 @@ class ClientRestResource(JsonResource):
             servlet_groups = SERVLET_GROUPS.keys()
 
         for servlet_group in servlet_groups:
-            # Skip unknown servlet groups.
+            # Fail on unknown servlet groups.
             if servlet_group not in SERVLET_GROUPS:
                 if servlet_group == "media":
                     logger.warn(
