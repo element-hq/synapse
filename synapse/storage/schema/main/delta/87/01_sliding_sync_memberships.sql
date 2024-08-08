@@ -31,7 +31,16 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     PRIMARY KEY (room_id)
 );
 
-
+-- Store the user's non-join room memberships. Only stores the latest membership event
+-- for a given user which matches `local_current_membership` (except we don't store
+-- joins).
+--
+-- FIXME: It might be easier to just store any membership here but just indicate that
+-- the state is a snapshot of the current state at the time of the membership event.
+-- That way we don't have to worry about clearing out
+-- `sliding_sync_non_join_memberships` when the the user joins a room. And we always
+-- have the full picture. Perhaps we can call it `sliding_sync_membership_snapshots`.
+--
 -- We don't include `bump_stamp` here because we can just use the `stream_ordering` from
 -- the membership event itself as the `bump_stamp`.
 CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
@@ -50,6 +59,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
     -- `m.room.encryption` -> `content.algorithm` (according to the current state at the
     -- time of the membership)
     is_encrypted BOOLEAN DEFAULT 0 NOT NULL,
+    -- FIXME: Maybe we want to add `tombstone_successor_room_id` here to help with `include_old_rooms`
+    -- (tracked by https://github.com/element-hq/synapse/issues/17540)
     PRIMARY KEY (room_id, user_id)
 );
 

@@ -1530,12 +1530,13 @@ class PersistEventsStore:
                 room_id,
                 # Even though `Mapping`/`Dict` have no guaranteed order, some
                 # implementations may preserve insertion order so we're just going to
-                # choose the best possible answer by using the "last" event ID which we
+                # choose the best possible answer by using the "first" event ID which we
                 # will assume will have the greatest `stream_ordering`. We really just
                 # need *some* answer in case we are the first ones inserting into the
-                # table and this will resolve itself when we update this field in the
-                # persist events loop.
-                list(to_insert.values())[-1],
+                # table and in reality, `_store_event_txn()` is run before this function
+                # so it will already have the correct value. This is just to account for
+                # things changing in the future.
+                next(iter(to_insert.values())),
             ]
             # If we have a `bump_event_id`, let's update the `bump_stamp` column
             bump_stamp_column = ""
@@ -1974,6 +1975,64 @@ class PersistEventsStore:
                 (event.event_id, event.room_id, event.type, event.state_key)
                 for event, _ in events_and_contexts
                 if event.is_state()
+            ],
+        )
+
+        # Handle updating `sliding_sync_joined_rooms`
+        room_id_to_stream_ordering_map: Dict[str, int] = {}
+        room_id_to_bump_stamp_map: Dict[str, int] = {}
+        for event, _ in events_and_contexts:
+            existing_stream_ordering = room_id_to_stream_ordering_map.get(event.room_id)
+            # This should exist at this point because we're inserting events here which require it
+            assert event.internal_metadata.stream_ordering is not None
+            if (
+                existing_stream_ordering is None
+                or existing_stream_ordering < event.internal_metadata.stream_ordering
+            ):
+                room_id_to_stream_ordering_map[event.room_id] = (
+                    event.internal_metadata.stream_ordering
+                )
+
+            if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                existing_bump_stamp = room_id_to_bump_stamp_map.get(event.room_id)
+                # This should exist at this point because we're inserting events here which require it
+                assert event.internal_metadata.stream_ordering is not None
+                if (
+                    existing_bump_stamp is None
+                    or existing_bump_stamp < event.internal_metadata.stream_ordering
+                ):
+                    room_id_to_bump_stamp_map[event.room_id] = (
+                        event.internal_metadata.stream_ordering
+                    )
+
+        # `_store_event_txn` is run before `_update_current_state_txn` which handles
+        # deleting the rows if we are no longer in the room so we don't need to worry
+        # about inserting something that will be orphaned.
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="sliding_sync_joined_rooms",
+            key_names=("room_id",),
+            key_values=[
+                (room_id,) for room_id in room_id_to_stream_ordering_map.keys()
+            ],
+            value_names=("event_stream_ordering",),
+            value_values=[
+                (room_id_to_stream_ordering_map[room_id],)
+                for room_id in room_id_to_stream_ordering_map.keys()
+            ],
+        )
+        # This has to be separate from the upsert above because we won't have a
+        # `bump_stamp` for every event and we don't want to overwrite the existing value
+        # with `None`.
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="sliding_sync_joined_rooms",
+            key_names=("room_id",),
+            key_values=[(room_id,) for room_id in room_id_to_bump_stamp_map.keys()],
+            value_names=("bump_stamp",),
+            value_values=[
+                (room_id_to_bump_stamp_map[room_id],)
+                for room_id in room_id_to_bump_stamp_map.keys()
             ],
         )
 
