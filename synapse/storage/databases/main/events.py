@@ -1310,7 +1310,6 @@ class PersistEventsStore:
                 # Update the `sliding_sync_non_join_memberships` table
                 insert_keys = sliding_sync_non_joined_rooms_insert_map.keys()
                 insert_values = sliding_sync_non_joined_rooms_insert_map.values()
-                # TODO: Only do this for non-join membership
                 txn.execute_batch(
                     f"""
                     WITH data_table (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)}) AS (
@@ -1470,12 +1469,12 @@ class PersistEventsStore:
             ] = {}
 
             # If something is being deleted from the state, we need to clear it out
-            for event_type, state_key in to_delete:
-                if event_type == EventTypes.Create and state_key == "":
+            for state_key in to_delete:
+                if state_key == (EventTypes.Create, ""):
                     sliding_sync_joined_rooms_insert_map["room_type"] = None
-                elif event_type == EventTypes.RoomEncryption and state_key == "":
+                elif state_key == (EventTypes.RoomEncryption, ""):
                     sliding_sync_joined_rooms_insert_map["is_encrypted"] = False
-                elif event_type == EventTypes.Name and state_key == "":
+                elif state_key == (EventTypes.Name, ""):
                     sliding_sync_joined_rooms_insert_map["room_name"] = None
 
             # Fetch the events from the database
