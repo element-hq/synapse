@@ -817,6 +817,12 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
                 state_key_user_id = (
                     state_key[:suffix_idx] if suffix_idx != -1 else state_key
                 )
+                if not UserID.is_valid(state_key_user_id):
+                    raise UnstableSpecAuthError(
+                        403,
+                        "State key is not a valid user ID",
+                        errcode=Codes.BAD_JSON,
+                    )
                 if (
                     state_key_user_id == event.user_id
                     or user_level > get_user_power_level(state_key_user_id, auth_events)
