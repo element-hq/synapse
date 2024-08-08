@@ -18,6 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import re
 from http import HTTPStatus
 from typing import Optional
 
@@ -34,6 +35,8 @@ from synapse.server import HomeServer
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
+
+_room_version_msc3757_re = re.compile(r"org.matrix.msc3757\b")
 
 
 @parameterized_class(
@@ -108,6 +111,12 @@ class PowerLevelsTestCase(HomeserverTestCase):
             "m.room.power_levels",
             room_power_levels,
             tok=self.admin_access_token,
+        )
+
+    @property
+    def _allows_owned_state(self) -> bool:
+        return self.room_version is not None and bool(
+            _room_version_msc3757_re.match(self.room_version)
         )
 
     def test_non_admins_cannot_enable_room_encryption(self) -> None:
@@ -306,4 +315,48 @@ class PowerLevelsTestCase(HomeserverTestCase):
             body["errcode"],
             Codes.BAD_JSON,
             body,
+        )
+
+    def test_can_set_own_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.mod_user_id}_suffix",
+            tok=self.mod_access_token,
+            expect_code=(
+                HTTPStatus.OK if self._allows_owned_state else HTTPStatus.FORBIDDEN
+            ),
+        )
+
+    def test_admins_can_set_others_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.mod_user_id}_suffix",
+            tok=self.admin_access_token,
+            expect_code=(
+                HTTPStatus.OK if self._allows_owned_state else HTTPStatus.FORBIDDEN
+            ),
+        )
+
+    def test_non_admins_cannot_set_others_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.admin_user_id}_suffix",
+            tok=self.mod_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+
+    def test_cannot_set_state_with_non_user_id_key(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.admin_user_id}@suffix",
+            tok=self.admin_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
         )
