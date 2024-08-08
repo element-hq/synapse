@@ -20,11 +20,13 @@
 #
 
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple, cast
+
+import attr
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership, EventContentFields, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.federation.federation_base import event_from_pdu_json
@@ -486,6 +488,28 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
         self.assertEqual(users, [])
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _SlidingSyncJoinedRoomResult:
+    room_id: str
+    event_stream_ordering: int
+    bump_stamp: int
+    room_type: str
+    room_name: str
+    is_encrypted: bool
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _SlidingSyncNonJoinMembershipResult:
+    room_id: str
+    user_id: str
+    membership_event_id: str
+    membership: str
+    event_stream_ordering: int
+    room_type: str
+    room_name: str
+    is_encrypted: bool
+
+
 class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     """
     Tests to make sure the
@@ -504,9 +528,89 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     ) -> None:
         self.store = self.hs.get_datastores().main
 
-    def test_room_with_no_info(self) -> None:
+    def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
         """
-        Test room that doesn't have a room type, encryption, or name.
+        Return the rows from the `sliding_sync_joined_rooms` table.
+
+        Returns:
+            Mapping from room_id to _SlidingSyncJoinedRoomResult.
+        """
+        rows = cast(
+            List[Tuple[str, int, int, str, str, bool]],
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "sliding_sync_joined_rooms",
+                    None,
+                    retcols=(
+                        "room_id",
+                        "event_stream_ordering",
+                        "bump_stamp",
+                        "room_type",
+                        "room_name",
+                        "is_encrypted",
+                    ),
+                ),
+            ),
+        )
+
+        return {
+            row[0]: _SlidingSyncJoinedRoomResult(
+                room_id=row[0],
+                event_stream_ordering=row[1],
+                bump_stamp=row[2],
+                room_type=row[3],
+                room_name=row[4],
+                is_encrypted=row[5],
+            )
+            for row in rows
+        }
+
+    def _get_sliding_sync_non_join_memberships(
+        self,
+    ) -> Dict[Tuple[str, str], _SlidingSyncNonJoinMembershipResult]:
+        """
+        Return the rows from the `sliding_sync_non_join_memberships` table.
+
+        Returns:
+            Mapping from the (room_id, user_id) to _SlidingSyncNonJoinMembershipResult.
+        """
+        rows = cast(
+            List[Tuple[str, str, str, str, int, str, str, bool]],
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "sliding_sync_non_join_memberships",
+                    None,
+                    retcols=(
+                        "room_id",
+                        "user_id",
+                        "membership_event_id",
+                        "membership",
+                        "event_stream_ordering",
+                        "room_type",
+                        "room_name",
+                        "is_encrypted",
+                    ),
+                ),
+            ),
+        )
+
+        return {
+            (row[0], row[1]): _SlidingSyncNonJoinMembershipResult(
+                room_id=row[0],
+                user_id=row[1],
+                membership_event_id=row[2],
+                membership=row[3],
+                event_stream_ordering=row[4],
+                room_type=row[5],
+                room_name=row[6],
+                is_encrypted=row[7],
+            )
+            for row in rows
+        }
+
+    def test_joined_room_with_no_info(self) -> None:
+        """
+        Test joined room that doesn't have a room type, encryption, or name.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -518,27 +622,35 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        sliding_sync_joined_rooms_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_joined_rooms", None, retcols=("*",)
-            )
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
         )
-        logger.info(
-            "sliding_sync_joined_rooms %s",
-            sliding_sync_joined_rooms_results,
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # TODO
+                event_stream_ordering=None,
+                bump_stamp=None,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
-        sliding_sync_non_join_memberships_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_non_join_memberships", None, retcols=("*",)
-            )
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
         )
-        logger.info(
-            "sliding_sync_non_join_memberships %s",
-            sliding_sync_non_join_memberships_results,
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
         )
 
-    def test_room_with_info(self) -> None:
+    def test_joined_room_with_info(self) -> None:
         """
         TODO
         """
@@ -566,27 +678,35 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
-        sliding_sync_joined_rooms_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_joined_rooms", None, retcols=("*",)
-            )
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
         )
-        logger.info(
-            "sliding_sync_joined_rooms %s",
-            sliding_sync_joined_rooms_results,
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # TODO
+                event_stream_ordering=None,
+                bump_stamp=None,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
         )
 
-        sliding_sync_non_join_memberships_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_non_join_memberships", None, retcols=("*",)
-            )
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
         )
-        logger.info(
-            "sliding_sync_non_join_memberships %s",
-            sliding_sync_non_join_memberships_results,
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
         )
 
-    def test_space_room_with_info(self) -> None:
+    def test_joined_space_room_with_info(self) -> None:
         """
         TODO
         """
@@ -613,24 +733,32 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         # User1 joins the room
         self.helper.join(space_room_id, user1_id, tok=user1_tok)
 
-        sliding_sync_joined_rooms_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_joined_rooms", None, retcols=("*",)
-            )
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {space_room_id},
+            exact=True,
         )
-        logger.info(
-            "sliding_sync_joined_rooms %s",
-            sliding_sync_joined_rooms_results,
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[space_room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=space_room_id,
+                # TODO
+                event_stream_ordering=None,
+                bump_stamp=None,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
         )
 
-        sliding_sync_non_join_memberships_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_non_join_memberships", None, retcols=("*",)
-            )
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
         )
-        logger.info(
-            "sliding_sync_non_join_memberships %s",
-            sliding_sync_non_join_memberships_results,
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
         )
 
     def test_server_left_room(self) -> None:
@@ -648,27 +776,35 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         # User2 leaves the room
-        self.helper.leave(room_id1, user2_id, tok=user2_tok)
+        leave_response2 = self.helper.leave(room_id1, user2_id, tok=user2_tok)
 
         # User1 leaves the room
-        self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
-        sliding_sync_joined_rooms_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_joined_rooms", None, retcols=("*",)
-            )
-        )
-        logger.info(
-            "sliding_sync_joined_rooms %s",
-            sliding_sync_joined_rooms_results,
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
         )
 
-        sliding_sync_non_join_memberships_results = self.get_success(
-            self.store.db_pool.simple_select_list(
-                "sliding_sync_non_join_memberships", None, retcols=("*",)
-            )
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
         )
-        logger.info(
-            "sliding_sync_non_join_memberships %s",
-            sliding_sync_non_join_memberships_results,
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            {
+                _SlidingSyncNonJoinMembershipResult(
+                    room_id=room_id1,
+                    user_id=user1_id,
+                    membership_event_id=leave_response1["event_id"],
+                    membership=Membership.LEAVE,
+                    # TODO
+                    event_stream_ordering=None,
+                    room_type=None,
+                    room_name=None,
+                    is_encrypted=False,
+                )
+            },
+            exact=True,
         )

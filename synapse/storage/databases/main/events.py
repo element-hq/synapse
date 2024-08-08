@@ -45,8 +45,8 @@ import synapse.metrics
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
-    RelationTypes,
     Membership,
+    RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
@@ -1281,9 +1281,6 @@ class PersistEventsStore:
             )
 
             # Handle updating the `sliding_sync_joined_rooms` table
-            sliding_sync_joined_rooms_insert_map: Dict[
-                str, Optional[Union[str, bool]]
-            ] = {}
             event_ids_to_fetch: List[str] = []
             create_event_id = None
             room_encryption_event_id = None
@@ -1292,15 +1289,12 @@ class PersistEventsStore:
                 if state_key[0] == EventTypes.Create:
                     create_event_id = event_id
                     event_ids_to_fetch.append(event_id)
-                    sliding_sync_joined_rooms_insert_map["room_type"] = None
                 elif state_key[0] == EventTypes.RoomEncryption:
                     room_encryption_event_id = event_id
                     event_ids_to_fetch.append(event_id)
-                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = None
                 elif state_key[0] == EventTypes.Name:
                     room_name_event_id = event_id
                     event_ids_to_fetch.append(event_id)
-                    sliding_sync_joined_rooms_insert_map["room_name"] = None
 
             # Fetch the events from the database
             event_json_rows = cast(
@@ -1315,6 +1309,9 @@ class PersistEventsStore:
                 ),
             )
             # Parse the raw event JSON
+            sliding_sync_joined_rooms_insert_map: Dict[
+                str, Optional[Union[str, bool]]
+            ] = {}
             for event_id, json in event_json_rows:
                 event_json = db_to_json(json)
 

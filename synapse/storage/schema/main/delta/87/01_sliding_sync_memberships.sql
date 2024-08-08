@@ -22,12 +22,12 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     event_stream_ordering BIGINT REFERENCES events(stream_ordering),
     -- The `stream_ordering` of the last event according to the `bump_event_types`
     bump_stamp BIGINT,
-    -- `m.room.create` -> `content.type`
+    -- `m.room.create` -> `content.type` (current state)
     room_type TEXT,
-    -- `m.room.name` -> `content.name`
+    -- `m.room.name` -> `content.name` (current state)
     room_name TEXT,
-    -- `m.room.encryption` -> `content.algorithm`
-    is_encrypted BOOLEAN,
+    -- `m.room.encryption` -> `content.algorithm` (current state)
+    is_encrypted BOOLEAN DEFAULT 0 NOT NULL,
     PRIMARY KEY (room_id)
 );
 
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
     room_name TEXT,
     -- `m.room.encryption` -> `content.algorithm` (according to the current state at the
     -- time of the membership)
-    is_encrypted BOOLEAN,
+    is_encrypted BOOLEAN DEFAULT 0 NOT NULL,
     PRIMARY KEY (room_id, user_id)
 );
 
