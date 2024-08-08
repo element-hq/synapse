@@ -523,10 +523,9 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         room.register_servlets,
     ]
 
-    def prepare(
-        self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
-    ) -> None:
-        self.store = self.hs.get_datastores().main
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
 
     def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
         """
@@ -615,10 +614,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
 
-        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)

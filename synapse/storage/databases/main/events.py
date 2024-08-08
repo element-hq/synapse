@@ -73,6 +73,7 @@ from synapse.types import (
     StrCollection,
     get_domain_from_id,
 )
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
@@ -1308,6 +1309,9 @@ class PersistEventsStore:
                         )
 
                 # Update the `sliding_sync_non_join_memberships` table
+                #
+                # Pulling keys/values separately is safe and will produce congruent
+                # lists
                 insert_keys = sliding_sync_non_joined_rooms_insert_map.keys()
                 insert_values = sliding_sync_non_joined_rooms_insert_map.values()
                 txn.execute_batch(
@@ -1452,6 +1456,7 @@ class PersistEventsStore:
             create_event_id = None
             room_encryption_event_id = None
             room_name_event_id = None
+            bump_event_id = None
             for state_key, event_id in to_insert.items():
                 if state_key[0] == EventTypes.Create and state_key[1] == "":
                     create_event_id = event_id
@@ -1462,6 +1467,12 @@ class PersistEventsStore:
                 elif state_key[0] == EventTypes.Name and state_key[1] == "":
                     room_name_event_id = event_id
                     event_ids_to_fetch.append(event_id)
+
+                if (
+                    state_key[0] in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+                    and state_key[1] == ""
+                ):
+                    bump_event_id = event_id
 
             # Map of values to insert/update in the `sliding_sync_joined_rooms` table
             sliding_sync_joined_rooms_insert_map: Dict[
@@ -1515,23 +1526,57 @@ class PersistEventsStore:
                     )
 
             # Update the `sliding_sync_joined_rooms` table
+            args: List[Any] = [
+                room_id,
+                # Even though `Mapping`/`Dict` have no guaranteed order, some
+                # implementations may preserve insertion order so we're just going to
+                # choose the best possible answer by using the "last" event ID which we
+                # will assume will have the greatest `stream_ordering`. We really just
+                # need *some* answer in case we are the first ones inserting into the
+                # table and this will resolve itself when we update this field in the
+                # persist events loop.
+                list(to_insert.values())[-1],
+            ]
+            # If we have a `bump_event_id`, let's update the `bump_stamp` column
+            bump_stamp_column = ""
+            bump_stamp_values_clause = ""
+            if bump_event_id is not None:
+                bump_stamp_column = "bump_stamp, "
+                bump_stamp_values_clause = (
+                    "(SELECT stream_ordering FROM events WHERE event_id = ?),"
+                )
+                args.append(bump_event_id)
+            # Pulling keys/values separately is safe and will produce congruent lists
             insert_keys = sliding_sync_joined_rooms_insert_map.keys()
             insert_values = sliding_sync_joined_rooms_insert_map.values()
+            args.extend(iter(insert_values))
             if len(insert_keys) > 0:
-                # TODO: Should we add `event_stream_ordering`, `bump_stamp` on insert?
+                # We don't update `bump_stamp` `ON CONFLICT` because we're dealing with
+                # state here and the only state event that is also a bump event type is
+                # `m.room.create`. Given the room creation event is the first one in the
+                # room, it's either going to be set on insert, or we've already moved on
+                # to other events with a greater `stream_ordering`/`bump_stamp` and we
+                # don't need to even try.
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_joined_rooms
-                        (room_id, {", ".join(insert_keys)})
+                        (room_id, event_stream_ordering, {bump_stamp_column} {", ".join(insert_keys)})
                     VALUES (
                         ?,
+                        (SELECT stream_ordering FROM events WHERE event_id = ?),
+                        {bump_stamp_values_clause}
                         {", ".join("?" for _ in insert_values)}
                     )
                     ON CONFLICT (room_id)
                     DO UPDATE SET
-                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)},
+                        event_stream_ordering = CASE
+                            WHEN event_stream_ordering < EXCLUDED.event_stream_ordering
+                                THEN EXCLUDED.event_stream_ordering
+                            ELSE event_stream_ordering
+                        END
                     """,
-                    [room_id] + list(insert_values),
+                    args,
                 )
 
         # We now update `local_current_membership`. We do this regardless
