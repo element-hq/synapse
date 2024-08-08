@@ -64,7 +64,10 @@ from synapse.storage.databases.main.state import (
     ROOM_UNKNOWN_SENTINEL,
     Sentinel as StateSentinel,
 )
-from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
+from synapse.storage.databases.main.stream import (
+    CurrentStateDeltaMembership,
+    PaginateFunction,
+)
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -540,6 +543,9 @@ class SlidingSyncHandler:
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
+        # The set of room IDs of all rooms that could appear in any list. These
+        # include rooms that are outside the list ranges.
+        all_rooms: Set[str] = set()
         if has_lists and sync_config.lists is not None:
             with start_active_span("assemble_sliding_window_lists"):
                 sync_room_map = await self.filter_rooms_relevant_for_sync(
@@ -557,11 +563,6 @@ class SlidingSyncHandler:
                             list_config.filters,
                             to_token,
                         )
-
-                    # Sort the list
-                    sorted_room_info = await self.sort_rooms(
-                        filtered_sync_room_map, to_token
-                    )
 
                     # Find which rooms are partially stated and may need to be filtered out
                     # depending on the `required_state` requested (see below).
@@ -583,6 +584,23 @@ class SlidingSyncHandler:
                         and StateValues.LAZY in membership_state_keys
                     )
 
+                    if not lazy_loading:
+                        # Exclude partially-stated rooms unless the `required_state`
+                        # only has `["m.room.member", "$LAZY"]` for membership
+                        # (lazy-loading room members).
+                        filtered_sync_room_map = {
+                            room_id: room
+                            for room_id, room in filtered_sync_room_map.items()
+                            if not partial_state_room_map.get(room_id)
+                        }
+
+                    all_rooms.update(filtered_sync_room_map)
+
+                    # Sort the list
+                    sorted_room_info = await self.sort_rooms(
+                        filtered_sync_room_map, to_token
+                    )
+
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                     if list_config.ranges:
                         for range in list_config.ranges:
@@ -599,15 +617,6 @@ class SlidingSyncHandler:
 
                                 if len(room_ids_in_list) >= max_num_rooms:
                                     break
-
-                                # Exclude partially-stated rooms unless the `required_state`
-                                # only has `["m.room.member", "$LAZY"]` for membership
-                                # (lazy-loading room members).
-                                if (
-                                    partial_state_room_map.get(room_id)
-                                    and not lazy_loading
-                                ):
-                                    continue
 
                                 # Take the superset of the `RoomSyncConfig` for each room.
                                 #
@@ -660,6 +669,8 @@ class SlidingSyncHandler:
                     # Skip this room if the user isn't allowed to see it
                     if not room_membership_for_user_at_to_token:
                         continue
+
+                    all_rooms.add(room_id)
 
                     room_membership_for_user_map[room_id] = (
                         room_membership_for_user_at_to_token
@@ -768,12 +779,40 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
+            # We now calculate if any rooms outside the range have had updates,
+            # which we are not sending down.
+            #
+            # We *must* record rooms that have had updates, but it is also fine
+            # to record rooms as having updates even if there might not actually
+            # be anything new for the user (e.g. due to event filters, events
+            # having happened after the user left, etc).
+            unsent_room_ids = []
+            if from_token:
+                # The set of rooms that the client (may) care about, but aren't
+                # in any list range (or subscribed to).
+                missing_rooms = all_rooms - relevant_room_map.keys()
+
+                # We now just go and try fetching any events in the above rooms
+                # to see if anything has happened since the `from_token`.
+                #
+                # TODO: Replace this with something faster. When we land the
+                # sliding sync tables that record the most recent event
+                # positions we can use that.
+                missing_event_map_by_room = (
+                    await self.store.get_room_events_stream_for_rooms(
+                        room_ids=missing_rooms,
+                        from_key=to_token.room_key,
+                        to_key=from_token.stream_token.room_key,
+                        limit=1,
+                    )
+                )
+                unsent_room_ids = list(missing_event_map_by_room)
+
             connection_position = await self.connection_store.record_rooms(
                 sync_config=sync_config,
                 from_token=from_token,
                 sent_room_ids=relevant_rooms_to_send_map.keys(),
-                # TODO: We need to calculate which rooms have had updates since the `from_token` but were not included in the `sent_room_ids`
-                unsent_room_ids=[],
+                unsent_room_ids=unsent_room_ids,
             )
         elif from_token:
             connection_position = from_token.connection_position
@@ -1863,10 +1902,13 @@ class SlidingSyncHandler:
         # We should return historical messages (before token range) in the
         # following cases because we want clients to be able to show a basic
         # screen of information:
+        #
         #  - Initial sync (because no `from_token` to limit us anyway)
         #  - When users `newly_joined`
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
+        #
+        # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
         from_bound = None
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
@@ -1927,7 +1969,36 @@ class SlidingSyncHandler:
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
-            timeline_events, new_room_key = await self.store.paginate_room_events(
+            # For initial `/sync` (and other historical scenarios mentioned above), we
+            # want to view a historical section of the timeline; to fetch events by
+            # `topological_ordering` (best representation of the room DAG as others were
+            # seeing it at the time). This also aligns with the order that `/messages`
+            # returns events in.
+            #
+            # For incremental `/sync`, we want to get all updates for rooms since
+            # the last `/sync` (regardless if those updates arrived late or happened
+            # a while ago in the past); to fetch events by `stream_ordering` (in the
+            # order they were received by the server).
+            #
+            # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+            #
+            # FIXME: Using workaround for mypy,
+            # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
+            # https://github.com/python/mypy/issues/17479
+            paginate_room_events_by_topological_ordering: PaginateFunction = (
+                self.store.paginate_room_events_by_topological_ordering
+            )
+            paginate_room_events_by_stream_ordering: PaginateFunction = (
+                self.store.paginate_room_events_by_stream_ordering
+            )
+            pagination_method: PaginateFunction = (
+                # Use `topographical_ordering` for historical events
+                paginate_room_events_by_topological_ordering
+                if from_bound is None
+                # Use `stream_ordering` for updates
+                else paginate_room_events_by_stream_ordering
+            )
+            timeline_events, new_room_key = await pagination_method(
                 room_id=room_id,
                 # The bounds are reversed so we can paginate backwards
                 # (from newer to older events) starting at to_bound.
@@ -1938,7 +2009,6 @@ class SlidingSyncHandler:
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
                 limit=room_sync_config.timeline_limit + 1,
-                event_filter=None,
             )
 
             # We want to return the events in ascending order (the last event is the
