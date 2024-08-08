@@ -912,6 +912,4 @@ FEDERATION_SERVLET_CLASSES: Tuple[Type[BaseFederationServlet], ...] = (
     FederationV1SendKnockServlet,
     FederationMakeKnockServlet,
     FederationAccountStatusServlet,
-    FederationMediaDownloadServlet,
-    FederationMediaThumbnailServlet,
 )

@@ -1,0 +1,1 @@
+Replace override of deprecated method `HTTPAdapter.get_connection` with `get_connection_with_tls_context`.
