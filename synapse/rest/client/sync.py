@@ -899,6 +899,9 @@ class SlidingSyncRestServlet(RestServlet):
         body = parse_and_validate_json_object_from_request(request, SlidingSyncBody)
 
         # Tag and log useful data to differentiate requests.
+        set_tag(
+            "sliding_sync.sync_type", "initial" if from_token is None else "incremental"
+        )
         set_tag("sliding_sync.conn_id", body.conn_id or "")
         log_kv(
             {
@@ -910,6 +913,12 @@ class SlidingSyncRestServlet(RestServlet):
                     for list_name, list_config in (body.lists or {}).items()
                 },
                 "sliding_sync.room_subscriptions": list(
+                    (body.room_subscriptions or {}).keys()
+                ),
+                # We also include the number of room subscriptions because logs are
+                # limited to 1024 characters and the large room ID list above can be cut
+                # off.
+                "sliding_sync.num_room_subscriptions": len(
                     (body.room_subscriptions or {}).keys()
                 ),
             }
