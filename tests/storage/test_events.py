@@ -863,7 +863,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         Test users who was invited shows up in `sliding_sync_non_join_memberships`.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
@@ -958,7 +958,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         `sliding_sync_non_join_memberships`.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
         user3_id = self.register_user("user3", "pass")
@@ -1088,28 +1088,36 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         self.assertIncludes(
             set(sliding_sync_non_join_memberships_results.keys()),
             {
-                _SlidingSyncNonJoinMembershipResult(
-                    room_id=room_id1,
-                    user_id=user1_id,
-                    membership_event_id=user1_leave_response["event_id"],
-                    membership=Membership.LEAVE,
-                    event_stream_ordering=user1_leave_event_pos.stream,
-                    room_type=None,
-                    room_name=None,
-                    is_encrypted=False,
-                ),
-                _SlidingSyncNonJoinMembershipResult(
-                    room_id=room_id1,
-                    user_id=user2_id,
-                    membership_event_id=user2_leave_response["event_id"],
-                    membership=Membership.LEAVE,
-                    event_stream_ordering=user2_leave_event_pos.stream,
-                    room_type=None,
-                    room_name=None,
-                    is_encrypted=False,
-                ),
+                (room_id1, user1_id),
+                (room_id1, user2_id),
             },
             exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user1_leave_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user2_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=user2_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user2_leave_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
     # TODO: test_non_join_state_reset
