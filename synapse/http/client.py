@@ -1057,17 +1057,11 @@ class _MultipartParserProtocol(protocol.Protocol):
         if not self.parser:
 
             def on_header_field(data: bytes, start: int, end: int) -> None:
-                if data[start:end] == b"Location" or data[start:end] == b"location":
+                if data[start:end].lower() == b"location":
                     self.has_redirect = True
-                if (
-                    data[start:end] == b"Content-Disposition"
-                    or data[start:end] == b"content-disposition"
-                ):
+                if data[start:end].lower() == b"content-disposition":
                     self.in_disposition = True
-                if (
-                    data[start:end] == b"Content-Type"
-                    or data[start:end] == b"content-type"
-                ):
+                if data[start:end].lower() == b"content-type":
                     self.in_content_type = True
 
             def on_header_value(data: bytes, start: int, end: int) -> None:
