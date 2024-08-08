@@ -386,6 +386,7 @@ LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
     RoomVersions.V7,
     RoomVersions.V8,
     RoomVersions.V9,
+    RoomVersions.MSC3757v9,
     RoomVersions.V10,
     RoomVersions.MSC1767v10,
     RoomVersions.MSC3757v10,
@@ -810,7 +811,11 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
         and state_key.startswith("@")
         and state_key != event.user_id
     ):
-        if event.room_version is RoomVersions.MSC3757v10:
+        if event.room_version in (
+            RoomVersions.MSC3757v9,
+            RoomVersions.MSC3757v10,
+            RoomVersions.MSC3757v11,
+        ):
             colon_idx = state_key.find(":")
             if colon_idx != -1:
                 suffix_idx = state_key.find("_", colon_idx)

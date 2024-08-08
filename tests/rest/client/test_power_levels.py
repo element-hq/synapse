@@ -40,7 +40,16 @@ _room_version_msc3757_re = re.compile(r"org.matrix.msc3757\b")
 
 
 @parameterized_class(
-    ("room_version",), [(None,), (RoomVersions.MSC3757v10.identifier,)]
+    ("room_version",),
+    [
+        (None,) if rv is None else (rv.identifier,)
+        for rv in [
+            None,
+            RoomVersions.MSC3757v9,
+            RoomVersions.MSC3757v10,
+            RoomVersions.MSC3757v11,
+        ]
+    ],
 )
 class PowerLevelsTestCase(HomeserverTestCase):
     """Tests that power levels are enforced in various situations"""
