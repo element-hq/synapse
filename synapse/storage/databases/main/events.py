@@ -2008,6 +2008,9 @@ class PersistEventsStore:
         # `_store_event_txn` is run before `_update_current_state_txn` which handles
         # deleting the rows if we are no longer in the room so we don't need to worry
         # about inserting something that will be orphaned.
+        #
+        # FIXME: We need to handle cases where we are persisting events out of order and
+        # the stream_ordering didn't increase.
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="sliding_sync_joined_rooms",
