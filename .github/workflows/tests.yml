@@ -745,6 +745,7 @@ jobs:
           # The newsfile lint may be skipped on non PR builds.
           skippable: |
             trial
+            trial-olddeps
             sytest
             portdb
             export-data
