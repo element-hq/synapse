@@ -801,8 +801,8 @@ class SlidingSyncHandler:
                 missing_event_map_by_room = (
                     await self.store.get_room_events_stream_for_rooms(
                         room_ids=missing_rooms,
-                        from_key=from_token.stream_token.room_key,
-                        to_key=to_token.room_key,
+                        from_key=to_token.room_key,
+                        to_key=from_token.stream_token.room_key,
                         limit=1,
                     )
                 )
