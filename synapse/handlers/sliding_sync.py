@@ -661,23 +661,6 @@ class SlidingSyncHandler:
                         filtered_sync_room_map, to_token
                     )
 
-                    if not lazy_loading:
-                        # Exclude partially-stated rooms unless the `required_state`
-                        # only has `["m.room.member", "$LAZY"]` for membership
-                        # (lazy-loading room members).
-                        filtered_sync_room_map = {
-                            room_id: room
-                            for room_id, room in filtered_sync_room_map.items()
-                            if not partial_state_room_map.get(room_id)
-                        }
-
-                    all_rooms.update(filtered_sync_room_map)
-
-                    # Sort the list
-                    sorted_room_info = await self.sort_rooms(
-                        filtered_sync_room_map, to_token
-                    )
-
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
                     if list_config.ranges:
                         for range in list_config.ranges:
