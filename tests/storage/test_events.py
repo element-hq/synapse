@@ -610,7 +610,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_joined_room_with_no_info(self) -> None:
         """
-        Test joined room that doesn't have a room type, encryption, or name.
+        Test joined room that doesn't have a room type, encryption, or name shows up in
+        `sliding_sync_joined_rooms`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -652,7 +653,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_joined_room_with_info(self) -> None:
         """
-        TODO
+        Test joined encrypted room with name shows up in `sliding_sync_joined_rooms`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -708,7 +709,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_joined_space_room_with_info(self) -> None:
         """
-        TODO
+        Test joined space room with name shows up in `sliding_sync_joined_rooms`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -761,9 +762,107 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             exact=True,
         )
 
-    def test_server_left_room(self) -> None:
+    # TODO: Test non-join, no info
+
+    # TODO: Test info filled out for non-joins
+
+    def test_non_join_invite_ban(self) -> None:
         """
-        TODO
+        Test users who have invite/ban membership in room shows up in
+        `sliding_sync_non_join_memberships`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to the room
+        user1_invited_response = self.helper.invite(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invited_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_invited_response["event_id"])
+        )
+
+        # User3 joins the room
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        # User3 is banned from the room
+        user3_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user3_id, tok=user2_tok
+        )
+        user3_ban_event_pos = self.get_success(
+            self.store.get_position_for_event(user3_ban_response["event_id"])
+        )
+
+        # User2 is still joined to the room so we should still have an entry
+        # in the `sliding_sync_joined_rooms` table.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # TODO
+                event_stream_ordering=None,
+                bump_stamp=None,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user3_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_invited_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=user1_invited_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user3_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user3_id,
+                membership_event_id=user3_ban_response["event_id"],
+                membership=Membership.BAN,
+                event_stream_ordering=user3_ban_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+    # TODO: Test remote invite
+
+    def test_non_join_server_left_room(self) -> None:
+        """
+        Test everyone local leaves the room but their leave membership still shows up in
+        `sliding_sync_non_join_memberships`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -776,11 +875,19 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         # User2 leaves the room
-        leave_response2 = self.helper.leave(room_id1, user2_id, tok=user2_tok)
+        user2_leave_response = self.helper.leave(room_id1, user2_id, tok=user2_tok)
+        user2_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user2_leave_response["event_id"])
+        )
 
         # User1 leaves the room
-        leave_response1 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        user1_leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        user1_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_leave_response["event_id"])
+        )
 
+        # No one is joined to the room anymore so we shouldn't have an entry in the
+        # `sliding_sync_joined_rooms` table.
         sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
         self.assertIncludes(
             set(sliding_sync_joined_rooms_results.keys()),
@@ -788,6 +895,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             exact=True,
         )
 
+        # We should still see rows for the leave events (non-joins)
         sliding_sync_non_join_memberships_results = (
             self._get_sliding_sync_non_join_memberships()
         )
@@ -797,14 +905,23 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 _SlidingSyncNonJoinMembershipResult(
                     room_id=room_id1,
                     user_id=user1_id,
-                    membership_event_id=leave_response1["event_id"],
+                    membership_event_id=user1_leave_response["event_id"],
                     membership=Membership.LEAVE,
-                    # TODO
-                    event_stream_ordering=None,
+                    event_stream_ordering=user1_leave_event_pos.stream,
                     room_type=None,
                     room_name=None,
                     is_encrypted=False,
-                )
+                ),
+                _SlidingSyncNonJoinMembershipResult(
+                    room_id=room_id1,
+                    user_id=user2_id,
+                    membership_event_id=user2_leave_response["event_id"],
+                    membership=Membership.LEAVE,
+                    event_stream_ordering=user2_leave_event_pos.stream,
+                    room_type=None,
+                    room_name=None,
+                    is_encrypted=False,
+                ),
             },
             exact=True,
         )
