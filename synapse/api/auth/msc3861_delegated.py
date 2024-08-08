@@ -121,7 +121,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._hostname = hs.hostname
         self._admin_token = self._config.admin_token
 
-        self._issuer_metadata = RetryOnExceptionCachedCall(self._load_metadata)
+        self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
+            self._load_metadata
+        )
 
         if isinstance(auth_method, PrivateKeyJWTWithKid):
             # Use the JWK as the client secret when using the private_key_jwt method
@@ -145,6 +147,42 @@ class MSC3861DelegatedAuth(BaseAuth):
         # metadata.validate_introspection_endpoint()
         return metadata
 
+    async def issuer(self) -> str:
+        """
+        Get the configured issuer
+
+        This will use the issuer value set in the metadata,
+        falling back to the one set in the config in case the metadata can't be loaded
+        """
+        issuer: Optional[str] = None
+        try:
+            metadata = await self._issuer_metadata.get()
+            issuer = metadata.issuer
+        # We don't want to raise here if we can't load the metadata
+        except Exception:
+            logger.warning("Failed to load metadata:", exc_info=True)
+
+        # Fallback to the config value if the metadata can't be loaded
+        # or if the metadata doesn't have an issuer set
+        return issuer or self._config.issuer
+
+    async def account_management_url(self) -> Optional[str]:
+        """
+        Get the configured account management URL
+
+        This will discover the account management URL from the issuer if it's not set in the config
+        """
+        if self._config.account_management_url is not None:
+            return self._config.account_management_url
+
+        try:
+            metadata = await self._issuer_metadata.get()
+            return metadata.get("account_management_uri", None)
+        # We don't want to raise here if we can't load the metadata
+        except Exception:
+            logger.warning("Failed to load metadata:", exc_info=True)
+            return None
+
     async def _introspection_endpoint(self) -> str:
         """
         Returns the introspection endpoint of the issuer
@@ -154,7 +192,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         if self._config.introspection_endpoint is not None:
             return self._config.introspection_endpoint
 
-        metadata = await self._load_metadata()
+        metadata = await self._issuer_metadata.get()
         return metadata.get("introspection_endpoint")
 
     async def _introspect_token(self, token: str) -> IntrospectionToken:

@@ -13,7 +13,7 @@
 # limitations under the License.
 import logging
 import typing
-from typing import Tuple
+from typing import Tuple, cast
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
@@ -43,10 +43,16 @@ class AuthIssuerServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         super().__init__()
         self._config = hs.config
+        self._auth = hs.get_auth()
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         if self._config.experimental.msc3861.enabled:
-            return 200, {"issuer": self._config.experimental.msc3861.issuer}
+            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
+            # We import lazily here because of the authlib requirement
+            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
+            auth = cast(MSC3861DelegatedAuth, self._auth)
+            return 200, {"issuer": await auth.issuer()}
         else:
             # Wouldn't expect this to be reached: the servelet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
