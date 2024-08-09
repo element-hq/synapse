@@ -46,6 +46,7 @@ from unpaddedbase64 import decode_base64
 
 from synapse.api.constants import (
     MAX_PDU_SIZE,
+    ZERO_LENGTH_STATE_KEY_EVENT_TYPES,
     EventContentFields,
     EventTypes,
     JoinRules,
@@ -388,6 +389,7 @@ LENIENT_EVENT_BYTE_LIMITS_ROOM_VERSIONS = {
     RoomVersions.V9,
     RoomVersions.V10,
     RoomVersions.MSC1767v10,
+    RoomVersions.MSC3779v10,
 }
 
 
@@ -753,7 +755,10 @@ def _check_joined_room(
 
 
 def get_send_level(
-    etype: str, state_key: Optional[str], power_levels_event: Optional["EventBase"]
+    etype: str,
+    state_key: Optional[str],
+    power_levels_event: Optional["EventBase"],
+    msc_3779_sender: Optional[str] = None,
 ) -> int:
     """Get the power level required to send an event of a given type
 
@@ -767,6 +772,8 @@ def get_send_level(
             a state event.
         power_levels_event: power levels event
             in force at this point in the room
+        msc_3779_sender: MXID of the user who sent the event.
+            Only for rooms with MSC3779 ("owned" state events) applied.
     Returns:
         power level required to send this event.
     """
@@ -781,7 +788,16 @@ def get_send_level(
 
     # otherwise, fall back to the state_default/events_default.
     if send_level is None:
-        if state_key is not None:
+        is_owned_state_event = (
+            msc_3779_sender is not None
+            and state_key is not None
+            and (
+                state_key == msc_3779_sender
+                or state_key.startswith(msc_3779_sender + "_")
+            )
+            and etype not in ZERO_LENGTH_STATE_KEY_EVENT_TYPES
+        )
+        if state_key is not None and not is_owned_state_event:
             send_level = power_levels_content.get("state_default", 50)
         else:
             send_level = power_levels_content.get("events_default", 0)
@@ -792,7 +808,13 @@ def get_send_level(
 def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> bool:
     power_levels_event = get_power_level_event(auth_events)
 
-    send_level = get_send_level(event.type, event.get("state_key"), power_levels_event)
+    use_msc3779 = event.room_version is RoomVersions.MSC3779v10
+    send_level = get_send_level(
+        event.type,
+        event.get("state_key"),
+        power_levels_event,
+        event.user_id if use_msc3779 else None,
+    )
     user_level = get_user_power_level(event.user_id, auth_events)
 
     if user_level < send_level:
@@ -806,7 +828,9 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
     # Check state_key
     if hasattr(event, "state_key"):
         if event.state_key.startswith("@"):
-            if event.state_key != event.user_id:
+            if event.state_key != event.user_id and not (
+                use_msc3779 and event.state_key.startswith(event.user_id + "_")
+            ):
                 raise AuthError(403, "You are not allowed to set others state")
 
     return True

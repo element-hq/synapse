@@ -136,6 +136,23 @@ class EventTypes:
     PollStart: Final = "m.poll.start"
 
 
+ZERO_LENGTH_STATE_KEY_EVENT_TYPES = {
+    EventTypes.CanonicalAlias,
+    EventTypes.Create,
+    EventTypes.JoinRules,
+    EventTypes.PowerLevels,
+    EventTypes.Name,
+    EventTypes.Topic,
+    EventTypes.RoomAvatar,
+    EventTypes.Pinned,
+    EventTypes.RoomEncryption,
+    EventTypes.RoomHistoryVisibility,
+    EventTypes.GuestAccess,
+    EventTypes.ServerACL,
+    EventTypes.Tombstone,
+}
+
+
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
 
