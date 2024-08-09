@@ -964,7 +964,7 @@ class RestServlet:
         """Register this servlet with the given HTTP server."""
         patterns = getattr(self, "PATTERNS", None)
         if patterns:
-            for method in ("GET", "PUT", "POST", "DELETE"):
+            for method in ("GET", "PUT", "POST", "DELETE", "PATCH"):
                 if hasattr(self, "on_%s" % (method,)):
                     servlet_classname = self.__class__.__name__
                     method_handler = getattr(self, "on_%s" % (method,))

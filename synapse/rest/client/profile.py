@@ -230,9 +230,16 @@ class ProfileRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
-        # TODO REVERT CHANGES
+        displayname = await self.profile_handler.get_displayname(user)
+        avatar_url = await self.profile_handler.get_avatar_url(user)
 
-        return 200, await self.profile_handler.get_profile(user_id)
+        ret = {}
+        if displayname is not None:
+            ret["displayname"] = displayname
+        if avatar_url is not None:
+            ret["avatar_url"] = avatar_url
+
+        return 200, ret
 
 
 class UnstableProfileRestServlet(RestServlet):
@@ -327,7 +334,7 @@ class UnstableProfileRestServlet(RestServlet):
 
         return 200, {}
 
-    async def on_POST(
+    async def on_PUT(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)

@@ -598,7 +598,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_fields(self) -> None:
         channel = self.make_request(
-            "POST",
+            "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
             content={
                 "avatar_url": "mxc://test/good",
