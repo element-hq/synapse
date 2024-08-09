@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -67,6 +67,7 @@ from synapse.handlers.appservice import ApplicationServicesHandler
 from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
+from synapse.handlers.delayed_events import DelayedEventsHandler
 from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
@@ -249,6 +250,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         "account_validity",
         "auth",
         "deactivate_account",
+        "delayed_events",
         "message",
         "pagination",
         "profile",
@@ -941,3 +943,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_task_scheduler(self) -> TaskScheduler:
         return TaskScheduler(self)
+
+    @cache_in_self
+    def get_delayed_events_handler(self) -> DelayedEventsHandler:
+        return DelayedEventsHandler(self)

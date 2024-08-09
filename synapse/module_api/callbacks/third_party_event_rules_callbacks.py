@@ -426,7 +426,10 @@ class ThirdPartyEventRulesModuleApiCallbacks:
         if len(self._on_new_event_callbacks) == 0:
             return
 
-        event = await self.store.get_event(event_id)
+        event = await self.store.get_event(event_id, allow_none=True)
+        if not event:
+            logger.warning("Could not find event %s" % (event_id,))
+            return
 
         # We *don't* want to wait for the full state here, because waiting for full
         # state will persist event, which in turn will call this method.
