@@ -471,7 +471,7 @@ class MediaRepository:
         responder = await self.media_storage.fetch_media(file_info)
         if federation:
             await respond_with_multipart_responder(
-                self.clock, request, responder, media_info
+                self.clock, request, responder, media_type, media_length, upload_name
             )
         else:
             await respond_with_responder(
@@ -1008,7 +1008,7 @@ class MediaRepository:
         t_method: str,
         t_type: str,
         url_cache: bool,
-    ) -> Optional[str]:
+    ) -> Optional[Tuple[str, FileInfo]]:
         input_path = await self.media_storage.ensure_media_is_in_local_cache(
             FileInfo(None, media_id, url_cache=url_cache)
         )
@@ -1070,7 +1070,7 @@ class MediaRepository:
                 t_len,
             )
 
-            return output_path
+            return output_path, file_info
 
         # Could not generate thumbnail.
         return None
