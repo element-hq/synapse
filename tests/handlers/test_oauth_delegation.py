@@ -550,7 +550,7 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             access_token="mockAccessToken",
         )
 
-        self.assertEqual(channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body)
+        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
     def expect_unauthorized(
         self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""

@@ -315,9 +315,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key2,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(
@@ -349,9 +347,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key3,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(
@@ -376,6 +372,4 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key3,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
