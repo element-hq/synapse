@@ -215,7 +215,18 @@ class DelayedEventsHandler:
         await self.request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        # TODO: Validate that the event is valid before scheduling it
+        self.event_creation_handler.validator.validate_builder(
+            self.event_creation_handler.event_builder_factory.for_room_version(
+                await self.store.get_room_version(room_id),
+                {
+                    "type": event_type,
+                    "content": content,
+                    "room_id": room_id,
+                    "sender": str(requester.user),
+                    **({"state_key": state_key} if state_key is not None else {}),
+                },
+            )
+        )
 
         user_localpart = UserLocalpart(requester.user.localpart)
         delay_id = await self.store.add(
