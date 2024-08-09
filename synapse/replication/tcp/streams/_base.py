@@ -330,6 +330,8 @@ class PresenceStream(_StreamFromIdGen):
         last_user_sync_ts: int
         status_msg: str
         currently_active: bool
+        displayname: str
+        avatar_url: str
 
     NAME = "presence"
     ROW_TYPE = PresenceStreamRow

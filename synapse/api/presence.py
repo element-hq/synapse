@@ -83,6 +83,8 @@ class UserPresenceState:
     last_user_sync_ts: int
     status_msg: Optional[str]
     currently_active: bool
+    displayname: Optional[str]
+    avatar_url: Optional[str]
 
     def as_dict(self) -> JsonDict:
         return attr.asdict(self)
@@ -101,4 +103,6 @@ class UserPresenceState:
             last_user_sync_ts=0,
             status_msg=None,
             currently_active=False,
+            displayname=None,
+            avatar_url=None,
         )

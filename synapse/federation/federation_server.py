@@ -1425,8 +1425,29 @@ class FederationHandlerRegistry:
         self._edu_type_to_instance[edu_type] = instance_names
 
     async def on_edu(self, edu_type: str, origin: str, content: dict) -> None:
+        """Passes an EDU to a registered handler if one exists
+
+        This potentially modifies the `content` dict for `m.presence` EDUs when
+        presence `remote_activity_tracking` is disabled.
+
+        Args:
+            edu_type: The type of the incoming EDU to process
+            origin: The server we received the event from
+            content: The content of the EDU
+        """
         if not self.config.server.track_presence and edu_type == EduTypes.PRESENCE:
             return
+
+        if (
+            not self.config.server.presence_remote_activity_tracking
+            and edu_type == EduTypes.PRESENCE
+        ):
+            filtered_edus = []
+            for e in content["push"]:
+                # Process only profile presence updates to reduce resource impact
+                if "status_msg" in e or "displayname" in e or "avatar_url" in e:
+                    filtered_edus.append(e)
+            content["push"] = filtered_edus
 
         # Check if we have a handler on this instance
         handler = self.edu_handlers.get(edu_type)

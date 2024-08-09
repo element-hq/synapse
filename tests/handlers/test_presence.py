@@ -366,6 +366,8 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
                 last_user_sync_ts=1,
                 status_msg="I'm online!",
                 currently_active=True,
+                displayname=None,
+                avatar_url=None,
             )
             presence_states.append(presence_state)
 
@@ -718,6 +720,8 @@ class PresenceHandlerInitTestCase(unittest.HomeserverTestCase):
                         last_user_sync_ts=now,
                         status_msg=None,
                         currently_active=True,
+                        displayname=None,
+                        avatar_url=None,
                     )
                 ]
             )
