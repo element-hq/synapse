@@ -18,11 +18,16 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import re
 from http import HTTPStatus
+from typing import Optional
+
+from parameterized import parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
+from synapse.api.room_versions import RoomVersions
 from synapse.events.utils import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -31,10 +36,25 @@ from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
 
+_room_version_msc3757_re = re.compile(r"org.matrix.msc3757\b")
 
+
+@parameterized_class(
+    ("room_version",),
+    [
+        (None,) if rv is None else (rv.identifier,)
+        for rv in [
+            None,
+            RoomVersions.MSC3757v9,
+            RoomVersions.MSC3757v10,
+            RoomVersions.MSC3757v11,
+        ]
+    ],
+)
 class PowerLevelsTestCase(HomeserverTestCase):
     """Tests that power levels are enforced in various situations"""
 
+    room_version: Optional[str]
     servlets = [
         admin.register_servlets,
         room.register_servlets,
@@ -58,7 +78,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # Invite the other users
@@ -98,6 +120,12 @@ class PowerLevelsTestCase(HomeserverTestCase):
             "m.room.power_levels",
             room_power_levels,
             tok=self.admin_access_token,
+        )
+
+    @property
+    def _allows_owned_state(self) -> bool:
+        return self.room_version is not None and bool(
+            _room_version_msc3757_re.match(self.room_version)
         )
 
     def test_non_admins_cannot_enable_room_encryption(self) -> None:
@@ -149,7 +177,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
     def test_non_admins_cannot_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # have the mod try to send a tombstone event
@@ -203,7 +233,9 @@ class PowerLevelsTestCase(HomeserverTestCase):
     def test_admins_can_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id, tok=self.admin_access_token
+            self.admin_user_id,
+            tok=self.admin_access_token,
+            room_version=self.room_version,
         )
 
         # have the admin try to send a tombstone event
@@ -292,4 +324,48 @@ class PowerLevelsTestCase(HomeserverTestCase):
             body["errcode"],
             Codes.BAD_JSON,
             body,
+        )
+
+    def test_can_set_own_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.mod_user_id}_suffix",
+            tok=self.mod_access_token,
+            expect_code=(
+                HTTPStatus.OK if self._allows_owned_state else HTTPStatus.FORBIDDEN
+            ),
+        )
+
+    def test_admins_can_set_others_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.mod_user_id}_suffix",
+            tok=self.admin_access_token,
+            expect_code=(
+                HTTPStatus.OK if self._allows_owned_state else HTTPStatus.FORBIDDEN
+            ),
+        )
+
+    def test_non_admins_cannot_set_others_state(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.admin_user_id}_suffix",
+            tok=self.mod_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+
+    def test_cannot_set_state_with_non_user_id_key(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            "org.matrix.msc3757.test",
+            {},
+            state_key=f"{self.admin_user_id}@suffix",
+            tok=self.admin_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
         )
