@@ -206,6 +206,21 @@ class GenericWorkerServer(HomeServer):
                                 "/_synapse/admin": admin_resource,
                             }
                         )
+
+                        if "federation" not in res.names:
+                            # Only load the federation media resource separately if federation
+                            # resource is not specified since federation resource includes media
+                            # resource.
+                            resources[FEDERATION_PREFIX] = TransportLayerServer(
+                                self, servlet_groups=["media"]
+                            )
+                        if "client" not in res.names:
+                            # Only load the client media resource separately if client
+                            # resource is not specified since client resource includes media
+                            # resource.
+                            resources[CLIENT_API_PREFIX] = ClientRestResource(
+                                self, servlet_groups=["media"]
+                            )
                     else:
                         logger.warning(
                             "A 'media' listener is configured but the media"

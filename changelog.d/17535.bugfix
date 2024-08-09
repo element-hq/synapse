@@ -1,0 +1,1 @@
+Fix experimental sliding sync implementation to remember any updates in rooms that were not sent down immediately.

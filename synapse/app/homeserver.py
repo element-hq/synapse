@@ -101,6 +101,12 @@ class SynapseHomeServer(HomeServer):
                     # Skip loading openid resource if federation is defined
                     # since federation resource will include openid
                     continue
+                if name == "media" and (
+                    "federation" in res.names or "client" in res.names
+                ):
+                    # Skip loading media resource if federation or client are defined
+                    # since federation & client resources will include media
+                    continue
                 if name == "health":
                     # Skip loading, health resource is always included
                     continue
@@ -230,6 +236,14 @@ class SynapseHomeServer(HomeServer):
                 raise ConfigError(
                     "'media' resource conflicts with enable_media_repo=False"
                 )
+
+        if name == "media":
+            resources[FEDERATION_PREFIX] = TransportLayerServer(
+                self, servlet_groups=["media"]
+            )
+            resources[CLIENT_API_PREFIX] = ClientRestResource(
+                self, servlet_groups=["media"]
+            )
 
         if name in ["keys", "federation"]:
             resources[SERVER_KEY_PREFIX] = KeyResource(self)

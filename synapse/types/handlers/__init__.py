@@ -18,7 +18,7 @@
 #
 #
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, Final, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Final, List, Mapping, Optional, Sequence, Tuple
 
 import attr
 from typing_extensions import TypedDict
@@ -31,7 +31,15 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
+from synapse.types import (
+    DeviceListUpdates,
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+    UserID,
+)
 from synapse.types.rest.client import SlidingSyncBody
 
 if TYPE_CHECKING:
@@ -102,7 +110,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     """
 
     user: UserID
-    device_id: Optional[str]
+    requester: Requester
 
     # Pydantic config
     class Config:
@@ -144,7 +152,7 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room subscription to room results.
+        rooms: Room subscription API. A map of room ID to room results.
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -174,8 +182,8 @@ class SlidingSyncResult:
                 absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
-            limited: True if their are more events than fit between the given position and now.
-                Sync again to get more.
+            limited: True if there are more events than `timeline_limit` looking
+                backwards from the `response.pos` to the `request.pos`.
             num_live: The number of timeline events which have just occurred and are not historical.
                 The last N events are 'live' and should be treated as such. This is mostly
                 useful to determine whether a given @mention event should make a noise or not.
@@ -230,6 +238,17 @@ class SlidingSyncResult:
         notification_count: int
         highlight_count: int
 
+        def __bool__(self) -> bool:
+            return (
+                # If this is the first time the client is seeing the room, we should not filter it out
+                # under any circumstance.
+                self.initial
+                # We need to let the client know if there are any new events
+                or bool(self.required_state)
+                or bool(self.timeline_events)
+                or bool(self.stripped_state)
+            )
+
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
         """
@@ -264,6 +283,7 @@ class SlidingSyncResult:
 
         Attributes:
             to_device: The to-device extension (MSC3885)
+            e2ee: The E2EE device extension (MSC3884)
         """
 
         @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -282,12 +302,109 @@ class SlidingSyncResult:
             def __bool__(self) -> bool:
                 return bool(self.events)
 
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class E2eeExtension:
+            """The E2EE device extension (MSC3884)
+
+            Attributes:
+                device_list_updates: List of user_ids whose devices have changed or left (only
+                    present on incremental syncs).
+                device_one_time_keys_count: Map from key algorithm to the number of
+                    unclaimed one-time keys currently held on the server for this device. If
+                    an algorithm is unlisted, the count for that algorithm is assumed to be
+                    zero. If this entire parameter is missing, the count for all algorithms
+                    is assumed to be zero.
+                device_unused_fallback_key_types: List of unused fallback key algorithms
+                    for this device.
+            """
+
+            # Only present on incremental syncs
+            device_list_updates: Optional[DeviceListUpdates]
+            device_one_time_keys_count: Mapping[str, int]
+            device_unused_fallback_key_types: Sequence[str]
+
+            def __bool__(self) -> bool:
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
+                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
+                    default_otk is not None and default_otk > 0
+                )
+
+                return bool(
+                    more_than_default_otk
+                    or self.device_list_updates
+                    or self.device_unused_fallback_key_types
+                )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class AccountDataExtension:
+            """The Account Data extension (MSC3959)
+
+            Attributes:
+                global_account_data_map: Mapping from `type` to `content` of global account
+                    data events.
+                account_data_by_room_map: Mapping from room_id to mapping of `type` to
+                    `content` of room account data events.
+            """
+
+            global_account_data_map: Mapping[str, JsonMapping]
+            account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
+
+            def __bool__(self) -> bool:
+                return bool(
+                    self.global_account_data_map or self.account_data_by_room_map
+                )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ReceiptsExtension:
+            """The Receipts extension (MSC3960)
+
+            Attributes:
+                room_id_to_receipt_map: Mapping from room_id to `m.receipt` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_receipt_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_receipt_map)
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class TypingExtension:
+            """The Typing Notification extension (MSC3961)
+
+            Attributes:
+                room_id_to_typing_map: Mapping from room_id to `m.typing` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_typing_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_typing_map)
+
         to_device: Optional[ToDeviceExtension] = None
+        e2ee: Optional[E2eeExtension] = None
+        account_data: Optional[AccountDataExtension] = None
+        receipts: Optional[ReceiptsExtension] = None
+        typing: Optional[TypingExtension] = None
 
         def __bool__(self) -> bool:
-            return bool(self.to_device)
+            return bool(
+                self.to_device
+                or self.e2ee
+                or self.account_data
+                or self.receipts
+                or self.typing
+            )
 
-    next_pos: StreamToken
+    next_pos: SlidingSyncStreamToken
     lists: Dict[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
     extensions: Extensions
@@ -297,10 +414,14 @@ class SlidingSyncResult:
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        return bool(self.lists or self.rooms or self.extensions)
+        # We don't include `self.lists` here, as a) `lists` is always non-empty even if
+        # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
+        # the latest activity, anything that would cause the order to change would end
+        # up in `self.rooms` and cause us to send down the change.
+        return bool(self.rooms or self.extensions)
 
     @staticmethod
-    def empty(next_pos: StreamToken) -> "SlidingSyncResult":
+    def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
         "Return a new empty result"
         return SlidingSyncResult(
             next_pos=next_pos,

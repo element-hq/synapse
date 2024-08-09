@@ -559,6 +559,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     def get_sync_handler(self) -> SyncHandler:
         return SyncHandler(self)
 
+    @cache_in_self
     def get_sliding_sync_handler(self) -> SlidingSyncHandler:
         return SlidingSyncHandler(self)
 
