@@ -230,10 +230,175 @@ class ProfileRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
+        # TODO REVERT CHANGES
+
         return 200, await self.profile_handler.get_profile(user_id)
 
 
 class UnstableProfileRestServlet(RestServlet):
+    PATTERNS = [
+        re.compile(
+            r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)"
+        )
+    ]
+    CATEGORY = "Event sending requests"
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.profile_handler = hs.get_profile_handler()
+        self.auth = hs.get_auth()
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester_user = None
+
+        if self.hs.config.server.require_auth_for_profile_requests:
+            requester = await self.auth.get_user_by_req(request)
+            requester_user = requester.user
+
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
+        user = UserID.from_string(user_id)
+        await self.profile_handler.check_profile_query_allowed(user, requester_user)
+
+        return 200, await self.profile_handler.get_profile(user_id)
+
+    async def on_PATCH(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user = UserID.from_string(user_id)
+        is_admin = await self.auth.is_server_admin(requester)
+
+        content = parse_json_object_from_request(request)
+
+        for field_name, new_value in content.items():
+            if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+                raise SynapseError(
+                    400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
+                )
+
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400,
+                    f"Invalid value for field: {field_name}",
+                    errcode=Codes.INVALID_PARAM,
+                )
+            # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
+            if len(new_value) > MAX_CUSTOM_VALUE_LEN:
+                raise SynapseError(
+                    400, "Field value too long", errcode=Codes.INVALID_PARAM
+                )
+
+        propagate = _read_propagate(self.hs, request)
+
+        requester_suspended = (
+            await self.hs.get_datastores().main.get_user_suspended_status(
+                requester.user.to_string()
+            )
+        )
+
+        if requester_suspended:
+            raise SynapseError(
+                403,
+                "Updating profile while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
+        # TODO This isn't idempotent.
+        for field_name, new_value in content.items():
+            if field_name == ProfileFields.DISPLAYNAME:
+                await self.profile_handler.set_displayname(
+                    user, requester, new_value, is_admin, propagate=propagate
+                )
+            elif field_name == ProfileFields.AVATAR_URL:
+                await self.profile_handler.set_avatar_url(
+                    user, requester, new_value, is_admin, propagate=propagate
+                )
+            else:
+                await self.profile_handler.set_profile_field(
+                    user, requester, field_name, new_value, is_admin
+                )
+
+        return 200, {}
+
+    async def on_POST(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user = UserID.from_string(user_id)
+        is_admin = await self.auth.is_server_admin(requester)
+
+        content = parse_json_object_from_request(request)
+
+        for field_name, new_value in content.items():
+            if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+                raise SynapseError(
+                    400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
+                )
+
+            if not isinstance(new_value, str):
+                raise SynapseError(
+                    400,
+                    f"Invalid value for field: {field_name}",
+                    errcode=Codes.INVALID_PARAM,
+                )
+            # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
+            if len(new_value) > MAX_CUSTOM_VALUE_LEN:
+                raise SynapseError(
+                    400, "Field value too long", errcode=Codes.INVALID_PARAM
+                )
+
+        propagate = _read_propagate(self.hs, request)
+
+        requester_suspended = (
+            await self.hs.get_datastores().main.get_user_suspended_status(
+                requester.user.to_string()
+            )
+        )
+
+        if requester_suspended:
+            raise SynapseError(
+                403,
+                "Updating profile while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
+        # TODO This isn't idempotent.
+
+        # Any fields which were not provided need to be deleted.
+        current_fields = await self.profile_handler.get_profile(user_id)
+        for field_name in (ProfileFields.DISPLAYNAME, ProfileFields.AVATAR_URL):
+            # If no new value is given, then set the value to empty to delete it.
+            if field_name not in content:
+                content[field_name] = ""
+        for field_name in current_fields.keys() - content.keys():
+            await self.profile_handler.delete_profile_field(user, requester, field_name)
+
+        # Remaining fields are created or updated.
+        for field_name, new_value in content.items():
+            if field_name == ProfileFields.DISPLAYNAME:
+                await self.profile_handler.set_displayname(
+                    user, requester, new_value, is_admin, propagate=propagate
+                )
+            elif field_name == ProfileFields.AVATAR_URL:
+                await self.profile_handler.set_avatar_url(
+                    user, requester, new_value, is_admin, propagate=propagate
+                )
+            else:
+                await self.profile_handler.set_profile_field(
+                    user, requester, field_name, new_value, is_admin
+                )
+
+        return 200, {}
+
+
+class UnstableProfileFieldRestServlet(RestServlet):
     PATTERNS = [
         re.compile(
             r"^/_matrix/client/unstable/uk\.tcpip\.msc4133/profile/(?P<user_id>[^/]*)/(?P<field_name>[^/]*)"
@@ -281,7 +446,7 @@ class UnstableProfileRestServlet(RestServlet):
         is_admin = await self.auth.is_server_admin(requester)
 
         if len(field_name) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.INVALID_PARAM)
+            raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
 
         content = parse_json_object_from_request(request)
         try:
@@ -292,7 +457,8 @@ class UnstableProfileRestServlet(RestServlet):
             )
 
         if not isinstance(new_value, str):
-            raise SynapseError(400, "Invalid field value", errcode=Codes.INVALID_PARAM)
+            raise SynapseError(400, "Invalid value", errcode=Codes.INVALID_PARAM)
+        # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
         if len(new_value) > MAX_CUSTOM_VALUE_LEN:
             raise SynapseError(400, "Field value too long", errcode=Codes.INVALID_PARAM)
 
@@ -307,7 +473,7 @@ class UnstableProfileRestServlet(RestServlet):
         if requester_suspended:
             raise SynapseError(
                 403,
-                "Updating avatar URL while account is suspended is not allowed.",
+                "Updating profile while account is suspended is not allowed.",
                 Codes.USER_ACCOUNT_SUSPENDED,
             )
 
@@ -326,10 +492,51 @@ class UnstableProfileRestServlet(RestServlet):
 
         return 200, {}
 
+    async def on_DELETE(
+        self, request: SynapseRequest, user_id: str, field_name: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user = UserID.from_string(user_id)
+        is_admin = await self.auth.is_server_admin(requester)
+
+        if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+            raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
+
+        propagate = _read_propagate(self.hs, request)
+
+        requester_suspended = (
+            await self.hs.get_datastores().main.get_user_suspended_status(
+                requester.user.to_string()
+            )
+        )
+
+        if requester_suspended:
+            raise SynapseError(
+                403,
+                "Updating profile while account is suspended is not allowed.",
+                Codes.USER_ACCOUNT_SUSPENDED,
+            )
+
+        if field_name == ProfileFields.DISPLAYNAME:
+            await self.profile_handler.set_displayname(
+                user, requester, "", is_admin, propagate=propagate
+            )
+        elif field_name == ProfileFields.AVATAR_URL:
+            await self.profile_handler.set_avatar_url(
+                user, requester, "", is_admin, propagate=propagate
+            )
+        else:
+            await self.profile_handler.delete_profile_field(
+                user, requester, field_name, is_admin
+            )
+
+        return 200, {}
+
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ProfileDisplaynameRestServlet(hs).register(http_server)
     ProfileAvatarURLRestServlet(hs).register(http_server)
     ProfileRestServlet(hs).register(http_server)
     if hs.config.experimental.msc4133_enabled:
+        UnstableProfileFieldRestServlet(hs).register(http_server)
         UnstableProfileRestServlet(hs).register(http_server)

@@ -92,6 +92,11 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.experimental.msc3664_enabled,
             }
 
+        if self.config.experimental.msc4133_enabled:
+            response["capabilities"]["k.tcpip.msc4133.profile_fields"] = {
+                True,
+            }
+
         return HTTPStatus.OK, response
 
 

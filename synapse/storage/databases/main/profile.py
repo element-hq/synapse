@@ -280,6 +280,20 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="set_profile_field",
         )
 
+    async def delete_profile_field(self, user_id: UserID, field_name: str) -> None:
+        """
+        Set a custom profile field for a user.
+
+        Args:
+            user_id: The user's ID.
+            field_name: The name of the custom profile field.
+        """
+        await self.db_pool.simple_delete(
+            table="profile_fields",
+            keyvalues={"user_id": user_id.to_string(), "name": field_name},
+            desc="delete_profile_field",
+        )
+
 
 class ProfileStore(ProfileWorkerStore):
     pass

@@ -436,29 +436,50 @@ class ProfileHandler:
             new_value: The new field value for this user.
             by_admin: Whether this change was made by an administrator.
             deactivation: Whether this change was made while deactivating the user.
-            propagate: Whether this change also applies to the user's membership events.
         """
         if not self.hs.is_mine(target_user):
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if not by_admin and target_user != requester.user:
-            raise AuthError(400, "Cannot set another user's avatar_url")
+            raise AuthError(400, "Cannot set another user's profile")
 
         if not isinstance(new_value, str):
             raise SynapseError(
                 400, f"'{field_name}' must be a string", errcode=Codes.INVALID_PARAM
             )
 
-        if not await self.check_avatar_size_and_mime_type(new_value):
-            raise SynapseError(403, "This avatar is not allowed", Codes.FORBIDDEN)
-
-        # Same like set_displayname
-        if by_admin:
-            requester = create_requester(
-                target_user, authenticated_entity=requester.authenticated_entity
-            )
-
         await self.store.set_profile_field(target_user, field_name, new_value)
+
+        # Custom fields do not propagate into the user directory *or* rooms.
+        profile = await self.store.get_profileinfo(target_user)
+        await self._third_party_rules.on_profile_update(
+            target_user.to_string(), profile, by_admin, deactivation
+        )
+
+    async def delete_profile_field(
+        self,
+        target_user: UserID,
+        requester: Requester,
+        field_name: str,
+        by_admin: bool = False,
+        deactivation: bool = False,
+    ) -> None:
+        """Set a new avatar URL for a user.
+
+        Args:
+            target_user: the user whose avatar URL is to be changed.
+            requester: The user attempting to make this change.
+            field_name: The name of the profile field to update.
+            by_admin: Whether this change was made by an administrator.
+            deactivation: Whether this change was made while deactivating the user.
+        """
+        if not self.hs.is_mine(target_user):
+            raise SynapseError(400, "User is not hosted on this homeserver")
+
+        if not by_admin and target_user != requester.user:
+            raise AuthError(400, "Cannot set another user's profile")
+
+        await self.store.delete_profile_field(target_user, field_name)
 
         # Custom fields do not propagate into the user directory *or* rooms.
         profile = await self.store.get_profileinfo(target_user)

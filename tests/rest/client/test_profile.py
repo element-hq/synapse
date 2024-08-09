@@ -512,6 +512,22 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body, {"custom_field": "test"})
 
+        # Overwriting the field should work.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={"custom_field": "new_Value"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(channel.json_body, {"custom_field": "new_Value"})
+
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(
@@ -550,6 +566,88 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_displayname(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/displayname",
+            content={"displayname": "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        displayname = self._get_displayname()
+        self.assertEqual(displayname, "test")
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_avatar_url(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/avatar_url",
+            content={"avatar_url": "mxc://test/good"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        avatar_url = self._get_avatar_url()
+        self.assertEqual(avatar_url, "mxc://test/good")
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_fields(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={
+                "avatar_url": "mxc://test/good",
+                "displayname": "test",
+                "custom": "foo",
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "avatar_url": "mxc://test/good",
+                "displayname": "test",
+                "custom": "foo",
+            },
+        )
+
+        # Update some fields.
+        channel = self.make_request(
+            "PATCH",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={
+                "avatar_url": "mxc://test/second",
+                "displayname": "new_name",
+                "new_field": "test",
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "avatar_url": "mxc://test/second",
+                "displayname": "new_name",
+                "new_field": "test",
+                "custom": "foo",
+            },
+        )
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_other(self) -> None:
