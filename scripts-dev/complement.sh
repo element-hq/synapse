@@ -167,11 +167,11 @@ if [ -z "$skip_docker_build" ]; then
             -f "docker/editable.Dockerfile" .
 
         $CONTAINER_RUNTIME build -t synapse-workers-editable \
-            --build-arg FROM=synapse-editable \
+            --build-arg SYNAPSE_IMAGE=synapse-editable \
             -f "docker/Dockerfile-workers" .
 
         $CONTAINER_RUNTIME build -t complement-synapse-editable \
-            --build-arg FROM=synapse-workers-editable \
+            --build-arg SUNAPSE_WORKERS_IMAGE=synapse-workers-editable \
             -f "docker/complement/Dockerfile" "docker/complement"
 
         # Prepare the Rust module
@@ -180,21 +180,24 @@ if [ -z "$skip_docker_build" ]; then
     else
 
         # Build the base Synapse image from the local checkout
-        echo_if_github "::group::Build Docker image: matrixdotorg/synapse"
-        $CONTAINER_RUNTIME build -t matrixdotorg/synapse \
-        --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
-        --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
-        -f "docker/Dockerfile" .
+        echo_if_github "::group::Build Docker image: synapse"
+        $CONTAINER_RUNTIME build -t synapse \
+            --build-arg TEST_ONLY_SKIP_DEP_HASH_VERIFICATION \
+            --build-arg TEST_ONLY_IGNORE_POETRY_LOCKFILE \
+            -f "docker/Dockerfile" .
         echo_if_github "::endgroup::"
 
         # Build the workers docker image (from the base Synapse image we just built).
-        echo_if_github "::group::Build Docker image: matrixdotorg/synapse-workers"
-        $CONTAINER_RUNTIME build -t matrixdotorg/synapse-workers -f "docker/Dockerfile-workers" .
+        echo_if_github "::group::Build Docker image: synapse-workers"
+        $CONTAINER_RUNTIME build -t synapse-workers \
+            --build-arg SYNAPSE_IMAGE=synapse \
+            -f "docker/Dockerfile-workers" .
         echo_if_github "::endgroup::"
 
         # Build the unified Complement image (from the worker Synapse image we just built).
-        echo_if_github "::group::Build Docker image: complement/Dockerfile"
+        echo_if_github "::group::Build Docker image: complement-synapse"
         $CONTAINER_RUNTIME build -t complement-synapse \
+            --build-arg SYNAPSE_WORKERS_IMAGE=synapse-workers \
             -f "docker/complement/Dockerfile" "docker/complement"
         echo_if_github "::endgroup::"
 
