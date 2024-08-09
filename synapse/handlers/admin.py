@@ -21,19 +21,41 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Set
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 import attr
 
-from synapse.api.constants import Direction, Membership
+from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.errors import SynapseError
 from synapse.events import EventBase
-from synapse.types import JsonMapping, RoomStreamToken, StateMap, UserID, UserInfo
+from synapse.types import (
+    JsonMapping,
+    Requester,
+    RoomStreamToken,
+    ScheduledTask,
+    StateMap,
+    TaskStatus,
+    UserID,
+    UserInfo,
+)
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+REDACT_ALL_EVENTS_ACTION_NAME = "redact_all_events"
 
 
 class AdminHandler:
@@ -43,6 +65,20 @@ class AdminHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
         self._msc3866_enabled = hs.config.experimental.msc3866.enabled
+        self.event_creation_handler = hs.get_event_creation_handler()
+        self._task_scheduler = hs.get_task_scheduler()
+
+        self._task_scheduler.register_action(
+            self._redact_all_events, REDACT_ALL_EVENTS_ACTION_NAME
+        )
+
+    async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
+        """Get the current status of an active redaction process
+
+        Args:
+            redact_id: redact_id returned by start_redact_events.
+        """
+        return await self._task_scheduler.get_task(redact_id)
 
     async def get_whois(self, user: UserID) -> JsonMapping:
         connections = []
@@ -310,6 +346,88 @@ class AdminHandler:
             start += limit
 
         return writer.finished()
+
+    async def start_redact_events(
+        self, user_id: str, rooms: list, requester: JsonMapping
+    ) -> str:
+        """
+        Start a task redacting the events of the given user in the givent rooms
+
+        Args:
+            user_id: the user ID of the user whose events should be redacted
+            rooms: the rooms in which to redact the user's events
+            requester: the user requesting the events
+        """
+        active_tasks = await self._task_scheduler.get_tasks(
+            actions=[REDACT_ALL_EVENTS_ACTION_NAME],
+            resource_id=user_id,
+            statuses=[TaskStatus.ACTIVE],
+        )
+
+        if len(active_tasks) > 0:
+            raise SynapseError(
+                400, "Redact already in progress for user %s" % (user_id,)
+            )
+
+        redact_id = await self._task_scheduler.schedule_task(
+            REDACT_ALL_EVENTS_ACTION_NAME,
+            resource_id=user_id,
+            params={"rooms": rooms, "requester": requester, "user_id": user_id},
+        )
+
+        logger.info(
+            "starting redact events with redact_id %s",
+            redact_id,
+        )
+
+        return redact_id
+
+    async def _redact_all_events(
+        self, task: ScheduledTask
+    ) -> Tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
+        """
+        Task to redact all a users events in the given rooms, tracking which, if any, events
+        whose redaction failed
+        """
+
+        assert task.params is not None
+        rooms = task.params.get("rooms")
+        assert rooms is not None
+
+        r = task.params.get("requester")
+        assert r is not None
+        requester = Requester.deserialize(self._store, r)
+
+        user_id = task.params.get("user_id")
+        assert user_id is not None
+
+        result: Dict[str, Any] = {"result": []}
+        for room in rooms:
+            room_version = await self._store.get_room_version(room)
+            events = await self._store.get_events_sent_by_user(user_id, room)
+
+            for event in events:
+                event_dict = {
+                    "type": EventTypes.Redaction,
+                    "content": {},
+                    "room_id": room,
+                    "sender": requester.user.to_string(),
+                }
+                if room_version.updated_redaction_rules:
+                    event_dict["content"]["redacts"] = event[0]
+                else:
+                    event_dict["redacts"] = event[0]
+
+                try:
+                    await self.event_creation_handler.create_and_send_nonmember_event(
+                        requester, event_dict
+                    )
+                except Exception as ex:
+                    logger.info(f"Redaction of event {event[0]} failed due to: {ex}")
+                    result["result"].append(event[0])
+                    await self._task_scheduler.update_task(task.id, result=result)
+
+        return TaskStatus.COMPLETE, result, None
 
 
 class ExfiltrationWriter(metaclass=abc.ABCMeta):
