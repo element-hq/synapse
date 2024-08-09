@@ -179,11 +179,13 @@ RUN \
   libicu72 \
   libssl-dev \
   openssl \
+  dos2unix \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
+RUN dos2unix /start.py
 
 EXPOSE 8008/tcp 8009/tcp 8448/tcp
 
