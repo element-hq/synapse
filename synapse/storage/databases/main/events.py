@@ -34,6 +34,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    Union,
     cast,
 )
 
@@ -41,7 +42,12 @@ import attr
 from prometheus_client import Counter
 
 import synapse.metrics
-from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, relation_from_event
@@ -52,6 +58,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.event_federation import EventFederationStore
 from synapse.storage.databases.main.events_worker import EventCacheEntry
@@ -59,7 +66,14 @@ from synapse.storage.databases.main.search import SearchEntry
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import AbstractStreamIdGenerator
 from synapse.storage.util.sequence import SequenceGenerator
-from synapse.types import JsonDict, StateMap, StrCollection, get_domain_from_id
+from synapse.types import (
+    JsonDict,
+    MutableStateMap,
+    StateMap,
+    StrCollection,
+    get_domain_from_id,
+)
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter, sorted_topologically
 from synapse.util.stringutils import non_null_str_or_none
@@ -1153,16 +1167,187 @@ class PersistEventsStore:
         to_delete = delta_state.to_delete
         to_insert = delta_state.to_insert
 
+        logger.info(
+            "asdf _update_current_state_txn no_longer_in_room=%s to_insert=%s to_delete=%s",
+            delta_state.no_longer_in_room,
+            to_insert,
+            to_delete,
+        )
+
         # Figure out the changes of membership to invalidate the
         # `get_rooms_for_user` cache.
         # We find out which membership events we may have deleted
         # and which we have added, then we invalidate the caches for all
         # those users.
-        members_changed = {
+        members_to_cache_bust = {
             state_key
             for ev_type, state_key in itertools.chain(to_delete, to_insert)
             if ev_type == EventTypes.Member
         }
+
+        # We now update `sliding_sync_non_join_memberships`.
+        #
+        # This would only happen if someone was state reset out of the room
+        if to_delete:
+            txn.execute_batch(
+                "DELETE FROM sliding_sync_non_join_memberships"
+                " WHERE room_id = ? AND user_id = ?",
+                (
+                    (room_id, state_key)
+                    for event_type, state_key in to_delete
+                    if event_type == EventTypes.Member and self.is_mine_id(state_key)
+                ),
+            )
+
+        # We handle `sliding_sync_non_join_memberships` before `current_state_events` so
+        # we can gather the current state before it might be deleted if we are
+        # `no_longer_in_room`.
+        #
+        # We do this regardless of whether the server is `no_longer_in_room` or not
+        # because we still want a row if a local user was just left/kicked or got banned
+        # from the room.
+        if to_insert:
+            membership_event_id_to_user_id_map: Dict[str, str] = {}
+            for state_key, event_id in to_insert.items():
+                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
+                    membership_event_id_to_user_id_map[event_id] = state_key[1]
+
+            if len(membership_event_id_to_user_id_map) > 0:
+                # Map of values to insert/update in the `sliding_sync_non_join_memberships` table
+                sliding_sync_non_joined_rooms_insert_map: Dict[
+                    str, Optional[Union[str, bool]]
+                ] = {}
+
+                relevant_state_set = {
+                    (EventTypes.Create, ""),
+                    (EventTypes.RoomEncryption, ""),
+                    (EventTypes.Name, ""),
+                }
+
+                # Fetch the current state event IDs from the database
+                (
+                    event_type_and_state_key_in_list_clause,
+                    event_type_and_state_key_args,
+                ) = make_tuple_in_list_sql_clause(
+                    self.database_engine,
+                    ("type", "state_key"),
+                    relevant_state_set,
+                )
+                txn.execute(
+                    f"""
+                    SELECT c.event_id, c.type, c.state_key
+                    FROM current_state_events AS c
+                    WHERE
+                        c.room_id = ?
+                        AND {event_type_and_state_key_in_list_clause}
+                    """,
+                    [room_id] + event_type_and_state_key_args,
+                )
+                current_state_map: MutableStateMap[str] = {
+                    (event_type, state_key): event_id
+                    for event_id, event_type, state_key in txn
+                }
+                # Since we fetched the current state before we took `to_insert`/`to_delete`
+                # into account, we need to do a couple fixups.
+                #
+                # Update the current_state_map with what we have `to_delete`
+                for state_key in to_delete:
+                    current_state_map.pop(state_key, None)
+                # Update the current_state_map with what we have `to_insert`
+                for state_key, event_id in to_insert.items():
+                    if state_key in relevant_state_set:
+                        current_state_map[state_key] = event_id
+
+                # Fetch the raw event JSON from the database
+                (
+                    event_id_in_list_clause,
+                    event_id_args,
+                ) = make_in_list_sql_clause(
+                    self.database_engine,
+                    "event_id",
+                    current_state_map.values(),
+                )
+                txn.execute(
+                    f"""
+                    SELECT event_id, type, state_key, json FROM event_json
+                    INNER JOIN events USING (event_id)
+                    WHERE {event_id_in_list_clause}
+                    """,
+                    event_id_args,
+                )
+
+                # Parse the raw event JSON
+                for row in txn:
+                    event_id, event_type, state_key, json = row
+                    event_json = db_to_json(json)
+
+                    if event_type == EventTypes.Create:
+                        room_type = event_json.get("content", {}).get(
+                            EventContentFields.ROOM_TYPE
+                        )
+                        sliding_sync_non_joined_rooms_insert_map["room_type"] = (
+                            room_type
+                        )
+                    elif event_type == EventTypes.RoomEncryption:
+                        encryption_algorithm = event_json.get("content", {}).get(
+                            EventContentFields.ENCRYPTION_ALGORITHM
+                        )
+                        is_encrypted = encryption_algorithm is not None
+                        sliding_sync_non_joined_rooms_insert_map["is_encrypted"] = (
+                            is_encrypted
+                        )
+                    elif event_type == EventTypes.Name:
+                        room_name = event_json.get("content", {}).get(
+                            EventContentFields.ROOM_NAME
+                        )
+                        sliding_sync_non_joined_rooms_insert_map["room_name"] = (
+                            room_name
+                        )
+                    else:
+                        raise AssertionError(
+                            f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
+                        )
+
+                # Update the `sliding_sync_non_join_memberships` table
+                #
+                # Pulling keys/values separately is safe and will produce congruent
+                # lists
+                insert_keys = sliding_sync_non_joined_rooms_insert_map.keys()
+                insert_values = sliding_sync_non_joined_rooms_insert_map.values()
+                txn.execute_batch(
+                    f"""
+                    WITH data_table (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)}) AS (
+                        VALUES (
+                            ?, ?, ?,
+                            (SELECT membership FROM room_memberships WHERE event_id = ?),
+                            (SELECT stream_ordering FROM events WHERE event_id = ?),
+                            {", ".join("?" for _ in insert_values)}
+                        )
+                    )
+                    INSERT INTO sliding_sync_non_join_memberships
+                        (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)})
+                    SELECT * FROM data_table
+                    WHERE membership != ?
+                    ON CONFLICT (room_id, user_id)
+                    DO UPDATE SET
+                        membership_event_id = EXCLUDED.membership_event_id,
+                        membership = EXCLUDED.membership,
+                        event_stream_ordering = EXCLUDED.event_stream_ordering,
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                    """,
+                    [
+                        [
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                            membership_event_id,
+                            membership_event_id,
+                        ]
+                        + list(insert_values)
+                        + [Membership.JOIN]
+                        for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
+                    ],
+                )
 
         if delta_state.no_longer_in_room:
             # Server is no longer in the room so we delete the room from
@@ -1182,14 +1367,20 @@ class PersistEventsStore:
                 """
             txn.execute(sql, (stream_id, self._instance_name, room_id))
 
+            # Grab the list of users before we clear out the current state
+            users_in_room = self.store.get_users_in_room_txn(txn, room_id)
             # We also want to invalidate the membership caches for users
             # that were in the room.
-            users_in_room = self.store.get_users_in_room_txn(txn, room_id)
-            members_changed.update(users_in_room)
+            members_to_cache_bust.update(users_in_room)
 
             self.db_pool.simple_delete_txn(
                 txn,
                 table="current_state_events",
+                keyvalues={"room_id": room_id},
+            )
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="sliding_sync_joined_rooms",
                 keyvalues={"room_id": room_id},
             )
         else:
@@ -1260,6 +1451,135 @@ class PersistEventsStore:
                 ],
             )
 
+            # Handle updating the `sliding_sync_joined_rooms` table
+            event_ids_to_fetch: List[str] = []
+            create_event_id = None
+            room_encryption_event_id = None
+            room_name_event_id = None
+            bump_event_id = None
+            for state_key, event_id in to_insert.items():
+                if state_key[0] == EventTypes.Create and state_key[1] == "":
+                    create_event_id = event_id
+                    event_ids_to_fetch.append(event_id)
+                elif state_key[0] == EventTypes.RoomEncryption and state_key[1] == "":
+                    room_encryption_event_id = event_id
+                    event_ids_to_fetch.append(event_id)
+                elif state_key[0] == EventTypes.Name and state_key[1] == "":
+                    room_name_event_id = event_id
+                    event_ids_to_fetch.append(event_id)
+
+                if (
+                    state_key[0] in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+                    and state_key[1] == ""
+                ):
+                    bump_event_id = event_id
+
+            # Map of values to insert/update in the `sliding_sync_joined_rooms` table
+            sliding_sync_joined_rooms_insert_map: Dict[
+                str, Optional[Union[str, bool]]
+            ] = {}
+
+            # If something is being deleted from the state, we need to clear it out
+            for state_key in to_delete:
+                if state_key == (EventTypes.Create, ""):
+                    sliding_sync_joined_rooms_insert_map["room_type"] = None
+                elif state_key == (EventTypes.RoomEncryption, ""):
+                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = False
+                elif state_key == (EventTypes.Name, ""):
+                    sliding_sync_joined_rooms_insert_map["room_name"] = None
+
+            # Fetch the events from the database
+            event_json_rows = cast(
+                List[Tuple[str, str]],
+                self.db_pool.simple_select_many_txn(
+                    txn,
+                    table="event_json",
+                    column="event_id",
+                    iterable=event_ids_to_fetch,
+                    retcols=["event_id", "json"],
+                    keyvalues={},
+                ),
+            )
+            # Parse the raw event JSON
+            for event_id, json in event_json_rows:
+                event_json = db_to_json(json)
+
+                if event_id == create_event_id:
+                    room_type = event_json.get("content", {}).get(
+                        EventContentFields.ROOM_TYPE
+                    )
+                    sliding_sync_joined_rooms_insert_map["room_type"] = room_type
+                elif event_id == room_encryption_event_id:
+                    encryption_algorithm = event_json.get("content", {}).get(
+                        EventContentFields.ENCRYPTION_ALGORITHM
+                    )
+                    is_encrypted = encryption_algorithm is not None
+                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = is_encrypted
+                elif event_id == room_name_event_id:
+                    room_name = event_json.get("content", {}).get(
+                        EventContentFields.ROOM_NAME
+                    )
+                    sliding_sync_joined_rooms_insert_map["room_name"] = room_name
+                else:
+                    raise AssertionError(
+                        f"Unexpected event_id (we should not be fetching extra events): {event_id}"
+                    )
+
+            # Update the `sliding_sync_joined_rooms` table
+            args: List[Any] = [
+                room_id,
+                # Even though `Mapping`/`Dict` have no guaranteed order, some
+                # implementations may preserve insertion order so we're just going to
+                # choose the best possible answer by using the "first" event ID which we
+                # will assume will have the greatest `stream_ordering`. We really just
+                # need *some* answer in case we are the first ones inserting into the
+                # table and in reality, `_store_event_txn()` is run before this function
+                # so it will already have the correct value. This is just to account for
+                # things changing in the future.
+                next(iter(to_insert.values())),
+            ]
+            # If we have a `bump_event_id`, let's update the `bump_stamp` column
+            bump_stamp_column = ""
+            bump_stamp_values_clause = ""
+            if bump_event_id is not None:
+                bump_stamp_column = "bump_stamp, "
+                bump_stamp_values_clause = (
+                    "(SELECT stream_ordering FROM events WHERE event_id = ?),"
+                )
+                args.append(bump_event_id)
+            # Pulling keys/values separately is safe and will produce congruent lists
+            insert_keys = sliding_sync_joined_rooms_insert_map.keys()
+            insert_values = sliding_sync_joined_rooms_insert_map.values()
+            args.extend(iter(insert_values))
+            if len(insert_keys) > 0:
+                # We don't update `bump_stamp` `ON CONFLICT` because we're dealing with
+                # state here and the only state event that is also a bump event type is
+                # `m.room.create`. Given the room creation event is the first one in the
+                # room, it's either going to be set on insert, or we've already moved on
+                # to other events with a greater `stream_ordering`/`bump_stamp` and we
+                # don't need to even try.
+                txn.execute(
+                    f"""
+                    INSERT INTO sliding_sync_joined_rooms
+                        (room_id, event_stream_ordering, {bump_stamp_column} {", ".join(insert_keys)})
+                    VALUES (
+                        ?,
+                        (SELECT stream_ordering FROM events WHERE event_id = ?),
+                        {bump_stamp_values_clause}
+                        {", ".join("?" for _ in insert_values)}
+                    )
+                    ON CONFLICT (room_id)
+                    DO UPDATE SET
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)},
+                        event_stream_ordering = CASE
+                            WHEN event_stream_ordering < EXCLUDED.event_stream_ordering
+                                THEN EXCLUDED.event_stream_ordering
+                            ELSE event_stream_ordering
+                        END
+                    """,
+                    args,
+                )
+
         # We now update `local_current_membership`. We do this regardless
         # of whether we're still in the room or not to handle the case where
         # e.g. we just got banned (where we need to record that fact here).
@@ -1303,12 +1623,14 @@ class PersistEventsStore:
         )
 
         # Invalidate the various caches
-        self.store._invalidate_state_caches_and_stream(txn, room_id, members_changed)
+        self.store._invalidate_state_caches_and_stream(
+            txn, room_id, members_to_cache_bust
+        )
 
         # Check if any of the remote membership changes requires us to
         # unsubscribe from their device lists.
         self.store.handle_potentially_left_users_txn(
-            txn, {m for m in members_changed if not self.hs.is_mine_id(m)}
+            txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
     def _upsert_room_version_txn(self, txn: LoggingTransaction, room_id: str) -> None:
@@ -1653,6 +1975,67 @@ class PersistEventsStore:
                 (event.event_id, event.room_id, event.type, event.state_key)
                 for event, _ in events_and_contexts
                 if event.is_state()
+            ],
+        )
+
+        # Handle updating `sliding_sync_joined_rooms`
+        room_id_to_stream_ordering_map: Dict[str, int] = {}
+        room_id_to_bump_stamp_map: Dict[str, int] = {}
+        for event, _ in events_and_contexts:
+            existing_stream_ordering = room_id_to_stream_ordering_map.get(event.room_id)
+            # This should exist at this point because we're inserting events here which require it
+            assert event.internal_metadata.stream_ordering is not None
+            if (
+                existing_stream_ordering is None
+                or existing_stream_ordering < event.internal_metadata.stream_ordering
+            ):
+                room_id_to_stream_ordering_map[event.room_id] = (
+                    event.internal_metadata.stream_ordering
+                )
+
+            if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                existing_bump_stamp = room_id_to_bump_stamp_map.get(event.room_id)
+                # This should exist at this point because we're inserting events here which require it
+                assert event.internal_metadata.stream_ordering is not None
+                if (
+                    existing_bump_stamp is None
+                    or existing_bump_stamp < event.internal_metadata.stream_ordering
+                ):
+                    room_id_to_bump_stamp_map[event.room_id] = (
+                        event.internal_metadata.stream_ordering
+                    )
+
+        # `_store_event_txn` is run before `_update_current_state_txn` which handles
+        # deleting the rows if we are no longer in the room so we don't need to worry
+        # about inserting something that will be orphaned.
+        #
+        # FIXME: We need to handle cases where we are persisting events out of order and
+        # the stream_ordering didn't increase.
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="sliding_sync_joined_rooms",
+            key_names=("room_id",),
+            key_values=[
+                (room_id,) for room_id in room_id_to_stream_ordering_map.keys()
+            ],
+            value_names=("event_stream_ordering",),
+            value_values=[
+                (room_id_to_stream_ordering_map[room_id],)
+                for room_id in room_id_to_stream_ordering_map.keys()
+            ],
+        )
+        # This has to be separate from the upsert above because we won't have a
+        # `bump_stamp` for every event and we don't want to overwrite the existing value
+        # with `None`.
+        self.db_pool.simple_upsert_many_txn(
+            txn,
+            table="sliding_sync_joined_rooms",
+            key_names=("room_id",),
+            key_values=[(room_id,) for room_id in room_id_to_bump_stamp_map.keys()],
+            value_names=("bump_stamp",),
+            value_values=[
+                (room_id_to_bump_stamp_map[room_id],)
+                for room_id in room_id_to_bump_stamp_map.keys()
             ],
         )
 

@@ -19,11 +19,14 @@
 #
 #
 
-from typing import List, Optional
+import logging
+from typing import Dict, List, Optional, Tuple, cast
+
+import attr
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase
 from synapse.federation.federation_base import event_from_pdu_json
@@ -34,6 +37,8 @@ from synapse.types import StateMap
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
+
+logger = logging.getLogger(__name__)
 
 
 class ExtremPruneTestCase(HomeserverTestCase):
@@ -481,3 +486,779 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 
         users = self.get_success(self.store.get_users_in_room(room_id))
         self.assertEqual(users, [])
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _SlidingSyncJoinedRoomResult:
+    room_id: str
+    event_stream_ordering: int
+    bump_stamp: int
+    room_type: str
+    room_name: str
+    is_encrypted: bool
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _SlidingSyncNonJoinMembershipResult:
+    room_id: str
+    user_id: str
+    membership_event_id: str
+    membership: str
+    event_stream_ordering: int
+    room_type: str
+    room_name: str
+    is_encrypted: bool
+
+
+class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
+    """
+    Tests to make sure the
+    `sliding_sync_joined_rooms`/`sliding_sync_non_join_memberships` database tables are
+    populated correctly.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
+
+    def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
+        """
+        Return the rows from the `sliding_sync_joined_rooms` table.
+
+        Returns:
+            Mapping from room_id to _SlidingSyncJoinedRoomResult.
+        """
+        rows = cast(
+            List[Tuple[str, int, int, str, str, bool]],
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "sliding_sync_joined_rooms",
+                    None,
+                    retcols=(
+                        "room_id",
+                        "event_stream_ordering",
+                        "bump_stamp",
+                        "room_type",
+                        "room_name",
+                        "is_encrypted",
+                    ),
+                ),
+            ),
+        )
+
+        return {
+            row[0]: _SlidingSyncJoinedRoomResult(
+                room_id=row[0],
+                event_stream_ordering=row[1],
+                bump_stamp=row[2],
+                room_type=row[3],
+                room_name=row[4],
+                is_encrypted=row[5],
+            )
+            for row in rows
+        }
+
+    def _get_sliding_sync_non_join_memberships(
+        self,
+    ) -> Dict[Tuple[str, str], _SlidingSyncNonJoinMembershipResult]:
+        """
+        Return the rows from the `sliding_sync_non_join_memberships` table.
+
+        Returns:
+            Mapping from the (room_id, user_id) to _SlidingSyncNonJoinMembershipResult.
+        """
+        rows = cast(
+            List[Tuple[str, str, str, str, int, str, str, bool]],
+            self.get_success(
+                self.store.db_pool.simple_select_list(
+                    "sliding_sync_non_join_memberships",
+                    None,
+                    retcols=(
+                        "room_id",
+                        "user_id",
+                        "membership_event_id",
+                        "membership",
+                        "event_stream_ordering",
+                        "room_type",
+                        "room_name",
+                        "is_encrypted",
+                    ),
+                ),
+            ),
+        )
+
+        return {
+            (row[0], row[1]): _SlidingSyncNonJoinMembershipResult(
+                room_id=row[0],
+                user_id=row[1],
+                membership_event_id=row[2],
+                membership=row[3],
+                event_stream_ordering=row[4],
+                room_type=row[5],
+                room_name=row[6],
+                is_encrypted=row[7],
+            )
+            for row in rows
+        }
+
+    def test_joined_room_with_no_info(self) -> None:
+        """
+        Test joined room that doesn't have a room type, encryption, or name shows up in
+        `sliding_sync_joined_rooms`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # History visibility just happens to be the last event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomHistoryVisibility, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+        # No one is non-joined to this room so we shouldn't see anything
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+    def test_joined_room_with_info(self) -> None:
+        """
+        Test joined encrypted room with name shows up in `sliding_sync_joined_rooms`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_join_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_join_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                event_stream_ordering=user1_join_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+    def test_joined_space_room_with_info(self) -> None:
+        """
+        Test joined space room with name shows up in `sliding_sync_joined_rooms`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        user1_join_response = self.helper.join(space_room_id, user1_id, tok=user1_tok)
+        user1_join_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_join_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(space_room_id)
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {space_room_id},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[space_room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=space_room_id,
+                event_stream_ordering=user1_join_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+    def test_joined_room_with_state_updated(self) -> None:
+        """
+        Test state derived info in `sliding_sync_joined_rooms` is updated when the
+        current state is updated.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_join_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_join_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                event_stream_ordering=user1_join_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Update the room name
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room was renamed"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        encrypt_room_response = self.helper.send_state(
+            room_id1,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+        encrypt_room_event_pos = self.get_success(
+            self.store.get_position_for_event(encrypt_room_response["event_id"])
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        # Make sure we see the new room name
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                event_stream_ordering=encrypt_room_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room was renamed",
+                is_encrypted=True,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+    def test_joined_room_is_bumped(self) -> None:
+        """
+        Test that `event_stream_ordering` and `bump_stamp` is updated when a new bump
+        event is sent (`sliding_sync_joined_rooms`).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_join_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_join_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                event_stream_ordering=user1_join_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Send a new message to bump the room
+        event_response = self.helper.send(room_id1, "some message", tok=user1_tok)
+        event_pos = self.get_success(
+            self.store.get_position_for_event(event_response["event_id"])
+        )
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        # Make sure we see the new room name
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # Updated `event_stream_ordering`
+                event_stream_ordering=event_pos.stream,
+                # And since the event was a bump event, the `bump_stamp` should be updated
+                bump_stamp=event_pos.stream,
+                # The state is still the same (it didn't change)
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            set(),
+            exact=True,
+        )
+
+    # TODO: test_joined_room_state_reset
+
+    def test_non_join_space_room_with_info(self) -> None:
+        """
+        Test users who was invited shows up in `sliding_sync_non_join_memberships`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        # User1 is invited to the room
+        user1_invited_response = self.helper.invite(
+            space_room_id, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invited_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_invited_response["event_id"])
+        )
+
+        # Update the room name after we are invited just to make sure
+        # we don't update non-join memberships when the room name changes.
+        rename_response = self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space was renamed"},
+            tok=user2_tok,
+        )
+        rename_event_pos = self.get_success(
+            self.store.get_position_for_event(rename_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(space_room_id)
+        )
+
+        # User2 is still joined to the room so we should still have an entry in the
+        # `sliding_sync_joined_rooms` table.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {space_room_id},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[space_room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=space_room_id,
+                event_stream_ordering=rename_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space was renamed",
+                is_encrypted=True,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            {
+                (space_room_id, user1_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user was invited
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((space_room_id, user1_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=user1_invited_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=user1_invited_event_pos.stream,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=True,
+            ),
+        )
+
+    def test_non_join_invite_ban(self) -> None:
+        """
+        Test users who have invite/ban membership in room shows up in
+        `sliding_sync_non_join_memberships`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to the room
+        user1_invited_response = self.helper.invite(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invited_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_invited_response["event_id"])
+        )
+
+        # User3 joins the room
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        # User3 is banned from the room
+        user3_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user3_id, tok=user2_tok
+        )
+        user3_ban_event_pos = self.get_success(
+            self.store.get_position_for_event(user3_ban_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # User2 is still joined to the room so we should still have an entry
+        # in the `sliding_sync_joined_rooms` table.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                event_stream_ordering=user3_ban_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user3_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_invited_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=user1_invited_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user3_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user3_id,
+                membership_event_id=user3_ban_response["event_id"],
+                membership=Membership.BAN,
+                event_stream_ordering=user3_ban_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+    # TODO: Test remote invite
+
+    # TODO Test for non-join membership changing
+
+    def test_non_join_server_left_room(self) -> None:
+        """
+        Test everyone local leaves the room but their leave membership still shows up in
+        `sliding_sync_non_join_memberships`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 joins the room
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        # User2 leaves the room
+        user2_leave_response = self.helper.leave(room_id1, user2_id, tok=user2_tok)
+        user2_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user2_leave_response["event_id"])
+        )
+
+        # User1 leaves the room
+        user1_leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        user1_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_leave_response["event_id"])
+        )
+
+        # No one is joined to the room anymore so we shouldn't have an entry in the
+        # `sliding_sync_joined_rooms` table.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # We should still see rows for the leave events (non-joins)
+        sliding_sync_non_join_memberships_results = (
+            self._get_sliding_sync_non_join_memberships()
+        )
+        self.assertIncludes(
+            set(sliding_sync_non_join_memberships_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user1_leave_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_non_join_memberships_results.get((room_id1, user2_id)),
+            _SlidingSyncNonJoinMembershipResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=user2_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user2_leave_event_pos.stream,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+    # TODO: test_non_join_state_reset

@@ -272,8 +272,8 @@ class TestCase(unittest.TestCase):
 
     def assertIncludes(
         self,
-        actual_items: AbstractSet[str],
-        expected_items: AbstractSet[str],
+        actual_items: AbstractSet[TV],
+        expected_items: AbstractSet[TV],
         exact: bool = False,
         message: Optional[str] = None,
     ) -> None:
