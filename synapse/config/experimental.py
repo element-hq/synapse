@@ -448,3 +448,6 @@ class ExperimentalConfig(Config):
 
         # MSC4156: Migrate server_name to via
         self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)
+
+        # MSC4133: Custom profile fields
+        self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)

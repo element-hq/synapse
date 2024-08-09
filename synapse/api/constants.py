@@ -314,3 +314,8 @@ class ApprovalNoticeMedium:
 class Direction(enum.Enum):
     BACKWARDS = "b"
     FORWARDS = "f"
+
+
+class ProfileFields:
+    DISPLAYNAME: Final = "displayname"
+    AVATAR_URL: Final = "avatar_url"
