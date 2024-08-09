@@ -2364,6 +2364,11 @@ class SlidingSyncHandler:
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
+        notif_counts = await self.store.get_unread_event_push_actions_by_room_for_user(
+            room_id,
+            sync_config.user.to_string(),
+        )
+
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
@@ -2384,11 +2389,9 @@ class SlidingSyncHandler:
             invited_count=room_membership_summary.get(
                 Membership.INVITE, empty_membership_summary
             ).count,
-            # TODO: These are just dummy values. We could potentially just remove these
-            # since notifications can only really be done correctly on the client anyway
-            # (encrypted rooms).
-            notification_count=0,
-            highlight_count=0,
+            # TODO: What about notifications in threads?
+            notification_count=notif_counts.main_timeline.notify_count,
+            highlight_count=notif_counts.main_timeline.highlight_count,
         )
 
     @trace
