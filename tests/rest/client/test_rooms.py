@@ -2291,6 +2291,51 @@ class RoomMessageFilterTestCase(RoomBase):
         self.assertEqual(len(chunk), 2, [event["content"] for event in chunk])
 
 
+class RoomDelayedEventTestCase(RoomBase):
+    """Tests delayed events."""
+
+    user_id = "@sid1:red"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = self.helper.create_room_as(self.user_id)
+
+    def test_send_delayed_invalid_event(self) -> None:
+        """Test sending a delayed event with invalid content."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+
+    def test_send_delayed_message_event(self) -> None:
+        """Test sending a delayed event with invalid content."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    def test_send_delayed_state_event(self) -> None:
+        """Test sending a delayed event with invalid content."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/state/m.room.topic/?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"topic": "This is a topic"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+
 class RoomSearchTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
