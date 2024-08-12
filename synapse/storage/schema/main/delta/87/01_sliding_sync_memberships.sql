@@ -46,7 +46,14 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
 -- to find all membership for a given user and shares the same semantics as
 -- `local_current_membership`. And we get to avoid some table maintenance; if we only
 -- stored non-joins, we would have to delete the row for the user when the user joins
--- the room.
+-- the room. Stripped state doesn't include the `m.room.tombstone` event, so we just
+-- assume that the room doesn't have a tombstone.
+--
+-- For remote invite/knocks where the server is not participating in the room, we will
+-- use stripped state events to populate this table. We assume that if any stripped
+-- state is given, it will include all possible stripped state events types. For
+-- example, if stripped state is given but `m.room.encryption` isn't included, we will
+-- assume that the room is not encrypted.
 --
 -- We don't include `bump_stamp` here because we can just use the `stream_ordering` from
 -- the membership event itself as the `bump_stamp`.
@@ -57,6 +64,11 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     membership TEXT NOT NULL,
     -- `stream_ordering` of the `membership_event_id`
     event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
+    -- For remote invites/knocks that don't include any stripped state, we want to be
+    -- able to distinguish between a room with `None` as valid value for some state and
+    -- room where the state is completely unknown. Basically, this should be True unless
+    -- no stripped state was provided for a remote invite/knock (False).
+    has_known_state BOOLEAN DEFAULT 0 NOT NULL,
     -- `m.room.create` -> `content.type` (according to the current state at the time of
     -- the membership)
     room_type TEXT,

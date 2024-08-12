@@ -1407,6 +1407,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
     # TODO: Test remote invite
+    # TODO: Test rejection of a remote invite
 
     # TODO Test for non-join membership changing
 

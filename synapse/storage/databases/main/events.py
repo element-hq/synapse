@@ -42,11 +42,17 @@ import attr
 from prometheus_client import Counter
 
 import synapse.metrics
-from synapse.api.constants import EventContentFields, EventTypes, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.errors import PartialStateConflictError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import EventBase, relation_from_event
+from synapse.events import EventBase, StrippedStateEvent, relation_from_event
 from synapse.events.snapshot import EventContext
+from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import trace
 from synapse.storage._base import db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
@@ -1312,11 +1318,12 @@ class PersistEventsStore:
                 txn.execute_batch(
                     f"""
                     INSERT INTO sliding_sync_membership_snapshots
-                        (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)})
+                        (room_id, user_id, membership_event_id, membership, event_stream_ordering, has_known_state, {", ".join(insert_keys)})
                     VALUES (
                         ?, ?, ?,
                         (SELECT membership FROM room_memberships WHERE event_id = ?),
                         (SELECT stream_ordering FROM events WHERE event_id = ?),
+                        ?,
                         {", ".join("?" for _ in insert_values)}
                     )
                     ON CONFLICT (room_id, user_id)
@@ -1333,6 +1340,7 @@ class PersistEventsStore:
                             membership_event_id,
                             membership_event_id,
                             membership_event_id,
+                            True,  # has_known_state
                         ]
                         + list(insert_values)
                         for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
@@ -2304,6 +2312,7 @@ class PersistEventsStore:
         )
 
         for event in events:
+            # Sanity check that we're working with persisted events
             assert event.internal_metadata.stream_ordering is not None
 
             # We update the local_current_membership table only if the event is
@@ -2318,6 +2327,16 @@ class PersistEventsStore:
                 and event.internal_metadata.is_outlier()
                 and event.internal_metadata.is_out_of_band_membership()
             ):
+                # The only sort of out-of-band-membership events we expect to see here
+                # are remote invites/knocks and LEAVE events corresponding to
+                # rejected/retracted invites and rescinded knocks.
+                assert event.type == EventTypes.Member
+                assert event.membership in (
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                    Membership.LEAVE,
+                )
+
                 self.db_pool.simple_upsert_txn(
                     txn,
                     table="local_current_membership",
@@ -2327,6 +2346,115 @@ class PersistEventsStore:
                         "event_stream_ordering": event.internal_metadata.stream_ordering,
                         "membership": event.membership,
                     },
+                )
+
+                # Update the `sliding_sync_membership_snapshots` table
+                #
+                raw_stripped_state_events = None
+                if event.membership == Membership.INVITE:
+                    invite_room_state = event.unsigned.get("invite_room_state")
+                    raw_stripped_state_events = invite_room_state
+                elif event.membership == Membership.KNOCK:
+                    knock_room_state = event.unsigned.get("knock_room_state")
+                    raw_stripped_state_events = knock_room_state
+
+                insert_values = {
+                    "membership_event_id": event.event_id,
+                    "membership": event.membership,
+                    "event_stream_ordering": event.internal_metadata.stream_ordering,
+                }
+                if raw_stripped_state_events is not None:
+                    stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
+                    if isinstance(raw_stripped_state_events, list):
+                        for raw_stripped_event in raw_stripped_state_events:
+                            stripped_state_event = parse_stripped_state_event(
+                                raw_stripped_event
+                            )
+                            if stripped_state_event is not None:
+                                stripped_state_map[
+                                    (
+                                        stripped_state_event.type,
+                                        stripped_state_event.state_key,
+                                    )
+                                ] = stripped_state_event
+
+                    # If there is some stripped state, we assume the remote server passed *all*
+                    # of the potential stripped state events for the room.
+                    create_stripped_event = stripped_state_map.get(
+                        (EventTypes.Create, "")
+                    )
+                    # Sanity check that we at-least have the create event
+                    if create_stripped_event is not None:
+                        # Find the room_type
+                        insert_values["room_type"] = (
+                            create_stripped_event.content.get(
+                                EventContentFields.ROOM_TYPE
+                            )
+                            if create_stripped_event is not None
+                            else None
+                        )
+
+                        # Find whether the room is_encrypted
+                        encryption_stripped_event = stripped_state_map.get(
+                            (EventTypes.RoomEncryption, "")
+                        )
+                        encryption = (
+                            encryption_stripped_event.content.get(
+                                EventContentFields.ENCRYPTION_ALGORITHM
+                            )
+                            if encryption_stripped_event is not None
+                            else None
+                        )
+                        insert_values["is_encrypted"] = encryption is not None
+
+                        # Find the room_name
+                        room_name_stripped_event = stripped_state_map.get(
+                            (EventTypes.Name, "")
+                        )
+                        insert_values["room_name"] = (
+                            room_name_stripped_event.content.get(
+                                EventContentFields.ROOM_NAME
+                            )
+                            if room_name_stripped_event is not None
+                            else None
+                        )
+
+                    else:
+                        # No strip state provided
+                        insert_values["has_known_state"] = False
+                        insert_values["room_type"] = None
+                        insert_values["room_name"] = None
+                        insert_values["is_encrypted"] = False
+                else:
+                    if event.membership == Membership.LEAVE:
+                        # Inherit the meta data from the remote invite/knock. When using
+                        # sliding sync filters, this will prevent the room from
+                        # disappearing/appearing just because you left the room.
+                        pass
+                    elif event.membership in (Membership.INVITE, Membership.KNOCK):
+                        # No strip state provided
+                        insert_values["has_known_state"] = False
+                        insert_values["room_type"] = None
+                        insert_values["room_name"] = None
+                        insert_values["is_encrypted"] = False
+                    else:
+                        # We don't know how to handle this type of membership yet
+                        #
+                        # FIXME: We should use `assert_never` here but for some reason
+                        # the exhaustive matching doesn't recognize the `Never` here.
+                        # assert_never(event.membership)
+                        raise AssertionError(
+                            f"Unexpected out-of-band membership {event.membership} ({event.event_id}) that we don't know how to handle yet"
+                        )
+
+                self.db_pool.simple_upsert_txn(
+                    txn,
+                    table="sliding_sync_membership_snapshots",
+                    keyvalues={
+                        "room_id": event.room_id,
+                        "user_id": event.state_key,
+                    },
+                    values=insert_values,
                 )
 
     def _handle_event_relations(
