@@ -34,6 +34,7 @@ from synapse.config import (  # noqa: F401
     experimental,
     federation,
     jwt,
+    custom_jwt,
     key,
     logger,
     metrics,
@@ -61,8 +62,10 @@ from synapse.config import (  # noqa: F401
     user_directory,
     voip,
     workers,
+    media_s3,
 )
 from synapse.types import StrSequence
+
 
 class ConfigError(Exception):
     def __init__(self, msg: str, path: Optional[StrSequence] = None):
@@ -101,6 +104,7 @@ class RootConfig:
     sso: sso.SSOConfig
     oidc: oidc.OIDCConfig
     jwt: jwt.JWTConfig
+    custom_jwt: custom_jwt.CUSTOMJWTConfig
     auth: auth.AuthConfig
     email: emailconfig.EmailConfig
     worker: workers.WorkerConfig
@@ -122,6 +126,7 @@ class RootConfig:
     retention: retention.RetentionConfig
     background_updates: background_updates.BackgroundUpdateConfig
     auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
+    media_s3: media_s3.MediaS3Config
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]
