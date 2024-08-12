@@ -23,7 +23,7 @@
 CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
     -- The `stream_ordering` of the latest event in the room
-    event_stream_ordering BIGINT REFERENCES events(stream_ordering),
+    event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
     -- The `stream_ordering` of the last event according to the `bump_event_types`
     bump_stamp BIGINT,
     -- `m.room.create` -> `content.type` (current state)
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     membership_event_id TEXT NOT NULL REFERENCES events(event_id),
     membership TEXT NOT NULL,
     -- `stream_ordering` of the `membership_event_id`
-    event_stream_ordering BIGINT REFERENCES events(stream_ordering),
+    event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
     -- `m.room.create` -> `content.type` (according to the current state at the time of
     -- the membership)
     room_type TEXT,

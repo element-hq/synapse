@@ -491,11 +491,16 @@ class InvalideUsersInRoomCacheTestCase(HomeserverTestCase):
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _SlidingSyncJoinedRoomResult:
     room_id: str
-    event_stream_ordering: int
-    bump_stamp: int
-    room_type: str
-    room_name: str
-    is_encrypted: bool
+    # `event_stream_ordering` is only optional to allow easier semantics when we make
+    # expected objects from `event.internal_metadata.stream_ordering`. in the tests.
+    # `event.internal_metadata.stream_ordering` is marked optional because it only
+    # exists for persisted events but in the context of these tests, we're only working
+    # with persisted events and we're making comparisons so we will find any mismatch.
+    event_stream_ordering: Optional[int]
+    bump_stamp: Optional[int]
+    room_type: Optional[str]
+    room_name: Optional[str]
+    is_encrypted: Optional[bool]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -504,10 +509,15 @@ class _SlidingSyncMembershipSnapshotResult:
     user_id: str
     membership_event_id: str
     membership: str
-    event_stream_ordering: int
-    room_type: str
-    room_name: str
-    is_encrypted: bool
+    # `event_stream_ordering` is only optional to allow easier semantics when we make
+    # expected objects from `event.internal_metadata.stream_ordering`. in the tests.
+    # `event.internal_metadata.stream_ordering` is marked optional because it only
+    # exists for persisted events but in the context of these tests, we're only working
+    # with persisted events and we're making comparisons so we will find any mismatch.
+    event_stream_ordering: Optional[int]
+    room_type: Optional[str]
+    room_name: Optional[str]
+    is_encrypted: Optional[bool]
 
 
 class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
