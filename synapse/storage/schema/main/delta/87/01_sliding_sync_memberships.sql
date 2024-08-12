@@ -12,8 +12,8 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- We store the join memberships in a separate table from
--- `sliding_sync_non_join_memberships` because the information can be shared across
--- everyone who is joined.
+-- `sliding_sync_membership_snapshots` because we need up-to-date information for joined
+-- rooms and it can be shared across everyone who is joined.
 --
 -- This table is kept in sync with `current_state_events`
 CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
@@ -31,19 +31,12 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     PRIMARY KEY (room_id)
 );
 
--- Store the user's non-join room memberships. Only stores the latest membership event
--- for a given user which matches `local_current_membership` (except we don't store
--- joins).
---
--- FIXME: It might be easier to just store any membership here but just indicate that
--- the state is a snapshot of the current state at the time of the membership event.
--- That way we don't have to worry about clearing out
--- `sliding_sync_non_join_memberships` when the the user joins a room. And we always
--- have the full picture. Perhaps we can call it `sliding_sync_membership_snapshots`.
+-- Store a snapshot of some state relevant for sliding sync for a user's room
+-- membership. Only stores the latest membership event for a given user in a room.
 --
 -- We don't include `bump_stamp` here because we can just use the `stream_ordering` from
 -- the membership event itself as the `bump_stamp`.
-CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
+CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
     user_id TEXT NOT NULL,
     membership_event_id TEXT NOT NULL REFERENCES events(event_id),
@@ -64,5 +57,5 @@ CREATE TABLE IF NOT EXISTS sliding_sync_non_join_memberships(
     PRIMARY KEY (room_id, user_id)
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_non_join_memberships_event_stream_ordering ON sliding_sync_non_join_memberships(event_stream_ordering);
-CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_non_join_memberships_membership_event_id ON sliding_sync_non_join_memberships(membership_event_id);
+CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream_ordering ON sliding_sync_membership_snapshots(event_stream_ordering);
+CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_membership_event_id ON sliding_sync_membership_snapshots(membership_event_id);

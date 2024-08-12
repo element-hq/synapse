@@ -499,7 +499,7 @@ class _SlidingSyncJoinedRoomResult:
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
-class _SlidingSyncNonJoinMembershipResult:
+class _SlidingSyncMembershipSnapshotResult:
     room_id: str
     user_id: str
     membership_event_id: str
@@ -513,7 +513,7 @@ class _SlidingSyncNonJoinMembershipResult:
 class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     """
     Tests to make sure the
-    `sliding_sync_joined_rooms`/`sliding_sync_non_join_memberships` database tables are
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` database tables are
     populated correctly.
     """
 
@@ -564,20 +564,20 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             for row in rows
         }
 
-    def _get_sliding_sync_non_join_memberships(
+    def _get_sliding_sync_membership_snapshots(
         self,
-    ) -> Dict[Tuple[str, str], _SlidingSyncNonJoinMembershipResult]:
+    ) -> Dict[Tuple[str, str], _SlidingSyncMembershipSnapshotResult]:
         """
-        Return the rows from the `sliding_sync_non_join_memberships` table.
+        Return the rows from the `sliding_sync_membership_snapshots` table.
 
         Returns:
-            Mapping from the (room_id, user_id) to _SlidingSyncNonJoinMembershipResult.
+            Mapping from the (room_id, user_id) to _SlidingSyncMembershipSnapshotResult.
         """
         rows = cast(
             List[Tuple[str, str, str, str, int, str, str, bool]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
-                    "sliding_sync_non_join_memberships",
+                    "sliding_sync_membership_snapshots",
                     None,
                     retcols=(
                         "room_id",
@@ -594,7 +594,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
         return {
-            (row[0], row[1]): _SlidingSyncNonJoinMembershipResult(
+            (row[0], row[1]): _SlidingSyncMembershipSnapshotResult(
                 room_id=row[0],
                 user_id=row[1],
                 membership_event_id=row[2],
@@ -644,14 +644,31 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        # No one is non-joined to this room so we shouldn't see anything
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+            },
             exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
     def test_joined_room_with_info(self) -> None:
@@ -680,10 +697,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
         # User1 joins the room
-        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
-        user1_join_event_pos = self.get_success(
-            self.store.get_position_for_event(user1_join_response["event_id"])
-        )
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
@@ -699,7 +713,10 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             sliding_sync_joined_rooms_results[room_id1],
             _SlidingSyncJoinedRoomResult(
                 room_id=room_id1,
-                event_stream_ordering=user1_join_event_pos.stream,
+                # This should be whatever is the last event in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
                 bump_stamp=state_map[
                     (EventTypes.Create, "")
                 ].internal_metadata.stream_ordering,
@@ -709,13 +726,51 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
             exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user2_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                # Even though this room does have a name and is encrypted, user2 is the
+                # room creator and joined at the room creation time which didn't have
+                # this state set yet.
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
     def test_joined_space_room_with_info(self) -> None:
@@ -772,13 +827,50 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (space_room_id, user1_id),
+                (space_room_id, user2_id),
+            },
             exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user2_id,
+                membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user2_id)
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                # Even though this room does have a name, user2 is the room creator and
+                # joined at the room creation time which didn't have this state set yet.
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
     def test_joined_room_with_state_updated(self) -> None:
@@ -830,12 +922,15 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
             exact=True,
         )
 
@@ -878,13 +973,48 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
             exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user2_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
         )
 
     def test_joined_room_is_bumped(self) -> None:
@@ -936,13 +1066,50 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
             exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        user1_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id1,
+            user_id=user1_id,
+            membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user1_id)
+            ].internal_metadata.stream_ordering,
+            room_type=None,
+            room_name="my super duper room",
+            is_encrypted=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            user1_snapshot,
+        )
+        # Holds the info according to the current state when the user joined
+        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id1,
+            user_id=user2_id,
+            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user2_id)
+            ].internal_metadata.stream_ordering,
+            room_type=None,
+            room_name=None,
+            is_encrypted=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            user2_snapshot,
         )
 
         # Send a new message to bump the room
@@ -973,20 +1140,31 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
-            set(),
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
             exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            user1_snapshot,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            user2_snapshot,
         )
 
     # TODO: test_joined_room_state_reset
 
     def test_non_join_space_room_with_info(self) -> None:
         """
-        Test users who was invited shows up in `sliding_sync_non_join_memberships`.
+        Test users who was invited shows up in `sliding_sync_membership_snapshots`.
         """
         user1_id = self.register_user("user1", "pass")
         _user1_tok = self.login(user1_id, "pass")
@@ -1061,20 +1239,21 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
+            set(sliding_sync_membership_snapshots_results.keys()),
             {
                 (space_room_id, user1_id),
+                (space_room_id, user2_id),
             },
             exact=True,
         )
         # Holds the info according to the current state when the user was invited
         self.assertEqual(
-            sliding_sync_non_join_memberships_results.get((space_room_id, user1_id)),
-            _SlidingSyncNonJoinMembershipResult(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
                 membership_event_id=user1_invited_response["event_id"],
@@ -1085,11 +1264,27 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=True,
             ),
         )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user2_id,
+                membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user2_id)
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
 
     def test_non_join_invite_ban(self) -> None:
         """
         Test users who have invite/ban membership in room shows up in
-        `sliding_sync_non_join_memberships`.
+        `sliding_sync_membership_snapshots`.
         """
         user1_id = self.register_user("user1", "pass")
         _user1_tok = self.login(user1_id, "pass")
@@ -1144,20 +1339,22 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
+            set(sliding_sync_membership_snapshots_results.keys()),
             {
                 (room_id1, user1_id),
+                (room_id1, user2_id),
                 (room_id1, user3_id),
             },
             exact=True,
         )
+        # Holds the info according to the current state when the user was invited
         self.assertEqual(
-            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
-            _SlidingSyncNonJoinMembershipResult(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
                 membership_event_id=user1_invited_response["event_id"],
@@ -1168,9 +1365,26 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=False,
             ),
         )
+        # Holds the info according to the current state when the user joined
         self.assertEqual(
-            sliding_sync_non_join_memberships_results.get((room_id1, user3_id)),
-            _SlidingSyncNonJoinMembershipResult(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user2_id)
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user was banned
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user3_id)),
+            _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user3_id,
                 membership_event_id=user3_ban_response["event_id"],
@@ -1189,7 +1403,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     def test_non_join_server_left_room(self) -> None:
         """
         Test everyone local leaves the room but their leave membership still shows up in
-        `sliding_sync_non_join_memberships`.
+        `sliding_sync_membership_snapshots`.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1223,11 +1437,11 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
         # We should still see rows for the leave events (non-joins)
-        sliding_sync_non_join_memberships_results = (
-            self._get_sliding_sync_non_join_memberships()
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
         )
         self.assertIncludes(
-            set(sliding_sync_non_join_memberships_results.keys()),
+            set(sliding_sync_membership_snapshots_results.keys()),
             {
                 (room_id1, user1_id),
                 (room_id1, user2_id),
@@ -1235,8 +1449,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             exact=True,
         )
         self.assertEqual(
-            sliding_sync_non_join_memberships_results.get((room_id1, user1_id)),
-            _SlidingSyncNonJoinMembershipResult(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
                 membership_event_id=user1_leave_response["event_id"],
@@ -1248,8 +1462,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
         self.assertEqual(
-            sliding_sync_non_join_memberships_results.get((room_id1, user2_id)),
-            _SlidingSyncNonJoinMembershipResult(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
                 membership_event_id=user2_leave_response["event_id"],

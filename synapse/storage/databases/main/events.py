@@ -45,7 +45,6 @@ import synapse.metrics
 from synapse.api.constants import (
     EventContentFields,
     EventTypes,
-    Membership,
     RelationTypes,
 )
 from synapse.api.errors import PartialStateConflictError
@@ -1185,12 +1184,12 @@ class PersistEventsStore:
             if ev_type == EventTypes.Member
         }
 
-        # We now update `sliding_sync_non_join_memberships`.
+        # We now update `sliding_sync_membership_snapshots`.
         #
         # This would only happen if someone was state reset out of the room
         if to_delete:
             txn.execute_batch(
-                "DELETE FROM sliding_sync_non_join_memberships"
+                "DELETE FROM sliding_sync_membership_snapshots"
                 " WHERE room_id = ? AND user_id = ?",
                 (
                     (room_id, state_key)
@@ -1199,7 +1198,7 @@ class PersistEventsStore:
                 ),
             )
 
-        # We handle `sliding_sync_non_join_memberships` before `current_state_events` so
+        # We handle `sliding_sync_membership_snapshots` before `current_state_events` so
         # we can gather the current state before it might be deleted if we are
         # `no_longer_in_room`.
         #
@@ -1213,8 +1212,8 @@ class PersistEventsStore:
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             if len(membership_event_id_to_user_id_map) > 0:
-                # Map of values to insert/update in the `sliding_sync_non_join_memberships` table
-                sliding_sync_non_joined_rooms_insert_map: Dict[
+                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+                sliding_sync_membership_snapshots_insert_map: Dict[
                     str, Optional[Union[str, bool]]
                 ] = {}
 
@@ -1285,7 +1284,7 @@ class PersistEventsStore:
                         room_type = event_json.get("content", {}).get(
                             EventContentFields.ROOM_TYPE
                         )
-                        sliding_sync_non_joined_rooms_insert_map["room_type"] = (
+                        sliding_sync_membership_snapshots_insert_map["room_type"] = (
                             room_type
                         )
                     elif event_type == EventTypes.RoomEncryption:
@@ -1293,14 +1292,14 @@ class PersistEventsStore:
                             EventContentFields.ENCRYPTION_ALGORITHM
                         )
                         is_encrypted = encryption_algorithm is not None
-                        sliding_sync_non_joined_rooms_insert_map["is_encrypted"] = (
+                        sliding_sync_membership_snapshots_insert_map["is_encrypted"] = (
                             is_encrypted
                         )
                     elif event_type == EventTypes.Name:
                         room_name = event_json.get("content", {}).get(
                             EventContentFields.ROOM_NAME
                         )
-                        sliding_sync_non_joined_rooms_insert_map["room_name"] = (
+                        sliding_sync_membership_snapshots_insert_map["room_name"] = (
                             room_name
                         )
                     else:
@@ -1308,26 +1307,22 @@ class PersistEventsStore:
                             f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
                         )
 
-                # Update the `sliding_sync_non_join_memberships` table
+                # Update the `sliding_sync_membership_snapshots` table
                 #
                 # Pulling keys/values separately is safe and will produce congruent
                 # lists
-                insert_keys = sliding_sync_non_joined_rooms_insert_map.keys()
-                insert_values = sliding_sync_non_joined_rooms_insert_map.values()
+                insert_keys = sliding_sync_membership_snapshots_insert_map.keys()
+                insert_values = sliding_sync_membership_snapshots_insert_map.values()
                 txn.execute_batch(
                     f"""
-                    WITH data_table (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)}) AS (
-                        VALUES (
-                            ?, ?, ?,
-                            (SELECT membership FROM room_memberships WHERE event_id = ?),
-                            (SELECT stream_ordering FROM events WHERE event_id = ?),
-                            {", ".join("?" for _ in insert_values)}
-                        )
-                    )
-                    INSERT INTO sliding_sync_non_join_memberships
+                    INSERT INTO sliding_sync_membership_snapshots
                         (room_id, user_id, membership_event_id, membership, event_stream_ordering, {", ".join(insert_keys)})
-                    SELECT * FROM data_table
-                    WHERE membership != ?
+                    VALUES (
+                        ?, ?, ?,
+                        (SELECT membership FROM room_memberships WHERE event_id = ?),
+                        (SELECT stream_ordering FROM events WHERE event_id = ?),
+                        {", ".join("?" for _ in insert_values)}
+                    )
                     ON CONFLICT (room_id, user_id)
                     DO UPDATE SET
                         membership_event_id = EXCLUDED.membership_event_id,
@@ -1344,7 +1339,6 @@ class PersistEventsStore:
                             membership_event_id,
                         ]
                         + list(insert_values)
-                        + [Membership.JOIN]
                         for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
                     ],
                 )
@@ -2010,7 +2004,7 @@ class PersistEventsStore:
         # longer in the room so we don't need to worry about inserting something that
         # will be orphaned.
         txn.execute_batch(
-            f"""
+            """
             INSERT INTO sliding_sync_joined_rooms
                 (room_id, event_stream_ordering, bump_stamp)
             VALUES (
