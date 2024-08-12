@@ -78,6 +78,7 @@ class ProfileHandler:
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
+        """Fetch a users full profile, including display name, avatar URL, and any custom fields."""
         target_user = UserID.from_string(user_id)
 
         if self.hs.is_mine(target_user):
@@ -93,7 +94,7 @@ class ProfileHandler:
             ):
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
 
-            # TODO Should this strip out empty values?
+            # Do not include display name or avatar are denoted if unset.
             ret = {}
             if profileinfo.display_name is not None:
                 ret[ProfileFields.DISPLAYNAME] = profileinfo.display_name
@@ -391,6 +392,17 @@ class ProfileHandler:
     async def get_profile_field(
         self, target_user: UserID, field_name: str
     ) -> Optional[str]:
+        """
+        Fetch a user's profile from the database for local users and over federation
+        for remote users.
+
+        Args:
+            target_user: The user ID to fetch the profile for.
+            field_name: The field to fetch the profile for.
+
+        Returns:
+            The value for the profile field or None if the field does not exist.
+        """
         if self.hs.is_mine(target_user):
             try:
                 field_value = await self.store.get_profile_field(
@@ -403,7 +415,6 @@ class ProfileHandler:
 
             return field_value
         else:
-            # TODO This should be an unstable query.
             try:
                 result = await self.federation.make_query(
                     destination=target_user.domain,
@@ -427,7 +438,7 @@ class ProfileHandler:
         by_admin: bool = False,
         deactivation: bool = False,
     ) -> None:
-        """Set a new avatar URL for a user.
+        """Set a new profile field for a user.
 
         Args:
             target_user: the user whose avatar URL is to be changed.
