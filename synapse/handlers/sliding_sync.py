@@ -571,21 +571,19 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
-        if from_token:
-            # Check that we recognize the connection position, if not tell the
-            # clients that they need to start again.
-            #
-            # If we don't do this and the client asks for the full range of
-            # rooms, we end up sending down all rooms and their state from
-            # scratch (which can be very slow). By expiring the connection we
-            # allow the client a chance to do an initial request with a smaller
-            # range of rooms to get them some results sooner but will end up
-            # taking the same amount of time (more with round-trips and
-            # re-processing) in the end to get everything again.
-            if not await self.connection_store.is_valid_token(
-                sync_config, from_token.connection_position
-            ):
-                raise SlidingSyncUnknownPosition()
+        # Get the per-connection state (if any).
+        #
+        # Raises an exception if there is a `connection_position` that we don't
+        # recognize. If we don't do this and the client asks for the full range
+        # of rooms, we end up sending down all rooms and their state from
+        # scratch (which can be very slow). By expiring the connection we allow
+        # the client a chance to do an initial request with a smaller range of
+        # rooms to get them some results sooner but will end up taking the same
+        # amount of time (more with round-trips and re-processing) in the end to
+        # get everything again.
+        per_connection_state = await self.connection_store.get_per_connection_state(
+            sync_config, from_token
+        )
 
         await self.connection_store.mark_token_seen(
             sync_config=sync_config,
@@ -781,11 +779,7 @@ class SlidingSyncHandler:
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
                 for room_id in relevant_room_map:
-                    status = await self.connection_store.have_sent_room(
-                        sync_config,
-                        from_token.connection_position,
-                        room_id,
-                    )
+                    status = per_connection_state.have_sent_room(room_id)
                     if (
                         # The room was never sent down before so the client needs to know
                         # about it regardless of any updates.
@@ -821,6 +815,7 @@ class SlidingSyncHandler:
         async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
+                per_connection_state=per_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -885,6 +880,7 @@ class SlidingSyncHandler:
             connection_position = await self.connection_store.record_rooms(
                 sync_config=sync_config,
                 from_token=from_token,
+                per_connection_state=per_connection_state,
                 sent_room_ids=relevant_rooms_to_send_map.keys(),
                 unsent_room_ids=unsent_room_ids,
             )
@@ -1939,6 +1935,7 @@ class SlidingSyncHandler:
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
+        per_connection_state: "PerConnectionState",
         room_id: str,
         room_sync_config: RoomSyncConfig,
         room_membership_for_user_at_to_token: _RoomMembershipForUser,
@@ -1986,11 +1983,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
-            room_status = await self.connection_store.have_sent_room(
-                sync_config=sync_config,
-                connection_token=from_token.connection_position,
-                room_id=room_id,
-            )
+            room_status = per_connection_state.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
@@ -3034,6 +3027,21 @@ HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
 HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
 
 
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class PerConnectionState:
+    """The per-connection state
+
+    Attributes:
+        rooms: The state of rooms that have been sent to clients.
+    """
+
+    rooms: Mapping[str, HaveSentRoom] = {}
+
+    def have_sent_room(self, room_id: str) -> HaveSentRoom:
+        """Return whether we have previously sent the room down"""
+        return self.rooms.get(room_id, HAVE_SENT_ROOM_NEVER)
+
+
 @attr.s(auto_attribs=True)
 class SlidingSyncConnectionStore:
     """In-memory store of per-connection state, including what rooms we have
@@ -3063,9 +3071,9 @@ class SlidingSyncConnectionStore:
             to mapping of room ID to `HaveSentRoom`.
     """
 
-    # `(user_id, conn_id)` -> `token` -> `room_id` -> `HaveSentRoom`
-    _connections: Dict[Tuple[str, str], Dict[int, Dict[str, HaveSentRoom]]] = (
-        attr.Factory(dict)
+    # `(user_id, conn_id)` -> `token` -> `PerConnectionState`
+    _connections: Dict[Tuple[str, str], Dict[int, PerConnectionState]] = attr.Factory(
+        dict
     )
 
     async def is_valid_token(
@@ -3078,26 +3086,40 @@ class SlidingSyncConnectionStore:
         conn_key = self._get_connection_key(sync_config)
         return connection_token in self._connections.get(conn_key, {})
 
-    async def have_sent_room(
-        self, sync_config: SlidingSyncConfig, connection_token: int, room_id: str
-    ) -> HaveSentRoom:
-        """For the given user_id/conn_id/token, return whether we have
-        previously sent the room down
+    async def get_per_connection_state(
+        self,
+        sync_config: SlidingSyncConfig,
+        from_token: Optional[SlidingSyncStreamToken],
+    ) -> PerConnectionState:
+        """Fetch the per-connection state for the token.
+
+        Raises:
+            SlidingSyncUnknownPosition if the connection_token is unknown
         """
+        if from_token is None:
+            return PerConnectionState()
+
+        connection_position = from_token.connection_position
+        if connection_position == 0:
+            # The '0' values is a special value to indicate there is no
+            # per-connection state.
+            return PerConnectionState()
 
         conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.setdefault(conn_key, {})
-        room_status = sync_statuses.get(connection_token, {}).get(
-            room_id, HAVE_SENT_ROOM_NEVER
-        )
+        sync_statuses = self._connections.get(conn_key, {})
+        connection_state = sync_statuses.get(connection_position)
 
-        return room_status
+        if connection_state is None:
+            raise SlidingSyncUnknownPosition()
+
+        return connection_state
 
     @trace
     async def record_rooms(
         self,
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken],
+        per_connection_state: PerConnectionState,
         *,
         sent_room_ids: StrCollection,
         unsent_room_ids: StrCollection,
@@ -3131,7 +3153,7 @@ class SlidingSyncConnectionStore:
         sync_statuses.pop(new_store_token, None)
 
         # Copy over and update the room mappings.
-        new_room_statuses = dict(sync_statuses.get(prev_connection_token, {}))
+        new_room_statuses = dict(per_connection_state.rooms)
 
         # Whether we have updated the `new_room_statuses`, if we don't by the
         # end we can treat this as a noop.
@@ -3165,7 +3187,7 @@ class SlidingSyncConnectionStore:
         if not have_updated:
             return prev_connection_token
 
-        sync_statuses[new_store_token] = new_room_statuses
+        sync_statuses[new_store_token] = PerConnectionState(rooms=new_room_statuses)
 
         return new_store_token
 
