@@ -28,11 +28,10 @@ from typing import TYPE_CHECKING, Awaitable, Dict, List, Optional, Tuple
 from urllib import parse as urlparse
 
 from prometheus_client.core import Histogram
-
 from twisted.web.server import Request
 
 from synapse import event_auth
-from synapse.api.constants import Direction, EventTypes, Membership
+from synapse.api.constants import Direction, EventTypes, Membership, UserTypes
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -67,6 +66,7 @@ from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
+from synapse.util.hash import sha256_and_url_safe_base64
 from synapse.util.stringutils import parse_and_validate_server_name, random_string
 
 if TYPE_CHECKING:
@@ -643,12 +643,22 @@ class RoomMemberListRestServlet(RestServlet):
         )
 
         chunk = []
-
+        user_type = parse_string(request, "user_type")
         for event in events:
             if (membership and event["content"].get("membership") != membership) or (
                 not_membership and event["content"].get("membership") == not_membership
             ):
                 continue
+
+            if user_type == UserTypes.BOT and not await self.store.is_bot_user(
+                event["user_id"]):
+                continue
+            else:
+                state_key = event["state_key"]
+                to_hash = "%s %s" % (state_key, "secret123")
+                global_state_key = sha256_and_url_safe_base64(to_hash)
+                event["state_key"] = global_state_key
+                event["user_id"] = global_state_key
             chunk.append(event)
 
         return 200, {"chunk": chunk}

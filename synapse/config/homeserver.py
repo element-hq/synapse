@@ -29,6 +29,7 @@ from .cache import CacheConfig
 from .captcha import CaptchaConfig
 from .cas import CasConfig
 from .consent import ConsentConfig
+from .custom_jwt import CUSTOMJWTConfig
 from .database import DatabaseConfig
 from .emailconfig import EmailConfig
 from .experimental import ExperimentalConfig
@@ -36,6 +37,7 @@ from .federation import FederationConfig
 from .jwt import JWTConfig
 from .key import KeyConfig
 from .logger import LoggingConfig
+from .media_s3 import MediaS3Config
 from .metrics import MetricsConfig
 from .modules import ModulesConfig
 from .oembed import OembedConfig
@@ -89,6 +91,7 @@ class HomeServerConfig(RootConfig):
         CasConfig,
         SSOConfig,
         JWTConfig,
+        CUSTOMJWTConfig,
         AuthConfig,
         EmailConfig,
         PasswordAuthProviderConfig,
@@ -107,4 +110,5 @@ class HomeServerConfig(RootConfig):
         ExperimentalConfig,
         BackgroundUpdateConfig,
         AutoAcceptInvitesConfig,
+        MediaS3Config,
     ]

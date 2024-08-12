@@ -86,6 +86,7 @@ class LoginRestServlet(RestServlet):
     SSO_TYPE = "m.login.sso"
     TOKEN_TYPE = "m.login.token"
     JWT_TYPE = "org.matrix.login.jwt"
+    CUSTOM_JWT_TOKEN_TYPE = "m.login.custom_jwt_token"
     APPSERVICE_TYPE = "m.login.application_service"
     REFRESH_TOKEN_PARAM = "refresh_token"
 
@@ -244,6 +245,15 @@ class LoginRestServlet(RestServlet):
                     None, request.getClientAddress().host
                 )
                 result = await self._do_token_login(
+                    login_submission,
+                    should_issue_refresh_token=should_issue_refresh_token,
+                    request_info=request_info,
+                )
+            elif login_submission["type"] == LoginRestServlet.CUSTOM_JWT_TOKEN_TYPE:
+                await self._address_ratelimiter.ratelimit(
+                    None, request.getClientAddress().host
+                )
+                result = await self._do_custom_jwt_token_login(
                     login_submission,
                     should_issue_refresh_token=should_issue_refresh_token,
                     request_info=request_info,
@@ -555,6 +565,31 @@ class LoginRestServlet(RestServlet):
             request_info=request_info,
         )
 
+    async def _do_custom_jwt_token_login(
+        self,
+        login_submission: JsonDict,
+        should_issue_refresh_token: bool = False,
+        *,
+        request_info: RequestInfo,
+    ) -> LoginResponse:
+        """
+        Handle the custom JWT login.
+        Args:
+            login_submission: The JSON request body.
+            should_issue_refresh_token: True if this login should issue
+                a refresh token alongside the access token.
+        Returns:
+            The body of the JSON response.
+        """
+        user_id = self.hs.get_custom_jwt_token_handler().validate_login(
+            login_submission)
+        return await self._complete_login(
+            user_id,
+            login_submission,
+            create_non_existent_users=True,
+            should_issue_refresh_token=should_issue_refresh_token,
+            request_info=request_info,
+        )
 
 def _get_auth_flow_dict_for_idp(idp: SsoIdentityProvider) -> JsonDict:
     """Return an entry for the login flow dict

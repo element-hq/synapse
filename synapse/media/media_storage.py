@@ -44,12 +44,13 @@ from typing import (
 from uuid import uuid4
 
 import attr
-from zope.interface import implementer
-
+import boto3
+from botocore.exceptions import ClientError
 from twisted.internet import interfaces
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IConsumer
 from twisted.protocols.basic import FileSender
+from zope.interface import implementer
 
 from synapse.api.errors import NotFoundError
 from synapse.logging.context import (
@@ -60,10 +61,9 @@ from synapse.logging.context import (
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
 from synapse.util import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
-
-from ..types import JsonDict
 from ._base import FileInfo, Responder
 from .filepath import MediaFilePaths
+from ..types import JsonDict
 
 if TYPE_CHECKING:
     from synapse.media.storage_provider import StorageProvider
@@ -92,12 +92,21 @@ class MediaStorage:
         storage_providers: Sequence["StorageProvider"],
     ):
         self.hs = hs
+        self.aws_access_key_id = hs.config.media_s3.aws_access_key_id
+        self.aws_secret_access_key = hs.config.media_s3.aws_secret_access_key
+        self.region_name = hs.config.media_s3.region_name
+        self.bucket_name = hs.config.media_s3.bucket_name
         self.reactor = hs.get_reactor()
         self.local_media_directory = local_media_directory
         self.filepaths = filepaths
         self.storage_providers = storage_providers
         self._spam_checker_module_callbacks = hs.get_module_api_callbacks().spam_checker
         self.clock = hs.get_clock()
+        # create s3 client
+        self.s3 = boto3.client('s3',
+                               aws_access_key_id=self.aws_access_key_id,
+                               aws_secret_access_key=self.aws_secret_access_key,
+                               region_name=self.region_name)
 
     @trace_with_opname("MediaStorage.store_file")
     async def store_file(self, source: IO, file_info: FileInfo) -> str:
@@ -122,6 +131,18 @@ class MediaStorage:
     async def write_to_file(self, source: IO, output: IO) -> None:
         """Asynchronously write the `source` to `output`."""
         await defer_to_thread(self.reactor, _write_file_synchronously, source, output)
+        # write to S3
+        await defer_to_thread(self.reactor, self._write_file_s3, source, output)
+
+    def _write_file_s3(self, source: IO, output: IO) -> None:
+        obj_name = max(output.name.split(self.local_media_directory + "/"))
+        # upload file to s3
+        try:
+            self.s3.upload_file(output.name, self.bucket_name, obj_name)
+            # file_obj = BytesIO(source.read())
+            # self.s3.upload_fileobj(file_obj, self.bucket_name, obj_name)
+        except ClientError as e:
+            logger.error("Failed to upload file to S3: %s", e)
 
     @trace_with_opname("MediaStorage.store_into_file")
     @contextlib.asynccontextmanager

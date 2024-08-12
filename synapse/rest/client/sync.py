@@ -58,7 +58,7 @@ from synapse.types import JsonDict, Requester, SlidingSyncStreamToken, StreamTok
 from synapse.types.rest.client import SlidingSyncBody
 from synapse.util import json_decoder
 from synapse.util.caches.lrucache import LruCache
-
+from synapse.util.hash import sha256_and_url_safe_base64
 from ._base import client_patterns, set_timeline_upper_limit
 
 if TYPE_CHECKING:
@@ -360,7 +360,8 @@ class SyncRestServlet(RestServlet):
             "events": [
                 {
                     "type": EduTypes.PRESENCE,
-                    "sender": event.user_id,
+                    "sender": sha256_and_url_safe_base64(
+                        "%s %s" % (event.user_id, "secret123")),
                     "content": format_user_presence_state(
                         event, time_now, include_user_id=False
                     ),
@@ -556,6 +557,8 @@ class SyncRestServlet(RestServlet):
             },
             "state": {"events": serialized_state},
             "account_data": {"events": account_data},
+            "peer_hash": sha256_and_url_safe_base64(
+                "%s %s" % (room.room_id, "secret123"))
         }
 
         if joined:

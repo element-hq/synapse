@@ -30,12 +30,12 @@ import functools
 import logging
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
 
-from typing_extensions import TypeAlias
-
+from synapse.synapse_rust.rendezvous import RendezvousHandler
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
+from typing_extensions import TypeAlias
 
 from synapse.api.auth import Auth
 from synapse.api.auth.internal import InternalAuth
@@ -66,6 +66,7 @@ from synapse.handlers.admin import AdminHandler
 from synapse.handlers.appservice import ApplicationServicesHandler
 from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
+from synapse.handlers.custom_jwt import CustomJwtHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
 from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
@@ -144,7 +145,6 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
-from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
 from synapse.util.distributor import Distributor
@@ -554,6 +554,12 @@ class HomeServer(metaclass=abc.ABCMeta):
         from synapse.handlers.jwt import JwtHandler
 
         return JwtHandler(self)
+
+    @cache_in_self
+    def get_custom_jwt_token_handler(self) -> "CustomJwtHandler":
+        from synapse.handlers.custom_jwt import CustomJwtHandler
+
+        return CustomJwtHandler(self)
 
     @cache_in_self
     def get_sync_handler(self) -> SyncHandler:
