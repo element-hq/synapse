@@ -24,6 +24,7 @@ from typing import Dict, List, Optional, Tuple, cast
 
 import attr
 
+from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
@@ -1498,130 +1499,6 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-    def test_non_join_remote_invite_no_stripped_state(self) -> None:
-        """
-        Test remote invite with no stripped state provided shows up in
-        `sliding_sync_membership_snapshots` with `has_known_state=False`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        _user1_tok = self.login(user1_id, "pass")
-
-        # Create a remote invite room without any `unsigned.invite_room_state`
-        remote_invite_room_id, remote_invite_event = (
-            self._create_remote_invite_room_for_user(user1_id, None)
-        )
-
-        # No one local is joined to the remote room
-        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
-        self.assertIncludes(
-            set(sliding_sync_joined_rooms_results.keys()),
-            set(),
-            exact=True,
-        )
-
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (remote_invite_room_id, user1_id),
-            },
-            exact=True,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get(
-                (remote_invite_room_id, user1_id)
-            ),
-            _SlidingSyncMembershipSnapshotResult(
-                room_id=remote_invite_room_id,
-                user_id=user1_id,
-                membership_event_id=remote_invite_event.event_id,
-                membership=Membership.INVITE,
-                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
-                # No stripped state provided
-                has_known_state=False,
-                room_type=None,
-                room_name=None,
-                is_encrypted=False,
-            ),
-        )
-
-    def test_non_join_remote_invite_encrypted_room(self) -> None:
-        """
-        Test remote invite with stripped state (encrypted room) shows up in
-        `sliding_sync_membership_snapshots`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        _user1_tok = self.login(user1_id, "pass")
-
-        # Create a remote invite room with some `unsigned.invite_room_state`
-        # indicating that the room is encrypted.
-        remote_invite_room_id, remote_invite_event = (
-            self._create_remote_invite_room_for_user(
-                user1_id,
-                [
-                    StrippedStateEvent(
-                        type=EventTypes.Create,
-                        state_key="",
-                        sender="@inviter:remote_server",
-                        content={
-                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
-                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
-                        },
-                    ),
-                    StrippedStateEvent(
-                        type=EventTypes.RoomEncryption,
-                        state_key="",
-                        sender="@inviter:remote_server",
-                        content={
-                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
-                        },
-                    ),
-                ],
-            )
-        )
-
-        # No one local is joined to the remote room
-        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
-        self.assertIncludes(
-            set(sliding_sync_joined_rooms_results.keys()),
-            set(),
-            exact=True,
-        )
-
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (remote_invite_room_id, user1_id),
-            },
-            exact=True,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get(
-                (remote_invite_room_id, user1_id)
-            ),
-            _SlidingSyncMembershipSnapshotResult(
-                room_id=remote_invite_room_id,
-                user_id=user1_id,
-                membership_event_id=remote_invite_event.event_id,
-                membership=Membership.INVITE,
-                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
-                has_known_state=True,
-                room_type=None,
-                room_name=None,
-                is_encrypted=True,
-            ),
-        )
-
-    # TODO: Test remote invite
-    # TODO: Test rejection of a remote invite
-
-    # TODO Test for non-join membership changing
-
     def test_non_join_server_left_room(self) -> None:
         """
         Test everyone local leaves the room but their leave membership still shows up in
@@ -1698,5 +1575,288 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=False,
             ),
         )
+
+    @parameterized.expand(
+        [
+            # No stripped state provided
+            ("none", None),
+            # Empty stripped state provided
+            ("empty", []),
+        ]
+    )
+    def test_non_join_remote_invite_no_stripped_state(
+        self, _description: str, stripped_state: Optional[List[StrippedStateEvent]]
+    ) -> None:
+        """
+        Test remote invite with no stripped state provided shows up in
+        `sliding_sync_membership_snapshots` with `has_known_state=False`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room without any `unsigned.invite_room_state`
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(user1_id, stripped_state)
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=remote_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
+                # No stripped state provided
+                has_known_state=False,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
+    def test_non_join_remote_invite_unencrypted_room(self) -> None:
+        """
+        Test remote invite with stripped state (unencrypted room) shows up in
+        `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper room",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=remote_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+    def test_non_join_remote_invite_encrypted_room(self) -> None:
+        """
+        Test remote invite with stripped state (encrypted room) shows up in
+        `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=remote_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=True,
+            ),
+        )
+
+    def test_non_join_remote_invite_space_room(self) -> None:
+        """
+        Test remote invite with stripped state (encrypted space room with name) shows up in
+        `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                            # Specify that it is a space room
+                            EventContentFields.ROOM_TYPE: RoomTypes.SPACE,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper space",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=remote_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=True,
+            ),
+        )
+
+    # TODO: Test rejection of a remote invite
+
+    # TODO Test for non-join membership changing
 
     # TODO: test_non_join_state_reset
