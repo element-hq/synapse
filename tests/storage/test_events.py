@@ -1553,6 +1553,241 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
+    def test_membership_changing(self) -> None:
+        """
+        Test latest membership change is reflected in `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to the room
+        # ======================================================
+        user1_invited_response = self.helper.invite(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invited_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_invited_response["event_id"])
+        )
+
+        # Update the room name after the user was invited
+        room_name_update_response = self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        room_name_update_event_pos = self.get_success(
+            self.store.get_position_for_event(room_name_update_response["event_id"])
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Assert joined room status
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # Latest event in the room
+                event_stream_ordering=room_name_update_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        # Assert membership snapshots
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user was invited
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_invited_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=user1_invited_event_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                # Room name was updated after the user was invited so we should still
+                # see it unset here
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id1,
+            user_id=user2_id,
+            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user2_id)
+            ].internal_metadata.stream_ordering,
+            has_known_state=True,
+            room_type=None,
+            room_name=None,
+            is_encrypted=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            user2_snapshot,
+        )
+
+        # User1 joins the room
+        # ======================================================
+        user1_joined_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_joined_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_joined_response["event_id"])
+        )
+
+        # Assert joined room status
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # Latest event in the room
+                event_stream_ordering=user1_joined_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        # Assert membership snapshots
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_joined_response["event_id"],
+                membership=Membership.JOIN,
+                event_stream_ordering=user1_joined_event_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                # We see the update state because the user joined after the room name
+                # change
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            user2_snapshot,
+        )
+
+        # User1 is banned from the room
+        # ======================================================
+        user1_ban_response = self.helper.ban(
+            room_id1, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_ban_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_ban_response["event_id"])
+        )
+
+        # Assert joined room status
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id1},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id1],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id1,
+                # Latest event in the room
+                event_stream_ordering=user1_ban_event_pos.stream,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        # Assert membership snapshots
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user was banned
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_ban_response["event_id"],
+                membership=Membership.BAN,
+                event_stream_ordering=user1_ban_event_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                # We see the update state because the user joined after the room name
+                # change
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the user joined
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            user2_snapshot,
+        )
+
     def test_non_join_server_left_room(self) -> None:
         """
         Test everyone local leaves the room but their leave membership still shows up in
@@ -2065,7 +2300,5 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=True,
             ),
         )
-
-    # TODO Test for non-join membership changing
 
     # TODO: test_non_join_state_reset
