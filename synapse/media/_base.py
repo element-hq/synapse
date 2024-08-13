@@ -728,6 +728,7 @@ class ThreadedFileSender:
         failure)."""
         if self.file:
             self.file.close()
+            self.file = None
 
         if self.consumer:
             self.consumer.unregisterProducer()
