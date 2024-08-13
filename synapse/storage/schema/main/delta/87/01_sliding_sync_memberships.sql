@@ -84,6 +84,6 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
 );
 
 -- So we can fetch all rooms for a given user
-CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id);
+CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id);
 -- So we can sort by `stream_ordering
 CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream_ordering ON sliding_sync_membership_snapshots(event_stream_ordering);
