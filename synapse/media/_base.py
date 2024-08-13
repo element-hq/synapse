@@ -51,15 +51,15 @@ from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
 from synapse.logging.context import (
-    defer_to_thread,
+    defer_to_threadpool,
     make_deferred_yieldable,
     run_in_background,
 )
-from synapse.types import ISynapseReactor
 from synapse.util import Clock
 from synapse.util.stringutils import is_ascii
 
 if TYPE_CHECKING:
+    from synapse.server import HomeServer
     from synapse.storage.databases.main.media_repository import LocalMedia
 
 
@@ -132,6 +132,7 @@ def respond_404(request: SynapseRequest) -> None:
 
 
 async def respond_with_file(
+    hs: "HomeServer",
     request: SynapseRequest,
     media_type: str,
     file_path: str,
@@ -148,7 +149,7 @@ async def respond_with_file(
         add_file_headers(request, media_type, file_size, upload_name)
 
         with open(file_path, "rb") as f:
-            await ThreadedFileSender(request.reactor).beginFileTransfer(f, request)
+            await ThreadedFileSender(hs).beginFileTransfer(f, request)
 
         finish_request(request)
     else:
@@ -632,8 +633,9 @@ class ThreadedFileSender:
     # read.
     TIMEOUT_SECONDS = 90.0
 
-    def __init__(self, reactor: ISynapseReactor) -> None:
-        self.reactor = reactor
+    def __init__(self, hs: "HomeServer") -> None:
+        self.reactor = hs.get_reactor()
+        self.thread_pool = hs.get_media_sender_thread_pool()
 
         self.file: Optional[BinaryIO] = None
         self.deferred: "Deferred[None]" = Deferred()
@@ -661,7 +663,12 @@ class ThreadedFileSender:
 
         # We set the wakeup signal as we should start producing immediately.
         self.wakeup_event.set()
-        run_in_background(defer_to_thread, self.reactor, self._on_thread_read_loop)
+        run_in_background(
+            defer_to_threadpool,
+            self.reactor,
+            self.thread_pool,
+            self._on_thread_read_loop,
+        )
 
         return make_deferred_yieldable(self.deferred)
 

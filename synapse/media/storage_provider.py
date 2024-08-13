@@ -178,7 +178,7 @@ class FileStorageProviderBackend(StorageProvider):
 
         backup_fname = os.path.join(self.base_directory, path)
         if os.path.isfile(backup_fname):
-            return FileResponder(self.reactor, open(backup_fname, "rb"))
+            return FileResponder(self.hs, open(backup_fname, "rb"))
 
         return None
 
