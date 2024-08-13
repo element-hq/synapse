@@ -696,6 +696,60 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
         return invite_room_id, persisted_event
 
+    def _retract_remote_invite_for_user(
+        self,
+        user_id: str,
+        remote_room_id: str,
+    ) -> EventBase:
+        """
+        Create a fake invite retraction for a remote room and persist it.
+
+        Retracting an invite just means the person is no longer invited to the room.
+        This is done by someone with proper power levels kicking the user from the room.
+        A kick shows up as a leave event for a given person with a different `sender`.
+
+        Args:
+            user_id: The person who was invited and we're going to retract the
+                invite for.
+            remote_room_id: The room ID that the invite was for.
+
+        Returns:
+            The persisted leave (kick) event.
+        """
+
+        kick_event_dict = {
+            "room_id": remote_room_id,
+            "sender": "@inviter:remote_server",
+            "state_key": user_id,
+            "depth": 1,
+            "origin_server_ts": 1,
+            "type": EventTypes.Member,
+            "content": {"membership": Membership.LEAVE},
+            "auth_events": [],
+            "prev_events": [],
+        }
+
+        kick_event = make_event_from_dict(
+            kick_event_dict,
+            room_version=RoomVersions.V10,
+        )
+        kick_event.internal_metadata.outlier = True
+        kick_event.internal_metadata.out_of_band_membership = True
+
+        self.get_success(
+            self.store.maybe_store_room_on_outlier_membership(
+                room_id=remote_room_id, room_version=kick_event.room_version
+            )
+        )
+        context = EventContext.for_outlier(self.hs.get_storage_controllers())
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+        persisted_event, _, _ = self.get_success(
+            persist_controller.persist_event(kick_event, context)
+        )
+
+        return persisted_event
+
     def test_joined_room_with_no_info(self) -> None:
         """
         Test joined room that doesn't have a room type, encryption, or name shows up in
@@ -1855,7 +1909,162 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-    # TODO: Test rejection of a remote invite
+    def test_non_join_rejected_remote_invite(self) -> None:
+        """
+        Test rejected remote invite (user decided to leave the room) inherits meta data
+        from when the remote invite stripped state and shows up in
+        `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # User1 decides to leave the room (reject the invite)
+        user1_leave_response = self.helper.leave(
+            remote_invite_room_id, user1_id, tok=user1_tok
+        )
+        user1_leave_pos = self.get_success(
+            self.store.get_position_for_event(user1_leave_response["event_id"])
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=user1_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user1_leave_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=True,
+            ),
+        )
+
+    def test_non_join_retracted_remote_invite(self) -> None:
+        """
+        Test retracted remote invite (Remote inviter kicks the person who was invited)
+        inherits meta data from when the remote invite stripped state and shows up in
+        `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote invite room with some `unsigned.invite_room_state`
+        # indicating that the room is encrypted.
+        remote_invite_room_id, remote_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # `@inviter:remote_server` decides to retract the invite (kicks the user).
+        # (Note: A kick is just a leave event with a different sender)
+        remote_invite_retraction_event = self._retract_remote_invite_for_user(
+            user_id=user1_id,
+            remote_room_id=remote_invite_room_id,
+        )
+
+        # No one local is joined to the remote room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (remote_invite_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (remote_invite_room_id, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=remote_invite_room_id,
+                user_id=user1_id,
+                membership_event_id=remote_invite_retraction_event.event_id,
+                membership=Membership.LEAVE,
+                event_stream_ordering=remote_invite_retraction_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=True,
+            ),
+        )
 
     # TODO Test for non-join membership changing
 
