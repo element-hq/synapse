@@ -271,36 +271,10 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
                 **shared_kwargs,
             )
         )
-        # We add a message event as a valid "bump type"
-        msg_tuple = self.get_success(
-            create_event(
-                self.hs,
-                prev_event_ids=[creator_tuple[0].event_id],
-                auth_event_ids=[create_tuple[0].event_id],
-                type=EventTypes.Message,
-                content={"body": "foo", "msgtype": "m.text"},
-                sender=creator,
-                **shared_kwargs,
-            )
-        )
-        invite_tuple = self.get_success(
-            create_event(
-                self.hs,
-                prev_event_ids=[msg_tuple[0].event_id],
-                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
-                type=EventTypes.Member,
-                state_key=user1_id,
-                content={"membership": Membership.INVITE},
-                sender=creator,
-                **shared_kwargs,
-            )
-        )
 
         remote_events_and_contexts = [
             create_tuple,
             creator_tuple,
-            msg_tuple,
-            invite_tuple,
         ]
 
         # Ensure the local HS knows the room version
@@ -322,12 +296,12 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         flawed_join_tuple = self.get_success(
             create_event(
                 self.hs,
-                prev_event_ids=[invite_tuple[0].event_id],
+                prev_event_ids=[creator_tuple[0].event_id],
                 # This doesn't work correctly to create an `EventContext` that includes
                 # both of these state events. I assume it's because we're working on our
                 # local homeserver which has the remote state set as `outlier`. We have
                 # to create our own EventContext below to get this right.
-                auth_event_ids=[create_tuple[0].event_id, invite_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id],
                 type=EventTypes.Member,
                 state_key=user1_id,
                 content={"membership": Membership.JOIN},
@@ -344,8 +318,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
             self.state_handler.compute_event_context(
                 join_event,
                 state_ids_before_event={
-                    (e.type, e.state_key): e.event_id
-                    for e in [create_tuple[0], invite_tuple[0]]
+                    (e.type, e.state_key): e.event_id for e in [create_tuple[0]]
                 },
                 partial_state=False,
             )
@@ -360,27 +333,11 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         # After all of the local users (there is only user1) leave and forgetting the
         # room, it is forgotten
         user1_leave_response = self.helper.leave(room_id, user1_id, tok=user1_tok)
+        user1_leave_event = self.get_success(
+            self.store.get_event(user1_leave_response["event_id"])
+        )
         self.get_success(self.store.forget(user1_id, room_id))
         self.assertTrue(self.get_success(self.store.is_locally_forgotten_room(room_id)))
-
-        # Invite local user1 again. This makes it easy to auth the join event.
-        invite_tuple2 = self.get_success(
-            create_event(
-                self.hs,
-                prev_event_ids=[user1_leave_response["event_id"]],
-                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
-                type=EventTypes.Member,
-                state_key=user1_id,
-                content={"membership": Membership.INVITE},
-                sender=creator,
-                **shared_kwargs,
-            )
-        )
-        self.get_success(
-            self.persistence.persist_event(
-                invite_tuple2[0], invite_tuple2[1], backfilled=True
-            )
-        )
 
         # Join the local user to the room (again). We want to make this feel as close to
         # the real `process_remote_join()` as possible but we'd like to avoid some of
@@ -392,12 +349,15 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         flawed_join_tuple = self.get_success(
             create_event(
                 self.hs,
-                prev_event_ids=[invite_tuple2[0].event_id],
+                prev_event_ids=[user1_leave_response["event_id"]],
                 # This doesn't work correctly to create an `EventContext` that includes
                 # both of these state events. I assume it's because we're working on our
                 # local homeserver which has the remote state set as `outlier`. We have
                 # to create our own EventContext below to get this right.
-                auth_event_ids=[create_tuple[0].event_id, invite_tuple2[0].event_id],
+                auth_event_ids=[
+                    create_tuple[0].event_id,
+                    user1_leave_response["event_id"],
+                ],
                 type=EventTypes.Member,
                 state_key=user1_id,
                 content={"membership": Membership.JOIN},
@@ -415,7 +375,7 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
                 join_event,
                 state_ids_before_event={
                     (e.type, e.state_key): e.event_id
-                    for e in [create_tuple[0], invite_tuple2[0]]
+                    for e in [create_tuple[0], user1_leave_event]
                 },
                 partial_state=False,
             )
