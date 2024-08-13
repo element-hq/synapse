@@ -259,6 +259,7 @@ class ThumbnailProvider:
         media_storage: MediaStorage,
     ):
         self.hs = hs
+        self.reactor = hs.get_reactor()
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
@@ -373,7 +374,7 @@ class ThumbnailProvider:
                 await respond_with_multipart_responder(
                     self.hs.get_clock(),
                     request,
-                    FileResponder(open(file_path, "rb")),
+                    FileResponder(self.reactor, open(file_path, "rb")),
                     media_info,
                 )
             else:

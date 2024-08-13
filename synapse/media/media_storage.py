@@ -49,19 +49,15 @@ from zope.interface import implementer
 from twisted.internet import interfaces
 from twisted.internet.defer import Deferred
 from twisted.internet.interfaces import IConsumer
-from twisted.protocols.basic import FileSender
 
 from synapse.api.errors import NotFoundError
-from synapse.logging.context import (
-    defer_to_thread,
-    make_deferred_yieldable,
-    run_in_background,
-)
+from synapse.logging.context import defer_to_thread, run_in_background
 from synapse.logging.opentracing import start_active_span, trace, trace_with_opname
+from synapse.media._base import ThreadedFileSender
 from synapse.util import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
-from ..types import JsonDict
+from ..types import ISynapseReactor, JsonDict
 from ._base import FileInfo, Responder
 from .filepath import MediaFilePaths
 
@@ -213,7 +209,7 @@ class MediaStorage:
             local_path = os.path.join(self.local_media_directory, path)
             if os.path.exists(local_path):
                 logger.debug("responding with local file %s", local_path)
-                return FileResponder(open(local_path, "rb"))
+                return FileResponder(self.reactor, open(local_path, "rb"))
             logger.debug("local file %s did not exist", local_path)
 
         for provider in self.storage_providers:
@@ -336,12 +332,13 @@ class FileResponder(Responder):
             is closed when finished streaming.
     """
 
-    def __init__(self, open_file: IO):
+    def __init__(self, reactor: ISynapseReactor, open_file: BinaryIO):
+        self.reactor = reactor
         self.open_file = open_file
 
     def write_to_consumer(self, consumer: IConsumer) -> Deferred:
-        return make_deferred_yieldable(
-            FileSender().beginFileTransfer(self.open_file, consumer)
+        return ThreadedFileSender(self.reactor).beginFileTransfer(
+            self.open_file, consumer
         )
 
     def __exit__(
