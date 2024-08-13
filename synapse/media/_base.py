@@ -50,7 +50,11 @@ from twisted.web.server import Request
 from synapse.api.errors import Codes, cs_error
 from synapse.http.server import finish_request, respond_with_json
 from synapse.http.site import SynapseRequest
-from synapse.logging.context import defer_to_thread, make_deferred_yieldable
+from synapse.logging.context import (
+    defer_to_thread,
+    make_deferred_yieldable,
+    run_in_background,
+)
 from synapse.types import ISynapseReactor
 from synapse.util import Clock
 from synapse.util.stringutils import is_ascii
@@ -657,7 +661,7 @@ class ThreadedFileSender:
 
         # We set the wakeup signal as we should start producing immediately.
         self.wakeup_event.set()
-        defer_to_thread(self.reactor, self._on_thread_read_loop)
+        run_in_background(defer_to_thread, self.reactor, self._on_thread_read_loop)
 
         return make_deferred_yieldable(self.deferred)
 
@@ -671,6 +675,9 @@ class ThreadedFileSender:
 
     def stopProducing(self) -> None:
         """interfaces.IPushProducer"""
+
+        # Unregister the consumer so we don't try and interact with it again.
+        self.consumer = None
 
         # Terminate the thread loop.
         self.wakeup_event.set()
