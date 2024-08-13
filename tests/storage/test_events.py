@@ -23,8 +23,8 @@ import logging
 from typing import Dict, List, Optional, Tuple, cast
 
 import attr
-
 from parameterized import parameterized
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
@@ -2230,7 +2230,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         `sliding_sync_membership_snapshots`.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
 
         # Create a remote invite room with some `unsigned.invite_room_state`
         # indicating that the room is encrypted.
