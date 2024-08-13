@@ -688,9 +688,9 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         # the real `process_remote_join()` as possible but we'd like to avoid some of
         # the auth checks that would be done in the real code.
         #
-        # FIXME: The test was originally written using this less-real shortcut but it
-        # would be nice to use the real remote join process in a
-        # `FederatingHomeserverTestCase`.
+        # FIXME: The test was originally written using this less-real
+        # `persist_event(...)` shortcut but it would be nice to use the real remote join
+        # process in a `FederatingHomeserverTestCase`.
         flawed_join_tuple = self.get_success(
             create_event(
                 self.hs,
