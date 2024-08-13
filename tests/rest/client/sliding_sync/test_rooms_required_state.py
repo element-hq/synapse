@@ -631,8 +631,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
     def test_rooms_required_state_partial_state(self) -> None:
         """
-        Test partially-stated room are excluded unless `rooms.required_state` is
-        lazy-loading room members.
+        Test partially-stated room are excluded if they require full state.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -649,13 +648,153 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             mark_event_as_partial_state(self.hs, join_response2["event_id"], room_id2)
         )
 
-        # Make the Sliding Sync request (NOT lazy-loading room members)
+        # Make the Sliding Sync request with examples where `must_await_full_state()` is
+        # `False`
         sync_body = {
             "lists": {
-                "foo-list": {
+                "no-state-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                "other-state-list": {
                     "ranges": [[0, 1]],
                     "required_state": [
                         [EventTypes.Create, ""],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "lazy-load-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        # Lazy-load room members
+                        [EventTypes.Member, StateValues.LAZY],
+                        # Local member
+                        [EventTypes.Member, user2_id],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "local-members-only-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        # Own user ID
+                        [EventTypes.Member, user1_id],
+                        # Local member
+                        [EventTypes.Member, user2_id],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "me-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        # Own user ID
+                        [EventTypes.Member, StateValues.ME],
+                        # Local member
+                        [EventTypes.Member, user2_id],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "wildcard-type-local-state-key-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        ["*", user1_id],
+                        # Not a user ID
+                        ["*", "foobarbaz"],
+                        # Not a user ID
+                        ["*", "foo.bar.baz"],
+                        # Not a user ID
+                        ["*", "@foo"],
+                    ],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # The list should include both rooms now because we don't need full state
+        for list_key in response_body["lists"].keys():
+            self.assertIncludes(
+                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
+                {room_id2, room_id1},
+                exact=True,
+                message=f"Expected all rooms to show up for list_key={list_key}. Response "
+                + str(response_body["lists"][list_key]),
+            )
+
+        # Take each of the list variants and apply them to room subscriptions to make
+        # sure the same rules apply
+        for list_key in sync_body["lists"].keys():
+            sync_body_for_subscriptions = {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                    room_id2: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
+            }
+            response_body, _ = self.do_sync(sync_body_for_subscriptions, tok=user1_tok)
+
+            self.assertIncludes(
+                set(response_body["rooms"].keys()),
+                {room_id2, room_id1},
+                exact=True,
+                message=f"Expected all rooms to show up for test_key={list_key}.",
+            )
+
+        # =====================================================================
+
+        # Make the Sliding Sync request with examples where `must_await_full_state()` is
+        # `True`
+        sync_body = {
+            "lists": {
+                "wildcard-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        ["*", "*"],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "wildcard-type-remote-state-key-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        ["*", "@some:remote"],
+                        # Not a user ID
+                        ["*", "foobarbaz"],
+                        # Not a user ID
+                        ["*", "foo.bar.baz"],
+                        # Not a user ID
+                        ["*", "@foo"],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "remote-member-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        # Own user ID
+                        [EventTypes.Member, user1_id],
+                        # Remote member
+                        [EventTypes.Member, "@some:remote"],
+                        # Local member
+                        [EventTypes.Member, user2_id],
+                    ],
+                    "timeline_limit": 0,
+                },
+                "lazy-but-remote-member-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        # Lazy-load room members
+                        [EventTypes.Member, StateValues.LAZY],
+                        # Remote member
+                        [EventTypes.Member, "@some:remote"],
                     ],
                     "timeline_limit": 0,
                 },
@@ -665,43 +804,39 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
         # Make sure the list includes room1 but room2 is excluded because it's still
         # partially-stated
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id1],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
+        for list_key in response_body["lists"].keys():
+            self.assertIncludes(
+                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
+                {room_id1},
+                exact=True,
+                message=f"Expected only fully-stated rooms to show up for list_key={list_key}. Response "
+                + str(response_body["lists"][list_key]),
+            )
 
-        # Make the Sliding Sync request (with lazy-loading room members)
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 1]],
-                    "required_state": [
-                        [EventTypes.Create, ""],
-                        # Lazy-load room members
-                        [EventTypes.Member, StateValues.LAZY],
-                    ],
-                    "timeline_limit": 0,
-                },
+        # Take each of the list variants and apply them to room subscriptions to make
+        # sure the same rules apply
+        for list_key in sync_body["lists"].keys():
+            sync_body_for_subscriptions = {
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                    room_id2: {
+                        "required_state": sync_body["lists"][list_key][
+                            "required_state"
+                        ],
+                        "timeline_limit": 0,
+                    },
+                }
             }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+            response_body, _ = self.do_sync(sync_body_for_subscriptions, tok=user1_tok)
 
-        # The list should include both rooms now because we're lazy-loading room members
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id2, room_id1],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
+            self.assertIncludes(
+                set(response_body["rooms"].keys()),
+                {room_id1},
+                exact=True,
+                message=f"Expected only fully-stated rooms to show up for test_key={list_key}.",
+            )
