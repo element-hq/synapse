@@ -57,7 +57,7 @@ from synapse.media._base import ThreadedFileSender
 from synapse.util import Clock
 from synapse.util.file_consumer import BackgroundFileConsumer
 
-from ..types import ISynapseReactor, JsonDict
+from ..types import JsonDict
 from ._base import FileInfo, Responder
 from .filepath import MediaFilePaths
 
@@ -209,7 +209,7 @@ class MediaStorage:
             local_path = os.path.join(self.local_media_directory, path)
             if os.path.exists(local_path):
                 logger.debug("responding with local file %s", local_path)
-                return FileResponder(self.reactor, open(local_path, "rb"))
+                return FileResponder(self.hs, open(local_path, "rb"))
             logger.debug("local file %s did not exist", local_path)
 
         for provider in self.storage_providers:
@@ -332,14 +332,12 @@ class FileResponder(Responder):
             is closed when finished streaming.
     """
 
-    def __init__(self, reactor: ISynapseReactor, open_file: BinaryIO):
-        self.reactor = reactor
+    def __init__(self, hs: "HomeServer", open_file: BinaryIO):
+        self.hs = hs
         self.open_file = open_file
 
     def write_to_consumer(self, consumer: IConsumer) -> Deferred:
-        return ThreadedFileSender(self.reactor).beginFileTransfer(
-            self.open_file, consumer
-        )
+        return ThreadedFileSender(self.hs).beginFileTransfer(self.open_file, consumer)
 
     def __exit__(
         self,
