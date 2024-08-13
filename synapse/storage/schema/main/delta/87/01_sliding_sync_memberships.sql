@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     -- `m.room.name` -> `content.name` (current state)
     room_name TEXT,
     -- `m.room.encryption` -> `content.algorithm` (current state)
-    is_encrypted BOOLEAN DEFAULT 0 NOT NULL,
+    is_encrypted BOOLEAN DEFAULT FALSE NOT NULL,
     -- FIXME: Maybe we want to add `tombstone_successor_room_id` here to help with `include_old_rooms`
     -- (tracked by https://github.com/element-hq/synapse/issues/17540)
     PRIMARY KEY (room_id)
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     -- able to distinguish between a room with `None` as valid value for some state and
     -- room where the state is completely unknown. Basically, this should be True unless
     -- no stripped state was provided for a remote invite/knock (False).
-    has_known_state BOOLEAN DEFAULT 0 NOT NULL,
+    has_known_state BOOLEAN DEFAULT FALSE NOT NULL,
     -- `m.room.create` -> `content.type` (according to the current state at the time of
     -- the membership)
     room_type TEXT,
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     room_name TEXT,
     -- `m.room.encryption` -> `content.algorithm` (according to the current state at the
     -- time of the membership)
-    is_encrypted BOOLEAN DEFAULT 0 NOT NULL,
+    is_encrypted BOOLEAN DEFAULT FALSE NOT NULL,
     -- FIXME: Maybe we want to add `tombstone_successor_room_id` here to help with `include_old_rooms`
     -- (tracked by https://github.com/element-hq/synapse/issues/17540)
     PRIMARY KEY (room_id, user_id)
