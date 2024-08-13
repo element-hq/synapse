@@ -1088,7 +1088,6 @@ class _MultipartParserProtocol(protocol.Protocol):
                     return
                 # otherwise we are in the file part
                 else:
-                    logger.info("Writing multipart file data to stream")
                     try:
                         self.stream.write(data[start:end])
                     except Exception as e:
