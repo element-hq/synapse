@@ -1332,6 +1332,9 @@ class PersistEventsStore:
                 # lists
                 insert_keys = sliding_sync_membership_snapshots_insert_map.keys()
                 insert_values = sliding_sync_membership_snapshots_insert_map.values()
+                # We need to insert/update regardless of whether we have `insert_keys`
+                # because there are other fields in the `ON CONFLICT` upsert to run (see
+                # inherit case above for more context when this happens).
                 txn.execute_batch(
                     f"""
                     INSERT INTO sliding_sync_membership_snapshots
@@ -1547,9 +1550,10 @@ class PersistEventsStore:
                 # choose the best possible answer by using the "first" event ID which we
                 # will assume will have the greatest `stream_ordering`. We really just
                 # need *some* answer in case we are the first ones inserting into the
-                # table and in reality, `_store_event_txn()` is run before this function
-                # so it will already have the correct value. This is just to account for
-                # things changing in the future.
+                # table and in reality,
+                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run
+                # after this function to update it to the correct latest value. This is
+                # just to account for things changing in the future.
                 next(iter(to_insert.values())),
             ]
             # If we have a `bump_event_id`, let's update the `bump_stamp` column
@@ -1565,7 +1569,11 @@ class PersistEventsStore:
             insert_keys = sliding_sync_joined_rooms_insert_map.keys()
             insert_values = sliding_sync_joined_rooms_insert_map.values()
             args.extend(iter(insert_values))
-            if len(insert_keys) > 0:
+            # We only need to update when one of the relevant state values has changed
+            if insert_keys:
+                # We don't update `event_stream_ordering` `ON CONFLICT` because it's simpler
+                # we can just
+                #
                 # We don't update `bump_stamp` `ON CONFLICT` because we're dealing with
                 # state here and the only state event that is also a bump event type is
                 # `m.room.create`. Given the room creation event is the first one in the
@@ -1584,12 +1592,7 @@ class PersistEventsStore:
                     )
                     ON CONFLICT (room_id)
                     DO UPDATE SET
-                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)},
-                        event_stream_ordering = CASE
-                            WHEN event_stream_ordering IS NULL OR event_stream_ordering < EXCLUDED.event_stream_ordering
-                                THEN EXCLUDED.event_stream_ordering
-                            ELSE event_stream_ordering
-                        END
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
                     """,
                     args,
                 )
