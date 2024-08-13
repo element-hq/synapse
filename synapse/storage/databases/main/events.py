@@ -1543,34 +1543,37 @@ class PersistEventsStore:
                     )
 
             # Update the `sliding_sync_joined_rooms` table
-            args: List[Any] = [
-                room_id,
-                # Even though `Mapping`/`Dict` have no guaranteed order, some
-                # implementations may preserve insertion order so we're just going to
-                # choose the best possible answer by using the "first" event ID which we
-                # will assume will have the greatest `stream_ordering`. We really just
-                # need *some* answer in case we are the first ones inserting into the
-                # table and in reality,
-                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run
-                # after this function to update it to the correct latest value. This is
-                # just to account for things changing in the future.
-                next(iter(to_insert.values())),
-            ]
-            # If we have a `bump_event_id`, let's update the `bump_stamp` column
-            bump_stamp_column = ""
-            bump_stamp_values_clause = ""
-            if bump_event_id is not None:
-                bump_stamp_column = "bump_stamp, "
-                bump_stamp_values_clause = (
-                    "(SELECT stream_ordering FROM events WHERE event_id = ?),"
-                )
-                args.append(bump_event_id)
+            #
             # Pulling keys/values separately is safe and will produce congruent lists
             insert_keys = sliding_sync_joined_rooms_insert_map.keys()
             insert_values = sliding_sync_joined_rooms_insert_map.values()
-            args.extend(iter(insert_values))
             # We only need to update when one of the relevant state values has changed
             if insert_keys:
+                args: List[Any] = [
+                    room_id,
+                    # Even though `Mapping`/`Dict` have no guaranteed order, some
+                    # implementations may preserve insertion order so we're just going to
+                    # choose the best possible answer by using the "first" event ID which we
+                    # will assume will have the greatest `stream_ordering`. We really just
+                    # need *some* answer in case we are the first ones inserting into the
+                    # table and in reality,
+                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run
+                    # after this function to update it to the correct latest value. This is
+                    # just to account for things changing in the future.
+                    next(iter(to_insert.values())),
+                ]
+                # If we have a `bump_event_id`, let's update the `bump_stamp` column
+                bump_stamp_column = ""
+                bump_stamp_values_clause = ""
+                if bump_event_id is not None:
+                    bump_stamp_column = "bump_stamp, "
+                    bump_stamp_values_clause = (
+                        "(SELECT stream_ordering FROM events WHERE event_id = ?),"
+                    )
+                    args.append(bump_event_id)
+
+                args.extend(iter(insert_values))
+
                 # We don't update `event_stream_ordering` `ON CONFLICT` because it's simpler
                 # we can just
                 #
