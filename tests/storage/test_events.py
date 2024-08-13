@@ -1555,7 +1555,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_membership_changing(self) -> None:
         """
-        Test latest membership change is reflected in `sliding_sync_membership_snapshots`.
+        Test latest snapshot evolves when membership changes (`sliding_sync_membership_snapshots`).
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
