@@ -2167,7 +2167,7 @@ unless <a href="#enable_registration"><code>enable_registration</code></a> is al
 </code></pre>
 <hr />
 <h3 id="registrations_require_3pid"><a class="header" href="#registrations_require_3pid"><code>registrations_require_3pid</code></a></h3>
-<p>If this is set, users must provide all of the specified types of 3PID when registering an account.</p>
+<p>If this is set, users must provide all of the specified types of <a href="https://spec.matrix.org/latest/appendices/#3pid-types">3PID</a> when registering an account.</p>
 <p>Note that <a href="#enable_registration"><code>enable_registration</code></a> must also be set to allow account registration.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">registrations_require_3pid:
@@ -2184,7 +2184,9 @@ flow (overrides <code>registrations_require_3pid</code> if MSISDNs are set as re
 <hr />
 <h3 id="allowed_local_3pids"><a class="header" href="#allowed_local_3pids"><code>allowed_local_3pids</code></a></h3>
 <p>Mandate that users are only allowed to associate certain formats of
-3PIDs with accounts on this server, as specified by the <code>medium</code> and <code>pattern</code> sub-options.</p>
+3PIDs with accounts on this server, as specified by the <code>medium</code> and <code>pattern</code> sub-options.
+<code>pattern</code> is a <a href="https://docs.python.org/3/library/re.html#module-re">Perl-like regular expression</a>.</p>
+<p>More information about 3PIDs, allowed <code>medium</code> types and their <code>address</code> syntax can be found <a href="https://spec.matrix.org/latest/appendices/#3pid-types">in the Matrix spec</a>.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">allowed_local_3pids:
   - medium: email
@@ -2192,7 +2194,7 @@ flow (overrides <code>registrations_require_3pid</code> if MSISDNs are set as re
   - medium: email
     pattern: '^[^@]+@vector\.im$'
   - medium: msisdn
-    pattern: '\+44'
+    pattern: '^44\d{10}$'
 </code></pre>
 <hr />
 <h3 id="enable_3pid_lookup"><a class="header" href="#enable_3pid_lookup"><code>enable_3pid_lookup</code></a></h3>
