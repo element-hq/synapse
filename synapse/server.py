@@ -124,6 +124,7 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
+from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -958,5 +959,8 @@ class HomeServer(metaclass=abc.ABCMeta):
         self.get_reactor().addSystemEventTrigger(
             "during", "shutdown", media_threadpool.stop
         )
+
+        # Register the threadpool with our metrics.
+        register_threadpool("media", media_threadpool)
 
         return media_threadpool
