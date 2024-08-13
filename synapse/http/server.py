@@ -74,7 +74,6 @@ from synapse.api.errors import (
 from synapse.config.homeserver import HomeServerConfig
 from synapse.logging.context import defer_to_thread, preserve_fn, run_in_background
 from synapse.logging.opentracing import active_span, start_active_span, trace_servlet
-from synapse.types import ISynapseReactor
 from synapse.util import json_encoder
 from synapse.util.caches import intern_dict
 from synapse.util.cancellation import is_function_cancellable
@@ -869,8 +868,7 @@ async def _async_write_json_to_request_in_thread(
 
     with start_active_span("encode_json_response"):
         span = active_span()
-        reactor: ISynapseReactor = request.reactor  # type: ignore
-        json_str = await defer_to_thread(reactor, encode, span)
+        json_str = await defer_to_thread(request.reactor, encode, span)
 
     _write_bytes_to_request(request, json_str)
 

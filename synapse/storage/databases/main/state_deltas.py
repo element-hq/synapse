@@ -166,6 +166,11 @@ class StateDeltasStore(SQLBaseStore):
     ) -> List[StateDelta]:
         """Get the state deltas between two tokens."""
 
+        if not self._curr_state_delta_stream_cache.has_entity_changed(
+            room_id, from_token.stream
+        ):
+            return []
+
         def get_current_state_deltas_for_room_txn(
             txn: LoggingTransaction,
         ) -> List[StateDelta]:
