@@ -1166,6 +1166,12 @@ def setup_test_homeserver(
 
     hs.get_auth_handler().validate_hash = validate_hash  # type: ignore[assignment]
 
+    # We need to replace the media threadpool with the fake test threadpool.
+    def thread_pool() -> threadpool.ThreadPool:
+        return reactor.getThreadPool()
+
+    hs.get_media_sender_thread_pool = thread_pool  # type: ignore[method-assign]
+
     # Load any configured modules into the homeserver
     module_api = hs.get_module_api()
     for module, module_config in hs.config.modules.loaded_modules:

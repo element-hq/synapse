@@ -34,6 +34,7 @@ from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
+from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
@@ -941,3 +942,21 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_task_scheduler(self) -> TaskScheduler:
         return TaskScheduler(self)
+
+    @cache_in_self
+    def get_media_sender_thread_pool(self) -> ThreadPool:
+        """Fetch the threadpool used to read files when responding to media
+        download requests."""
+
+        # We can choose a large threadpool size as these threads predominately
+        # do IO rather than CPU work.
+        media_threadpool = ThreadPool(
+            name="media_threadpool", minthreads=1, maxthreads=50
+        )
+
+        media_threadpool.start()
+        self.get_reactor().addSystemEventTrigger(
+            "during", "shutdown", media_threadpool.stop
+        )
+
+        return media_threadpool
