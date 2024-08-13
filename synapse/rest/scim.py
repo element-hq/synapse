@@ -27,7 +27,7 @@ import datetime
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, Tuple
+from typing import TYPE_CHECKING, Dict, List, Tuple, Union
 
 from scim2_models import (
     AuthenticationScheme,
@@ -103,7 +103,9 @@ class SCIMServlet(RestServlet):
 
         self.default_nb_items_per_page = 100
 
-    def make_error_response(self, status, message):
+    def make_error_response(
+        self, status: Union[int, HTTPStatus], message: str
+    ) -> Error:
         return (
             status,
             Error(
@@ -112,19 +114,18 @@ class SCIMServlet(RestServlet):
             ).model_dump(),
         )
 
-    def parse_search_request(self, request):
+    def parse_search_request(self, request: SynapseRequest) -> SearchRequest:
+        args: Dict[bytes, List[bytes]] = request.args  # type: ignore
         return SearchRequest(
-            attributes=parse_strings_from_args(request.args, "attributes"),
-            excluded_attributes=parse_strings_from_args(
-                request.args, "excludedAttributes"
-            ),
+            attributes=parse_strings_from_args(args, "attributes"),
+            excluded_attributes=parse_strings_from_args(args, "excludedAttributes"),
             start_index=parse_integer(request, "startIndex", default=1, negative=True),
             count=parse_integer(
                 request, "count", default=self.default_nb_items_per_page, negative=True
             ),
         )
 
-    async def get_scim_user(self, user_id: str):
+    async def get_scim_user(self, user_id: str) -> User:
         user_id_obj = UserID.from_string(user_id)
         user = await self.store.get_user_by_id(user_id)
         profile = await self.store.get_profileinfo(user_id_obj)
@@ -198,9 +199,7 @@ class UserServlet(SCIMServlet):
         except SynapseError as exc:
             return self.make_error_response(exc.code, exc.msg)
 
-    async def on_DELETE(
-        self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    async def on_DELETE(self, request: SynapseRequest, user_id: str) -> Tuple[int, str]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         deactivate_account_handler = self.hs.get_deactivate_account_handler()
@@ -414,8 +413,8 @@ class ServiceProviderConfigServlet(SCIMServlet):
 class BaseSchemaServlet(SCIMServlet):
     schemas: Dict[str, Schema]
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
         self.schemas = {
             "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig": ServiceProviderConfig.to_schema(),
             "urn:ietf:params:scim:schemas:core:2.0:ResourceType": ResourceType.to_schema(),
@@ -474,8 +473,8 @@ class SchemaServlet(BaseSchemaServlet):
 class BaseResourceTypeServlet(SCIMServlet):
     resource_type: ResourceType
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, hs: "HomeServer"):
+        super().__init__(hs)
         self.resource_type = ResourceType(
             id="User",
             name="User",
