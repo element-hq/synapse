@@ -632,7 +632,7 @@ class ThreadedFileSender:
         self.reactor = reactor
 
         self.file: Optional[BinaryIO] = None
-        self.deferred: Deferred[None] = Deferred()
+        self.deferred: "Deferred[None]" = Deferred()
         self.consumer: Optional[interfaces.IConsumer] = None
 
         # Signals if the thread should keep reading/sending data. Set means
@@ -646,7 +646,7 @@ class ThreadedFileSender:
 
     def beginFileTransfer(
         self, file: BinaryIO, consumer: interfaces.IConsumer
-    ) -> Deferred[None]:
+    ) -> "Deferred[None]":
         """
         Begin transferring a file
         """
