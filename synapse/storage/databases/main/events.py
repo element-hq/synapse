@@ -1199,7 +1199,7 @@ class PersistEventsStore:
 
         # We handle `sliding_sync_membership_snapshots` before `current_state_events` so
         # we can gather the current state before it might be deleted if we are
-        # `no_longer_in_room`.
+        # last ones in the room and now we are `no_longer_in_room`.
         #
         # We do this regardless of whether the server is `no_longer_in_room` or not
         # because we still want a row if a local user was just left/kicked or got banned
@@ -1211,11 +1211,6 @@ class PersistEventsStore:
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             if len(membership_event_id_to_user_id_map) > 0:
-                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-                sliding_sync_membership_snapshots_insert_map: Dict[
-                    str, Optional[Union[str, bool]]
-                ] = {}
-
                 relevant_state_set = {
                     (EventTypes.Create, ""),
                     (EventTypes.RoomEncryption, ""),
@@ -1256,55 +1251,80 @@ class PersistEventsStore:
                     if state_key in relevant_state_set:
                         current_state_map[state_key] = event_id
 
-                # Fetch the raw event JSON from the database
-                (
-                    event_id_in_list_clause,
-                    event_id_args,
-                ) = make_in_list_sql_clause(
-                    self.database_engine,
-                    "event_id",
-                    current_state_map.values(),
-                )
-                txn.execute(
-                    f"""
-                    SELECT event_id, type, state_key, json FROM event_json
-                    INNER JOIN events USING (event_id)
-                    WHERE {event_id_in_list_clause}
-                    """,
-                    event_id_args,
-                )
+                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+                sliding_sync_membership_snapshots_insert_map: Dict[
+                    str, Optional[Union[str, bool]]
+                ] = {}
+                if current_state_map:
+                    # We have current state to work from
+                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
+                        True
+                    )
 
-                # Parse the raw event JSON
-                for row in txn:
-                    event_id, event_type, state_key, json = row
-                    event_json = db_to_json(json)
+                    # Fetch the raw event JSON from the database
+                    (
+                        event_id_in_list_clause,
+                        event_id_args,
+                    ) = make_in_list_sql_clause(
+                        self.database_engine,
+                        "event_id",
+                        current_state_map.values(),
+                    )
+                    txn.execute(
+                        f"""
+                        SELECT event_id, type, state_key, json FROM event_json
+                        INNER JOIN events USING (event_id)
+                        WHERE {event_id_in_list_clause}
+                        """,
+                        event_id_args,
+                    )
 
-                    if event_type == EventTypes.Create:
-                        room_type = event_json.get("content", {}).get(
-                            EventContentFields.ROOM_TYPE
-                        )
-                        sliding_sync_membership_snapshots_insert_map["room_type"] = (
-                            room_type
-                        )
-                    elif event_type == EventTypes.RoomEncryption:
-                        encryption_algorithm = event_json.get("content", {}).get(
-                            EventContentFields.ENCRYPTION_ALGORITHM
-                        )
-                        is_encrypted = encryption_algorithm is not None
-                        sliding_sync_membership_snapshots_insert_map["is_encrypted"] = (
-                            is_encrypted
-                        )
-                    elif event_type == EventTypes.Name:
-                        room_name = event_json.get("content", {}).get(
-                            EventContentFields.ROOM_NAME
-                        )
-                        sliding_sync_membership_snapshots_insert_map["room_name"] = (
-                            room_name
-                        )
-                    else:
-                        raise AssertionError(
-                            f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
-                        )
+                    # Parse the raw event JSON
+                    for row in txn:
+                        event_id, event_type, state_key, json = row
+                        event_json = db_to_json(json)
+
+                        if event_type == EventTypes.Create:
+                            room_type = event_json.get("content", {}).get(
+                                EventContentFields.ROOM_TYPE
+                            )
+                            sliding_sync_membership_snapshots_insert_map[
+                                "room_type"
+                            ] = room_type
+                        elif event_type == EventTypes.RoomEncryption:
+                            encryption_algorithm = event_json.get("content", {}).get(
+                                EventContentFields.ENCRYPTION_ALGORITHM
+                            )
+                            is_encrypted = encryption_algorithm is not None
+                            sliding_sync_membership_snapshots_insert_map[
+                                "is_encrypted"
+                            ] = is_encrypted
+                        elif event_type == EventTypes.Name:
+                            room_name = event_json.get("content", {}).get(
+                                EventContentFields.ROOM_NAME
+                            )
+                            sliding_sync_membership_snapshots_insert_map[
+                                "room_name"
+                            ] = room_name
+                        else:
+                            raise AssertionError(
+                                f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
+                            )
+                else:
+                    # We don't have any `current_state_events` anymore (previously
+                    # cleared out because of `no_longer_in_room`). This can happen if
+                    # one user is joined and another is invited (some non-join
+                    # membership). If the joined user leaves, we are `no_longer_in_room`
+                    # and `current_state_events` is cleared out. When the invited user
+                    # rejects the invite (leaves the room), we will end up here.
+                    #
+                    # In these cases, we should inherit the meta data from the previous
+                    # snapshot. When using sliding sync filters, this will prevent the
+                    # room from disappearing/appearing just because you left the room.
+                    #
+                    # Ideally, we could additionally assert that we're only here for
+                    # valid non-join membership transitions.
+                    assert delta_state.no_longer_in_room
 
                 # Update the `sliding_sync_membership_snapshots` table
                 #
@@ -1315,20 +1335,20 @@ class PersistEventsStore:
                 txn.execute_batch(
                     f"""
                     INSERT INTO sliding_sync_membership_snapshots
-                        (room_id, user_id, membership_event_id, membership, event_stream_ordering, has_known_state, {", ".join(insert_keys)})
+                        (room_id, user_id, membership_event_id, membership, event_stream_ordering
+                        {"," + (", ".join(insert_keys)) if insert_keys else ""})
                     VALUES (
                         ?, ?, ?,
                         (SELECT membership FROM room_memberships WHERE event_id = ?),
-                        (SELECT stream_ordering FROM events WHERE event_id = ?),
-                        ?,
-                        {", ".join("?" for _ in insert_values)}
+                        (SELECT stream_ordering FROM events WHERE event_id = ?)
+                        {"," + (", ".join("?" for _ in insert_values)) if insert_values else ""}
                     )
                     ON CONFLICT (room_id, user_id)
                     DO UPDATE SET
                         membership_event_id = EXCLUDED.membership_event_id,
                         membership = EXCLUDED.membership,
-                        event_stream_ordering = EXCLUDED.event_stream_ordering,
-                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                        event_stream_ordering = EXCLUDED.event_stream_ordering
+                        {"," + (", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)) if insert_keys else ""}
                     """,
                     [
                         [
@@ -1337,7 +1357,6 @@ class PersistEventsStore:
                             membership_event_id,
                             membership_event_id,
                             membership_event_id,
-                            True,  # has_known_state
                         ]
                         + list(insert_values)
                         for membership_event_id, user_id in membership_event_id_to_user_id_map.items()

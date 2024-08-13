@@ -1553,6 +1553,82 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
+    def test_non_join_reject_invite_empty_room(self) -> None:
+        """
+        In a room where no one is joined (`no_longer_in_room`), test rejecting an invite.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to the room
+        self.helper.invite(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # User2 leaves the room
+        user2_leave_response = self.helper.leave(room_id1, user2_id, tok=user2_tok)
+        user2_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user2_leave_response["event_id"])
+        )
+
+        # User1 rejects the invite
+        user1_leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        user1_leave_event_pos = self.get_success(
+            self.store.get_position_for_event(user1_leave_response["event_id"])
+        )
+
+        # No one is joined to the room
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id1, user1_id),
+                (room_id1, user2_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user left
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user1_id,
+                membership_event_id=user1_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user1_leave_event_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        # Holds the info according to the current state when the left
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id1,
+                user_id=user2_id,
+                membership_event_id=user2_leave_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=user2_leave_event_pos.stream,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+
     def test_membership_changing(self) -> None:
         """
         Test latest snapshot evolves when membership changes (`sliding_sync_membership_snapshots`).
