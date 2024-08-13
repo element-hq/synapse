@@ -29,6 +29,7 @@ from typing import (
     Callable,
     Dict,
     Final,
+    Generic,
     List,
     Literal,
     Mapping,
@@ -37,6 +38,7 @@ from typing import (
     Sequence,
     Set,
     Tuple,
+    TypeVar,
     Union,
     cast,
 )
@@ -55,6 +57,7 @@ from synapse.api.constants import (
 from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event, strip_event
+from synapse.handlers.receipts import ReceiptEventSource
 from synapse.handlers.relations import BundledAggregations
 from synapse.logging.opentracing import (
     SynapseTags,
@@ -840,6 +843,7 @@ class SlidingSyncHandler:
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
+            per_connection_state=per_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -884,7 +888,7 @@ class SlidingSyncHandler:
                 unsent_room_ids = list(missing_event_map_by_room)
 
                 new_connection_state.rooms.record_unsent_rooms(
-                    unsent_room_ids, from_token.stream_token
+                    unsent_room_ids, from_token.stream_token.room_key
                 )
 
             new_connection_state.rooms.record_sent_rooms(
@@ -2474,6 +2478,7 @@ class SlidingSyncHandler:
     async def get_extensions_response(
         self,
         sync_config: SlidingSyncConfig,
+        per_connection_state: "PerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2528,6 +2533,7 @@ class SlidingSyncHandler:
         if sync_config.extensions.receipts is not None:
             receipts_response = await self.get_receipts_extension_response(
                 sync_config=sync_config,
+                per_connection_state=per_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
@@ -2847,6 +2853,7 @@ class SlidingSyncHandler:
     async def get_receipts_extension_response(
         self,
         sync_config: SlidingSyncConfig,
+        per_connection_state: "PerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2880,47 +2887,89 @@ class SlidingSyncHandler:
 
         room_id_to_receipt_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
-            # TODO: Take connection tracking into account so that when a room comes back
-            # into range we can send the receipts that were missed.
-            receipt_source = self.event_sources.sources.receipt
-            receipts, _ = await receipt_source.get_new_events(
-                user=sync_config.user,
-                from_key=(
-                    from_token.stream_token.receipt_key
-                    if from_token
-                    else MultiWriterStreamToken(stream=0)
-                ),
-                to_key=to_token.receipt_key,
-                # This is a dummy value and isn't used in the function
-                limit=0,
-                room_ids=relevant_room_ids,
-                is_guest=False,
+            live_rooms = set()
+            previously_rooms: Dict[str, MultiWriterStreamToken] = {}
+            initial_rooms = set()
+            for room_id in actual_room_ids:
+                if not from_token:
+                    initial_rooms.add(room_id)
+                    continue
+
+                room_result = actual_room_response_map.get(room_id)
+                if room_result is not None and room_result.initial:
+                    initial_rooms.add(room_id)
+                    continue
+
+                room_status = per_connection_state.receipts.have_sent_room(room_id)
+                if room_status.status == HaveSentRoomFlag.LIVE:
+                    live_rooms.add(room_id)
+                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                    assert room_status.last_token is not None
+                    previously_rooms[room_id] = room_status.last_token
+                elif room_status.status == HaveSentRoomFlag.NEVER:
+                    initial_rooms.add(room_id)
+                else:
+                    assert_never(room_status.status)
+
+            fetched_receipts = []
+            if live_rooms:
+                assert from_token is not None
+                receipts = await self.store.get_linearized_receipts_for_rooms(
+                    room_ids=live_rooms,
+                    from_key=from_token.stream_token.receipt_key,
+                    to_key=to_token.receipt_key,
+                )
+                fetched_receipts.extend(receipts)
+
+            if previously_rooms:
+                for room_id, receipt_token in previously_rooms.items():
+                    previously_receipts = (
+                        await self.store.get_linearized_receipts_for_room(
+                            room_id=room_id,
+                            from_key=receipt_token,
+                            to_key=to_token.receipt_key,
+                        )
+                    )
+                    fetched_receipts.extend(previously_receipts)
+
+            for room_id in initial_rooms:
+                room_result = actual_room_response_map.get(room_id)
+                if room_result is None:
+                    continue
+
+                relevant_event_ids = [
+                    event.event_id for event in room_result.timeline_events
+                ]
+
+                initial_receipts = await self.store.get_linearized_receipts_for_room(
+                    room_id=room_id,
+                    to_key=to_token.receipt_key,
+                )
+
+                for receipt in initial_receipts:
+                    content = {
+                        event_id: content_value
+                        for event_id, content_value in receipt["content"].items()
+                        if event_id in relevant_event_ids
+                    }
+                    if content:
+                        fetched_receipts.append(
+                            {
+                                "type": receipt["type"],
+                                "room_id": receipt["room_id"],
+                                "content": content,
+                            }
+                        )
+
+            fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
+                fetched_receipts, sync_config.user.to_string()
             )
 
-            for receipt in receipts:
+            for receipt in fetched_receipts:
                 # These fields should exist for every receipt
                 room_id = receipt["room_id"]
                 type = receipt["type"]
                 content = receipt["content"]
-
-                # For `inital: True` rooms, we only want to include receipts for events
-                # in the timeline.
-                room_result = actual_room_response_map.get(room_id)
-                if room_result is not None:
-                    if room_result.initial:
-                        # TODO: In the future, it would be good to fetch less receipts
-                        # out of the database in the first place but we would need to
-                        # add a new `event_id` index to `receipts_linearized`.
-                        relevant_event_ids = [
-                            event.event_id for event in room_result.timeline_events
-                        ]
-
-                        assert isinstance(content, dict)
-                        content = {
-                            event_id: content_value
-                            for event_id, content_value in content.items()
-                            if event_id in relevant_event_ids
-                        }
 
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
@@ -3014,9 +3063,15 @@ class HaveSentRoomFlag(Enum):
     LIVE = 3
 
 
+T = TypeVar("T")
+
+
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class HaveSentRoom:
-    """Whether we have sent the room down a sliding sync connection.
+class HaveSentRoom(Generic[T]):
+    """Whether we have sent the room data down a sliding sync connection.
+
+    We are generic over the type of token used, e.g. `RoomStreamToken` or
+    `MultiWriterStreamToken`.
 
     Attributes:
         status: Flag of if we have or haven't sent down the room
@@ -3027,50 +3082,54 @@ class HaveSentRoom:
     """
 
     status: HaveSentRoomFlag
-    last_token: Optional[RoomStreamToken]
+    last_token: Optional[T]
 
     @staticmethod
-    def previously(last_token: RoomStreamToken) -> "HaveSentRoom":
+    def live() -> "HaveSentRoom[T]":
+        return HaveSentRoom(HaveSentRoomFlag.LIVE, None)
+
+    @staticmethod
+    def previously(last_token: T) -> "HaveSentRoom[T]":
         """Constructor for `PREVIOUSLY` flag."""
         return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token)
 
-
-HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
-HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
+    @staticmethod
+    def never() -> "HaveSentRoom[T]":
+        return HaveSentRoom(HaveSentRoomFlag.NEVER, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class RoomStatusesForStream:
+class RoomStatusesForStream(Generic[T]):
     """For a given stream, e.g. events, records what we have or have not sent
     down for that stream in a given room."""
 
-    _statuses: Mapping[str, HaveSentRoom] = attr.Factory(dict)
+    _statuses: Mapping[str, HaveSentRoom[T]] = attr.Factory(dict)
 
-    def have_sent_room(self, room_id: str) -> HaveSentRoom:
+    def have_sent_room(self, room_id: str) -> HaveSentRoom[T]:
         """Return whether we have previously sent the room down"""
-        return self._statuses.get(room_id, HAVE_SENT_ROOM_NEVER)
+        return self._statuses.get(room_id, HaveSentRoom.never())
 
-    def get_mutable(self) -> "MutableRoomStatusesForStream":
+    def get_mutable(self) -> "MutableRoomStatusesForStream[T]":
         """Get a mutable copy of this state."""
         return MutableRoomStatusesForStream(
             statuses=self._statuses,
         )
 
-    def copy(self) -> "RoomStatusesForStream":
+    def copy(self) -> "RoomStatusesForStream[T]":
         """Make a copy of the class. Useful for converting from a mutable to
         immutable version."""
 
         return RoomStatusesForStream(statuses=dict(self._statuses))
 
 
-class MutableRoomStatusesForStream(RoomStatusesForStream):
+class MutableRoomStatusesForStream(RoomStatusesForStream[T]):
     """A mutable version of `RoomStatusesForStream`"""
 
-    _statuses: typing.ChainMap[str, HaveSentRoom]
+    _statuses: typing.ChainMap[str, HaveSentRoom[T]]
 
     def __init__(
         self,
-        statuses: Mapping[str, HaveSentRoom],
+        statuses: Mapping[str, HaveSentRoom[T]],
     ) -> None:
         # ChainMap requires a mutable mapping, but we're not actually going to
         # mutate it.
@@ -3080,7 +3139,7 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
             statuses=ChainMap({}, statuses),
         )
 
-    def get_updates(self) -> Mapping[str, HaveSentRoom]:
+    def get_updates(self) -> Mapping[str, HaveSentRoom[T]]:
         """Return only the changes that were made"""
         return self._statuses.maps[0]
 
@@ -3094,11 +3153,9 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
             ):
                 continue
 
-            self._statuses[room_id] = HAVE_SENT_ROOM_LIVE
+            self._statuses[room_id] = HaveSentRoom.live()
 
-    def record_unsent_rooms(
-        self, room_ids: StrCollection, from_token: StreamToken
-    ) -> None:
+    def record_unsent_rooms(self, room_ids: StrCollection, from_token: T) -> None:
         """Record that we have not sent these rooms in the response, but there
         have been updates.
         """
@@ -3117,7 +3174,7 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
             if current_status is None or current_status.status != HaveSentRoomFlag.LIVE:
                 continue
 
-            self._statuses[room_id] = HaveSentRoom.previously(from_token.room_key)
+            self._statuses[room_id] = HaveSentRoom.previously(from_token)
 
 
 @attr.s(auto_attribs=True)
@@ -3128,12 +3185,16 @@ class PerConnectionState:
         rooms: The status of each room for the events stream.
     """
 
-    rooms: RoomStatusesForStream = attr.Factory(RoomStatusesForStream)
+    rooms: RoomStatusesForStream = attr.Factory(RoomStatusesForStream[RoomStreamToken])
+    receipts: RoomStatusesForStream = attr.Factory(
+        RoomStatusesForStream[MultiWriterStreamToken]
+    )
 
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
+            receipts=self.receipts.get_mutable(),
         )
 
 
@@ -3141,10 +3202,11 @@ class PerConnectionState:
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
-    rooms: MutableRoomStatusesForStream
+    rooms: MutableRoomStatusesForStream[RoomStreamToken]
+    receipts: MutableRoomStatusesForStream[MultiWriterStreamToken]
 
     def has_updates(self) -> bool:
-        return bool(self.rooms.get_updates())
+        return bool(self.rooms.get_updates()) or bool(self.receipts.get_updates())
 
 
 @attr.s(auto_attribs=True)
