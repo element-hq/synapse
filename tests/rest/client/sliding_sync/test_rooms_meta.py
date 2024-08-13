@@ -45,6 +45,9 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.state_handler = self.hs.get_state_handler()
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
 
     def test_rooms_meta_when_joined(self) -> None:
         """
@@ -601,7 +604,6 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         Test that `bump_stamp` ignores backfilled events, i.e. events with a
         negative stream ordering.
         """
-
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
 
@@ -678,11 +680,10 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         self.get_success(self.store.store_room(room_id, creator, False, room_version))
 
         # Persist these events as backfilled events.
-        persistence = self.hs.get_storage_controllers().persistence
-        assert persistence is not None
-
         for event, context in remote_events_and_contexts:
-            self.get_success(persistence.persist_event(event, context, backfilled=True))
+            self.get_success(
+                self.persistence.persist_event(event, context, backfilled=True)
+            )
 
         # Now we join the local user to the room. We want to make this feel as close to
         # the real `process_remote_join()` as possible but we'd like to avoid some of
@@ -722,7 +723,7 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
                 partial_state=False,
             )
         )
-        self.get_success(persistence.persist_event(join_event, join_context))
+        self.get_success(self.persistence.persist_event(join_event, join_context))
 
         # Doing an SS request should return a positive `bump_stamp`, even though
         # the only event that matches the bump types has as negative stream
