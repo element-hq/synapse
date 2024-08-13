@@ -609,6 +609,10 @@ class PersistEventsStore:
                 txn, room_id, state_delta_for_room, min_stream_order
             )
 
+        self._update_sliding_sync_tables_with_new_persisted_events_txn(
+            txn, events_and_contexts
+        )
+
     def _persist_event_auth_chain_txn(
         self,
         txn: LoggingTransaction,
@@ -1631,6 +1635,84 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
+    def _update_sliding_sync_tables_with_new_persisted_events_txn(
+        self,
+        txn: LoggingTransaction,
+        events_and_contexts: List[Tuple[EventBase, EventContext]],
+    ) -> None:
+        """
+        Update the latest `event_stream_ordering`/`bump_stamp` columns in the
+        `sliding_sync_joined_rooms` table for the room with new events.
+
+        This function assumes that `_store_event_txn()` (to persist the event) and
+        `_update_current_state_txn(...)` (so that `sliding_sync_joined_rooms` table has
+        been updated with rooms that were joined) have already been run.
+
+        Args:
+            txn
+            events_and_contexts: The events being persisted
+        """
+
+        # Handle updating `sliding_sync_joined_rooms`
+        room_id_to_stream_ordering_map: Dict[str, int] = {}
+        room_id_to_bump_stamp_map: Dict[str, int] = {}
+        for event, _ in events_and_contexts:
+            existing_stream_ordering = room_id_to_stream_ordering_map.get(event.room_id)
+            # This should exist for persisted events
+            assert event.internal_metadata.stream_ordering is not None
+
+            # Ignore backfilled events which will have a negative stream ordering
+            if event.internal_metadata.stream_ordering < 0:
+                continue
+
+            if (
+                existing_stream_ordering is None
+                or existing_stream_ordering < event.internal_metadata.stream_ordering
+            ):
+                room_id_to_stream_ordering_map[event.room_id] = (
+                    event.internal_metadata.stream_ordering
+                )
+
+            if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                existing_bump_stamp = room_id_to_bump_stamp_map.get(event.room_id)
+                # This should exist at this point because we're inserting events here which require it
+                assert event.internal_metadata.stream_ordering is not None
+                if (
+                    existing_bump_stamp is None
+                    or existing_bump_stamp < event.internal_metadata.stream_ordering
+                ):
+                    room_id_to_bump_stamp_map[event.room_id] = (
+                        event.internal_metadata.stream_ordering
+                    )
+
+        txn.execute_batch(
+            """
+            UPDATE sliding_sync_joined_rooms
+            SET
+                event_stream_ordering = CASE
+                    WHEN event_stream_ordering IS NULL OR event_stream_ordering < ?
+                        THEN ?
+                    ELSE event_stream_ordering
+                END,
+                bump_stamp = CASE
+                    WHEN bump_stamp IS NULL OR bump_stamp < ?
+                        THEN ?
+                    ELSE bump_stamp
+                END
+            WHERE room_id = ?
+            """,
+            [
+                [
+                    room_id_to_stream_ordering_map[room_id],
+                    room_id_to_stream_ordering_map[room_id],
+                    room_id_to_bump_stamp_map.get(room_id),
+                    room_id_to_bump_stamp_map.get(room_id),
+                    room_id,
+                ]
+                for room_id in room_id_to_stream_ordering_map.keys()
+            ],
+        )
+
     def _upsert_room_version_txn(self, txn: LoggingTransaction, room_id: str) -> None:
         """Update the room version in the database based off current state
         events.
@@ -1973,67 +2055,6 @@ class PersistEventsStore:
                 (event.event_id, event.room_id, event.type, event.state_key)
                 for event, _ in events_and_contexts
                 if event.is_state()
-            ],
-        )
-
-        # Handle updating `sliding_sync_joined_rooms`
-        room_id_to_stream_ordering_map: Dict[str, int] = {}
-        room_id_to_bump_stamp_map: Dict[str, int] = {}
-        for event, _ in events_and_contexts:
-            existing_stream_ordering = room_id_to_stream_ordering_map.get(event.room_id)
-            # This should exist at this point because we're inserting events here which require it
-            assert event.internal_metadata.stream_ordering is not None
-            if (
-                existing_stream_ordering is None
-                or existing_stream_ordering < event.internal_metadata.stream_ordering
-            ):
-                room_id_to_stream_ordering_map[event.room_id] = (
-                    event.internal_metadata.stream_ordering
-                )
-
-            if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                existing_bump_stamp = room_id_to_bump_stamp_map.get(event.room_id)
-                # This should exist at this point because we're inserting events here which require it
-                assert event.internal_metadata.stream_ordering is not None
-                if (
-                    existing_bump_stamp is None
-                    or existing_bump_stamp < event.internal_metadata.stream_ordering
-                ):
-                    room_id_to_bump_stamp_map[event.room_id] = (
-                        event.internal_metadata.stream_ordering
-                    )
-
-        # This function (`_store_event_txn(...)`) is run before
-        # `_update_current_state_txn(...)` which handles deleting the rows if we are no
-        # longer in the room so we don't need to worry about inserting something that
-        # will be orphaned.
-        txn.execute_batch(
-            """
-            INSERT INTO sliding_sync_joined_rooms
-                (room_id, event_stream_ordering, bump_stamp)
-            VALUES (
-                ?, ?, ?
-            )
-            ON CONFLICT (room_id)
-            DO UPDATE SET
-                event_stream_ordering = CASE
-                    WHEN event_stream_ordering IS NULL OR event_stream_ordering < EXCLUDED.event_stream_ordering
-                        THEN EXCLUDED.event_stream_ordering
-                    ELSE event_stream_ordering
-                END,
-                bump_stamp = CASE
-                    WHEN bump_stamp IS NULL OR bump_stamp < EXCLUDED.bump_stamp
-                        THEN EXCLUDED.bump_stamp
-                    ELSE bump_stamp
-                END
-            """,
-            [
-                [
-                    room_id,
-                    room_id_to_stream_ordering_map[room_id],
-                    room_id_to_bump_stamp_map.get(room_id),
-                ]
-                for room_id in room_id_to_stream_ordering_map.keys()
             ],
         )
 
@@ -2385,6 +2406,8 @@ class PersistEventsStore:
                     )
                     # Sanity check that we at-least have the create event
                     if create_stripped_event is not None:
+                        insert_values["has_known_state"] = True
+
                         # Find the room_type
                         insert_values["room_type"] = (
                             create_stripped_event.content.get(
