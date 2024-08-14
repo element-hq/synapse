@@ -2887,9 +2887,13 @@ class SlidingSyncHandler:
 
         room_id_to_receipt_map: Dict[str, JsonMapping] = {}
         if len(relevant_room_ids) > 0:
+            # We need to handle the different cases depending on if we have sent
+            # down receipts previously or not, so we split the relevant rooms
+            # up into different collections based on status.
             live_rooms = set()
             previously_rooms: Dict[str, MultiWriterStreamToken] = {}
             initial_rooms = set()
+
             for room_id in actual_room_ids:
                 if not from_token:
                     initial_rooms.add(room_id)
@@ -2911,7 +2915,12 @@ class SlidingSyncHandler:
                 else:
                     assert_never(room_status.status)
 
+            # The set of receipts that we fetched. Private receipts need to be
+            # filtered out before returning.
             fetched_receipts = []
+
+            # For live rooms we just fetch all receipts in those rooms since the
+            # `since` token.
             if live_rooms:
                 assert from_token is not None
                 receipts = await self.store.get_linearized_receipts_for_rooms(
@@ -2921,6 +2930,8 @@ class SlidingSyncHandler:
                 )
                 fetched_receipts.extend(receipts)
 
+            # For rooms we've previously sent down, but aren't up to date, we
+            # need to use the from token from the room status.
             if previously_rooms:
                 for room_id, receipt_token in previously_rooms.items():
                     previously_receipts = (
@@ -2932,6 +2943,8 @@ class SlidingSyncHandler:
                     )
                     fetched_receipts.extend(previously_receipts)
 
+            # For rooms we haven't previously sent down, we send all receipts
+            # from that room.
             for room_id in initial_rooms:
                 room_result = actual_room_response_map.get(room_id)
                 if room_result is None:
