@@ -44,6 +44,8 @@
 #         SYNAPSE_WORKER_TYPES='event_persister, federation_sender, client_reader'
 #         SYNAPSE_WORKER_TYPES='event_persister:2, federation_sender:2, client_reader'
 #         SYNAPSE_WORKER_TYPES='stream_writers=account_data+presence+typing'
+#   * SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK: Whether worker logs should be written to disk,
+#         in addition to stdout.
 #   * SYNAPSE_AS_REGISTRATION_DIR: If specified, a directory in which .yaml and .yml files
 #         will be treated as Application Service registration files.
 #   * SYNAPSE_TLS_CERT: Path to a TLS certificate in PEM format.
@@ -57,7 +59,9 @@
 #   * SYNAPSE_LOG_SENSITIVE: If unset, SQL and SQL values won't be logged,
 #         regardless of the SYNAPSE_LOG_LEVEL setting.
 #   * SYNAPSE_LOG_TESTING: if set, Synapse will log additional information useful
-#     for testing.
+#         for testing.
+#   * SYNAPSE_USE_UNIX_SOCKET: if set, workers will communicate via unix socket
+#         rather than TCP.
 #
 # NOTE: According to Complement's ENTRYPOINT expectations for a homeserver image (as defined
 # in the project's README), this script may be run multiple times, and functionality should
