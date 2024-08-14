@@ -19,6 +19,8 @@
 #
 import enum
 import logging
+import typing
+from collections import ChainMap
 from enum import Enum
 from itertools import chain
 from typing import (
@@ -848,6 +850,8 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
+            new_connection_state = per_connection_state.get_mutable()
+
             # We now calculate if any rooms outside the range have had updates,
             # which we are not sending down.
             #
@@ -877,12 +881,16 @@ class SlidingSyncHandler:
                 )
                 unsent_room_ids = list(missing_event_map_by_room)
 
-            connection_position = await self.connection_store.record_rooms(
+                new_connection_state.record_unsent_rooms(
+                    unsent_room_ids, from_token.stream_token
+                )
+
+            new_connection_state.record_sent_rooms(relevant_rooms_to_send_map.keys())
+
+            connection_position = await self.connection_store.record_new_state(
                 sync_config=sync_config,
                 from_token=from_token,
-                per_connection_state=per_connection_state,
-                sent_room_ids=relevant_rooms_to_send_map.keys(),
-                unsent_room_ids=unsent_room_ids,
+                per_connection_state=new_connection_state,
             )
         elif from_token:
             connection_position = from_token.connection_position
@@ -3041,6 +3049,69 @@ class PerConnectionState:
         """Return whether we have previously sent the room down"""
         return self.rooms.get(room_id, HAVE_SENT_ROOM_NEVER)
 
+    def get_mutable(self) -> "MutablePerConnectionState":
+        """Get a mutable copy of this state."""
+        return MutablePerConnectionState(
+            rooms=dict(self.rooms),
+        )
+
+
+class MutablePerConnectionState(PerConnectionState):
+    """A mutable version of `PerConnectionState`"""
+
+    rooms: typing.ChainMap[str, HaveSentRoom]
+
+    def __init__(
+        self,
+        rooms: Dict[str, HaveSentRoom],
+    ) -> None:
+        super().__init__(
+            rooms=ChainMap({}, rooms),
+        )
+
+    def updated_rooms(self) -> Mapping[str, HaveSentRoom]:
+        """Return the room entries that have been updated"""
+        return self.rooms.maps[0]
+
+    def has_updates(self) -> bool:
+        """Are there any updates"""
+        return bool(self.updated_rooms())
+
+    def record_sent_rooms(self, room_ids: StrCollection) -> None:
+        """Record that we have sent these rooms in the response"""
+        for room_id in room_ids:
+            current_status = self.rooms.get(room_id)
+            if (
+                current_status is not None
+                and current_status.status == HaveSentRoomFlag.LIVE
+            ):
+                continue
+
+            self.rooms[room_id] = HAVE_SENT_ROOM_LIVE
+
+    def record_unsent_rooms(
+        self, room_ids: StrCollection, from_token: StreamToken
+    ) -> None:
+        """Record that we have not sent these rooms in the response, but there
+        have been updates.
+        """
+        # Whether we add/update the entries for unsent rooms depends on the
+        # existing entry:
+        #   - LIVE: We have previously sent down everything up to
+        #     `last_room_token, so we update the entry to be `PREVIOUSLY` with
+        #     `last_room_token`.
+        #   - PREVIOUSLY: We have previously sent down everything up to *a*
+        #     given token, so we don't need to update the entry.
+        #   - NEVER: We have never previously sent down the room, and we haven't
+        #     sent anything down this time either so we leave it as NEVER.
+
+        for room_id in room_ids:
+            current_status = self.rooms.get(room_id)
+            if current_status is None or current_status.status != HaveSentRoomFlag.LIVE:
+                continue
+
+            self.rooms[room_id] = HaveSentRoom.previously(from_token.room_key)
+
 
 @attr.s(auto_attribs=True)
 class SlidingSyncConnectionStore:
@@ -3115,33 +3186,17 @@ class SlidingSyncConnectionStore:
         return connection_state
 
     @trace
-    async def record_rooms(
+    async def record_new_state(
         self,
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken],
-        per_connection_state: PerConnectionState,
-        *,
-        sent_room_ids: StrCollection,
-        unsent_room_ids: StrCollection,
+        per_connection_state: MutablePerConnectionState,
     ) -> int:
-        """Record which rooms we have/haven't sent down in a new response
-
-        Attributes:
-            sync_config
-            from_token: The since token from the request, if any
-            sent_room_ids: The set of room IDs that we have sent down as
-                part of this request (only needs to be ones we didn't
-                previously sent down).
-            unsent_room_ids: The set of room IDs that have had updates
-                since the `from_token`, but which were not included in
-                this request
-        """
         prev_connection_token = 0
         if from_token is not None:
             prev_connection_token = from_token.connection_position
 
-        # If there are no changes then this is a noop.
-        if not sent_room_ids and not unsent_room_ids:
+        if not per_connection_state.has_updates():
             return prev_connection_token
 
         conn_key = self._get_connection_key(sync_config)
@@ -3152,42 +3207,9 @@ class SlidingSyncConnectionStore:
         new_store_token = prev_connection_token + 1
         sync_statuses.pop(new_store_token, None)
 
-        # Copy over and update the room mappings.
-        new_room_statuses = dict(per_connection_state.rooms)
-
-        # Whether we have updated the `new_room_statuses`, if we don't by the
-        # end we can treat this as a noop.
-        have_updated = False
-        for room_id in sent_room_ids:
-            new_room_statuses[room_id] = HAVE_SENT_ROOM_LIVE
-            have_updated = True
-
-        # Whether we add/update the entries for unsent rooms depends on the
-        # existing entry:
-        #   - LIVE: We have previously sent down everything up to
-        #     `last_room_token, so we update the entry to be `PREVIOUSLY` with
-        #     `last_room_token`.
-        #   - PREVIOUSLY: We have previously sent down everything up to *a*
-        #     given token, so we don't need to update the entry.
-        #   - NEVER: We have never previously sent down the room, and we haven't
-        #     sent anything down this time either so we leave it as NEVER.
-
-        # Work out the new state for unsent rooms that were `LIVE`.
-        if from_token:
-            new_unsent_state = HaveSentRoom.previously(from_token.stream_token.room_key)
-        else:
-            new_unsent_state = HAVE_SENT_ROOM_NEVER
-
-        for room_id in unsent_room_ids:
-            prev_state = new_room_statuses.get(room_id)
-            if prev_state is not None and prev_state.status == HaveSentRoomFlag.LIVE:
-                new_room_statuses[room_id] = new_unsent_state
-                have_updated = True
-
-        if not have_updated:
-            return prev_connection_token
-
-        sync_statuses[new_store_token] = PerConnectionState(rooms=new_room_statuses)
+        sync_statuses[new_store_token] = PerConnectionState(
+            rooms=dict(per_connection_state.rooms),
+        )
 
         return new_store_token
 
