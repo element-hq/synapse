@@ -857,7 +857,7 @@ def generate_worker_files(
         worker_config = insert_worker_name_for_worker_config(worker_config, worker_name)
 
         worker_config.update(
-            {"name": worker_name, "port": str(worker_port), "config_path": config_path}
+            {"name": worker_name, "port": str(worker_port)}
         )
 
         # Update the shared config with any worker_type specific options. The first of a
