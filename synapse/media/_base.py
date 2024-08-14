@@ -681,6 +681,9 @@ class ThreadedFileSender:
         """interfaces.IPushProducer"""
 
         # Unregister the consumer so we don't try and interact with it again.
+        if self.consumer:
+            self.consumer.unregisterProducer()
+
         self.consumer = None
 
         # Terminate the loop.
