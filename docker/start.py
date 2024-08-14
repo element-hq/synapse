@@ -72,6 +72,9 @@ def generate_config_from_template(
         "macaroon": "SYNAPSE_MACAROON_SECRET_KEY",
     }
 
+    if not os.path.exists(data_dir):
+        os.mkdir(data_dir)
+
     synapse_server_name = environ["SYNAPSE_SERVER_NAME"]
     for name, secret in secrets.items():
         if secret not in environ:
