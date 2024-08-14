@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple, cast
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, JoinRules, Membership, EventContentFields
+from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.admin import register_servlets_for_client_rest_resource
@@ -38,8 +38,8 @@ from synapse.util import Clock
 from tests import unittest
 from tests.server import TestHomeServer
 from tests.test_utils import event_injection
-from tests.unittest import skip_unless
 from tests.test_utils.event_injection import create_event
+from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
 
