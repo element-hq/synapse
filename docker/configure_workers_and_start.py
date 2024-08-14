@@ -1126,7 +1126,7 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         # Always regenerate all other config files
         log("Generating worker config files")
         generate_worker_files(
-            environ, config_path, data_dir, template_dir, requested_worker_types
+            environ, config_dir, config_path, data_dir, template_dir, requested_worker_types
         )
 
         # Mark workers as being configured
