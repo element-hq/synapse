@@ -24,6 +24,13 @@
 # nginx and supervisord configs depending on the workers requested.
 #
 # The environment variables it reads are:
+#   * SYNAPSE_CONFIG_PATH: The path where the generated `homeserver.yaml` will
+#         be stored.
+#   * SYNAPSE_CONFIG_DIR: The directory where generated config will be stored.
+#         If `SYNAPSE_CONFIG_PATH` is not set, it will default to
+#         SYNAPSE_CONFIG_DIR/homeserver.yaml.
+#   * SYNAPSE_DATA_DIR: Where the generated config will put persistent data
+#         such as the database and media store.
 #   * SYNAPSE_CONFIG_TEMPLATE_DIR: The directory containing jinja2 templates for
 #         configuration that this script will generate config from. Defaults to '/conf'.
 #   * SYNAPSE_SERVER_NAME: The desired server_name of the homeserver.
@@ -606,7 +613,9 @@ def generate_base_homeserver_config() -> None:
     # start.py already does this for us, so just call that.
     # note that this script is copied in in the official, monolith dockerfile
     os.environ["SYNAPSE_HTTP_PORT"] = str(MAIN_PROCESS_HTTP_LISTENER_PORT)
-    subprocess.run(["/usr/local/bin/python", "/start.py", "migrate_config"], check=True)
+
+    # This script makes use of the `SYNAPSE_CONFIG_DIR` environment variable to
+    # determine where to place the generated homeserver config.
 
 
 def parse_worker_types(
@@ -735,6 +744,7 @@ def parse_worker_types(
 
 def generate_worker_files(
     environ: Mapping[str, str],
+    config_dir: str,
     config_path: str,
     data_dir: str,
     template_dir: str,
@@ -745,7 +755,11 @@ def generate_worker_files(
 
     Args:
         environ: os.environ instance.
-        config_path: The location of the generated Synapse main worker config file.
+        config_dir: The location of the configuration directory, where generated
+            worker config files are written to.
+        config_path: The location of the base Synapse homeserver config file.
+        data_dir: The location of the synapse data directory. Where logs will be
+            stored (if `SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK` is set).
         template_dir: The location of the template directory. Where jinja2
             templates for config files live.
         requested_worker_types: A Dict containing requested workers in the format of
@@ -810,7 +824,8 @@ def generate_worker_files(
     nginx_locations: Dict[str, str] = {}
 
     # Create the worker configuration directory if it doesn't already exist
-    os.makedirs("/conf/workers", exist_ok=True)
+    workers_config_dir = os.path.join(config_dir, "workers")
+    os.makedirs(workers_config_dir, exist_ok=True)
 
     # Start worker ports from this arbitrary port
     worker_port = 18009
@@ -881,13 +896,13 @@ def generate_worker_files(
 
         # Write out the worker's logging config file
         log_config_filepath = generate_worker_log_config(
-            environ, worker_name, template_dir, data_dir
+            environ, worker_name, template_dir, workers_config_dir, data_dir
         )
 
         # Then a worker config file
         convert(
             os.path.join(template_dir, "worker.yaml.j2"),
-            f"/conf/workers/{worker_name}.yaml",
+            os.path.join(workers_config_dir, f"{worker_name}.yaml"),
             **worker_config,
             worker_log_config_filepath=log_config_filepath,
             using_unix_sockets=using_unix_sockets,
@@ -929,7 +944,7 @@ def generate_worker_files(
 
     # log config for the master process
     master_log_config = generate_worker_log_config(
-        environ, "master", template_dir, data_dir
+        environ, "master", template_dir, workers_config_dir, data_dir
     )
     shared_config["log_config"] = master_log_config
 
@@ -962,7 +977,7 @@ def generate_worker_files(
     # Shared homeserver config
     convert(
         os.path.join(template_dir, "shared.yaml.j2"),
-        "/conf/workers/shared.yaml",
+        os.path.join(workers_config_dir, "shared.yaml"),
         shared_worker_config=yaml.dump(shared_config),
         appservice_registrations=appservice_registrations,
         enable_redis=workers_in_use,
@@ -1013,7 +1028,11 @@ def generate_worker_files(
 
 
 def generate_worker_log_config(
-    environ: Mapping[str, str], worker_name: str, template_dir: str, data_dir: str
+    environ: Mapping[str, str],
+    worker_name: str,
+    workers_config_dir: str,
+    template_dir: str,
+    data_dir: str,
 ) -> str:
     """Generate a log.config file for the given worker.
 
@@ -1021,6 +1040,8 @@ def generate_worker_log_config(
         environ: A mapping representing the environment variables that this script
             is running with.
         worker_name: The name of the worker. Used in generated file paths.
+        workers_config_dir: The location of the worker configuration directory,
+            where the generated worker log config will be saved.
         template_dir: The directory containing jinja2 template files.
         data_dir: The directory where log files will be written (if
             `SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK` is set).
@@ -1039,7 +1060,7 @@ def generate_worker_log_config(
     extra_log_template_args["SYNAPSE_LOG_TESTING"] = environ.get("SYNAPSE_LOG_TESTING")
 
     # Render and write the file
-    log_config_filepath = f"/conf/workers/{worker_name}.log.config"
+    log_config_filepath = os.path.join(workers_config_dir, f"{worker_name}.log.config")
     convert(
         os.path.join(template_dir, "log.config"),
         log_config_filepath,
@@ -1076,9 +1097,10 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         generate_base_homeserver_config()
     else:
         log("Base homeserver config exists—not regenerating")
+
     # This script may be run multiple times (mostly by Complement, see note at top of
     # file). Don't re-configure workers in this instance.
-    mark_filepath = "/conf/workers_have_been_configured"
+    mark_filepath = os.path.join(config_dir, "workers_have_been_configured")
     if not os.path.exists(mark_filepath):
         # Collect and validate worker_type requests
         # Read the desired worker configuration from the environment
