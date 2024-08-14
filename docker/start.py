@@ -43,6 +43,7 @@ def convert(src: str, dst: str, environ: Mapping[str, object]) -> None:
 
 def generate_config_from_template(
     data_dir: str,
+    template_dir: str,
     config_dir: str,
     config_path: str,
     os_environ: Mapping[str, str],
@@ -52,6 +53,8 @@ def generate_config_from_template(
 
     Args:
         data_dir: where persistent data is stored
+        template_dir: The location of the template directory. Where jinja2
+            templates for config files live.
         config_dir: where to put generated config files
         config_path: where to put the main config file
         os_environ: environment mapping
@@ -117,12 +120,12 @@ def generate_config_from_template(
         environ["SYNAPSE_LOG_CONFIG"] = config_dir + "/log.config"
 
     log("Generating synapse config file " + config_path)
-    convert("/conf/homeserver.yaml", config_path, environ)
+    convert(os.path.join(template_dir, "homeserver.yaml"), config_path, environ)
 
     log_config_file = environ["SYNAPSE_LOG_CONFIG"]
     log("Generating log config file " + log_config_file)
     convert(
-        "/conf/log.config",
+        os.path.join(template_dir, "log.config"),
         log_config_file,
         {**environ, "include_worker_name_in_log_line": False},
     )
@@ -165,12 +168,13 @@ def run_generate_config(environ: Mapping[str, str], ownership: Optional[str]) ->
     config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
+    template_dir = environ.get("SYNAPSE_CONFIG_TEMPLATE_DIR", "/conf")
 
     # create a suitable log config from our template
     log_config_file = "%s/%s.log.config" % (config_dir, server_name)
     if not os.path.exists(log_config_file):
         log("Creating log config %s" % (log_config_file,))
-        convert("/conf/log.config", log_config_file, environ)
+        convert(os.path.join(template_dir, "log.config"), log_config_file, environ)
 
     # generate the main config file, and a signing key.
     args = [
@@ -227,8 +231,9 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
         config_path = environ.get(
             "SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml"
         )
+        template_dir = environ.get("SYNAPSE_CONFIG_TEMPLATE_DIR", "/conf")
         return generate_config_from_template(
-            data_dir, config_dir, config_path, environ, ownership
+            data_dir, template_dir, config_dir, config_path, environ, ownership
         )
 
     if mode != "run":
