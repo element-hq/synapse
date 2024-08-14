@@ -621,6 +621,10 @@ def generate_base_homeserver_config() -> None:
     # This script makes use of the `SYNAPSE_CONFIG_DIR` environment variable to
     # determine where to place the generated homeserver config.
 
+    # We use "python" instead of supplying an absolute path here to allow those
+    # running the script to use python from a virtual env.
+    subprocess.run(["python", "/start.py", "migrate_config"], check=True)
+
 
 def parse_worker_types(
     requested_worker_types: List[str],
