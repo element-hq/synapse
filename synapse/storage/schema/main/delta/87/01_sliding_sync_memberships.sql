@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     PRIMARY KEY (room_id, user_id)
 );
 
+-- So we can purge rooms easily
+CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_room_id ON sliding_sync_membership_snapshots(room_id);
 -- So we can fetch all rooms for a given user
 CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id);
 -- So we can sort by `stream_ordering
