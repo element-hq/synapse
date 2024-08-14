@@ -42,6 +42,7 @@ def convert(src: str, dst: str, environ: Mapping[str, object]) -> None:
 
 
 def generate_config_from_template(
+    data_dir: str,
     config_dir: str,
     config_path: str,
     os_environ: Mapping[str, str],
@@ -50,6 +51,7 @@ def generate_config_from_template(
     """Generate a homeserver.yaml from environment variables
 
     Args:
+        data_dir: where persistent data is stored
         config_dir: where to put generated config files
         config_path: where to put the main config file
         os_environ: environment mapping
@@ -70,9 +72,10 @@ def generate_config_from_template(
         "macaroon": "SYNAPSE_MACAROON_SECRET_KEY",
     }
 
+    synapse_server_name = environ["SYNAPSE_SERVER_NAME"]
     for name, secret in secrets.items():
         if secret not in environ:
-            filename = "/data/%s.%s.key" % (environ["SYNAPSE_SERVER_NAME"], name)
+            filename = os.path.join(data_dir, f"{synapse_server_name}.{name}.key")
 
             # if the file already exists, load in the existing value; otherwise,
             # generate a new secret and write it to a file
@@ -88,7 +91,7 @@ def generate_config_from_template(
                     handle.write(value)
             environ[secret] = value
 
-    environ["SYNAPSE_APPSERVICES"] = glob.glob("/data/appservices/*.yaml")
+    environ["SYNAPSE_APPSERVICES"] = glob.glob(os.path.join(data_dir, "appservices", "*.yaml"))
     if not os.path.exists(config_dir):
         os.mkdir(config_dir)
 
@@ -128,15 +131,15 @@ def generate_config_from_template(
         "synapse.app.homeserver",
         "--config-path",
         config_path,
-        # tell synapse to put generated keys in /data rather than /compiled
+        # tell synapse to put generated keys in the data directory rather than /compiled
         "--keys-directory",
         config_dir,
         "--generate-keys",
     ]
 
     if ownership is not None:
-        log(f"Setting ownership on /data to {ownership}")
-        subprocess.run(["chown", "-R", ownership, "/data"], check=True)
+        log(f"Setting ownership on the data dir to {ownership}")
+        subprocess.run(["chown", "-R", ownership, data_dir], check=True)
         args = ["gosu", ownership] + args
 
     subprocess.run(args, check=True)
@@ -216,12 +219,13 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
 
     if mode == "migrate_config":
         # generate a config based on environment vars.
+        data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
         config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
         config_path = environ.get(
             "SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml"
         )
         return generate_config_from_template(
-            config_dir, config_path, environ, ownership
+            data_dir, config_dir, config_path, environ, ownership
         )
 
     if mode != "run":
