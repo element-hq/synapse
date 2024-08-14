@@ -24,6 +24,8 @@
 # nginx and supervisord configs depending on the workers requested.
 #
 # The environment variables it reads are:
+#   * SYNAPSE_CONFIG_TEMPLATE_DIR: The directory containing jinja2 templates for
+#         configuration that this script will generate config from.
 #   * SYNAPSE_SERVER_NAME: The desired server_name of the homeserver.
 #   * SYNAPSE_REPORT_STATS: Whether to report stats.
 #   * SYNAPSE_WORKER_TYPES: A comma separated list of worker names as specified in WORKERS_CONFIG
@@ -735,6 +737,7 @@ def generate_worker_files(
     environ: Mapping[str, str],
     config_path: str,
     data_dir: str,
+    template_dir: str,
     requested_worker_types: Dict[str, Set[str]],
 ) -> None:
     """Read the desired workers(if any) that is passed in and generate shared
@@ -743,8 +746,8 @@ def generate_worker_files(
     Args:
         environ: os.environ instance.
         config_path: The location of the generated Synapse main worker config file.
-        data_dir: The location of the synapse data directory. Where log and
-            user-facing config files live.
+        template_dir: The location of the template directory. Where jinja2
+            templates for config files live.
         requested_worker_types: A Dict containing requested workers in the format of
             {'worker_name1': {'worker_type', ...}}
     """
@@ -877,11 +880,13 @@ def generate_worker_files(
         worker_descriptors.append(worker_config)
 
         # Write out the worker's logging config file
-        log_config_filepath = generate_worker_log_config(environ, worker_name, data_dir)
+        log_config_filepath = generate_worker_log_config(
+            environ, worker_name, template_dir, data_dir
+        )
 
         # Then a worker config file
         convert(
-            "/conf/worker.yaml.j2",
+            os.path.join(template_dir, "worker.yaml.j2"),
             f"/conf/workers/{worker_name}.yaml",
             **worker_config,
             worker_log_config_filepath=log_config_filepath,
@@ -923,7 +928,9 @@ def generate_worker_files(
     # Finally, we'll write out the config files.
 
     # log config for the master process
-    master_log_config = generate_worker_log_config(environ, "master", data_dir)
+    master_log_config = generate_worker_log_config(
+        environ, "master", template_dir, data_dir
+    )
     shared_config["log_config"] = master_log_config
 
     # Find application service registrations
@@ -954,7 +961,7 @@ def generate_worker_files(
 
     # Shared homeserver config
     convert(
-        "/conf/shared.yaml.j2",
+        os.path.join(template_dir, "shared.yaml.j2"),
         "/conf/workers/shared.yaml",
         shared_worker_config=yaml.dump(shared_config),
         appservice_registrations=appservice_registrations,
@@ -965,7 +972,7 @@ def generate_worker_files(
 
     # Nginx config
     convert(
-        "/conf/nginx.conf.j2",
+        os.path.join(template_dir, "nginx.conf.j2"),
         "/etc/nginx/conf.d/matrix-synapse.conf",
         worker_locations=nginx_location_config,
         upstream_directives=nginx_upstream_config,
@@ -977,7 +984,7 @@ def generate_worker_files(
     # Supervisord config
     os.makedirs("/etc/supervisor", exist_ok=True)
     convert(
-        "/conf/supervisord.conf.j2",
+        os.path.join(template_dir, "supervisord.conf.j2"),
         "/etc/supervisor/supervisord.conf",
         main_config_path=config_path,
         enable_redis=workers_in_use,
@@ -985,7 +992,7 @@ def generate_worker_files(
     )
 
     convert(
-        "/conf/synapse.supervisord.conf.j2",
+        os.path.join(template_dir, "synapse.supervisord.conf.j2"),
         "/etc/supervisor/conf.d/synapse.conf",
         workers=worker_descriptors,
         main_config_path=config_path,
@@ -994,7 +1001,7 @@ def generate_worker_files(
 
     # healthcheck config
     convert(
-        "/conf/healthcheck.sh.j2",
+        os.path.join(template_dir, "healthcheck.sh.j2"),
         "/healthcheck.sh",
         healthcheck_urls=healthcheck_urls,
     )
@@ -1006,9 +1013,17 @@ def generate_worker_files(
 
 
 def generate_worker_log_config(
-    environ: Mapping[str, str], worker_name: str, data_dir: str
+    environ: Mapping[str, str], worker_name: str, template_dir: str, data_dir: str
 ) -> str:
     """Generate a log.config file for the given worker.
+
+    Args:
+        environ: A mapping representing the environment variables that this script
+            is running with.
+        worker_name: The name of the worker. Used in generated file paths.
+        template_dir: The directory containing jinja2 template files.
+        data_dir: The directory where log files will be written (if
+            `SYNAPSE_WORKERS_WRITE_LOGS_TO_DISK` is set).
 
     Returns: the path to the generated file
     """
@@ -1026,7 +1041,7 @@ def generate_worker_log_config(
     # Render and write the file
     log_config_filepath = f"/conf/workers/{worker_name}.log.config"
     convert(
-        "/conf/log.config",
+        os.path.join(template_dir, "log.config"),
         log_config_filepath,
         worker_name=worker_name,
         **extra_log_template_args,
@@ -1049,6 +1064,7 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
     config_dir = environ.get("SYNAPSE_CONFIG_DIR", "/data")
     config_path = environ.get("SYNAPSE_CONFIG_PATH", config_dir + "/homeserver.yaml")
     data_dir = environ.get("SYNAPSE_DATA_DIR", "/data")
+    template_dir = environ.get("SYNAPSE_CONFIG_TEMPLATE_DIR", "/conf")
 
     # override SYNAPSE_NO_TLS, we don't support TLS in worker mode,
     # this needs to be handled by a frontend proxy
@@ -1079,7 +1095,9 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
 
         # Always regenerate all other config files
         log("Generating worker config files")
-        generate_worker_files(environ, config_path, data_dir, requested_worker_types)
+        generate_worker_files(
+            environ, config_path, data_dir, template_dir, requested_worker_types
+        )
 
         # Mark workers as being configured
         with open(mark_filepath, "w") as f:
