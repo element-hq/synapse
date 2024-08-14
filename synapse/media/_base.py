@@ -694,7 +694,7 @@ class ThreadedFileSender:
         """This is the loop that drives reading/writing"""
         try:
             while not self.stop_writing:
-                # Start the loop in th threadpool to read data.
+                # Start the loop in the threadpool to read data.
                 more_data = await defer_to_threadpool(
                     self.reactor, self.thread_pool, self._on_thread_read_loop
                 )
