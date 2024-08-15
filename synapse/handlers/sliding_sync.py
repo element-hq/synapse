@@ -840,10 +840,13 @@ class SlidingSyncHandler:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
 
+        new_connection_state = per_connection_state.get_mutable()
+
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
             per_connection_state=per_connection_state,
+            mutable_per_connection_state=new_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -856,8 +859,6 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
-            new_connection_state = per_connection_state.get_mutable()
-
             # We now calculate if any rooms outside the range have had updates,
             # which we are not sending down.
             #
@@ -2479,6 +2480,7 @@ class SlidingSyncHandler:
         self,
         sync_config: SlidingSyncConfig,
         per_connection_state: "PerConnectionState",
+        mutable_per_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2534,6 +2536,7 @@ class SlidingSyncHandler:
             receipts_response = await self.get_receipts_extension_response(
                 sync_config=sync_config,
                 per_connection_state=per_connection_state,
+                mutable_per_connection_state=mutable_per_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
@@ -2854,6 +2857,7 @@ class SlidingSyncHandler:
         self,
         sync_config: SlidingSyncConfig,
         per_connection_state: "PerConnectionState",
+        mutable_per_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2894,7 +2898,7 @@ class SlidingSyncHandler:
             previously_rooms: Dict[str, MultiWriterStreamToken] = {}
             initial_rooms = set()
 
-            for room_id in actual_room_ids:
+            for room_id in relevant_room_ids:
                 if not from_token:
                     initial_rooms.add(room_id)
                     continue
@@ -2985,6 +2989,21 @@ class SlidingSyncHandler:
                 content = receipt["content"]
 
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
+
+        mutable_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
+
+        if from_token:
+            receipt_key = from_token.stream_token.receipt_key
+            rooms_no_receipts = (
+                per_connection_state.receipts._statuses.keys() - relevant_room_ids
+            )
+            changed_rooms = self.store._receipts_stream_cache.get_entities_changed(
+                rooms_no_receipts,
+                receipt_key.stream,
+            )
+            mutable_per_connection_state.receipts.record_unsent_rooms(
+                changed_rooms, receipt_key
+            )
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(
             room_id_to_receipt_map=room_id_to_receipt_map,
@@ -3318,6 +3337,7 @@ class SlidingSyncConnectionStore:
 
         sync_statuses[new_store_token] = PerConnectionState(
             rooms=per_connection_state.rooms.copy(),
+            receipts=per_connection_state.receipts.copy(),
         )
 
         return new_store_token

@@ -120,19 +120,19 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
                 "foo-list": {
                     "ranges": [[0, 1]],
                     "required_state": [],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 },
                 # We expect this list range to include room5, room4, room3
                 "bar-list": {
                     "ranges": [[0, 2]],
                     "required_state": [],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 },
             },
             "room_subscriptions": {
                 room_id1: {
                     "required_state": [],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 }
             },
         }
