@@ -84,12 +84,12 @@ class _DelayedCallKey:
 
 class DelayedEventsHandler:
     def __init__(self, hs: "HomeServer"):
-        self.store = hs.get_datastores().main
-        self.config = hs.config
-        self.clock = hs.get_clock()
-        self.request_ratelimiter = hs.get_request_ratelimiter()
-        self.event_creation_handler = hs.get_event_creation_handler()
-        self.room_member_handler = hs.get_room_member_handler()
+        self._store = hs.get_datastores().main
+        self._config = hs.config
+        self._clock = hs.get_clock()
+        self._request_ratelimiter = hs.get_request_ratelimiter()
+        self._event_creation_handler = hs.get_event_creation_handler()
+        self._room_member_handler = hs.get_room_member_handler()
 
         self._delayed_calls: Dict[_DelayedCallKey, IDelayedCall] = {}
         # This is for making delayed event actions atomic
@@ -99,7 +99,7 @@ class DelayedEventsHandler:
 
         async def _schedule_db_events() -> None:
             # TODO: Sync all state first, so that affected delayed state events will be cancelled
-            events, remaining_timeout_delays = await self.store.process_all_delays(
+            events, remaining_timeout_delays = await self._store.process_all_delays(
                 self._get_current_ts()
             )
             sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
@@ -156,7 +156,7 @@ class DelayedEventsHandler:
                 for (
                     removed_timeout_delay_id,
                     removed_timeout_delay_user_localpart,
-                ) in await self.store.remove_state_events(
+                ) in await self._store.remove_state_events(
                     event.room_id,
                     event.type,
                     state_key,
@@ -198,7 +198,7 @@ class DelayedEventsHandler:
             The ID of the added delayed event.
         """
         if delay is not None:
-            max_delay = self.config.experimental.msc4140_max_delay
+            max_delay = self._config.experimental.msc4140_max_delay
             if delay > max_delay:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,
@@ -212,12 +212,12 @@ class DelayedEventsHandler:
         # Callers should ensure that at least one of these are set
         assert delay or parent_id
 
-        await self.request_ratelimiter.ratelimit(requester)
+        await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        self.event_creation_handler.validator.validate_builder(
-            self.event_creation_handler.event_builder_factory.for_room_version(
-                await self.store.get_room_version(room_id),
+        self._event_creation_handler.validator.validate_builder(
+            self._event_creation_handler.event_builder_factory.for_room_version(
+                await self._store.get_room_version(room_id),
                 {
                     "type": event_type,
                     "content": content,
@@ -229,7 +229,7 @@ class DelayedEventsHandler:
         )
 
         user_localpart = UserLocalpart(requester.user.localpart)
-        delay_id = await self.store.add(
+        delay_id = await self._store.add(
             user_localpart=user_localpart,
             current_ts=self._get_current_ts(),
             room_id=RoomID.from_string(room_id),
@@ -271,17 +271,17 @@ class DelayedEventsHandler:
         delay_id = DelayID(delay_id)
         user_localpart = UserLocalpart(requester.user.localpart)
 
-        await self.request_ratelimiter.ratelimit(requester)
+        await self._request_ratelimiter.ratelimit(requester)
 
         async with self._get_delay_context(delay_id, user_localpart):
             if enum_action == _UpdateDelayedEventAction.CANCEL:
-                for removed_timeout_delay_id in await self.store.remove(
+                for removed_timeout_delay_id in await self._store.remove(
                     delay_id, user_localpart
                 ):
                     self._unschedule(removed_timeout_delay_id, user_localpart)
 
             elif enum_action == _UpdateDelayedEventAction.RESTART:
-                delay = await self.store.restart(
+                delay = await self._store.restart(
                     delay_id,
                     user_localpart,
                     self._get_current_ts(),
@@ -291,7 +291,7 @@ class DelayedEventsHandler:
                 self._schedule(delay_id, user_localpart, delay)
 
             elif enum_action == _UpdateDelayedEventAction.SEND:
-                args, removed_timeout_delay_ids = await self.store.pop_event(
+                args, removed_timeout_delay_ids = await self._store.pop_event(
                     delay_id, user_localpart
                 )
 
@@ -306,7 +306,7 @@ class DelayedEventsHandler:
 
         async with self._get_delay_context(delay_id, user_localpart):
             try:
-                args, removed_timeout_delay_ids = await self.store.pop_event(
+                args, removed_timeout_delay_ids = await self._store.pop_event(
                     delay_id, user_localpart
                 )
             except NotFoundError:
@@ -339,7 +339,7 @@ class DelayedEventsHandler:
         )
 
         self._delayed_calls[_DelayedCallKey(delay_id, user_localpart)] = (
-            self.clock.call_later(
+            self._clock.call_later(
                 delay_sec,
                 run_as_background_process,
                 "_send_on_timeout",
@@ -353,13 +353,13 @@ class DelayedEventsHandler:
         delayed_call = self._delayed_calls.pop(
             _DelayedCallKey(delay_id, user_localpart)
         )
-        self.clock.cancel_call_later(delayed_call)
+        self._clock.cancel_call_later(delayed_call)
 
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
-        await self.request_ratelimiter.ratelimit(requester)
+        await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
-        return await self.store.get_all_for_user(
+        return await self._store.get_all_for_user(
             UserLocalpart(requester.user.localpart)
         )
 
@@ -373,17 +373,17 @@ class DelayedEventsHandler:
         content: JsonDict,
         txn_id: Optional[str] = None,
     ) -> None:
-        user_id = UserID(user_localpart, self.config.server.server_name)
+        user_id = UserID(user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
         requester = create_requester(
             user_id,
-            is_guest=await self.store.is_guest(user_id_str),
+            is_guest=await self._store.is_guest(user_id_str),
         )
 
         try:
             if state_key is not None and event_type == EventTypes.Member:
                 membership = content.get("membership", None)
-                event_id, _ = await self.room_member_handler.update_membership(
+                event_id, _ = await self._room_member_handler.update_membership(
                     requester,
                     target=UserID.from_string(state_key),
                     room_id=room_id.to_string(),
@@ -408,7 +408,7 @@ class DelayedEventsHandler:
                 (
                     event,
                     _,
-                ) = await self.event_creation_handler.create_and_send_nonmember_event(
+                ) = await self._event_creation_handler.create_and_send_nonmember_event(
                     requester,
                     event_dict,
                     txn_id=txn_id,
@@ -420,7 +420,7 @@ class DelayedEventsHandler:
         set_tag("event_id", event_id)
 
     def _get_current_ts(self) -> Timestamp:
-        return Timestamp(self.clock.time_msec())
+        return Timestamp(self._clock.time_msec())
 
     @asynccontextmanager
     async def _get_delay_context(
