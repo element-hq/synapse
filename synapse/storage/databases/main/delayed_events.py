@@ -225,7 +225,7 @@ class DelayedEventsStore(SQLBaseStore):
         """
         Resets the matching delayed event, as long as it has a timeout.
 
-        Params:
+        Args:
             delay_id: The ID of the delayed event to restart.
             user_localpart: The localpart of the delayed event's owner.
             current_ts: The current time, to which the delayed event's "running_since" will be set to.

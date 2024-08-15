@@ -181,7 +181,7 @@ class DelayedEventsHandler:
         """
         Creates a new delayed event.
 
-        Params:
+        Args:
             requester: The requester of the delayed event, who will be its owner.
             room_id: The room where the event should be sent.
             event_type: The type of event to be sent.
@@ -250,7 +250,7 @@ class DelayedEventsHandler:
         """
         Executes the appropriate action for the matching delayed event.
 
-        Params:
+        Args:
             delay_id: The ID of the delayed event to act on.
             action: What to do with the delayed event.
 
