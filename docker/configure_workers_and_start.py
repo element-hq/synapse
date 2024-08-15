@@ -904,7 +904,7 @@ def generate_worker_files(
 
         # Write out the worker's logging config file
         log_config_filepath = generate_worker_log_config(
-            environ, worker_name, template_dir, workers_config_dir, data_dir
+            environ, worker_name, workers_config_dir, template_dir, data_dir
         )
 
         # Then a worker config file
@@ -952,7 +952,7 @@ def generate_worker_files(
 
     # log config for the master process
     master_log_config = generate_worker_log_config(
-        environ, "master", template_dir, workers_config_dir, data_dir
+        environ, "master", workers_config_dir, template_dir, data_dir
     )
     shared_config["log_config"] = master_log_config
 
