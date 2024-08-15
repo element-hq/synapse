@@ -307,6 +307,7 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
             body,
         )
 
+
 @parameterized_class(
     ("room_version", "allows_owned_state"),
     [
