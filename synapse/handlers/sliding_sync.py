@@ -2990,9 +2990,13 @@ class SlidingSyncHandler:
 
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
+        # Now we update the per-connection state to track which receipts we have
+        # and haven't sent down.
         mutable_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
 
         if from_token:
+            # Use the receipt stream change cache to check which rooms might have
+            # had receipts that we haven't sent down.
             receipt_key = from_token.stream_token.receipt_key
             rooms_no_receipts = (
                 per_connection_state.receipts._statuses.keys() - relevant_room_ids
