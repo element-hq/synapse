@@ -18,7 +18,7 @@
 
 import logging
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, List, NewType, Optional, Set, Tuple
+from typing import Any, Dict, List, NewType, Optional, Set, Tuple
 
 from synapse.api.errors import (
     Codes,
@@ -28,17 +28,9 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import (
-    DatabasePool,
-    LoggingDatabaseConnection,
-    LoggingTransaction,
-)
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict, RoomID, StrCollection
 from synapse.util import json_encoder, stringutils as stringutils
-
-if TYPE_CHECKING:
-    from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
 
@@ -72,16 +64,6 @@ DelayedPartialEventWithUser = Tuple[
 
 # TODO: Try to support workers
 class DelayedEventsStore(SQLBaseStore):
-    def __init__(
-        self,
-        database: DatabasePool,
-        db_conn: LoggingDatabaseConnection,
-        hs: "HomeServer",
-    ):
-        super().__init__(database, db_conn, hs)
-        # TODO: Always use RETURNING once the minimum supported Sqlite version is 3.35.0
-        self._use_returning = isinstance(self.database_engine, PostgresEngine)
-
     async def add(
         self,
         *,
@@ -118,7 +100,7 @@ class DelayedEventsStore(SQLBaseStore):
                         ?
                     )
                     """
-                if self._use_returning:
+                if self.database_engine.supports_returning:
                     sql += "RETURNING delay_rowid"
                 txn.execute(
                     sql,
@@ -144,7 +126,7 @@ class DelayedEventsStore(SQLBaseStore):
                     f"Couldn't generate a unique delay_id for user_localpart {user_localpart}",
                 )
 
-            if not self._use_returning:
+            if not self.database_engine.supports_returning:
                 txn.execute(
                     """
                     SELECT delay_rowid
