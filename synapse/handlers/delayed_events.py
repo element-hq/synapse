@@ -384,7 +384,8 @@ class DelayedEventsHandler:
 
         try:
             if state_key is not None and event_type == EventTypes.Member:
-                membership = content.get("membership", None)
+                membership = content.get("membership")
+                assert membership is not None
                 event_id, _ = await self._room_member_handler.update_membership(
                     requester,
                     target=UserID.from_string(state_key),
