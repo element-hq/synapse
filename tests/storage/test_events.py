@@ -32,10 +32,10 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
+from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
 from synapse.types import StateMap
 from synapse.util import Clock
 
