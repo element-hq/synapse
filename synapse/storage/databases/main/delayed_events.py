@@ -16,6 +16,7 @@
 #
 #
 
+import logging
 from binascii import crc32
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, NewType, Optional, Set, Tuple
@@ -40,6 +41,8 @@ from synapse.util.stringutils import base62_encode
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+logger = logging.getLogger(__name__)
 
 
 DelayID = NewType("DelayID", str)
@@ -134,11 +137,13 @@ class DelayedEventsStore(SQLBaseStore):
                 )
             # TODO: Handle only the error for DB key collisions
             except Exception as e:
+                logger.debug(
+                    "Error inserting into delayed_events",
+                    str(e),
+                )
                 raise SynapseError(
                     HTTPStatus.INTERNAL_SERVER_ERROR,
                     f"Couldn't generate a unique delay_id for user_localpart {user_localpart}",
-                    # TODO: Maybe remove this
-                    additional_fields={"db_error": str(e)},
                 )
 
             if not self._use_returning:
@@ -190,13 +195,15 @@ class DelayedEventsStore(SQLBaseStore):
                     )
                 # TODO: Handle only the error for the relevant foreign key / check violation
                 except Exception as e:
+                    logger.debug(
+                        "Error inserting into delayed_event_children",
+                        str(e),
+                    )
                     raise SynapseError(
                         HTTPStatus.BAD_REQUEST,
                         # TODO: Improve the wording for this
                         "Invalid parent delayed event",
                         Codes.INVALID_PARAM,
-                        # TODO: Maybe remove this
-                        additional_fields={"db_error": str(e)},
                     )
                 if txn.rowcount != 1:
                     raise NotFoundError("Parent delayed event not found")
