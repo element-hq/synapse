@@ -92,7 +92,7 @@ federation_rc_concurrent: 3
 
 ## Files ##
 
-media_store_path: "/data/media"
+media_store_path: "/root/synapse/data/media"
 max_upload_size: "{{ SYNAPSE_MAX_UPLOAD_SIZE or "50M" }}"
 max_image_pixels: "32M"
 dynamic_thumbnails: false
@@ -179,7 +179,7 @@ macaroon_secret_key: "{{ SYNAPSE_MACAROON_SECRET_KEY }}"
 
 ## Signing Keys ##
 
-signing_key_path: "/data/{{ SYNAPSE_SERVER_NAME }}.signing.key"
+signing_key_path: "/root/synapse/data/{{ SYNAPSE_SERVER_NAME }}.signing.key"
 old_signing_keys: {}
 key_refresh_interval: "1d" # 1 Day.
 
@@ -190,4 +190,4 @@ trusted_key_servers:
       "ed25519:auto": "Noi6WqcDj0QmPxCNQqgezwTlBKrfqehY1u2FyWP9uYw"
 
 password_config:
-   enabled: true
+   enabled: false
