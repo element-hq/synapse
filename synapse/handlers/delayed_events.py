@@ -57,7 +57,7 @@ from synapse.types import (
     create_requester,
 )
 from synapse.util.async_helpers import Linearizer, ReadWriteLock
-from synapse.util.stringutils import random_string
+from synapse.util.events import generate_fake_event_id
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -417,7 +417,7 @@ class DelayedEventsHandler:
                 )
                 event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
 
