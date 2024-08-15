@@ -101,7 +101,7 @@ class DelayedEventsStore(SQLBaseStore):
         Returns: The generated ID assigned to the added delayed event.
 
         Raises:
-            SynapseError if the delayed event failed to be added.
+            SynapseError: if the delayed event failed to be added.
         """
 
         def add_txn(txn: LoggingTransaction) -> DelayID:
@@ -238,8 +238,8 @@ class DelayedEventsStore(SQLBaseStore):
         Returns: The delay at which the delayed event will be sent (unless it is reset again).
 
         Raises:
-            NotFoundError if there is no matching delayed event.
-            SynapseError if the matching delayed event has no timeout.
+            NotFoundError: if there is no matching delayed event.
+            SynapseError: if the matching delayed event has no timeout.
         """
 
         def restart_txn(txn: LoggingTransaction) -> Delay:
@@ -403,7 +403,7 @@ class DelayedEventsStore(SQLBaseStore):
                 - The IDs of all removed delayed events with a timeout that must be unscheduled.
 
         Raises:
-            NotFoundError if there is no matching delayed event.
+            NotFoundError: if there is no matching delayed event.
         """
         return await self.db_pool.runInteraction(
             "pop_event",
@@ -483,7 +483,7 @@ class DelayedEventsStore(SQLBaseStore):
             The IDs of all removed delayed events with a timeout that must be unscheduled.
 
         Raises:
-            NotFoundError if there is no matching delayed event.
+            NotFoundError: if there is no matching delayed event.
         """
 
         removed_timeout_delay_ids = await self.db_pool.runInteraction(
@@ -535,7 +535,7 @@ class DelayedEventsStore(SQLBaseStore):
             The specified columns for each delayed event with a timeout that was removed.
 
         Raises:
-            NotFoundError if allow_none is False and no delayed events match the keyvalues.
+            NotFoundError: if allow_none is False and no delayed events match the keyvalues.
         """
         sql_with = f"""
             WITH target_rowids AS (

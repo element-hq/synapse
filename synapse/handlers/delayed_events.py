@@ -257,8 +257,8 @@ class DelayedEventsHandler:
             action: What to do with the delayed event.
 
         Raises:
-            SynapseError if the provided action is unknown, or is unsupported for the target delayed event.
-            NotFoundError if no matching delayed event could be found.
+            SynapseError: if the provided action is unknown, or is unsupported for the target delayed event.
+            NotFoundError: if no matching delayed event could be found.
         """
         try:
             enum_action = _UpdateDelayedEventAction(action)
