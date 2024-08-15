@@ -811,11 +811,7 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
         and state_key.startswith("@")
         and state_key != event.user_id
     ):
-        if event.room_version in (
-            RoomVersions.MSC3757v9,
-            RoomVersions.MSC3757v10,
-            RoomVersions.MSC3757v11,
-        ):
+        if event.room_version.msc3757_enabled:
             colon_idx = state_key.find(":", 1)
             if colon_idx != -1:
                 suffix_idx = state_key.find("_", colon_idx + 1)

@@ -107,6 +107,8 @@ class RoomVersion:
     # support the flag. Unknown flags are ignored by the evaluator, making conditions
     # fail if used.
     msc3931_push_features: Tuple[str, ...]  # values from PushRuleRoomFlag
+    # MSC3757: Restricting who can overwrite a state event
+    msc3757_enabled: bool
 
 
 class RoomVersions:
@@ -128,6 +130,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V2 = RoomVersion(
         "2",
@@ -147,6 +150,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V3 = RoomVersion(
         "3",
@@ -166,6 +170,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V4 = RoomVersion(
         "4",
@@ -185,6 +190,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V5 = RoomVersion(
         "5",
@@ -204,6 +210,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V6 = RoomVersion(
         "6",
@@ -223,6 +230,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V7 = RoomVersion(
         "7",
@@ -242,6 +250,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V8 = RoomVersion(
         "8",
@@ -261,6 +270,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     V9 = RoomVersion(
         "9",
@@ -280,6 +290,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     MSC3757v9 = RoomVersion(
         # MSC3757 (Restricting who can overwrite a state event) based on room version "9"
@@ -300,6 +311,7 @@ class RoomVersions:
         knock_restricted_join_rule=False,
         enforce_int_power_levels=False,
         msc3931_push_features=(),
+        msc3757_enabled=True,
     )
     V10 = RoomVersion(
         "10",
@@ -319,6 +331,7 @@ class RoomVersions:
         knock_restricted_join_rule=True,
         enforce_int_power_levels=True,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     MSC1767v10 = RoomVersion(
         # MSC1767 (Extensible Events) based on room version "10"
@@ -339,6 +352,7 @@ class RoomVersions:
         knock_restricted_join_rule=True,
         enforce_int_power_levels=True,
         msc3931_push_features=(PushRuleRoomFlag.EXTENSIBLE_EVENTS,),
+        msc3757_enabled=False,
     )
     MSC3757v10 = RoomVersion(
         # MSC3757 (Restricting who can overwrite a state event) based on room version "10"
@@ -359,6 +373,7 @@ class RoomVersions:
         knock_restricted_join_rule=True,
         enforce_int_power_levels=True,
         msc3931_push_features=(),
+        msc3757_enabled=True,
     )
     V11 = RoomVersion(
         "11",
@@ -378,6 +393,7 @@ class RoomVersions:
         knock_restricted_join_rule=True,
         enforce_int_power_levels=True,
         msc3931_push_features=(),
+        msc3757_enabled=False,
     )
     MSC3757v11 = RoomVersion(
         # MSC3757 (Restricting who can overwrite a state event) based on room version "11"
@@ -398,6 +414,7 @@ class RoomVersions:
         knock_restricted_join_rule=True,
         enforce_int_power_levels=True,
         msc3931_push_features=(),
+        msc3757_enabled=True,
     )
 
 
