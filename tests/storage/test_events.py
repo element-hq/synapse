@@ -32,6 +32,7 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import event_from_pdu_json
+from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -2378,3 +2379,106 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
     # TODO: test_non_join_state_reset
+
+    def test_joined_background_update_missing(self) -> None:
+        """
+        Test that the background update for `sliding_sync_joined_rooms` backfills missing rows
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_no_info = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        room_id_with_info = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user1_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user1_tok,
+        )
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_joined_rooms",
+                column="room_id",
+                iterable=(room_id_no_info, room_id_with_info, space_room_id),
+                keyvalues={},
+                desc="RelationsTestCase.test_background_update",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        # Ugh, have to reset this flag
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id_no_info, room_id_with_info, space_room_id},
+            exact=True,
+        )
+        # self.assertEqual(
+        #     sliding_sync_joined_rooms_results[room_id1],
+        #     _SlidingSyncJoinedRoomResult(
+        #         room_id=room_id1,
+        #         # Latest event in the room
+        #         event_stream_ordering=room_name_update_event_pos.stream,
+        #         bump_stamp=state_map[
+        #             (EventTypes.Create, "")
+        #         ].internal_metadata.stream_ordering,
+        #         room_type=None,
+        #         room_name="my super duper room",
+        #         is_encrypted=False,
+        #     ),
+        # )
+
+    def test_joined_background_update_partial(self) -> None:
+        """
+        Test that the background update for `sliding_sync_joined_rooms` backfills partially updated rows
+        """

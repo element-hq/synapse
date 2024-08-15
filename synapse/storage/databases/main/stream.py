@@ -1268,7 +1268,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         self,
         room_id: str,
         end_token: RoomStreamToken,
-        event_types: Optional[Collection[str]] = None,
+        event_types: Optional[StrCollection] = None,
     ) -> Optional[Tuple[str, PersistedEventPosition]]:
         """
         Returns the ID and event position of the last event in a room at or before a

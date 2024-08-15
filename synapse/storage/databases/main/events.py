@@ -93,6 +93,17 @@ event_counter = Counter(
     ["type", "origin_type", "origin_entity"],
 )
 
+# State event type/key pairs that we need to gather to fill in the
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+SLIDING_SYNC_RELEVANT_STATE_SET = {
+    # So we can fill in the `room_type` column in the `sliding_sync_joined_rooms` table
+    (EventTypes.Create, ""),
+    # So we can fill in the `is_encrypted` column in the `sliding_sync_joined_rooms` table
+    (EventTypes.RoomEncryption, ""),
+    # So we can fill in the `room_name` column in the `sliding_sync_joined_rooms` table
+    (EventTypes.Name, ""),
+}
+
 
 @attr.s(slots=True, auto_attribs=True)
 class DeltaState:
@@ -1211,35 +1222,11 @@ class PersistEventsStore:
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
             if len(membership_event_id_to_user_id_map) > 0:
-                relevant_state_set = {
-                    (EventTypes.Create, ""),
-                    (EventTypes.RoomEncryption, ""),
-                    (EventTypes.Name, ""),
-                }
-
-                # Fetch the current state event IDs from the database
-                (
-                    event_type_and_state_key_in_list_clause,
-                    event_type_and_state_key_args,
-                ) = make_tuple_in_list_sql_clause(
-                    self.database_engine,
-                    ("type", "state_key"),
-                    relevant_state_set,
+                current_state_map = (
+                    self._get_relevant_sliding_sync_current_state_event_ids_txn(
+                        txn, room_id
+                    )
                 )
-                txn.execute(
-                    f"""
-                    SELECT c.event_id, c.type, c.state_key
-                    FROM current_state_events AS c
-                    WHERE
-                        c.room_id = ?
-                        AND {event_type_and_state_key_in_list_clause}
-                    """,
-                    [room_id] + event_type_and_state_key_args,
-                )
-                current_state_map: MutableStateMap[str] = {
-                    (event_type, state_key): event_id
-                    for event_id, event_type, state_key in txn
-                }
                 # Since we fetched the current state before we took `to_insert`/`to_delete`
                 # into account, we need to do a couple fixups.
                 #
@@ -1248,7 +1235,7 @@ class PersistEventsStore:
                     current_state_map.pop(state_key, None)
                 # Update the current_state_map with what we have `to_insert`
                 for state_key, event_id in to_insert.items():
-                    if state_key in relevant_state_set:
+                    if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
                         current_state_map[state_key] = event_id
 
                 # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
@@ -1256,60 +1243,13 @@ class PersistEventsStore:
                     str, Optional[Union[str, bool]]
                 ] = {}
                 if current_state_map:
+                    sliding_sync_membership_snapshots_insert_map = self._get_sliding_sync_insert_values_according_to_current_state_map_txn(
+                        txn, current_state_map
+                    )
                     # We have current state to work from
                     sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
                         True
                     )
-
-                    # Fetch the raw event JSON from the database
-                    (
-                        event_id_in_list_clause,
-                        event_id_args,
-                    ) = make_in_list_sql_clause(
-                        self.database_engine,
-                        "event_id",
-                        current_state_map.values(),
-                    )
-                    txn.execute(
-                        f"""
-                        SELECT event_id, type, state_key, json FROM event_json
-                        INNER JOIN events USING (event_id)
-                        WHERE {event_id_in_list_clause}
-                        """,
-                        event_id_args,
-                    )
-
-                    # Parse the raw event JSON
-                    for row in txn:
-                        event_id, event_type, state_key, json = row
-                        event_json = db_to_json(json)
-
-                        if event_type == EventTypes.Create:
-                            room_type = event_json.get("content", {}).get(
-                                EventContentFields.ROOM_TYPE
-                            )
-                            sliding_sync_membership_snapshots_insert_map[
-                                "room_type"
-                            ] = room_type
-                        elif event_type == EventTypes.RoomEncryption:
-                            encryption_algorithm = event_json.get("content", {}).get(
-                                EventContentFields.ENCRYPTION_ALGORITHM
-                            )
-                            is_encrypted = encryption_algorithm is not None
-                            sliding_sync_membership_snapshots_insert_map[
-                                "is_encrypted"
-                            ] = is_encrypted
-                        elif event_type == EventTypes.Name:
-                            room_name = event_json.get("content", {}).get(
-                                EventContentFields.ROOM_NAME
-                            )
-                            sliding_sync_membership_snapshots_insert_map[
-                                "room_name"
-                            ] = room_name
-                        else:
-                            raise AssertionError(
-                                f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
-                            )
                 else:
                     # We don't have any `current_state_events` anymore (previously
                     # cleared out because of `no_longer_in_room`). This can happen if
@@ -1468,7 +1408,12 @@ class PersistEventsStore:
                 ],
             )
 
-            # Handle updating the `sliding_sync_joined_rooms` table
+            # Handle updating the `sliding_sync_joined_rooms` table. We only deal with
+            # updating the state related columns. The
+            # `event_stream_ordering`/`bump_stamp` are updated elsewhere in the event
+            # persisting stack (see
+            # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
+            #
             event_ids_to_fetch: List[str] = []
             create_event_id = None
             room_encryption_event_id = None
@@ -1574,8 +1519,10 @@ class PersistEventsStore:
 
                 args.extend(iter(insert_values))
 
-                # We don't update `event_stream_ordering` `ON CONFLICT` because it's simpler
-                # we can just
+                # We don't update `event_stream_ordering` `ON CONFLICT` because it's
+                # simpler and we can just rely on
+                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to do
+                # the right thing.
                 #
                 # We don't update `bump_stamp` `ON CONFLICT` because we're dealing with
                 # state here and the only state event that is also a bump event type is
@@ -1652,6 +1599,105 @@ class PersistEventsStore:
         self.store.handle_potentially_left_users_txn(
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
+
+    @classmethod
+    def _get_relevant_sliding_sync_current_state_event_ids_txn(
+        cls, txn: LoggingTransaction, room_id: str
+    ) -> MutableStateMap[str]:
+        """
+        Fetch the current state event IDs for the relevant (to the
+        `sliding_sync_joined_rooms` table) state types for the given room.
+
+        TODO
+        """
+        # Fetch the current state event IDs from the database
+        (
+            event_type_and_state_key_in_list_clause,
+            event_type_and_state_key_args,
+        ) = make_tuple_in_list_sql_clause(
+            txn.database_engine,
+            ("type", "state_key"),
+            SLIDING_SYNC_RELEVANT_STATE_SET,
+        )
+        txn.execute(
+            f"""
+            SELECT c.event_id, c.type, c.state_key
+            FROM current_state_events AS c
+            WHERE
+                c.room_id = ?
+                AND {event_type_and_state_key_in_list_clause}
+            """,
+            [room_id] + event_type_and_state_key_args,
+        )
+        current_state_map: MutableStateMap[str] = {
+            (event_type, state_key): event_id for event_id, event_type, state_key in txn
+        }
+
+        return current_state_map
+
+    @classmethod
+    def _get_sliding_sync_insert_values_according_to_current_state_map_txn(
+        cls, txn: LoggingTransaction, current_state_map: StateMap[str]
+    ) -> Dict[str, Optional[Union[str, bool]]]:
+        """
+        TODO
+
+        Returns:
+            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
+            state values needed to insert into
+            the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+        """
+        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
+        # Fetch the raw event JSON from the database
+        (
+            event_id_in_list_clause,
+            event_id_args,
+        ) = make_in_list_sql_clause(
+            txn.database_engine,
+            "event_id",
+            current_state_map.values(),
+        )
+        txn.execute(
+            f"""
+            SELECT type, state_key, json FROM event_json
+            INNER JOIN events USING (event_id)
+            WHERE {event_id_in_list_clause}
+            """,
+            event_id_args,
+        )
+
+        # Parse the raw event JSON
+        for row in txn:
+            event_type, state_key, json = row
+            event_json = db_to_json(json)
+
+            if event_type == EventTypes.Create:
+                room_type = event_json.get("content", {}).get(
+                    EventContentFields.ROOM_TYPE
+                )
+                sliding_sync_insert_map["room_type"] = room_type
+            elif event_type == EventTypes.RoomEncryption:
+                encryption_algorithm = event_json.get("content", {}).get(
+                    EventContentFields.ENCRYPTION_ALGORITHM
+                )
+                is_encrypted = encryption_algorithm is not None
+                sliding_sync_insert_map["is_encrypted"] = is_encrypted
+            elif event_type == EventTypes.Name:
+                room_name = event_json.get("content", {}).get(
+                    EventContentFields.ROOM_NAME
+                )
+                sliding_sync_insert_map["room_name"] = room_name
+            else:
+                # We only expect to see events according to the
+                # `SLIDING_SYNC_RELEVANT_STATE_SET` which is what will
+                # `_get_relevant_sliding_sync_current_state_event_ids_txn()` will
+                # return.
+                raise AssertionError(
+                    f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
+                )
+
+        return sliding_sync_insert_map
 
     def _update_sliding_sync_tables_with_new_persisted_events_txn(
         self,

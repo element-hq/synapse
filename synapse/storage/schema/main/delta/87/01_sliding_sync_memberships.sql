@@ -22,7 +22,7 @@
 -- no longer participating in a room, the row will be deleted.
 CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
-    -- The `stream_ordering` of the latest event in the room
+    -- The `stream_ordering` of the most-recent/latest event in the room
     event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
     -- The `stream_ordering` of the last event according to the `bump_event_types`
     bump_stamp BIGINT,
@@ -83,9 +83,22 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     PRIMARY KEY (room_id, user_id)
 );
 
--- So we can purge rooms easily
-CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_room_id ON sliding_sync_membership_snapshots(room_id);
+-- So we can purge rooms easily.
+--
+-- Since we're using a multi-column index as the primary key (room_id, user_id), the
+-- first index column (room_id) is always usable for searching so we don't need to
+-- create a separate index for it.
+--
+-- CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_room_id ON sliding_sync_membership_snapshots(room_id);
+
 -- So we can fetch all rooms for a given user
 CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_sync_membership_snapshots(user_id);
 -- So we can sort by `stream_ordering
 CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream_ordering ON sliding_sync_membership_snapshots(event_stream_ordering);
+
+
+-- Add some background updates to populate the new tables
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (8701, 'sliding_sync_joined_rooms_backfill', '{}');
+INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
+  (8701, 'sliding_sync_membership_snapshots_backfill', '{}');

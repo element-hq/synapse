@@ -35,8 +35,10 @@ from synapse.storage.database import (
     make_tuple_comparison_clause,
 )
 from synapse.storage.databases.main.events import PersistEventsStore
+from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.types import Cursor
 from synapse.types import JsonDict, StrCollection
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -77,6 +79,11 @@ class _BackgroundUpdates:
     EVENTS_POPULATE_STATE_KEY_REJECTIONS = "events_populate_state_key_rejections"
 
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
+
+    SLIDING_SYNC_JOINED_ROOMS_BACKFILL = "sliding_sync_joined_rooms_backfill"
+    SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL = (
+        "sliding_sync_membership_snapshots_backfill"
+    )
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -277,6 +284,16 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
             table="events",
             columns=["room_id", "origin_server_ts"],
             where_clause="NOT outlier",
+        )
+
+        # Backfill the sliding sync tables
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+            self._sliding_sync_joined_rooms_backfill,
+        )
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+            self._sliding_sync_membership_snapshots_backfill,
         )
 
     async def _background_reindex_fields_sender(
@@ -1516,3 +1533,216 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
             )
 
         return batch_size
+
+    async def _sliding_sync_joined_rooms_backfill(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Handles backfilling the `sliding_sync_joined_rooms` table.
+        """
+        last_room_id = progress.get("last_room_id", "")
+
+        def make_sql_clause_for_get_last_event_pos_in_room(
+            database_engine: BaseDatabaseEngine,
+            event_types: Optional[StrCollection] = None,
+        ) -> Tuple[str, list]:
+            """
+            Returns the ID and event position of the last event in a room at or before a
+            stream ordering.
+
+            Based on `get_last_event_pos_in_room_before_stream_ordering(...)`
+
+            Args:
+                database_engine
+                event_types: Optional allowlist of event types to filter by
+
+            Returns:
+                A tuple of SQL query and the args
+            """
+            event_type_clause = ""
+            event_type_args: List[str] = []
+            if event_types is not None and len(event_types) > 0:
+                event_type_clause, event_type_args = make_in_list_sql_clause(
+                    database_engine, "type", event_types
+                )
+                event_type_clause = f"AND {event_type_clause}"
+
+            sql = f"""
+            SELECT stream_ordering
+            FROM events
+            LEFT JOIN rejections USING (event_id)
+            WHERE room_id = ?
+                {event_type_clause}
+                AND NOT outlier
+                AND rejections.event_id IS NULL
+            ORDER BY stream_ordering DESC
+            LIMIT 1
+            """
+
+            return sql, event_type_args
+
+        def _txn(txn: LoggingTransaction) -> int:
+            # Fetch the set of room IDs that we want to update
+            txn.execute(
+                """
+                SELECT DISTINCT room_id FROM current_state_events
+                WHERE room_id > ?
+                ORDER BY room_id ASC
+                LIMIT ?
+                """,
+                (last_room_id, batch_size),
+            )
+
+            rooms_to_update_rows = txn.fetchall()
+            if not rooms_to_update_rows:
+                return 0
+
+            for (room_id,) in rooms_to_update_rows:
+                logger.info("asdf Working on room %s", room_id)
+                current_state_map = PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn(
+                    txn, room_id
+                )
+                # We're iterating over rooms pulled from the current_state_events table
+                # so we should have some current state for each room
+                assert current_state_map
+
+                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_according_to_current_state_map_txn(
+                    txn, current_state_map
+                )
+                # We should have some insert values for each room, even if they are `None`
+                assert sliding_sync_joined_rooms_insert_map
+
+                (
+                    most_recent_event_stream_ordering_clause,
+                    most_recent_event_stream_ordering_args,
+                ) = make_sql_clause_for_get_last_event_pos_in_room(
+                    txn.database_engine, event_types=None
+                )
+                bump_stamp_clause, bump_stamp_args = (
+                    make_sql_clause_for_get_last_event_pos_in_room(
+                        txn.database_engine,
+                        event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+                    )
+                )
+
+                # Pulling keys/values separately is safe and will produce congruent
+                # lists
+                insert_keys = sliding_sync_joined_rooms_insert_map.keys()
+                insert_values = sliding_sync_joined_rooms_insert_map.values()
+
+                sql = f"""
+                    INSERT INTO sliding_sync_joined_rooms
+                        (room_id, event_stream_ordering, bump_stamp, {", ".join(insert_keys)})
+                    VALUES (
+                        ?,
+                        ({most_recent_event_stream_ordering_clause}),
+                        ({bump_stamp_clause}),
+                        {", ".join("?" for _ in insert_values)}
+                    )
+                    ON CONFLICT (room_id)
+                    DO UPDATE SET
+                        event_stream_ordering = EXCLUDED.event_stream_ordering,
+                        bump_stamp = EXCLUDED.bump_stamp,
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                    """
+                args = (
+                    [room_id, room_id]
+                    + most_recent_event_stream_ordering_args
+                    + [room_id]
+                    + bump_stamp_args
+                    + list(insert_values)
+                )
+                txn.execute(sql, args)
+
+            self.db_pool.updates._background_update_progress_txn(
+                txn,
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                {"last_room_id": rooms_to_update_rows[-1][0]},
+            )
+
+            return len(rooms_to_update_rows)
+
+        count = await self.db_pool.runInteraction(
+            "sliding_sync_joined_rooms_backfill", _txn
+        )
+
+        if not count:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL
+            )
+
+        return count
+
+    async def _sliding_sync_membership_snapshots_backfill(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Handles backfilling the `sliding_sync_membership_snapshots` table.
+        """
+        # last_event_stream_ordering = progress.get("last_event_stream_ordering", "")
+
+        def _txn(txn: LoggingTransaction) -> int:
+            # # Fetch the set of event IDs that we want to update
+            # txn.execute(
+            #     """
+            #     SELECT room_id, user_id, event_id FROM local_current_membership
+            #     WHERE event_stream_ordering > ?
+            #     ORDER BY event_stream_ordering ASC
+            #     LIMIT ?
+            #     """,
+            #     (last_event_stream_ordering, batch_size),
+            # )
+
+            # rows = txn.fetchall()
+            # if not rows:
+            #     return 0
+
+            # # Update the redactions with the received_ts.
+            # #
+            # # Note: Not all events have an associated received_ts, so we
+            # # fallback to using origin_server_ts. If we for some reason don't
+            # # have an origin_server_ts, lets just use the current timestamp.
+            # #
+            # # We don't want to leave it null, as then we'll never try and
+            # # censor those redactions.
+            # txn.execute_batch(
+            #     f"""
+            #     INSERT INTO sliding_sync_membership_snapshots
+            #         (room_id, user_id, membership_event_id, membership, event_stream_ordering
+            #         {"," + (", ".join(insert_keys)) if insert_keys else ""})
+            #     VALUES (
+            #         ?, ?, ?,
+            #         (SELECT membership FROM room_memberships WHERE event_id = ?),
+            #         (SELECT stream_ordering FROM events WHERE event_id = ?)
+            #         {"," + (", ".join("?" for _ in insert_values)) if insert_values else ""}
+            #     )
+            #     ON CONFLICT (room_id, user_id)
+            #     DO UPDATE SET
+            #         membership_event_id = EXCLUDED.membership_event_id,
+            #         membership = EXCLUDED.membership,
+            #         event_stream_ordering = EXCLUDED.event_stream_ordering
+            #         {"," + (", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)) if insert_keys else ""}
+            #     """,
+            #     (TODO,),
+            # )
+
+            # self.db_pool.updates._background_update_progress_txn(
+            #     txn, "redactions_received_ts", {"last_event_id": upper_event_id}
+            # )
+
+            # return len(rows)
+
+            # TODO
+            # return len(rows)
+            return 0
+
+        count = await self.db_pool.runInteraction(
+            "sliding_sync_membership_snapshots_backfill", _txn
+        )
+
+        if not count:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL
+            )
+
+        return count
