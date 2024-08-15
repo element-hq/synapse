@@ -313,7 +313,7 @@ class DelayedEventsHandler:
                 )
             except NotFoundError:
                 logger.debug(
-                    "delay_id %s for local user %s was removed after it timed out, but before it was sent on timeout",
+                    "delay_id %s for local user %s was removed from the DB before it timed out (or was always missing)",
                     delay_id,
                     user_localpart,
                 )
@@ -330,7 +330,7 @@ class DelayedEventsHandler:
         user_localpart: UserLocalpart,
         delay: Delay,
     ) -> None:
-        """NOTE: Should not be called with a delay_id that isn't in the DB, or with a negative delay."""
+        assert delay > 0, "Clock.call_later doesn't support negative delays"
         delay_sec = delay / 1000
 
         logger.info(
