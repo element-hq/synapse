@@ -145,7 +145,7 @@ Changes in SCHEMA_VERSION = 86
 
 Changes in SCHEMA_VERSION = 87
     - MSC4140: Add `delayed_events` table that keeps track of events that are to
-    be posted in response to a resettable timeout or an on-demand action.
+      be posted in response to a resettable timeout or an on-demand action.
 """
 
 
