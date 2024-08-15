@@ -67,7 +67,8 @@ from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
-from synapse.util.stringutils import parse_and_validate_server_name, random_string
+from synapse.util.events import generate_fake_event_id
+from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -344,7 +345,7 @@ class RoomStateEventRestServlet(RestServlet):
                 )
                 event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         ret = {"event_id": event_id}
@@ -417,7 +418,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             )
             event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         return 200, {"event_id": event_id}
@@ -1233,7 +1234,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
 
             event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         return 200, {"event_id": event_id}
