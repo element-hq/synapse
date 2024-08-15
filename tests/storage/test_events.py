@@ -2430,7 +2430,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 column="room_id",
                 iterable=(room_id_no_info, room_id_with_info, space_room_id),
                 keyvalues={},
-                desc="RelationsTestCase.test_background_update",
+                desc="sliding_sync_joined_rooms.test_joined_background_update_missing",
             )
         )
 
@@ -2453,7 +2453,6 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 },
             )
         )
-        # Ugh, have to reset this flag
         self.store.db_pool.updates._all_done = False
         self.wait_for_background_updates()
 
@@ -2463,22 +2462,161 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             {room_id_no_info, room_id_with_info, space_room_id},
             exact=True,
         )
-        # self.assertEqual(
-        #     sliding_sync_joined_rooms_results[room_id1],
-        #     _SlidingSyncJoinedRoomResult(
-        #         room_id=room_id1,
-        #         # Latest event in the room
-        #         event_stream_ordering=room_name_update_event_pos.stream,
-        #         bump_stamp=state_map[
-        #             (EventTypes.Create, "")
-        #         ].internal_metadata.stream_ordering,
-        #         room_type=None,
-        #         room_name="my super duper room",
-        #         is_encrypted=False,
-        #     ),
-        # )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id_no_info)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id_no_info],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id_no_info,
+                # History visibility just happens to be the last event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomHistoryVisibility, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id_with_info)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id_with_info],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id_with_info,
+                # Lastest event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomEncryption, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(space_room_id)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[space_room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=space_room_id,
+                # Lastest event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.Name, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
 
     def test_joined_background_update_partial(self) -> None:
         """
-        Test that the background update for `sliding_sync_joined_rooms` backfills partially updated rows
+        Test that the background update for `sliding_sync_joined_rooms` backfills
+        partially updated rows.
         """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_with_info = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user1_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id_with_info)
+        )
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the the encryption event
+        # never made it into the table.
+        self.get_success(
+            self.store.db_pool.simple_update(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id_with_info},
+                updatevalues={"is_encrypted": False},
+                desc="sliding_sync_joined_rooms.test_joined_background_update_partial",
+            )
+        )
+
+        # We should see the partial row that we made in preparation for the test.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id_with_info},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id_with_info],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id_with_info,
+                # Lastest event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomEncryption, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id_with_info},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id_with_info],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id_with_info,
+                # Lastest event sent in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomEncryption, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
