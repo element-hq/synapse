@@ -17,7 +17,6 @@
 #
 
 import logging
-from binascii import crc32
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, NewType, Optional, Set, Tuple
 
@@ -37,7 +36,6 @@ from synapse.storage.database import (
 from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID, StrCollection
 from synapse.util import json_encoder, stringutils as stringutils
-from synapse.util.stringutils import base62_encode
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -583,12 +581,8 @@ def _generate_delay_id() -> DelayID:
     """Generates an opaque string, for use as a delay ID"""
 
     # We use the following format for delay IDs:
-    #    syf_<random string>_<base62 crc check>
+    #    syf_<random string>
     # They are scoped to user localparts, so it is possible for
     # the same ID to exist for multiple users.
 
-    random_string = stringutils.random_string(20)
-    base = f"syd_{random_string}"
-
-    crc = base62_encode(crc32(base.encode("ascii")), minwidth=6)
-    return DelayID(f"{base}_{crc}")
+    return DelayID(f"syd_{stringutils.random_string(20)}")
