@@ -2995,18 +2995,18 @@ class SlidingSyncHandler:
         mutable_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
 
         if from_token:
-            # Use the receipt stream change cache to check which rooms might have
-            # had receipts that we haven't sent down.
-            receipt_key = from_token.stream_token.receipt_key
+            # Now find the set of rooms that may have receipts that we're not
+            # sending down.
             rooms_no_receipts = (
                 per_connection_state.receipts._statuses.keys() - relevant_room_ids
             )
-            changed_rooms = self.store._receipts_stream_cache.get_entities_changed(
+            changed_rooms = await self.store.get_rooms_with_receipts_between(
                 rooms_no_receipts,
-                receipt_key.stream,
+                from_key=from_token.stream_token.receipt_key,
+                to_key=to_token.receipt_key,
             )
             mutable_per_connection_state.receipts.record_unsent_rooms(
-                changed_rooms, receipt_key
+                changed_rooms, from_token.stream_token.receipt_key
             )
 
         return SlidingSyncResult.Extensions.ReceiptsExtension(
