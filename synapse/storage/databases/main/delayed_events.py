@@ -315,7 +315,6 @@ class DelayedEventsStore(SQLBaseStore):
                 **({"delay": Delay(row[4])} if row[4] is not None else {}),
                 **({"parent_delay_id": DelayID(row[5])} if row[5] is not None else {}),
                 "running_since": Timestamp(row[6]),
-                # TODO: Verify contents?
                 "content": db_to_json(row[7]),
             }
             for row in rows
@@ -469,7 +468,6 @@ class DelayedEventsStore(SQLBaseStore):
                 EventType(event_row[1]),
                 StateKey(event_row[2]) if event_row[2] is not None else None,
                 Timestamp(event_row[3]) if event_row[3] is not None else None,
-                # TODO: Verify contents?
                 contents,
             ),
             {DelayID(r[0]) for r in removed_timeout_delay_ids},
