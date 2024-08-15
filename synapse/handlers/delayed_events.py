@@ -193,6 +193,8 @@ class DelayedEventsHandler:
                 If None, the event won't be automatically sent (allowed only when parent_id is set).
             parent_id: The ID of the delayed event this one is grouped with.
                 May only refer to a delayed event that has no parent itself.
+                When the parent event is sent or cancelled, this one is cancelled;
+                and when this event is sent, the parent is cancelled.
 
         Returns:
             The ID of the added delayed event.
