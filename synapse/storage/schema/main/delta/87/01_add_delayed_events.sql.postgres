@@ -11,4 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+-- Sets the column as an identity column, meaning that the column in new rows
+-- will automatically have values from an implicit sequence assigned to it.
 ALTER TABLE delayed_events ALTER COLUMN delay_rowid ADD GENERATED ALWAYS AS IDENTITY;
