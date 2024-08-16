@@ -588,8 +588,10 @@ class SlidingSyncHandler:
         # rooms to get them some results sooner but will end up taking the same
         # amount of time (more with round-trips and re-processing) in the end to
         # get everything again.
-        per_connection_state = await self.connection_store.get_per_connection_state(
-            sync_config, from_token
+        previous_connection_state = (
+            await self.connection_store.get_per_connection_state(
+                sync_config, from_token
+            )
         )
 
         await self.connection_store.mark_token_seen(
@@ -786,7 +788,7 @@ class SlidingSyncHandler:
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
                 for room_id in relevant_room_map:
-                    status = per_connection_state.rooms.have_sent_room(room_id)
+                    status = previous_connection_state.rooms.have_sent_room(room_id)
                     if (
                         # The room was never sent down before so the client needs to know
                         # about it regardless of any updates.
@@ -822,7 +824,7 @@ class SlidingSyncHandler:
         async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
-                per_connection_state=per_connection_state,
+                per_connection_state=previous_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -840,12 +842,12 @@ class SlidingSyncHandler:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
 
-        new_connection_state = per_connection_state.get_mutable()
+        new_connection_state = previous_connection_state.get_mutable()
 
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
-            per_connection_state=per_connection_state,
+            per_connection_state=previous_connection_state,
             mutable_per_connection_state=new_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
@@ -3135,31 +3137,32 @@ class HaveSentRoom(Generic[T]):
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class RoomStatusesForStream(Generic[T]):
+class RoomStatusMap(Generic[T]):
     """For a given stream, e.g. events, records what we have or have not sent
     down for that stream in a given room."""
 
+    # `room_id` -> `HaveSentRoom`
     _statuses: Mapping[str, HaveSentRoom[T]] = attr.Factory(dict)
 
     def have_sent_room(self, room_id: str) -> HaveSentRoom[T]:
         """Return whether we have previously sent the room down"""
         return self._statuses.get(room_id, HaveSentRoom.never())
 
-    def get_mutable(self) -> "MutableRoomStatusesForStream[T]":
+    def get_mutable(self) -> "MutableRoomStatusMap[T]":
         """Get a mutable copy of this state."""
-        return MutableRoomStatusesForStream(
+        return MutableRoomStatusMap(
             statuses=self._statuses,
         )
 
-    def copy(self) -> "RoomStatusesForStream[T]":
+    def copy(self) -> "RoomStatusMap[T]":
         """Make a copy of the class. Useful for converting from a mutable to
         immutable version."""
 
-        return RoomStatusesForStream(statuses=dict(self._statuses))
+        return RoomStatusMap(statuses=dict(self._statuses))
 
 
-class MutableRoomStatusesForStream(RoomStatusesForStream[T]):
-    """A mutable version of `RoomStatusesForStream`"""
+class MutableRoomStatusMap(RoomStatusMap[T]):
+    """A mutable version of `RoomStatusMap`"""
 
     _statuses: typing.ChainMap[str, HaveSentRoom[T]]
 
@@ -3182,11 +3185,8 @@ class MutableRoomStatusesForStream(RoomStatusesForStream[T]):
     def record_sent_rooms(self, room_ids: StrCollection) -> None:
         """Record that we have sent these rooms in the response"""
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id)
-            if (
-                current_status is not None
-                and current_status.status == HaveSentRoomFlag.LIVE
-            ):
+            current_status = self._statuses.get(room_id, HaveSentRoom.never())
+            if current_status.status == HaveSentRoomFlag.LIVE:
                 continue
 
             self._statuses[room_id] = HaveSentRoom.live()
@@ -3206,8 +3206,8 @@ class MutableRoomStatusesForStream(RoomStatusesForStream[T]):
         #     sent anything down this time either so we leave it as NEVER.
 
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id)
-            if current_status is None or current_status.status != HaveSentRoomFlag.LIVE:
+            current_status = self._statuses.get(room_id, HaveSentRoom.never())
+            if current_status.status != HaveSentRoomFlag.LIVE:
                 continue
 
             self._statuses[room_id] = HaveSentRoom.previously(from_token)
@@ -3215,16 +3215,20 @@ class MutableRoomStatusesForStream(RoomStatusesForStream[T]):
 
 @attr.s(auto_attribs=True)
 class PerConnectionState:
-    """The per-connection state
+    """The per-connection state. A snapshot of what we've sent down the connection before.
+
+    Currently, we track whether we've sent down various aspects of a given room before.
+
+    We use the `rooms` field to store the position in the events stream for each room that we've previously sent to the client before. On the next request that includes the room, we can then send only what's changed since that recorded position.
+
+    Same goes for the `receipts` field so we only need to send the new receipts since the last time you made a sync request.
 
     Attributes:
         rooms: The status of each room for the events stream.
     """
 
-    rooms: RoomStatusesForStream = attr.Factory(RoomStatusesForStream[RoomStreamToken])
-    receipts: RoomStatusesForStream = attr.Factory(
-        RoomStatusesForStream[MultiWriterStreamToken]
-    )
+    rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
+    receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
 
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
@@ -3238,8 +3242,8 @@ class PerConnectionState:
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
-    rooms: MutableRoomStatusesForStream[RoomStreamToken]
-    receipts: MutableRoomStatusesForStream[MultiWriterStreamToken]
+    rooms: MutableRoomStatusMap[RoomStreamToken]
+    receipts: MutableRoomStatusMap[MultiWriterStreamToken]
 
     def has_updates(self) -> bool:
         return bool(self.rooms.get_updates()) or bool(self.receipts.get_updates())
@@ -3274,7 +3278,7 @@ class SlidingSyncConnectionStore:
             to mapping of room ID to `HaveSentRoom`.
     """
 
-    # `(user_id, conn_id)` -> `token` -> `PerConnectionState`
+    # `(user_id, conn_id)` -> `connection_position` -> `PerConnectionState`
     _connections: Dict[Tuple[str, str], Dict[int, PerConnectionState]] = attr.Factory(
         dict
     )
@@ -3304,8 +3308,8 @@ class SlidingSyncConnectionStore:
 
         connection_position = from_token.connection_position
         if connection_position == 0:
-            # The '0' values is a special value to indicate there is no
-            # per-connection state.
+            # Initial sync (request without a `from_token`) starts at `0` so
+            # there is no existing per-connection state
             return PerConnectionState()
 
         conn_key = self._get_connection_key(sync_config)
@@ -3324,6 +3328,12 @@ class SlidingSyncConnectionStore:
         from_token: Optional[SlidingSyncStreamToken],
         per_connection_state: MutablePerConnectionState,
     ) -> int:
+        """Record updated per-connection state, returning the connection
+        position associated with the new state.
+
+        If there are no changes to the state this may return the same token as
+        the existing per-connection state.
+        """
         prev_connection_token = 0
         if from_token is not None:
             prev_connection_token = from_token.connection_position
