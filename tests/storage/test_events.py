@@ -2781,7 +2781,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         backfills missing rows for invite memberships.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
@@ -2969,7 +2969,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         backfills missing rows for remote invites (out-of-band memberships).
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
 
         # Create rooms with various levels of state that should appear in the table
         #
