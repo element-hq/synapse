@@ -1416,21 +1416,11 @@ class PersistEventsStore:
             # persisting stack (see
             # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
             #
-            event_ids_to_fetch: List[str] = []
-            create_event_id = None
-            room_encryption_event_id = None
-            room_name_event_id = None
             bump_event_id = None
+            current_state_map = {}
             for state_key, event_id in to_insert.items():
-                if state_key[0] == EventTypes.Create and state_key[1] == "":
-                    create_event_id = event_id
-                    event_ids_to_fetch.append(event_id)
-                elif state_key[0] == EventTypes.RoomEncryption and state_key[1] == "":
-                    room_encryption_event_id = event_id
-                    event_ids_to_fetch.append(event_id)
-                elif state_key[0] == EventTypes.Name and state_key[1] == "":
-                    room_name_event_id = event_id
-                    event_ids_to_fetch.append(event_id)
+                if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
+                    current_state_map[state_key] = event_id
 
                 if (
                     state_key[0] in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
@@ -1439,9 +1429,11 @@ class PersistEventsStore:
                     bump_event_id = event_id
 
             # Map of values to insert/update in the `sliding_sync_joined_rooms` table
-            sliding_sync_joined_rooms_insert_map: Dict[
-                str, Optional[Union[str, bool]]
-            ] = {}
+            sliding_sync_joined_rooms_insert_map = (
+                self._get_sliding_sync_insert_values_from_current_state_map_txn(
+                    txn, current_state_map
+                )
+            )
 
             # If something is being deleted from the state, we need to clear it out
             for state_key in to_delete:
@@ -1451,43 +1443,6 @@ class PersistEventsStore:
                     sliding_sync_joined_rooms_insert_map["is_encrypted"] = False
                 elif state_key == (EventTypes.Name, ""):
                     sliding_sync_joined_rooms_insert_map["room_name"] = None
-
-            # Fetch the events from the database
-            event_json_rows = cast(
-                List[Tuple[str, str]],
-                self.db_pool.simple_select_many_txn(
-                    txn,
-                    table="event_json",
-                    column="event_id",
-                    iterable=event_ids_to_fetch,
-                    retcols=["event_id", "json"],
-                    keyvalues={},
-                ),
-            )
-            # Parse the raw event JSON
-            for event_id, json in event_json_rows:
-                event_json = db_to_json(json)
-
-                if event_id == create_event_id:
-                    room_type = event_json.get("content", {}).get(
-                        EventContentFields.ROOM_TYPE
-                    )
-                    sliding_sync_joined_rooms_insert_map["room_type"] = room_type
-                elif event_id == room_encryption_event_id:
-                    encryption_algorithm = event_json.get("content", {}).get(
-                        EventContentFields.ENCRYPTION_ALGORITHM
-                    )
-                    is_encrypted = encryption_algorithm is not None
-                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = is_encrypted
-                elif event_id == room_name_event_id:
-                    room_name = event_json.get("content", {}).get(
-                        EventContentFields.ROOM_NAME
-                    )
-                    sliding_sync_joined_rooms_insert_map["room_name"] = room_name
-                else:
-                    raise AssertionError(
-                        f"Unexpected event_id (we should not be fetching extra events): {event_id}"
-                    )
 
             # Update the `sliding_sync_joined_rooms` table
             #
