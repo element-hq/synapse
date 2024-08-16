@@ -3016,9 +3016,12 @@ class SlidingSyncHandler:
             # correctly when they come into range anyway. (i.e. we only want to
             # transition `LIVE` rooms to `PREVIOUSLY` rooms, so only pick out
             # the live rooms)
-            rooms_no_receipts = (
-                previous_connection_state.receipts._statuses.keys() - relevant_room_ids
-            )
+            rooms_no_receipts = [
+                room_id
+                for room_id, room_status in previous_connection_state.receipts._statuses.items()
+                if room_status.status == HaveSentRoomFlag.LIVE
+                and room_id not in relevant_room_ids
+            ]
             changed_rooms = await self.store.get_rooms_with_receipts_between(
                 rooms_no_receipts,
                 from_key=from_token.stream_token.receipt_key,
