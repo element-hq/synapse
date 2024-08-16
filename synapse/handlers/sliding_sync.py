@@ -824,7 +824,7 @@ class SlidingSyncHandler:
         async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
-                per_connection_state=previous_connection_state,
+                previous_connection_state=previous_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -847,8 +847,8 @@ class SlidingSyncHandler:
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
-            per_connection_state=previous_connection_state,
-            mutable_per_connection_state=new_connection_state,
+            previous_connection_state=previous_connection_state,
+            new_per_connection_state=new_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -901,7 +901,7 @@ class SlidingSyncHandler:
             connection_position = await self.connection_store.record_new_state(
                 sync_config=sync_config,
                 from_token=from_token,
-                per_connection_state=new_connection_state,
+                new_connection_state=new_connection_state,
             )
         elif from_token:
             connection_position = from_token.connection_position
@@ -1954,7 +1954,7 @@ class SlidingSyncHandler:
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
-        per_connection_state: "PerConnectionState",
+        previous_connection_state: "PerConnectionState",
         room_id: str,
         room_sync_config: RoomSyncConfig,
         room_membership_for_user_at_to_token: _RoomMembershipForUser,
@@ -2002,7 +2002,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
-            room_status = per_connection_state.rooms.have_sent_room(room_id)
+            room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
@@ -2481,8 +2481,8 @@ class SlidingSyncHandler:
     async def get_extensions_response(
         self,
         sync_config: SlidingSyncConfig,
-        per_connection_state: "PerConnectionState",
-        mutable_per_connection_state: "MutablePerConnectionState",
+        previous_connection_state: "PerConnectionState",
+        new_per_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2493,8 +2493,8 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            per_connection_state: The current per-connection state
-            mutable_per_connection_state: A mutable copy of the per-connection
+            previous_connection_state: The current per-connection state
+            new_per_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
@@ -2540,8 +2540,8 @@ class SlidingSyncHandler:
         if sync_config.extensions.receipts is not None:
             receipts_response = await self.get_receipts_extension_response(
                 sync_config=sync_config,
-                per_connection_state=per_connection_state,
-                mutable_per_connection_state=mutable_per_connection_state,
+                previous_connection_state=previous_connection_state,
+                new_per_connection_state=new_per_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
@@ -2861,8 +2861,8 @@ class SlidingSyncHandler:
     async def get_receipts_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        per_connection_state: "PerConnectionState",
-        mutable_per_connection_state: "MutablePerConnectionState",
+        previous_connection_state: "PerConnectionState",
+        new_per_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2874,8 +2874,8 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            per_connection_state: The current per-connection state
-            mutable_per_connection_state: A mutable copy of the per-connection
+            previous_connection_state: The current per-connection state
+            new_per_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
@@ -2916,7 +2916,7 @@ class SlidingSyncHandler:
                     initial_rooms.add(room_id)
                     continue
 
-                room_status = per_connection_state.receipts.have_sent_room(room_id)
+                room_status = previous_connection_state.receipts.have_sent_room(room_id)
                 if room_status.status == HaveSentRoomFlag.LIVE:
                     live_rooms.add(room_id)
                 elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
@@ -3000,20 +3000,20 @@ class SlidingSyncHandler:
 
         # Now we update the per-connection state to track which receipts we have
         # and haven't sent down.
-        mutable_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
+        new_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
 
         if from_token:
             # Now find the set of rooms that may have receipts that we're not
             # sending down.
             rooms_no_receipts = (
-                per_connection_state.receipts._statuses.keys() - relevant_room_ids
+                previous_connection_state.receipts._statuses.keys() - relevant_room_ids
             )
             changed_rooms = await self.store.get_rooms_with_receipts_between(
                 rooms_no_receipts,
                 from_key=from_token.stream_token.receipt_key,
                 to_key=to_token.receipt_key,
             )
-            mutable_per_connection_state.receipts.record_unsent_rooms(
+            new_per_connection_state.receipts.record_unsent_rooms(
                 changed_rooms, from_token.stream_token.receipt_key
             )
 
@@ -3338,7 +3338,7 @@ class SlidingSyncConnectionStore:
         self,
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken],
-        per_connection_state: MutablePerConnectionState,
+        new_connection_state: MutablePerConnectionState,
     ) -> int:
         """Record updated per-connection state, returning the connection
         position associated with the new state.
@@ -3350,7 +3350,7 @@ class SlidingSyncConnectionStore:
         if from_token is not None:
             prev_connection_token = from_token.connection_position
 
-        if not per_connection_state.has_updates():
+        if not new_connection_state.has_updates():
             return prev_connection_token
 
         conn_key = self._get_connection_key(sync_config)
@@ -3362,8 +3362,8 @@ class SlidingSyncConnectionStore:
         sync_statuses.pop(new_store_token, None)
 
         sync_statuses[new_store_token] = PerConnectionState(
-            rooms=per_connection_state.rooms.copy(),
-            receipts=per_connection_state.receipts.copy(),
+            rooms=new_connection_state.rooms.copy(),
+            receipts=new_connection_state.receipts.copy(),
         )
 
         return new_store_token
