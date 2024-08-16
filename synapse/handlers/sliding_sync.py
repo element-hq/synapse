@@ -785,7 +785,7 @@ class SlidingSyncHandler:
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
                 for room_id in relevant_room_map:
-                    status = per_connection_state.rooms.have_sent_room(room_id)
+                    status = previous_connection_state.rooms.have_sent_room(room_id)
                     if (
                         # The room was never sent down before so the client needs to know
                         # about it regardless of any updates.
@@ -821,7 +821,7 @@ class SlidingSyncHandler:
         async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
-                per_connection_state=per_connection_state,
+                per_connection_state=previous_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -854,7 +854,7 @@ class SlidingSyncHandler:
         )
 
         if has_lists or has_room_subscriptions:
-            new_connection_state = per_connection_state.get_mutable()
+            new_connection_state = previous_connection_state.get_mutable()
 
             # We now calculate if any rooms outside the range have had updates,
             # which we are not sending down.
@@ -3212,7 +3212,8 @@ class SlidingSyncConnectionStore:
 
         connection_position = from_token.connection_position
         if connection_position == 0:
-            # Initial sync (request without a `from_token`) starts at `0` so there is no existing per-connection state
+            # Initial sync (request without a `from_token`) starts at `0` so
+            # there is no existing per-connection state
             return PerConnectionState()
 
         conn_key = self._get_connection_key(sync_config)
