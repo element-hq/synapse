@@ -1656,6 +1656,85 @@ class PersistEventsStore:
 
         return sliding_sync_insert_map
 
+    @classmethod
+    def _get_sliding_sync_insert_values_from_stripped_state_txn(
+        cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
+    ) -> Dict[str, Optional[Union[str, bool]]]:
+        """
+        TODO
+
+        Returns:
+            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
+            state values needed to insert into the `sliding_sync_membership_snapshots` tables.
+        """
+        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
+
+        if unsigned_stripped_state_events is not None:
+            stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
+            if isinstance(unsigned_stripped_state_events, list):
+                for raw_stripped_event in unsigned_stripped_state_events:
+                    stripped_state_event = parse_stripped_state_event(
+                        raw_stripped_event
+                    )
+                    if stripped_state_event is not None:
+                        stripped_state_map[
+                            (
+                                stripped_state_event.type,
+                                stripped_state_event.state_key,
+                            )
+                        ] = stripped_state_event
+
+            # If there is some stripped state, we assume the remote server passed *all*
+            # of the potential stripped state events for the room.
+            create_stripped_event = stripped_state_map.get((EventTypes.Create, ""))
+            # Sanity check that we at-least have the create event
+            if create_stripped_event is not None:
+                sliding_sync_insert_map["has_known_state"] = True
+
+                # Find the room_type
+                sliding_sync_insert_map["room_type"] = (
+                    create_stripped_event.content.get(EventContentFields.ROOM_TYPE)
+                    if create_stripped_event is not None
+                    else None
+                )
+
+                # Find whether the room is_encrypted
+                encryption_stripped_event = stripped_state_map.get(
+                    (EventTypes.RoomEncryption, "")
+                )
+                encryption = (
+                    encryption_stripped_event.content.get(
+                        EventContentFields.ENCRYPTION_ALGORITHM
+                    )
+                    if encryption_stripped_event is not None
+                    else None
+                )
+                sliding_sync_insert_map["is_encrypted"] = encryption is not None
+
+                # Find the room_name
+                room_name_stripped_event = stripped_state_map.get((EventTypes.Name, ""))
+                sliding_sync_insert_map["room_name"] = (
+                    room_name_stripped_event.content.get(EventContentFields.ROOM_NAME)
+                    if room_name_stripped_event is not None
+                    else None
+                )
+
+            else:
+                # No strip state provided
+                sliding_sync_insert_map["has_known_state"] = False
+                sliding_sync_insert_map["room_type"] = None
+                sliding_sync_insert_map["room_name"] = None
+                sliding_sync_insert_map["is_encrypted"] = False
+        else:
+            # No strip state provided
+            sliding_sync_insert_map["has_known_state"] = False
+            sliding_sync_insert_map["room_type"] = None
+            sliding_sync_insert_map["room_name"] = None
+            sliding_sync_insert_map["is_encrypted"] = False
+
+        return sliding_sync_insert_map
+
     def _update_sliding_sync_tables_with_new_persisted_events_txn(
         self,
         txn: LoggingTransaction,
@@ -2437,85 +2516,6 @@ class PersistEventsStore:
                     },
                     values=insert_values,
                 )
-
-    @classmethod
-    def _get_sliding_sync_insert_values_from_stripped_state_txn(
-        cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
-    ) -> Dict[str, Optional[Union[str, bool]]]:
-        """
-        TODO
-
-        Returns:
-            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
-            state values needed to insert into the `sliding_sync_membership_snapshots` tables.
-        """
-        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
-
-        if unsigned_stripped_state_events is not None:
-            stripped_state_map: MutableStateMap[StrippedStateEvent] = {}
-            if isinstance(unsigned_stripped_state_events, list):
-                for raw_stripped_event in unsigned_stripped_state_events:
-                    stripped_state_event = parse_stripped_state_event(
-                        raw_stripped_event
-                    )
-                    if stripped_state_event is not None:
-                        stripped_state_map[
-                            (
-                                stripped_state_event.type,
-                                stripped_state_event.state_key,
-                            )
-                        ] = stripped_state_event
-
-            # If there is some stripped state, we assume the remote server passed *all*
-            # of the potential stripped state events for the room.
-            create_stripped_event = stripped_state_map.get((EventTypes.Create, ""))
-            # Sanity check that we at-least have the create event
-            if create_stripped_event is not None:
-                sliding_sync_insert_map["has_known_state"] = True
-
-                # Find the room_type
-                sliding_sync_insert_map["room_type"] = (
-                    create_stripped_event.content.get(EventContentFields.ROOM_TYPE)
-                    if create_stripped_event is not None
-                    else None
-                )
-
-                # Find whether the room is_encrypted
-                encryption_stripped_event = stripped_state_map.get(
-                    (EventTypes.RoomEncryption, "")
-                )
-                encryption = (
-                    encryption_stripped_event.content.get(
-                        EventContentFields.ENCRYPTION_ALGORITHM
-                    )
-                    if encryption_stripped_event is not None
-                    else None
-                )
-                sliding_sync_insert_map["is_encrypted"] = encryption is not None
-
-                # Find the room_name
-                room_name_stripped_event = stripped_state_map.get((EventTypes.Name, ""))
-                sliding_sync_insert_map["room_name"] = (
-                    room_name_stripped_event.content.get(EventContentFields.ROOM_NAME)
-                    if room_name_stripped_event is not None
-                    else None
-                )
-
-            else:
-                # No strip state provided
-                sliding_sync_insert_map["has_known_state"] = False
-                sliding_sync_insert_map["room_type"] = None
-                sliding_sync_insert_map["room_name"] = None
-                sliding_sync_insert_map["is_encrypted"] = False
-        else:
-            # No strip state provided
-            sliding_sync_insert_map["has_known_state"] = False
-            sliding_sync_insert_map["room_type"] = None
-            sliding_sync_insert_map["room_name"] = None
-            sliding_sync_insert_map["is_encrypted"] = False
-
-        return sliding_sync_insert_map
 
     def _handle_event_relations(
         self, txn: LoggingTransaction, event: EventBase
