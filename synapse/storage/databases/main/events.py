@@ -1244,7 +1244,7 @@ class PersistEventsStore:
                 ] = {}
                 if current_state_map:
                     sliding_sync_membership_snapshots_insert_map = (
-                        self._get_sliding_sync_insert_values_from_current_state_map_txn(
+                        self._get_sliding_sync_insert_values_from_state_map_txn(
                             txn, current_state_map
                         )
                     )
@@ -1430,7 +1430,7 @@ class PersistEventsStore:
 
             # Map of values to insert/update in the `sliding_sync_joined_rooms` table
             sliding_sync_joined_rooms_insert_map = (
-                self._get_sliding_sync_insert_values_from_current_state_map_txn(
+                self._get_sliding_sync_insert_values_from_state_map_txn(
                     txn, current_state_map
                 )
             )
@@ -1593,8 +1593,8 @@ class PersistEventsStore:
         return current_state_map
 
     @classmethod
-    def _get_sliding_sync_insert_values_from_current_state_map_txn(
-        cls, txn: LoggingTransaction, current_state_map: StateMap[str]
+    def _get_sliding_sync_insert_values_from_state_map_txn(
+        cls, txn: LoggingTransaction, state_map: StateMap[str]
     ) -> Dict[str, Optional[Union[str, bool]]]:
         """
         TODO
@@ -1613,7 +1613,7 @@ class PersistEventsStore:
         ) = make_in_list_sql_clause(
             txn.database_engine,
             "event_id",
-            current_state_map.values(),
+            state_map.values(),
         )
         txn.execute(
             f"""

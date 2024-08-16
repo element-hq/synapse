@@ -32,7 +32,10 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
-from synapse.storage.databases.main.events import PersistEventsStore
+from synapse.storage.databases.main.events import (
+    SLIDING_SYNC_RELEVANT_STATE_SET,
+    PersistEventsStore,
+)
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine
 from synapse.types import JsonDict, MutableStateMap, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
@@ -618,7 +621,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                 # so we should have some current state for each room
                 assert current_state_map
 
-                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_current_state_map_txn(
+                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
                     txn, current_state_map
                 )
                 # We should have some insert values for each room, even if they are `None`
@@ -751,7 +754,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     # for each room
                     assert current_state_map
 
-                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_current_state_map_txn(
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
                         txn, current_state_map
                     )
                     # We should have some insert values for each room, even if they are `None`
@@ -827,21 +830,35 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     assert sliding_sync_membership_snapshots_insert_map
                 elif membership == Membership.BAN:
                     # Pull from historical state
-                    # state_group = self.db_pool.simple_select_one_onecol_txn(
-                    #     table="event_to_state_groups",
-                    #     keyvalues={"event_id": membership_event_id},
-                    #     retcol="state_group",
-                    #     allow_none=True,
-                    #     desc="_get_state_group_for_event",
-                    # )
-                    # # We should know the state for the event
-                    # assert state_group is not None
+                    state_group = self.db_pool.simple_select_one_onecol_txn(
+                        txn,
+                        table="event_to_state_groups",
+                        keyvalues={"event_id": membership_event_id},
+                        retcol="state_group",
+                        allow_none=True,
+                    )
+                    # We should know the state for the event
+                    assert state_group is not None
 
-                    # state_by_group = self._get_state_groups_from_groups_txn(
-                    #     txn, [state_group]
-                    # )
-                    # state_map = state_by_group[state_group]
-                    pass
+                    state_by_group = self._get_state_groups_from_groups_txn(
+                        txn,
+                        groups=[state_group],
+                        state_filter=StateFilter.from_types(
+                            SLIDING_SYNC_RELEVANT_STATE_SET
+                        ),
+                    )
+                    state_map = state_by_group[state_group]
+
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
+                        txn, state_map
+                    )
+                    # We should have some insert values for each room, even if they are `None`
+                    assert sliding_sync_membership_snapshots_insert_map
+
+                    # We have historical state to work from
+                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
+                        True
+                    )
                 else:
                     assert_never(membership)
 
