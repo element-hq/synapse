@@ -828,7 +828,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     # stripped state is on the event because we still want to record
                     # that we have no known state
                     assert sliding_sync_membership_snapshots_insert_map
-                elif membership == Membership.BAN:
+                elif membership in (Membership.LEAVE, Membership.BAN):
                     # Pull from historical state
                     state_group = self.db_pool.simple_select_one_onecol_txn(
                         txn,
