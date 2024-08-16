@@ -3405,3 +3405,220 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=False,
             ),
         )
+
+    @parameterized.expand(
+        [
+            (Membership.LEAVE,),
+            (Membership.BAN,),
+        ]
+    )
+    def test_membership_snapshots_background_update_historical_state(
+        self, test_membership: str
+    ) -> None:
+        """
+        Test that the background update for `sliding_sync_membership_snapshots`
+        backfills missing rows for leave memberships.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_no_info = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        room_id_with_info = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user2_tok,
+        )
+
+        # Join the room in preparation for our test_membership
+        self.helper.join(room_id_no_info, user1_id, tok=user1_tok)
+        self.helper.join(room_id_with_info, user1_id, tok=user1_tok)
+        self.helper.join(space_room_id, user1_id, tok=user1_tok)
+
+        if test_membership == Membership.LEAVE:
+            # Have user1 leave the rooms
+            user1_membership_room_id_no_info_response = self.helper.leave(
+                room_id_no_info, user1_id, tok=user1_tok
+            )
+            user1_membership_room_id_with_info_response = self.helper.leave(
+                room_id_with_info, user1_id, tok=user1_tok
+            )
+            user1_membership_space_room_id_response = self.helper.leave(
+                space_room_id, user1_id, tok=user1_tok
+            )
+        elif test_membership == Membership.BAN:
+            # Ban user1 from the rooms
+            user1_membership_room_id_no_info_response = self.helper.ban(
+                room_id_no_info, src=user2_id, targ=user1_id, tok=user2_tok
+            )
+            user1_membership_room_id_with_info_response = self.helper.ban(
+                room_id_with_info, src=user2_id, targ=user1_id, tok=user2_tok
+            )
+            user1_membership_space_room_id_response = self.helper.ban(
+                space_room_id, src=user2_id, targ=user1_id, tok=user2_tok
+            )
+        else:
+            raise AssertionError("Unknown test_membership")
+
+        # Have user2 leave the rooms to make sure that our background update is not just
+        # reading from `current_state_events`. For leave memberships, we should be
+        # reading from the historical state.
+        self.helper.leave(room_id_no_info, user2_id, tok=user2_tok)
+        self.helper.leave(room_id_with_info, user2_id, tok=user2_tok)
+        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
+        # Check to make sure we actually don't have any `current_state_events` for the rooms
+        current_state_check_rows = self.get_success(
+            self.store.db_pool.simple_select_many_batch(
+                table="current_state_events",
+                column="room_id",
+                iterable=[room_id_no_info, room_id_with_info, space_room_id],
+                retcols=("event_id",),
+                keyvalues={},
+                desc="check current_state_events in test",
+            )
+        )
+        self.assertEqual(len(current_state_check_rows), 0)
+
+        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_membership_snapshots",
+                column="room_id",
+                iterable=(room_id_no_info, room_id_with_info, space_room_id),
+                keyvalues={},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_invite",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Make sure the table is populated
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                # The memberships for user1
+                (room_id_no_info, user1_id),
+                (room_id_with_info, user1_id),
+                (space_room_id, user1_id),
+                # The leave memberships for user2
+                (room_id_no_info, user2_id),
+                (room_id_with_info, user2_id),
+                (space_room_id, user2_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id_no_info, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_no_info,
+                user_id=user1_id,
+                membership_event_id=user1_membership_room_id_no_info_response[
+                    "event_id"
+                ],
+                membership=test_membership,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_membership_room_id_no_info_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_with_info, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_with_info,
+                user_id=user1_id,
+                membership_event_id=user1_membership_room_id_with_info_response[
+                    "event_id"
+                ],
+                membership=test_membership,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_membership_room_id_with_info_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=user1_membership_space_room_id_response["event_id"],
+                membership=test_membership,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_membership_space_room_id_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
