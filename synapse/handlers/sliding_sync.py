@@ -2911,6 +2911,11 @@ class SlidingSyncHandler:
                     initial_rooms.add(room_id)
                     continue
 
+                # If we're sending down the room again for some reason, we
+                # should always resend the receipts as well (regardless of if
+                # we've sent them down before). This is to mimic the behaviour
+                # of what happens on initial load, where you get a chunk of
+                # timeline with all the receipts for the room.
                 room_result = actual_room_response_map.get(room_id)
                 if room_result is not None and room_result.initial:
                     initial_rooms.add(room_id)
