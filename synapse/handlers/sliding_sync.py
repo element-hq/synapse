@@ -3226,11 +3226,27 @@ class PerConnectionState:
         RoomStatusesForStream[MultiWriterStreamToken]
     )
 
+    previous_room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
+
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
+        # ChainMap requires a mutable mapping, but we're not actually going to
+        # mutate it.
+        previous_room_configs = cast(
+            MutableMapping[str, RoomSyncConfig], self.previous_room_configs
+        )
+
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
+            previous_room_configs=ChainMap({}, previous_room_configs),
+        )
+
+    def copy(self) -> "PerConnectionState":
+        return PerConnectionState(
+            rooms=self.rooms.copy(),
+            receipts=self.receipts.copy(),
+            previous_room_configs=dict(self.previous_room_configs),
         )
 
 
@@ -3241,8 +3257,18 @@ class MutablePerConnectionState(PerConnectionState):
     rooms: MutableRoomStatusesForStream[RoomStreamToken]
     receipts: MutableRoomStatusesForStream[MultiWriterStreamToken]
 
+    previous_room_configs: typing.ChainMap[str, RoomSyncConfig]
+
     def has_updates(self) -> bool:
-        return bool(self.rooms.get_updates()) or bool(self.receipts.get_updates())
+        return (
+            bool(self.rooms.get_updates())
+            or bool(self.receipts.get_updates())
+            or bool(self.get_room_config_updates())
+        )
+
+    def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
+        """Get updates to the room sync config"""
+        return self.previous_room_configs.maps[0]
 
 
 @attr.s(auto_attribs=True)
@@ -3339,10 +3365,7 @@ class SlidingSyncConnectionStore:
         new_store_token = prev_connection_token + 1
         sync_statuses.pop(new_store_token, None)
 
-        sync_statuses[new_store_token] = PerConnectionState(
-            rooms=per_connection_state.rooms.copy(),
-            receipts=per_connection_state.receipts.copy(),
-        )
+        sync_statuses[new_store_token] = per_connection_state.copy()
 
         return new_store_token
 
