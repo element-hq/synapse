@@ -3044,6 +3044,7 @@ class RoomStatusesForStream:
     """For a given stream, e.g. events, records what we have or have not sent
     down for that stream in a given room."""
 
+    # `room_id` -> `HaveSentRoom`
     _statuses: Mapping[str, HaveSentRoom] = attr.Factory(dict)
 
     def have_sent_room(self, room_id: str) -> HaveSentRoom:
