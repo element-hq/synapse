@@ -144,7 +144,8 @@ Changes in SCHEMA_VERSION = 86
     - Add a column `authenticated` to the tables `local_media_repository` and `remote_media_cache`
 
 Changes in SCHEMA_VERSION = 87
-    - TODO
+    - Add tables to store Sliding Sync data for quick filtering/sorting
+      (`sliding_sync_joined_rooms`, `sliding_sync_membership_snapshots`)
 """
 
 

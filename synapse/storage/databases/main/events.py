@@ -1565,7 +1565,10 @@ class PersistEventsStore:
         Fetch the current state event IDs for the relevant (to the
         `sliding_sync_joined_rooms` table) state types for the given room.
 
-        TODO
+        Returns:
+            StateMap of event IDs necessary to to fetch the relevant state values needed
+            to insert into the
+            `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`.
         """
         # Fetch the current state event IDs from the database
         (
@@ -1597,7 +1600,9 @@ class PersistEventsStore:
         cls, txn: LoggingTransaction, state_map: StateMap[str]
     ) -> Dict[str, Optional[Union[str, bool]]]:
         """
-        TODO
+        Fetch events in the `state_map` and extract the relevant state values needed to
+        insert into the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
+        tables.
 
         Returns:
             Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
@@ -1661,7 +1666,8 @@ class PersistEventsStore:
         cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
     ) -> Dict[str, Optional[Union[str, bool]]]:
         """
-        TODO
+        Pull out the relevant state values from the stripped state needed to insert into
+        the `sliding_sync_membership_snapshots` tables.
 
         Returns:
             Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
