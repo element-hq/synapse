@@ -267,8 +267,7 @@ class DeviceWorkerHandler:
                 newly_left_rooms.add(change.room_id)
 
         # We now work out if any other users have since joined or left the rooms
-        # the user is currently in. First we filter out rooms that we know
-        # haven't changed recently.
+        # the user is currently in.
 
         # List of membership changes per room
         room_to_deltas: Dict[str, List[StateDelta]] = {}
