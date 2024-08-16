@@ -785,7 +785,19 @@ class SlidingSyncHandler:
                 # subscription and have updates we need to send (i.e. either because
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
-                for room_id in relevant_room_map:
+                for room_id, room_config in relevant_room_map.items():
+                    prev_room_sync_config = (
+                        per_connection_state.previous_room_configs.get(room_id)
+                    )
+                    if prev_room_sync_config is not None:
+                        # Always include rooms whose timeline limit has increased.
+                        if (
+                            prev_room_sync_config.timeline_limit
+                            < room_config.timeline_limit
+                        ):
+                            rooms_should_send.add(room_id)
+                            continue
+
                     status = per_connection_state.rooms.have_sent_room(room_id)
                     if (
                         # The room was never sent down before so the client needs to know
@@ -817,12 +829,17 @@ class SlidingSyncHandler:
                     if room_id in rooms_should_send
                 }
 
+        new_connection_state = per_connection_state.get_mutable()
+
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
+            set_tag("room_id", room_id)
+
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
                 per_connection_state=per_connection_state,
+                mutable_per_connection_state=new_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -839,8 +856,6 @@ class SlidingSyncHandler:
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
-
-        new_connection_state = per_connection_state.get_mutable()
 
         extensions = await self.get_extensions_response(
             sync_config=sync_config,
@@ -1953,6 +1968,7 @@ class SlidingSyncHandler:
         self,
         sync_config: SlidingSyncConfig,
         per_connection_state: "PerConnectionState",
+        mutable_per_connection_state: "MutablePerConnectionState",
         room_id: str,
         room_sync_config: RoomSyncConfig,
         room_membership_for_user_at_to_token: _RoomMembershipForUser,
@@ -1997,8 +2013,15 @@ class SlidingSyncHandler:
         #    connection before
         #
         # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+        #
+        # We also need to check if the timeline limit has increased, if so we ignore
+        # the from bound for the timeline to send down a larger chunk of
+        # history.
+        #
+        # TODO: Also handle changes to `required_state`
         from_bound = None
         initial = True
+        ignore_timeline_bound = False
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
             room_status = per_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
@@ -2016,7 +2039,39 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
+            prev_room_sync_config = per_connection_state.previous_room_configs.get(
+                room_id
+            )
+            if prev_room_sync_config is not None:
+                # Check if the timeline limit has increased, if so ignore the
+                # timeline bound and record the change.
+                if (
+                    prev_room_sync_config.timeline_limit
+                    < room_sync_config.timeline_limit
+                ):
+                    ignore_timeline_bound = True
+                    mutable_per_connection_state.previous_room_configs[room_id] = (
+                        room_sync_config
+                    )
+
+                if (
+                    room_status.status != HaveSentRoomFlag.LIVE
+                    and prev_room_sync_config.timeline_limit
+                    > room_sync_config.timeline_limit
+                ):
+                    mutable_per_connection_state.previous_room_configs[room_id] = (
+                        room_sync_config
+                    )
+
+                # TODO: Record changes in required_state.
+
+        log_kv(
+            {
+                "sliding_sync.from_bound": from_bound,
+                "sliding_sync.initial": initial,
+                "sliding_sync.ignore_timeline_bound": ignore_timeline_bound,
+            }
+        )
 
         # Assemble the list of timeline events
         #
@@ -2053,6 +2108,10 @@ class SlidingSyncHandler:
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
+            timeline_from_bound = from_bound
+            if ignore_timeline_bound:
+                timeline_from_bound = None
+
             # For initial `/sync` (and other historical scenarios mentioned above), we
             # want to view a historical section of the timeline; to fetch events by
             # `topological_ordering` (best representation of the room DAG as others were
@@ -2078,7 +2137,7 @@ class SlidingSyncHandler:
             pagination_method: PaginateFunction = (
                 # Use `topographical_ordering` for historical events
                 paginate_room_events_by_topological_ordering
-                if from_bound is None
+                if timeline_from_bound is None
                 # Use `stream_ordering` for updates
                 else paginate_room_events_by_stream_ordering
             )
@@ -2088,7 +2147,7 @@ class SlidingSyncHandler:
                 # (from newer to older events) starting at to_bound.
                 # This ensures we fill the `limit` with the newest events first,
                 from_key=to_bound,
-                to_key=from_bound,
+                to_key=timeline_from_bound,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -2445,6 +2504,51 @@ class SlidingSyncHandler:
             # instead we use the membership event position.
             if new_bump_event_pos.stream > 0:
                 bump_stamp = new_bump_event_pos.stream
+
+        prev_room_sync_config = per_connection_state.previous_room_configs.get(room_id)
+        if ignore_timeline_bound:
+            # FIXME: We signal the fact that we're sending down more events to
+            # the client by setting `initial=true` *without* sending down all
+            # the state/metadata again, which is what the proxy does. We should
+            # update the protocol to do something less silly.
+            initial = True
+
+            mutable_per_connection_state.previous_room_configs[room_id] = (
+                RoomSyncConfig(
+                    timeline_limit=len(timeline_events),
+                    required_state_map=room_sync_config.required_state_map,
+                )
+            )
+        elif prev_room_sync_config is not None:
+            # If the result isn't limited then we don't need to record that the
+            # timeline_limit has been reduced, as the *effective* timeline limit
+            # (i.e. the amount of timeline we have previously sent) is at least
+            # the previous timeline limit.
+            #
+            # This is to handle the case where the timeline limit e.g. goes from
+            # 10 to 5 to 10 again (without any timeline gaps), where there's no
+            # point sending down extra events when the timeline limit is
+            # increased as the client already has the 10 previous events.
+            # However, if is a gap (i.e. limited is True), then we *do* need to
+            # record the reduced timeline.
+            if (
+                limited
+                and prev_room_sync_config.timeline_limit
+                > room_sync_config.timeline_limit
+            ):
+                mutable_per_connection_state.previous_room_configs[room_id] = (
+                    RoomSyncConfig(
+                        timeline_limit=len(timeline_events),
+                        required_state_map=room_sync_config.required_state_map,
+                    )
+                )
+
+            # TODO: Record changes in required_state.
+
+        else:
+            mutable_per_connection_state.previous_room_configs[room_id] = (
+                room_sync_config
+            )
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
