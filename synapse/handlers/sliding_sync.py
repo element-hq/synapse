@@ -585,7 +585,7 @@ class SlidingSyncHandler:
         # rooms to get them some results sooner but will end up taking the same
         # amount of time (more with round-trips and re-processing) in the end to
         # get everything again.
-        per_connection_state = await self.connection_store.get_per_connection_state(
+        previous_connection_state = await self.connection_store.get_per_connection_state(
             sync_config, from_token
         )
 
@@ -3123,7 +3123,13 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
 
 @attr.s(auto_attribs=True)
 class PerConnectionState:
-    """The per-connection state
+    """The per-connection state. A snapshot of what we've sent down the connection before.
+    
+    Currently, we track whether we've sent down various aspects of a given room before.
+    
+    We use the `rooms` field to store the position in the events stream for each room that we've previously sent to the client before. On the next request that includes the room, we can then send only what's changed since that recorded position.
+    
+    Same goes for the `receipts` field so we only need to send the new receipts since the last time you made a sync request.
 
     Attributes:
         rooms: The status of each room for the events stream.
