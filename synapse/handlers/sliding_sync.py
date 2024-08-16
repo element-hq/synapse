@@ -3042,7 +3042,7 @@ HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class RoomStatusesForStream:
+class RoomStatusMap:
     """For a given stream, e.g. events, records what we have or have not sent
     down for that stream in a given room."""
 
@@ -3053,21 +3053,21 @@ class RoomStatusesForStream:
         """Return whether we have previously sent the room down"""
         return self._statuses.get(room_id, HAVE_SENT_ROOM_NEVER)
 
-    def get_mutable(self) -> "MutableRoomStatusesForStream":
+    def get_mutable(self) -> "MutableRoomStatusMap":
         """Get a mutable copy of this state."""
-        return MutableRoomStatusesForStream(
+        return MutableRoomStatusMap(
             statuses=self._statuses,
         )
 
-    def copy(self) -> "RoomStatusesForStream":
+    def copy(self) -> "RoomStatusMap":
         """Make a copy of the class. Useful for converting from a mutable to
         immutable version."""
 
-        return RoomStatusesForStream(statuses=dict(self._statuses))
+        return RoomStatusMap(statuses=dict(self._statuses))
 
 
-class MutableRoomStatusesForStream(RoomStatusesForStream):
-    """A mutable version of `RoomStatusesForStream`"""
+class MutableRoomStatusMap(RoomStatusMap):
+    """A mutable version of `RoomStatusMap`"""
 
     _statuses: typing.ChainMap[str, HaveSentRoom]
 
@@ -3134,7 +3134,7 @@ class PerConnectionState:
         rooms: The status of each room for the events stream.
     """
 
-    rooms: RoomStatusesForStream = attr.Factory(RoomStatusesForStream)
+    rooms: RoomStatusMap = attr.Factory(RoomStatusMap)
 
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
@@ -3147,7 +3147,7 @@ class PerConnectionState:
 class MutablePerConnectionState(PerConnectionState):
     """A mutable version of `PerConnectionState`"""
 
-    rooms: MutableRoomStatusesForStream
+    rooms: MutableRoomStatusMap
 
     def has_updates(self) -> bool:
         return bool(self.rooms.get_updates())
