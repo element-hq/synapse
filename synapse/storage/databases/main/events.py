@@ -1261,8 +1261,9 @@ class PersistEventsStore:
                     # rejects the invite (leaves the room), we will end up here.
                     #
                     # In these cases, we should inherit the meta data from the previous
-                    # snapshot. When using sliding sync filters, this will prevent the
-                    # room from disappearing/appearing just because you left the room.
+                    # snapshot (handled by the default `ON CONFLICT ... DO UPDATE SET`).
+                    # When using sliding sync filters, this will prevent the room from
+                    # disappearing/appearing just because you left the room.
                     #
                     # Ideally, we could additionally assert that we're only here for
                     # valid non-join membership transitions.
