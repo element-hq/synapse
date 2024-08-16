@@ -2774,3 +2774,634 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 is_encrypted=False,
             ),
         )
+
+    def test_membership_snapshots_background_update_local_invite(self) -> None:
+        """
+        Test that the background update for `sliding_sync_membership_snapshots`
+        backfills missing rows for invite memberships.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_no_info = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        room_id_with_info = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+
+        space_room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE}
+            },
+        )
+        # Add a room name
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {"name": "my super duper space"},
+            tok=user2_tok,
+        )
+
+        # Invite user1 to the rooms
+        user1_invite_room_id_no_info_response = self.helper.invite(
+            room_id_no_info, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invite_room_id_with_info_response = self.helper.invite(
+            room_id_with_info, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+        user1_invite_space_room_id_response = self.helper.invite(
+            space_room_id, src=user2_id, targ=user1_id, tok=user2_tok
+        )
+
+        # Have user2 leave the rooms to make sure that our background update is not just
+        # reading from `current_state_events`. For invite/knock memberships, we should
+        # be reading from the stripped state on the invite/knock event itself.
+        self.helper.leave(room_id_no_info, user2_id, tok=user2_tok)
+        self.helper.leave(room_id_with_info, user2_id, tok=user2_tok)
+        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
+        # Check to make sure we actually don't have any `current_state_events` for the rooms
+        current_state_check_rows = self.get_success(
+            self.store.db_pool.simple_select_many_batch(
+                table="current_state_events",
+                column="room_id",
+                iterable=[room_id_no_info, room_id_with_info, space_room_id],
+                retcols=("event_id",),
+                keyvalues={},
+                desc="check current_state_events in test",
+            )
+        )
+        self.assertEqual(len(current_state_check_rows), 0)
+
+        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_membership_snapshots",
+                column="room_id",
+                iterable=(room_id_no_info, room_id_with_info, space_room_id),
+                keyvalues={},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_invite",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Make sure the table is populated
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                # The invite memberships for user1
+                (room_id_no_info, user1_id),
+                (room_id_with_info, user1_id),
+                (space_room_id, user1_id),
+                # The leave memberships for user2
+                (room_id_no_info, user2_id),
+                (room_id_with_info, user2_id),
+                (space_room_id, user2_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id_no_info, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_no_info,
+                user_id=user1_id,
+                membership_event_id=user1_invite_room_id_no_info_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_invite_room_id_no_info_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_with_info, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_with_info,
+                user_id=user1_id,
+                membership_event_id=user1_invite_room_id_with_info_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_invite_room_id_with_info_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=user1_invite_space_room_id_response["event_id"],
+                membership=Membership.INVITE,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        user1_invite_space_room_id_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
+
+    def test_membership_snapshots_background_update_remote_invite(
+        self,
+    ) -> None:
+        """
+        Test that the background update for `sliding_sync_membership_snapshots`
+        backfills missing rows for remote invites (out-of-band memberships).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_unknown_state, room_id_unknown_state_invite_event = (
+            self._create_remote_invite_room_for_user(user1_id, None)
+        )
+
+        room_id_no_info, room_id_no_info_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                ],
+            )
+        )
+
+        room_id_with_info, room_id_with_info_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper room",
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        space_room_id, space_room_id_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                            EventContentFields.ROOM_TYPE: RoomTypes.SPACE,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper space",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_membership_snapshots",
+                column="room_id",
+                iterable=(
+                    room_id_unknown_state,
+                    room_id_no_info,
+                    room_id_with_info,
+                    space_room_id,
+                ),
+                keyvalues={},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_invite",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Make sure the table is populated
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                # The invite memberships for user1
+                (room_id_unknown_state, user1_id),
+                (room_id_no_info, user1_id),
+                (room_id_with_info, user1_id),
+                (space_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_unknown_state, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_unknown_state,
+                user_id=user1_id,
+                membership_event_id=room_id_unknown_state_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=room_id_unknown_state_invite_event.internal_metadata.stream_ordering,
+                has_known_state=False,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id_no_info, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_no_info,
+                user_id=user1_id,
+                membership_event_id=room_id_no_info_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=room_id_no_info_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_with_info, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_with_info,
+                user_id=user1_id,
+                membership_event_id=room_id_with_info_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=room_id_with_info_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=space_room_id_invite_event.event_id,
+                membership=Membership.INVITE,
+                event_stream_ordering=space_room_id_invite_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )
+
+    def test_membership_snapshots_background_update_remote_invite_rejections_and_retractions(
+        self,
+    ) -> None:
+        """
+        Test that the background update for `sliding_sync_membership_snapshots`
+        backfills missing rows for remote invite rejections/retractions (out-of-band memberships).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create rooms with various levels of state that should appear in the table
+        #
+        room_id_unknown_state, room_id_unknown_state_invite_event = (
+            self._create_remote_invite_room_for_user(user1_id, None)
+        )
+
+        room_id_no_info, room_id_no_info_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                ],
+            )
+        )
+
+        room_id_with_info, room_id_with_info_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper room",
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.RoomEncryption,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        space_room_id, space_room_id_invite_event = (
+            self._create_remote_invite_room_for_user(
+                user1_id,
+                [
+                    StrippedStateEvent(
+                        type=EventTypes.Create,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_CREATOR: "@inviter:remote_server",
+                            EventContentFields.ROOM_VERSION: RoomVersions.V10.identifier,
+                            EventContentFields.ROOM_TYPE: RoomTypes.SPACE,
+                        },
+                    ),
+                    StrippedStateEvent(
+                        type=EventTypes.Name,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.ROOM_NAME: "my super duper space",
+                        },
+                    ),
+                ],
+            )
+        )
+
+        # Reject the remote invites.
+        # Also try retracting a remote invite.
+        room_id_unknown_state_leave_event_response = self.helper.leave(
+            room_id_unknown_state, user1_id, tok=user1_tok
+        )
+        room_id_no_info_leave_event = self._retract_remote_invite_for_user(
+            user_id=user1_id,
+            remote_room_id=room_id_no_info,
+        )
+        room_id_with_info_leave_event_response = self.helper.leave(
+            room_id_with_info, user1_id, tok=user1_tok
+        )
+        space_room_id_leave_event = self._retract_remote_invite_for_user(
+            user_id=user1_id,
+            remote_room_id=space_room_id,
+        )
+
+        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_membership_snapshots",
+                column="room_id",
+                iterable=(
+                    room_id_unknown_state,
+                    room_id_no_info,
+                    room_id_with_info,
+                    space_room_id,
+                ),
+                keyvalues={},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_invite",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Make sure the table is populated
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                # The invite memberships for user1
+                (room_id_unknown_state, user1_id),
+                (room_id_no_info, user1_id),
+                (room_id_with_info, user1_id),
+                (space_room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_unknown_state, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_unknown_state,
+                user_id=user1_id,
+                membership_event_id=room_id_unknown_state_leave_event_response[
+                    "event_id"
+                ],
+                membership=Membership.LEAVE,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        room_id_unknown_state_leave_event_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=False,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id_no_info, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_no_info,
+                user_id=user1_id,
+                membership_event_id=room_id_no_info_leave_event.event_id,
+                membership=Membership.LEAVE,
+                event_stream_ordering=room_id_no_info_leave_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get(
+                (room_id_with_info, user1_id)
+            ),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id_with_info,
+                user_id=user1_id,
+                membership_event_id=room_id_with_info_leave_event_response["event_id"],
+                membership=Membership.LEAVE,
+                event_stream_ordering=self.get_success(
+                    self.store.get_position_for_event(
+                        room_id_with_info_leave_event_response["event_id"]
+                    )
+                ).stream,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+            ),
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((space_room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=space_room_id,
+                user_id=user1_id,
+                membership_event_id=space_room_id_leave_event.event_id,
+                membership=Membership.LEAVE,
+                event_stream_ordering=space_room_id_leave_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=RoomTypes.SPACE,
+                room_name="my super duper space",
+                is_encrypted=False,
+            ),
+        )

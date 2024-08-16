@@ -727,7 +727,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                 user_id,
                 membership_event_id,
                 membership,
-                _membership_event_stream_ordering,
+                membership_event_stream_ordering,
                 is_outlier,
             ) in memberships_to_update_rows:
                 # We don't know how to handle `membership` values other than these. The
@@ -788,7 +788,12 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                                 AND event_stream_ordering < ?
                             ORDER BY event_stream_ordering DESC
                             LIMIT 1
-                            """
+                            """,
+                            (
+                                room_id,
+                                user_id,
+                                membership_event_stream_ordering,
+                            ),
                         )
                         row = txn.fetchone()
                         # We should see a corresponding previous invite/knock event
@@ -801,7 +806,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                         SELECT json FROM event_json
                         WHERE event_id = ?
                         """,
-                        (invite_or_knock_event_id),
+                        (invite_or_knock_event_id,),
                     )
                     row = txn.fetchone()
                     # We should find a corresponding event
