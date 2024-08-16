@@ -3207,8 +3207,7 @@ class SlidingSyncConnectionStore:
 
         connection_position = from_token.connection_position
         if connection_position == 0:
-            # The '0' values is a special value to indicate there is no
-            # per-connection state.
+            # Initial sync (request without a `from_token`) starts at `0` so there is no existing per-connection state
             return PerConnectionState()
 
         conn_key = self._get_connection_key(sync_config)
