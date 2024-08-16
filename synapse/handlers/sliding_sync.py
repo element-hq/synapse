@@ -2946,6 +2946,8 @@ class SlidingSyncHandler:
             # need to use the from token from the room status.
             if previously_rooms:
                 for room_id, receipt_token in previously_rooms.items():
+                    # TODO: Limit the number of receipts we're about to send down
+                    # for the room, if its too many we should TODO
                     previously_receipts = (
                         await self.store.get_linearized_receipts_for_room(
                             room_id=room_id,
@@ -2955,8 +2957,10 @@ class SlidingSyncHandler:
                     )
                     fetched_receipts.extend(previously_receipts)
 
-            # For rooms we haven't previously sent down, we send all receipts
-            # from that room.
+            # For rooms we haven't previously sent down, we could send all receipts
+            # from that room but we only want to include receipts for events
+            # in the timeline to avoid bloating and blowing up the sync response
+            # as the number of users in the room increases. (this behavior is part of the spec)
             for room_id in initial_rooms:
                 room_result = actual_room_response_map.get(room_id)
                 if room_result is None:
@@ -2966,6 +2970,9 @@ class SlidingSyncHandler:
                     event.event_id for event in room_result.timeline_events
                 ]
 
+                # TODO: In the future, it would be good to fetch less receipts
+                # out of the database in the first place but we would need to
+                # add a new `event_id` index to `receipts_linearized`.
                 initial_receipts = await self.store.get_linearized_receipts_for_room(
                     room_id=room_id,
                     to_key=to_token.receipt_key,
@@ -3004,7 +3011,11 @@ class SlidingSyncHandler:
 
         if from_token:
             # Now find the set of rooms that may have receipts that we're not
-            # sending down.
+            # sending down. We only check in the rooms that we have previously
+            # returned receipts for, as if we haven't we'll handle those rooms
+            # correctly when they come into range anyway. (i.e. we only want to
+            # transition `LIVE` rooms to `PREVIOUSLY` rooms, so only pick out
+            # the live rooms)
             rooms_no_receipts = (
                 previous_connection_state.receipts._statuses.keys() - relevant_room_ids
             )
