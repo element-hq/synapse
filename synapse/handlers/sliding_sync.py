@@ -2493,6 +2493,9 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
+            per_connection_state: The current per-connection state
+            mutable_per_connection_state: A mutable copy of the per-connection
+                state, used to record updates to the state.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
@@ -2871,6 +2874,9 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
+            per_connection_state: The current per-connection state
+            mutable_per_connection_state: A mutable copy of the per-connection
+                state, used to record updates to the state.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
