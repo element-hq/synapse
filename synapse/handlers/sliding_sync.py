@@ -3088,10 +3088,9 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
     def record_sent_rooms(self, room_ids: StrCollection) -> None:
         """Record that we have sent these rooms in the response"""
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id)
+            current_status = self._statuses.get(room_id, HAVE_SENT_ROOM_NEVER)
             if (
-                current_status is not None
-                and current_status.status == HaveSentRoomFlag.LIVE
+                current_status.status == HaveSentRoomFlag.LIVE
             ):
                 continue
 
@@ -3114,8 +3113,8 @@ class MutableRoomStatusesForStream(RoomStatusesForStream):
         #     sent anything down this time either so we leave it as NEVER.
 
         for room_id in room_ids:
-            current_status = self._statuses.get(room_id)
-            if current_status is None or current_status.status != HaveSentRoomFlag.LIVE:
+            current_status = self._statuses.get(room_id, HAVE_SENT_ROOM_NEVER)
+            if current_status.status != HaveSentRoomFlag.LIVE:
                 continue
 
             self._statuses[room_id] = HaveSentRoom.previously(from_token.room_key)
