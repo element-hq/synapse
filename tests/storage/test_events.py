@@ -35,7 +35,7 @@ from synapse.federation.federation_base import event_from_pdu_json
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
+from synapse.storage.databases.state.bg_updates import _BackgroundUpdates
 from synapse.types import StateMap
 from synapse.util import Clock
 

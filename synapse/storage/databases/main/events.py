@@ -1194,7 +1194,7 @@ class PersistEventsStore:
             if ev_type == EventTypes.Member
         }
 
-        # We now update `sliding_sync_membership_snapshots`.
+        # Handle updating the `sliding_sync_membership_snapshots` table
         #
         # This would only happen if someone was state reset out of the room
         if to_delete:
@@ -1674,7 +1674,7 @@ class PersistEventsStore:
             events_and_contexts: The events being persisted
         """
 
-        # Handle updating `sliding_sync_joined_rooms`
+        # Handle updating the `sliding_sync_joined_rooms` table.
         room_id_to_stream_ordering_map: Dict[str, int] = {}
         room_id_to_bump_stamp_map: Dict[str, int] = {}
         for event, _ in events_and_contexts:
@@ -2390,7 +2390,8 @@ class PersistEventsStore:
                     },
                 )
 
-                # Update the `sliding_sync_membership_snapshots` table
+                # Handle updating the `sliding_sync_membership_snapshots` table
+                # (out-of-band membership events only)
                 #
                 raw_stripped_state_events = None
                 if event.membership == Membership.INVITE:
