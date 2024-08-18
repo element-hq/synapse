@@ -105,7 +105,7 @@ class SCIMServlet(RestServlet):
 
     def make_error_response(
         self, status: Union[int, HTTPStatus], message: str
-    ) -> Error:
+    ) -> Tuple[Union[int, HTTPStatus], JsonDict]:
         return (
             status,
             Error(
@@ -185,7 +185,7 @@ class UserServlet(SCIMServlet):
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
+    ) -> Tuple[Union[int, HTTPStatus], JsonDict]:
         await assert_requester_is_admin(self.auth, request)
         try:
             user = await self.get_scim_user(user_id)
@@ -199,7 +199,9 @@ class UserServlet(SCIMServlet):
         except SynapseError as exc:
             return self.make_error_response(exc.code, exc.msg)
 
-    async def on_DELETE(self, request: SynapseRequest, user_id: str) -> Tuple[int, str]:
+    async def on_DELETE(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[Union[int, HTTPStatus], Union[str, JsonDict]]:
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         deactivate_account_handler = self.hs.get_deactivate_account_handler()
@@ -291,11 +293,11 @@ class UserListServlet(SCIMServlet):
             req = self.parse_search_request(request)
 
             items, total = await self.store.get_users_paginate(
-                start=req.start_index - 1,
-                limit=req.count,
+                start=(req.start_index or 0) - 1,
+                limit=req.count or 0,
             )
             users = [await self.get_scim_user(item.name) for item in items]
-            list_response = ListResponse.of(User)(
+            list_response = ListResponse[User](
                 start_index=req.start_index,
                 items_per_page=req.count,
                 total_results=total,
@@ -384,25 +386,25 @@ class ServiceProviderConfigServlet(SCIMServlet):
             ),
             documentation_uri="https://element-hq.github.io/synapse/latest/admin_api/scim_api.html",
             patch=Patch(supported=False),
-            bulk=Bulk(supported=False, maxOperations=0, maxPayloadSize=0),
-            changePassword=ChangePassword(supported=True),
-            filter=Filter(supported=False, maxResults=0),
+            bulk=Bulk(supported=False, max_operations=0, max_payload_size=0),
+            change_password=ChangePassword(supported=True),
+            filter=Filter(supported=False, max_results=0),
             sort=Sort(supported=False),
             etag=ETag(supported=False),
-            authenticationSchemes=[
+            authentication_schemes=[
                 AuthenticationScheme(
                     name="OAuth Bearer Token",
                     description="Authentication scheme using the OAuth Bearer Token Standard",
-                    specUri="http://www.rfc-editor.org/info/rfc6750",
-                    documentationUri="https://element-hq.github.io/synapse/latest/openid.html",
+                    spec_uri="http://www.rfc-editor.org/info/rfc6750",
+                    documentation_uri="https://element-hq.github.io/synapse/latest/openid.html",
                     type="oauthbearertoken",
                     primary=True,
                 ),
                 AuthenticationScheme(
                     name="HTTP Basic",
                     description="Authentication scheme using the HTTP Basic Standard",
-                    specUri="http://www.rfc-editor.org/info/rfc2617",
-                    documentationUri="https://element-hq.github.io/synapse/latest/modules/password_auth_provider_callbacks.html",
+                    spec_uri="http://www.rfc-editor.org/info/rfc2617",
+                    documentation_uri="https://element-hq.github.io/synapse/latest/modules/password_auth_provider_callbacks.html",
                     type="httpbasic",
                 ),
             ],
@@ -441,13 +443,14 @@ class SchemaListServlet(BaseSchemaServlet):
         """Return the list of schemas provided by the synapse SCIM implementation."""
 
         req = self.parse_search_request(request)
-        stop_index = req.start_index + req.count if req.count else None
+        start_index = req.start_index or 0
+        stop_index = start_index + req.count if req.count else None
         resources = list(self.schemas.values())
-        response = ListResponse.of(Schema)(
+        response = ListResponse[Schema](
             total_results=len(resources),
             items_per_page=req.count or len(resources),
-            start_index=req.start_index,
-            resources=resources[req.start_index - 1 : stop_index],
+            start_index=start_index,
+            resources=resources[start_index - 1 : stop_index],
         )
         return HTTPStatus.OK, response.model_dump(
             scim_ctx=Context.RESOURCE_QUERY_RESPONSE
@@ -480,7 +483,7 @@ class BaseResourceTypeServlet(SCIMServlet):
             name="User",
             endpoint="/Users",
             description="User accounts",
-            schema="urn:ietf:params:scim:schemas:core:2.0:User",
+            schema_="urn:ietf:params:scim:schemas:core:2.0:User",
             meta=Meta(
                 resource_type="ResourceType",
                 location=(
@@ -497,15 +500,16 @@ class ResourceTypeListServlet(BaseResourceTypeServlet):
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         req = self.parse_search_request(request)
-        stop_index = req.start_index + req.count if req.count else None
+        start_index = req.start_index or 0
+        stop_index = start_index + req.count if req.count else None
         resources = [
             self.resource_type.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE)
         ]
-        response = ListResponse.of(ResourceType)(
+        response = ListResponse[ResourceType](
             total_results=len(resources),
             items_per_page=req.count or len(resources),
-            start_index=req.start_index,
-            resources=resources[req.start_index - 1 : stop_index],
+            start_index=start_index,
+            resources=resources[start_index - 1 : stop_index],
         )
         return HTTPStatus.OK, response.model_dump(
             scim_ctx=Context.RESOURCE_QUERY_RESPONSE
