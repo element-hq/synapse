@@ -2493,9 +2493,9 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            previous_connection_state: The current per-connection state
+            previous_connection_state: Snapshot of the current per-connection state
             new_per_connection_state: A mutable copy of the per-connection
-                state, used to record updates to the state.
+                state, used to record updates to the state during this request.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
             actual_room_ids: The actual room IDs in the the Sliding Sync response.
@@ -2911,11 +2911,11 @@ class SlidingSyncHandler:
                     initial_rooms.add(room_id)
                     continue
 
-                # If we're sending down the room again for some reason, we
+                # If we're sending down the room from scratch again for some reason, we
                 # should always resend the receipts as well (regardless of if
                 # we've sent them down before). This is to mimic the behaviour
-                # of what happens on initial load, where you get a chunk of
-                # timeline with all the receipts for the room.
+                # of what happens on initial sync, where you get a chunk of
+                # timeline with all of the corresponding receipts for the events in the timeline.
                 room_result = actual_room_response_map.get(room_id)
                 if room_result is not None and room_result.initial:
                     initial_rooms.add(room_id)
@@ -3015,12 +3015,14 @@ class SlidingSyncHandler:
         new_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
 
         if from_token:
-            # Now find the set of rooms that may have receipts that we're not
-            # sending down. We only check in the rooms that we have previously
-            # returned receipts for, as if we haven't we'll handle those rooms
-            # correctly when they come into range anyway. (i.e. we only want to
-            # transition `LIVE` rooms to `PREVIOUSLY` rooms, so only pick out
-            # the live rooms)
+            # Now find the set of rooms that may have receipts that we're not sending
+            # down. We only need to check rooms that we have previously returned
+            # receipts for (in `previous_connection_state`) because we only care about
+            # updating `LIVE` rooms to `PREVIOUSLY`. The `PREVIOUSLY` rooms will just
+            # stay pointing at their previous position so we don't need to waste time
+            # checking those and since we default to `NEVER`, rooms that were `NEVER`
+            # sent before don't need to be recorded as we'll handle them correctly when
+            # they come into range for the first time.
             rooms_no_receipts = [
                 room_id
                 for room_id, room_status in previous_connection_state.receipts._statuses.items()
