@@ -64,6 +64,7 @@ class VersionsRestServlet(RestServlet):
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         msc3881_enabled = self.config.experimental.msc3881_enabled
+        msc3575_enabled = self.config.experimental.msc3575_enabled
 
         if self.auth.has_access_token(request):
             requester = await self.auth.get_user_by_req(
@@ -76,6 +77,9 @@ class VersionsRestServlet(RestServlet):
 
             msc3881_enabled = await self.store.is_feature_enabled(
                 user_id, ExperimentalFeature.MSC3881
+            )
+            msc3575_enabled = await self.store.is_feature_enabled(
+                user_id, ExperimentalFeature.MSC3575
             )
 
         return (
@@ -169,6 +173,8 @@ class VersionsRestServlet(RestServlet):
                     ),
                     # MSC4151: Report room API (Client-Server API)
                     "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
+                    # Simplified sliding sync
+                    "org.matrix.simplified_msc3575": msc3575_enabled,
                 },
             },
         )
