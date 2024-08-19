@@ -3469,8 +3469,8 @@ class SlidingSyncConnectionStore:
 
         connection_position = from_token.connection_position
         if connection_position == 0:
-            # The '0' values is a special value to indicate there is no
-            # per-connection state.
+            # Initial sync (request without a `from_token`) starts at `0` so
+            # there is no existing per-connection state
             return PerConnectionState()
 
         conn_key = self._get_connection_key(sync_config)
@@ -3489,6 +3489,11 @@ class SlidingSyncConnectionStore:
         from_token: Optional[SlidingSyncStreamToken],
         new_connection_state: MutablePerConnectionState,
     ) -> int:
+        """Record updated per-connection state, returning the connection
+        position associated with the new state.
+        If there are no changes to the state this may return the same token as
+        the existing per-connection state.
+        """
         prev_connection_token = 0
         if from_token is not None:
             prev_connection_token = from_token.connection_position
@@ -3504,6 +3509,8 @@ class SlidingSyncConnectionStore:
         new_store_token = prev_connection_token + 1
         sync_statuses.pop(new_store_token, None)
 
+        # We copy the `MutablePerConnectionState` so that the inner `ChainMap`s
+        # don't grow forever.
         sync_statuses[new_store_token] = new_connection_state.copy()
 
         return new_store_token
