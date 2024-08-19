@@ -2012,11 +2012,15 @@ class SlidingSyncHandler:
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
         #
-        # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+        # Relevant spec issue:
+        # https://github.com/matrix-org/matrix-spec/issues/1917
         #
-        # We also need to check if the timeline limit has increased, if so we ignore
-        # the from bound for the timeline to send down a larger chunk of
-        # history.
+        # XXX: Odd behavior - We also check if the `timeline_limit` has
+        # increased, if so we ignore the from bound for the timeline to send
+        # down a larger chunk of history with `initial: True`. This is matches
+        # the behavior of the Sliding Sync proxy and is what e.g. ElementX
+        # currently expects. In future this behavior is almost certianly going
+        # to change
         #
         # TODO: Also handle changes to `required_state`
         from_bound = None
@@ -2042,7 +2046,8 @@ class SlidingSyncHandler:
             prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
             if prev_room_sync_config is not None:
                 # Check if the timeline limit has increased, if so ignore the
-                # timeline bound and record the change.
+                # timeline bound and record the change (see "XXX: Odd behavior"
+                # above).
                 if (
                     prev_room_sync_config.timeline_limit
                     < room_sync_config.timeline_limit
@@ -2496,7 +2501,8 @@ class SlidingSyncHandler:
             # FIXME: We signal the fact that we're sending down more events to
             # the client by setting `initial=true` *without* sending down all
             # the state/metadata again, which is what the proxy does. We should
-            # update the protocol to do something less silly.
+            # update the protocol to do something less silly (see "XXX: Odd
+            # behavior" above).
             initial = True
 
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
