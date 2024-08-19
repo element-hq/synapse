@@ -2048,16 +2048,8 @@ class SlidingSyncHandler:
                     < room_sync_config.timeline_limit
                 ):
                     ignore_timeline_bound = True
-                    new_connection_state.room_configs[room_id] = room_sync_config
 
-                if (
-                    room_status.status != HaveSentRoomFlag.LIVE
-                    and prev_room_sync_config.timeline_limit
-                    > room_sync_config.timeline_limit
-                ):
-                    new_connection_state.room_configs[room_id] = room_sync_config
-
-                # TODO: Record changes in required_state.
+                # TODO: Check for changes in `required_state``
 
         log_kv(
             {
