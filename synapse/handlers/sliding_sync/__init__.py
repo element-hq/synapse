@@ -208,7 +208,7 @@ class SlidingSyncHandler:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
-        self.connection_store = SlidingSyncConnectionStore()
+        self.connection_store = SlidingSyncConnectionStore(self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
 
     async def wait_for_sync_for_user(
