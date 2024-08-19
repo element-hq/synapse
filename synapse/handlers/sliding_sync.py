@@ -2858,6 +2858,7 @@ class SlidingSyncHandler:
             account_data_by_room_map=account_data_by_room_map,
         )
 
+    @trace
     async def get_receipts_extension_response(
         self,
         sync_config: SlidingSyncConfig,
@@ -2966,24 +2967,25 @@ class SlidingSyncHandler:
             # from that room but we only want to include receipts for events
             # in the timeline to avoid bloating and blowing up the sync response
             # as the number of users in the room increases. (this behavior is part of the spec)
-            for room_id in initial_rooms:
-                room_result = actual_room_response_map.get(room_id)
-                if room_result is None:
-                    continue
-
-                relevant_event_ids = [
-                    event.event_id for event in room_result.timeline_events
-                ]
-
-                # TODO: In the future, it would be good to fetch less receipts
-                # out of the database in the first place but we would need to
-                # add a new `event_id` index to `receipts_linearized`.
-                initial_receipts = await self.store.get_linearized_receipts_for_room(
-                    room_id=room_id,
+            initial_rooms = [
+                room_id
+                for room_id in initial_rooms
+                if room_id in actual_room_response_map
+            ]
+            if initial_rooms:
+                initial_receipts = await self.store.get_linearized_receipts_for_rooms(
+                    room_ids=initial_rooms,
                     to_key=to_token.receipt_key,
                 )
 
                 for receipt in initial_receipts:
+                    relevant_event_ids = [
+                        event.event_id
+                        for event in actual_room_response_map[
+                            receipt["room_id"]
+                        ].timeline_events
+                    ]
+
                     content = {
                         event_id: content_value
                         for event_id, content_value in receipt["content"].items()
