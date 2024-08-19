@@ -3441,7 +3441,7 @@ class SlidingSyncConnectionStore:
             to mapping of room ID to `HaveSentRoom`.
     """
 
-    # `(user_id, conn_id)` -> `token` -> `PerConnectionState`
+    # `(user_id, conn_id)` -> `connection_position` -> `PerConnectionState`
     _connections: Dict[Tuple[str, str], Dict[int, PerConnectionState]] = attr.Factory(
         dict
     )
