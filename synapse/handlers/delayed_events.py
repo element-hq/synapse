@@ -175,8 +175,7 @@ class DelayedEventsHandler:
         state_key: Optional[str],
         origin_server_ts: Optional[int],
         content: JsonDict,
-        delay: Optional[int],
-        parent_id: Optional[str],
+        delay: int,
     ) -> str:
         """
         Creates a new delayed event.
@@ -190,29 +189,21 @@ class DelayedEventsHandler:
                 If None, the timestamp will be the actual time when the event is sent.
             content: The content of the event to be sent.
             delay: How long (in milliseconds) to wait before automatically sending the event.
-                If None, the event won't be automatically sent (allowed only when parent_id is set).
-            parent_id: The ID of the delayed event this one is grouped with.
-                May only refer to a delayed event that has no parent itself.
-                When the parent event is sent or cancelled, this one is cancelled;
-                and when this event is sent, the parent is cancelled.
 
         Returns:
             The ID of the added delayed event.
         """
-        if delay is not None:
-            max_delay = self._config.experimental.msc4140_max_delay
-            if delay > max_delay:
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    "The requested delay exceeds the allowed maximum.",
-                    Codes.UNKNOWN,
-                    {
-                        "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
-                        "org.matrix.msc4140.max_delay": max_delay,
-                    },
-                )
-        # Callers should ensure that at least one of these are set
-        assert delay or parent_id
+        max_delay = self._config.experimental.msc4140_max_delay
+        if delay > max_delay:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "The requested delay exceeds the allowed maximum.",
+                Codes.UNKNOWN,
+                {
+                    "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
+                    "org.matrix.msc4140.max_delay": max_delay,
+                },
+            )
 
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
@@ -240,11 +231,9 @@ class DelayedEventsHandler:
             origin_server_ts=origin_server_ts,
             content=content,
             delay=delay,
-            parent_id=parent_id,
         )
 
-        if delay is not None:
-            self._schedule(delay_id, user_localpart, Delay(delay))
+        self._schedule(delay_id, user_localpart, Delay(delay))
 
         return delay_id
 
@@ -277,10 +266,7 @@ class DelayedEventsHandler:
 
         async with self._get_delay_context(delay_id, user_localpart):
             if enum_action == _UpdateDelayedEventAction.CANCEL:
-                for removed_timeout_delay_id in await self._store.remove(
-                    delay_id, user_localpart
-                ):
-                    self._unschedule(removed_timeout_delay_id, user_localpart)
+                self._unschedule(delay_id, user_localpart)
 
             elif enum_action == _UpdateDelayedEventAction.RESTART:
                 delay = await self._store.restart(
@@ -293,12 +279,9 @@ class DelayedEventsHandler:
                 self._schedule(delay_id, user_localpart, delay)
 
             elif enum_action == _UpdateDelayedEventAction.SEND:
-                args, removed_timeout_delay_ids = await self._store.pop_event(
-                    delay_id, user_localpart
-                )
+                args = await self._store.pop_event(delay_id, user_localpart)
 
-                for timeout_delay_id in removed_timeout_delay_ids:
-                    self._unschedule(timeout_delay_id, user_localpart)
+                self._unschedule(delay_id, user_localpart)
                 await self._send_event(user_localpart, *args)
 
     async def _send_on_timeout(
@@ -308,9 +291,7 @@ class DelayedEventsHandler:
 
         async with self._get_delay_context(delay_id, user_localpart):
             try:
-                args, removed_timeout_delay_ids = await self._store.pop_event(
-                    delay_id, user_localpart
-                )
+                args = await self._store.pop_event(delay_id, user_localpart)
             except NotFoundError:
                 logger.debug(
                     "delay_id %s for local user %s was removed from the DB before it timed out (or was always missing)",
@@ -319,9 +300,6 @@ class DelayedEventsHandler:
                 )
                 return
 
-            removed_timeout_delay_ids.remove(delay_id)
-            for timeout_delay_id in removed_timeout_delay_ids:
-                self._unschedule(timeout_delay_id, user_localpart)
             await self._send_event(user_localpart, *args)
 
     def _schedule(

@@ -292,8 +292,7 @@ class RoomStateEventRestServlet(RestServlet):
             origin_server_ts = parse_integer(request, "ts")
 
         delay = parse_integer(request, "org.matrix.msc4140.delay")
-        parent_id = parse_string(request, "org.matrix.msc4140.parent_delay_id")
-        if delay is not None or parent_id is not None:
+        if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
                 room_id=room_id,
@@ -302,7 +301,6 @@ class RoomStateEventRestServlet(RestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
-                parent_id=parent_id,
             )
 
             set_tag("delay_id", delay_id)
@@ -382,8 +380,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             origin_server_ts = parse_integer(request, "ts")
 
         delay = parse_integer(request, "org.matrix.msc4140.delay")
-        parent_id = parse_string(request, "org.matrix.msc4140.parent_delay_id")
-        if delay is not None or parent_id is not None:
+        if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
                 room_id=room_id,
@@ -392,7 +389,6 @@ class RoomSendEventRestServlet(TransactionRestServlet):
                 origin_server_ts=origin_server_ts,
                 content=content,
                 delay=delay,
-                parent_id=parent_id,
             )
 
             set_tag("delay_id", delay_id)

@@ -20,6 +20,7 @@ CREATE TABLE delayed_events (
 
     delay_id TEXT NOT NULL,
     user_localpart TEXT NOT NULL,
+    delay BIGINT NOT NULL,
     running_since BIGINT NOT NULL,
     room_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
@@ -31,22 +32,3 @@ CREATE TABLE delayed_events (
 
 CREATE INDEX delayed_events_room_state_event_idx ON delayed_events (room_id, event_type, state_key) WHERE state_key IS NOT NULL;
 CREATE INDEX delayed_events_user_idx ON delayed_events (user_localpart);
-
-CREATE TABLE delayed_event_timeouts (
-    delay_rowid INTEGER PRIMARY KEY
-        REFERENCES delayed_events (delay_rowid) ON DELETE CASCADE,
-    delay BIGINT NOT NULL
-);
-
-CREATE TABLE delayed_event_parents (
-    delay_rowid INTEGER PRIMARY KEY
-        REFERENCES delayed_event_timeouts (delay_rowid) ON DELETE CASCADE
-);
-
-CREATE TABLE delayed_event_children (
-    child_rowid INTEGER PRIMARY KEY
-        REFERENCES delayed_events (delay_rowid) ON DELETE CASCADE,
-    parent_rowid INTEGER NOT NULL
-        REFERENCES delayed_event_parents (delay_rowid) ON DELETE CASCADE,
-    CHECK (child_rowid <> parent_rowid)
-);
