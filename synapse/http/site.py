@@ -658,7 +658,7 @@ class SynapseSite(ProxySite):
         )
 
         self.site_tag = site_tag
-        self.reactor = reactor
+        self.reactor: ISynapseReactor = reactor
 
         assert config.http_options is not None
         proxied = config.http_options.x_forwarded

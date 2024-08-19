@@ -1,0 +1,1 @@
+Fix fetching federation signing keys from servers that omit `old_verify_keys`. Contributed by @tulir @ Beeper.

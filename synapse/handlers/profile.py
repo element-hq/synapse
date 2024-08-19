@@ -74,6 +74,17 @@ class ProfileHandler:
         self._third_party_rules = hs.get_module_api_callbacks().third_party_event_rules
 
     async def get_profile(self, user_id: str, ignore_backoff: bool = True) -> JsonDict:
+        """
+        Get a user's profile as a JSON dictionary.
+
+        Args:
+            user_id: The user to fetch the profile of.
+            ignore_backoff: True to ignore backoff when fetching over federation.
+
+        Returns:
+            A JSON dictionary. For local queries this will include the displayname and avatar_url
+            fields. For remote queries it may contain arbitrary information.
+        """
         target_user = UserID.from_string(user_id)
 
         if self.hs.is_mine(target_user):
@@ -107,6 +118,15 @@ class ProfileHandler:
                 raise e.to_synapse_error()
 
     async def get_displayname(self, target_user: UserID) -> Optional[str]:
+        """
+        Fetch a user's display name from their profile.
+
+        Args:
+            target_user: The user to fetch the display name of.
+
+        Returns:
+            The user's display name or None if unset.
+        """
         if self.hs.is_mine(target_user):
             try:
                 displayname = await self.store.get_profile_displayname(target_user)
@@ -203,6 +223,15 @@ class ProfileHandler:
             await self._update_join_states(requester, target_user)
 
     async def get_avatar_url(self, target_user: UserID) -> Optional[str]:
+        """
+        Fetch a user's avatar URL from their profile.
+
+        Args:
+            target_user: The user to fetch the avatar URL of.
+
+        Returns:
+            The user's avatar URL or None if unset.
+        """
         if self.hs.is_mine(target_user):
             try:
                 avatar_url = await self.store.get_profile_avatar_url(target_user)
@@ -403,6 +432,12 @@ class ProfileHandler:
     async def _update_join_states(
         self, requester: Requester, target_user: UserID
     ) -> None:
+        """
+        Update the membership events of each room the user is joined to with the
+        new profile information.
+
+        Note that this stomps over any custom display name or avatar URL in member events.
+        """
         if not self.hs.is_mine(target_user):
             return
 
