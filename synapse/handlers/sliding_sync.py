@@ -123,7 +123,9 @@ def get_rooms(from_token: SlidingSyncStreamToken) -> None:
         event_stream_change_cache_valid = ...
 
     if from_token and event_stream_change_cache_valid:
-        # Get all the rooms again, this call can be cached.
+        # Get all the rooms again, this call can be cached. Since we know we can
+        # use the stream change we don't have to hit the DB again to get the
+        # changed rooms.
         sql = """
             SELECT s.room_id, s.membership, s.event_stream_ordering
             FROM sliding_sync_membership_snapshots AS s
