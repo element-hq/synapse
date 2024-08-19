@@ -3069,6 +3069,9 @@ class RoomStatusMap:
 class MutableRoomStatusMap(RoomStatusMap):
     """A mutable version of `RoomStatusMap`"""
 
+    # We use a ChainMap here so that we can easily track what has been updated
+    # and what hasn't. Note that when we persist the per connection state this
+    # will get flattened to a normal dict (via calling `.copy()`)
     _statuses: typing.ChainMap[str, HaveSentRoom]
 
     def __init__(
@@ -3253,6 +3256,8 @@ class SlidingSyncConnectionStore:
         new_store_token = prev_connection_token + 1
         sync_statuses.pop(new_store_token, None)
 
+        # We copy the `MutablePerConnectionState` so that the inner `ChainMap`s
+        # don't grow forever.
         sync_statuses[new_store_token] = PerConnectionState(
             rooms=per_connection_state.rooms.copy(),
         )
