@@ -836,8 +836,6 @@ class SlidingSyncHandler:
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
-            set_tag("room_id", room_id)
-
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
