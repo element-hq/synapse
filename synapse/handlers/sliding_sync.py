@@ -3258,6 +3258,7 @@ class PerConnectionState:
 
     Attributes:
         rooms: The status of each room for the events stream.
+        receipts: The status of each room for the receipts stream.
     """
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
