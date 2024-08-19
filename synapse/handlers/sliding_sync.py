@@ -3362,6 +3362,8 @@ class PerConnectionState:
     Attributes:
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
+        previous_room_configs: Map from room_id to the `RoomSyncConfig` of all
+            rooms that we have previously sent down.
     """
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
