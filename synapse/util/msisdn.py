@@ -21,7 +21,7 @@
 
 import phonenumbers
 
-from synapse.api.errors import SynapseError, Codes
+from synapse.api.errors import Codes, SynapseError
 
 
 def phone_number_to_msisdn(country: str, number: str) -> str:
