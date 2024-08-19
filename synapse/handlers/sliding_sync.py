@@ -2500,7 +2500,7 @@ class SlidingSyncHandler:
             initial = True
 
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                timeline_limit=len(timeline_events),
+                timeline_limit=room_sync_config.timeline_limit,
                 required_state_map=room_sync_config.required_state_map,
             )
         elif prev_room_sync_config is not None:
@@ -2521,7 +2521,7 @@ class SlidingSyncHandler:
                 > room_sync_config.timeline_limit
             ):
                 new_connection_state.room_configs[room_id] = RoomSyncConfig(
-                    timeline_limit=len(timeline_events),
+                    timeline_limit=room_sync_config.timeline_limit,
                     required_state_map=room_sync_config.required_state_map,
                 )
 
