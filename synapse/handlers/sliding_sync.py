@@ -2510,10 +2510,14 @@ class SlidingSyncHandler:
                 required_state_map=room_sync_config.required_state_map,
             )
         elif prev_room_sync_config is not None:
-            # If the result isn't limited then we don't need to record that the
-            # timeline_limit has been reduced, as the *effective* timeline limit
-            # (i.e. the amount of timeline we have previously sent) is at least
-            # the previous timeline limit.
+            # If the result is limited then we need to record that the timeline
+            # limit has been reduced, as if the client later requests more
+            # timeline then we have more data to send.
+            #
+            # Otherwise we don't need to record that the timeline_limit has been
+            # reduced, as the *effective* timeline limit (i.e. the amount of
+            # timeline we have previously sent) is at least the previous
+            # timeline limit.
             #
             # This is to handle the case where the timeline limit e.g. goes from
             # 10 to 5 to 10 again (without any timeline gaps), where there's no
