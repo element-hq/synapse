@@ -609,16 +609,21 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self.assertEqual(room_response["limited"], True)
 
         # We only expect the last message at first
-        self.assertEqual(
-            [event["event_id"] for event in room_response["timeline"]],
-            message_events[-1:],
-            room_response["timeline"],
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[event["event_id"] for event in room_response["timeline"]],
+            expected_event_ids=message_events[-1:],
+            message=str(room_response["timeline"]),
         )
 
         # We also expect to get the create event state.
-        self.assertEqual(
-            [event["type"] for event in room_response["required_state"]],
-            [EventTypes.Create],
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        self._assertRequiredStateIncludes(
+            room_response["required_state"],
+            {state_map[(EventTypes.Create, "")]},
+            exact=True,
         )
 
         # Now do another request with a room subscription with an increased timeline limit
@@ -638,10 +643,11 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self.assertEqual(room_response["limited"], True)
 
         # Now we expect all the messages
-        self.assertEqual(
-            [event["event_id"] for event in room_response["timeline"]],
-            message_events,
-            room_response["timeline"],
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[event["event_id"] for event in room_response["timeline"]],
+            expected_event_ids=message_events,
+            message=str(room_response["timeline"]),
         )
 
         # We don't expect to get the room create down, as nothing has changed.
@@ -666,10 +672,11 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self.assertNotIn("initial", room_response)
         self.assertEqual(room_response["limited"], False)
 
-        self.assertEqual(
-            [event["event_id"] for event in room_response["timeline"]],
-            [latest_event_id],
-            room_response["timeline"],
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[event["event_id"] for event in room_response["timeline"]],
+            expected_event_ids=[latest_event_id],
+            message=str(room_response["timeline"]),
         )
 
         # Increasing the limit to what it was before also should not resend any
@@ -692,8 +699,9 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         self.assertNotIn("initial", room_response)
         self.assertEqual(room_response["limited"], False)
 
-        self.assertEqual(
-            [event["event_id"] for event in room_response["timeline"]],
-            [latest_event_id],
-            room_response["timeline"],
+        self._assertTimelineEqual(
+            room_id=room_id1,
+            actual_event_ids=[event["event_id"] for event in room_response["timeline"]],
+            expected_event_ids=[latest_event_id],
+            message=str(room_response["timeline"]),
         )
