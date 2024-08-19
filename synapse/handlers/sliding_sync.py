@@ -115,6 +115,65 @@ DEFAULT_BUMP_EVENT_TYPES = {
 }
 
 
+def get_rooms(from_token: SlidingSyncStreamToken) -> None:
+
+    # Check if the event stream change cache has entries from the `from_token`
+    # position, if it has we can use a fast path.
+    if from_token:
+        event_stream_change_cache_valid = ...
+
+    if from_token and event_stream_change_cache_valid:
+        # Get all the rooms again, this call can be cached.
+        sql = """
+            SELECT s.room_id, s.membership, s.event_stream_ordering
+            FROM sliding_sync_membership_snapshots AS s
+            WHERE s.user_id = ? AND NOT s.forgotten
+                AND (s.membership != 'leave' OR s.sender != s.user_id)
+                AND {filter}
+            ORDER BY s.stream_ordering DESC
+        """
+
+        # Joined rooms can be worked out from above.
+        joined_room_ids = [...]
+
+        # Check with the event stream change cache to filter down rooms to those
+        # with changes.
+        updated_joined_room_ids = [...]
+
+        # Membership changes can be calculated from the above by looking at
+        # `s.event_stream_ordering`.
+        membership_changes = [...]
+    else:
+        # Get all members
+        #
+        # We need to count how many rows match, so we may as well pull all the
+        # rows out and filter them.
+
+        # Output of this can be used to prefill the cache of the above SQL.
+        sql = """
+            SELECT s.room_id, s.membership, s.event_stream_ordering,
+                j.event_stream_ordering, j.bump_stamp
+            FROM sliding_sync_membership_snapshots AS s
+            INNER JOIN sliding_sync_joined_rooms AS j ON (s.room_id = j.room_id AND s.membership = 'join')
+            WHERE s.user_id = ? AND NOT s.forgotten
+                AND (s.membership != 'leave' OR s.sender != s.user_id)
+                AND {filter}
+            ORDER BY COALESCE(j.event_stream_ordering, s.stream_ordering) DESC
+        """
+
+    # TODO: Handle the event_stream_ordering returned being above the `to_token`.
+
+    # We can now sort and cap the rooms, noting if there have been changes
+    # outside of the capped range.
+    ...
+
+    # Calculate room sync config
+    ...
+
+    # Return the set of rooms to generate responses for and their metadata.
+    ...
+
+
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _RoomMembershipForUser:
     """
