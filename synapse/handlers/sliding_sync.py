@@ -848,7 +848,7 @@ class SlidingSyncHandler:
             sync_config=sync_config,
             actual_lists=lists,
             previous_connection_state=previous_connection_state,
-            new_per_connection_state=new_connection_state,
+            new_connection_state=new_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -2482,7 +2482,7 @@ class SlidingSyncHandler:
         self,
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
-        new_per_connection_state: "MutablePerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2493,7 +2493,7 @@ class SlidingSyncHandler:
 
         Args:
             sync_config: Sync configuration
-            previous_connection_state: Snapshot of the current per-connection state
+            new_connection_state: Snapshot of the current per-connection state
             new_per_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state during this request.
             actual_lists: Sliding window API. A map of list key to list results in the
@@ -2541,7 +2541,7 @@ class SlidingSyncHandler:
             receipts_response = await self.get_receipts_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
-                new_per_connection_state=new_per_connection_state,
+                new_connection_state=new_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 actual_room_response_map=actual_room_response_map,
@@ -2862,7 +2862,7 @@ class SlidingSyncHandler:
         self,
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
-        new_per_connection_state: "MutablePerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
         actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
@@ -2875,7 +2875,7 @@ class SlidingSyncHandler:
         Args:
             sync_config: Sync configuration
             previous_connection_state: The current per-connection state
-            new_per_connection_state: A mutable copy of the per-connection
+            new_connection_state: A mutable copy of the per-connection
                 state, used to record updates to the state.
             actual_lists: Sliding window API. A map of list key to list results in the
                 Sliding Sync response.
@@ -3012,7 +3012,7 @@ class SlidingSyncHandler:
 
         # Now we update the per-connection state to track which receipts we have
         # and haven't sent down.
-        new_per_connection_state.receipts.record_sent_rooms(relevant_room_ids)
+        new_connection_state.receipts.record_sent_rooms(relevant_room_ids)
 
         if from_token:
             # Now find the set of rooms that may have receipts that we're not sending
@@ -3034,7 +3034,7 @@ class SlidingSyncHandler:
                 from_key=from_token.stream_token.receipt_key,
                 to_key=to_token.receipt_key,
             )
-            new_per_connection_state.receipts.record_unsent_rooms(
+            new_connection_state.receipts.record_unsent_rooms(
                 changed_rooms, from_token.stream_token.receipt_key
             )
 
