@@ -880,7 +880,7 @@ def generate_worker_files(
         worker_config = insert_worker_name_for_worker_config(worker_config, worker_name)
 
         worker_config.update(
-            {"name": worker_name, "port": str(worker_port)}
+            {"name": worker_name, "port": worker_port}
         )
 
         # Update the shared config with any worker_type specific options. The first of a
@@ -920,7 +920,7 @@ def generate_worker_files(
         for worker_type in worker_types_set:
             nginx_upstreams.setdefault(worker_type, set()).add(worker_port)
 
-        worker_port += 1
+        worker_port += 2
 
     # Build the nginx location config blocks
     nginx_location_config = ""
