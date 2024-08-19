@@ -788,8 +788,8 @@ class SlidingSyncHandler:
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
                 for room_id, room_config in relevant_room_map.items():
-                    prev_room_sync_config = (
-                        previous_connection_state.previous_room_configs.get(room_id)
+                    prev_room_sync_config = previous_connection_state.room_configs.get(
+                        room_id
                     )
                     if prev_room_sync_config is not None:
                         # Always include rooms whose timeline limit has increased.
@@ -2041,9 +2041,7 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-            prev_room_sync_config = previous_connection_state.previous_room_configs.get(
-                room_id
-            )
+            prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
             if prev_room_sync_config is not None:
                 # Check if the timeline limit has increased, if so ignore the
                 # timeline bound and record the change.
@@ -2052,18 +2050,14 @@ class SlidingSyncHandler:
                     < room_sync_config.timeline_limit
                 ):
                     ignore_timeline_bound = True
-                    new_connection_state.previous_room_configs[room_id] = (
-                        room_sync_config
-                    )
+                    new_connection_state.room_configs[room_id] = room_sync_config
 
                 if (
                     room_status.status != HaveSentRoomFlag.LIVE
                     and prev_room_sync_config.timeline_limit
                     > room_sync_config.timeline_limit
                 ):
-                    new_connection_state.previous_room_configs[room_id] = (
-                        room_sync_config
-                    )
+                    new_connection_state.room_configs[room_id] = room_sync_config
 
                 # TODO: Record changes in required_state.
 
@@ -2507,9 +2501,7 @@ class SlidingSyncHandler:
             if new_bump_event_pos.stream > 0:
                 bump_stamp = new_bump_event_pos.stream
 
-        prev_room_sync_config = previous_connection_state.previous_room_configs.get(
-            room_id
-        )
+        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
         if ignore_timeline_bound:
             # FIXME: We signal the fact that we're sending down more events to
             # the client by setting `initial=true` *without* sending down all
@@ -2517,7 +2509,7 @@ class SlidingSyncHandler:
             # update the protocol to do something less silly.
             initial = True
 
-            new_connection_state.previous_room_configs[room_id] = RoomSyncConfig(
+            new_connection_state.room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=len(timeline_events),
                 required_state_map=room_sync_config.required_state_map,
             )
@@ -2538,7 +2530,7 @@ class SlidingSyncHandler:
                 and prev_room_sync_config.timeline_limit
                 > room_sync_config.timeline_limit
             ):
-                new_connection_state.previous_room_configs[room_id] = RoomSyncConfig(
+                new_connection_state.room_configs[room_id] = RoomSyncConfig(
                     timeline_limit=len(timeline_events),
                     required_state_map=room_sync_config.required_state_map,
                 )
@@ -2546,7 +2538,7 @@ class SlidingSyncHandler:
             # TODO: Record changes in required_state.
 
         else:
-            new_connection_state.previous_room_configs[room_id] = room_sync_config
+            new_connection_state.room_configs[room_id] = room_sync_config
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
@@ -3362,32 +3354,30 @@ class PerConnectionState:
     Attributes:
         rooms: The status of each room for the events stream.
         receipts: The status of each room for the receipts stream.
-        previous_room_configs: Map from room_id to the `RoomSyncConfig` of all
+        room_configs: Map from room_id to the `RoomSyncConfig` of all
             rooms that we have previously sent down.
     """
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
 
-    previous_room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
+    room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
-        previous_room_configs = cast(
-            MutableMapping[str, RoomSyncConfig], self.previous_room_configs
-        )
+        room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
 
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
-            previous_room_configs=ChainMap({}, previous_room_configs),
+            room_configs=ChainMap({}, room_configs),
         )
 
     def copy(self) -> "PerConnectionState":
         return PerConnectionState(
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
-            previous_room_configs=dict(self.previous_room_configs),
+            room_configs=dict(self.room_configs),
         )
 
 
@@ -3398,7 +3388,7 @@ class MutablePerConnectionState(PerConnectionState):
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
 
-    previous_room_configs: typing.ChainMap[str, RoomSyncConfig]
+    room_configs: typing.ChainMap[str, RoomSyncConfig]
 
     def has_updates(self) -> bool:
         return (
@@ -3409,7 +3399,7 @@ class MutablePerConnectionState(PerConnectionState):
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
         """Get updates to the room sync config"""
-        return self.previous_room_configs.maps[0]
+        return self.room_configs.maps[0]
 
 
 @attr.s(auto_attribs=True)
