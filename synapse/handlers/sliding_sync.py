@@ -161,6 +161,12 @@ def get_rooms(from_token: SlidingSyncStreamToken) -> None:
             ORDER BY COALESCE(j.event_stream_ordering, s.stream_ordering) DESC
         """
 
+        if from_token:
+            # Calculate what has changed.
+            ...
+        else:
+            ...
+
     # TODO: Handle the event_stream_ordering returned being above the `to_token`.
 
     # We can now sort and cap the rooms, noting if there have been changes
