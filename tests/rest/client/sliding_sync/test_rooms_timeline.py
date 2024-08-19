@@ -606,6 +606,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         room_response = response_body["rooms"][room_id1]
 
         self.assertEqual(room_response["initial"], True)
+        self.assertNotIn("unstable_expanded_timeline", room_response)
         self.assertEqual(room_response["limited"], True)
 
         # We only expect the last message at first
@@ -639,7 +640,8 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         )
         room_response = response_body["rooms"][room_id1]
 
-        self.assertEqual(room_response["initial"], True)
+        self.assertNotIn("initial", room_response)
+        self.assertEqual(room_response["unstable_expanded_timeline"], True)
         self.assertEqual(room_response["limited"], True)
 
         # Now we expect all the messages
@@ -670,6 +672,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         room_response = response_body["rooms"][room_id1]
 
         self.assertNotIn("initial", room_response)
+        self.assertNotIn("unstable_expanded_timeline", room_response)
         self.assertEqual(room_response["limited"], False)
 
         self._assertTimelineEqual(
@@ -697,6 +700,7 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         room_response = response_body["rooms"][room_id1]
 
         self.assertNotIn("initial", room_response)
+        self.assertNotIn("unstable_expanded_timeline", room_response)
         self.assertEqual(room_response["limited"], False)
 
         self._assertTimelineEqual(

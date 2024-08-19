@@ -2017,10 +2017,11 @@ class SlidingSyncHandler:
         #
         # XXX: Odd behavior - We also check if the `timeline_limit` has
         # increased, if so we ignore the from bound for the timeline to send
-        # down a larger chunk of history with `initial: True`. This is matches
-        # the behavior of the Sliding Sync proxy and is what e.g. ElementX
-        # currently expects. In future this behavior is almost certianly going
-        # to change
+        # down a larger chunk of history and set `unstable_expanded_timeline` to
+        # true. This is a bit different to the behavior of the Sliding Sync
+        # proxy (which sets initial=true, but then doesn't send down the full
+        # state again), but existing apps, e.g. ElementX, just need `limited`
+        # set. In future this behavior is almost certainly going to change.
         #
         # TODO: Also handle changes to `required_state`
         from_bound = None
@@ -2496,14 +2497,13 @@ class SlidingSyncHandler:
             if new_bump_event_pos.stream > 0:
                 bump_stamp = new_bump_event_pos.stream
 
+        unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
         if ignore_timeline_bound:
             # FIXME: We signal the fact that we're sending down more events to
-            # the client by setting `initial=true` *without* sending down all
-            # the state/metadata again, which is what the proxy does. We should
-            # update the protocol to do something less silly (see "XXX: Odd
-            # behavior" above).
-            initial = True
+            # the client by setting `unstable_expanded_timeline` to true (see
+            # "XXX: Odd behavior" above).
+            unstable_expanded_timeline = True
 
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=room_sync_config.timeline_limit,
@@ -2550,6 +2550,7 @@ class SlidingSyncHandler:
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
+            unstable_expanded_timeline=unstable_expanded_timeline,
             num_live=num_live,
             bump_stamp=bump_stamp,
             joined_count=room_membership_summary.get(
