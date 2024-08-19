@@ -1,0 +1,1 @@
+Fix performance of device lists in `/key/changes` and sliding sync.

@@ -544,7 +544,7 @@ class MultipartFileConsumer:
         Calculate the content length of the multipart response
         in bytes.
         """
-        if not self.length:
+        if self.length is None:
             return None
         # calculate length of json field and content-type, disposition headers
         json_field = json.dumps(self.json_field)

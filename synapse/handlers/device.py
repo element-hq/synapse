@@ -267,31 +267,27 @@ class DeviceWorkerHandler:
                 newly_left_rooms.add(change.room_id)
 
         # We now work out if any other users have since joined or left the rooms
-        # the user is currently in. First we filter out rooms that we know
-        # haven't changed recently.
-        rooms_changed = self.store.get_rooms_that_changed(
-            joined_room_ids, from_token.room_key
-        )
+        # the user is currently in.
 
         # List of membership changes per room
         room_to_deltas: Dict[str, List[StateDelta]] = {}
         # The set of event IDs of membership events (so we can fetch their
         # associated membership).
         memberships_to_fetch: Set[str] = set()
-        for room_id in rooms_changed:
-            # TODO: Only pull out membership events?
-            state_changes = await self.store.get_current_state_deltas_for_room(
-                room_id, from_token=from_token.room_key, to_token=now_token.room_key
-            )
-            for delta in state_changes:
-                if delta.event_type != EventTypes.Member:
-                    continue
 
-                room_to_deltas.setdefault(room_id, []).append(delta)
-                if delta.event_id:
-                    memberships_to_fetch.add(delta.event_id)
-                if delta.prev_event_id:
-                    memberships_to_fetch.add(delta.prev_event_id)
+        # TODO: Only pull out membership events?
+        state_changes = await self.store.get_current_state_deltas_for_rooms(
+            joined_room_ids, from_token=from_token.room_key, to_token=now_token.room_key
+        )
+        for delta in state_changes:
+            if delta.event_type != EventTypes.Member:
+                continue
+
+            room_to_deltas.setdefault(delta.room_id, []).append(delta)
+            if delta.event_id:
+                memberships_to_fetch.add(delta.event_id)
+            if delta.prev_event_id:
+                memberships_to_fetch.add(delta.prev_event_id)
 
         # Fetch all the memberships for the membership events
         event_id_to_memberships = await self.store.get_membership_from_event_ids(

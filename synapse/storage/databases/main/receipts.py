@@ -558,7 +558,8 @@ class ReceiptsWorkerStore(SQLBaseStore):
         from_key: MultiWriterStreamToken,
         to_key: MultiWriterStreamToken,
     ) -> StrCollection:
-        """Get the set of rooms that (may) have receipts between the two tokens."""
+        """Given a set of room_ids, find out which ones (may) have receipts
+        between the two tokens (> `from_token` and <= `to_token`)."""
 
         room_ids = self._receipts_stream_cache.get_entities_changed(
             room_ids, from_key.stream
