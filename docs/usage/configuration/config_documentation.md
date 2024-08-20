@@ -509,7 +509,8 @@ Unix socket support (_Added in Synapse 1.89.0_):
 
 Valid resource names are:
 
-* `client`: the client-server API (/_matrix/client), and the synapse admin API (/_synapse/admin). Also implies `media` and `static`.
+* `client`: the client-server API (/_matrix/client). Also implies `media` and `static`.
+  On the main process is also the synapse admin API (/_synapse/admin) loaded.
 
 * `consent`: user consent forms (/_matrix/consent). See [here](../../consent_tracking.md) for more.
 
@@ -1765,7 +1766,7 @@ rc_3pid_validation:
 
 This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer`
 defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
@@ -1966,7 +1967,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.
 
 Example configuration:
 ```yaml
