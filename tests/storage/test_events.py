@@ -1432,19 +1432,27 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             )
         )
         event_chunk = [message_tuple]
+        delta_state = DeltaState(
+            # This is the state reset part. We're removing the room name state.
+            to_delete=[(EventTypes.Name, "")],
+            to_insert={},
+        )
+        assert self.storage_controllers.persistence is not None
+        sliding_sync_table_changes = self.get_success(
+            self.storage_controllers.persistence._calculate_sliding_sync_table_changes(
+                room_id, event_chunk, delta_state
+            )
+        )
         self.get_success(
             self.persist_events_store._persist_events_and_state_updates(
                 room_id,
                 event_chunk,
-                state_delta_for_room=DeltaState(
-                    # This is the state reset part. We're removing the room name state.
-                    to_delete=[(EventTypes.Name, "")],
-                    to_insert={},
-                ),
+                state_delta_for_room=delta_state,
                 new_forward_extremities={message_tuple[0].event_id},
                 use_negative_stream_ordering=False,
                 inhibit_local_membership_updates=False,
                 new_event_links={},
+                sliding_sync_table_changes=sliding_sync_table_changes,
             )
         )
 
@@ -2672,19 +2680,27 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             )
         )
         event_chunk = [message_tuple]
+        delta_state = DeltaState(
+            # This is the state reset part. We're removing the room name state.
+            to_delete=[(EventTypes.Member, user1_id)],
+            to_insert={},
+        )
+        assert self.storage_controllers.persistence is not None
+        sliding_sync_table_changes = self.get_success(
+            self.storage_controllers.persistence._calculate_sliding_sync_table_changes(
+                room_id, event_chunk, delta_state
+            )
+        )
         self.get_success(
             self.persist_events_store._persist_events_and_state_updates(
                 room_id,
                 event_chunk,
-                state_delta_for_room=DeltaState(
-                    # This is the state reset part. We're removing the room name state.
-                    to_delete=[(EventTypes.Member, user1_id)],
-                    to_insert={},
-                ),
+                state_delta_for_room=delta_state,
                 new_forward_extremities={message_tuple[0].event_id},
                 use_negative_stream_ordering=False,
                 inhibit_local_membership_updates=False,
                 new_event_links={},
+                sliding_sync_table_changes=sliding_sync_table_changes,
             )
         )
 

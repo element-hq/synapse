@@ -31,17 +31,16 @@ from typing import (
     Generator,
     Iterable,
     List,
-    Literal,
     Optional,
     Set,
     Tuple,
     Union,
     cast,
 )
-from typing_extensions import TypedDict
 
 import attr
 from prometheus_client import Counter
+from typing_extensions import TypedDict
 
 import synapse.metrics
 from synapse.api.constants import (
@@ -127,6 +126,7 @@ class DeltaState:
         return not self.to_delete and not self.to_insert and not self.no_longer_in_room
 
 
+# We want `total=False` because we want to allow values to be unset.
 class SlidingSyncStateInsertValues(TypedDict, total=False):
     """
     Insert values relevant for the `sliding_sync_joined_rooms` and
@@ -163,10 +163,8 @@ class SlidingSyncMembershipInfo(TypedDict, total=False):
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncTableChanges:
     room_id: str
-    # room_id -> dict to upsert into `sliding_sync_joined_rooms`
-    joined_room_updates: Dict[str, SlidingSyncStateInsertValues]
-    # room_ids to delete from `sliding_sync_joined_rooms`
-    to_delete_joined_rooms: StrCollection
+    # Values to upsert into `sliding_sync_joined_rooms`
+    joined_room_updates: SlidingSyncStateInsertValues
 
     # Shared values to upsert into `sliding_sync_membership_snapshots` for each
     # `to_insert_membership_snapshots`
@@ -1371,32 +1369,9 @@ class PersistEventsStore:
             # persisting stack (see
             # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
             #
-            current_state_map = {}
-            for state_key, event_id in to_insert.items():
-                if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
-                    current_state_map[state_key] = event_id
-
-            # Map of values to insert/update in the `sliding_sync_joined_rooms` table
-            sliding_sync_joined_rooms_insert_map = (
-                self._get_sliding_sync_insert_values_from_state_ids_map_txn(
-                    txn, current_state_map
-                )
-            )
-
-            # If something is being deleted from the state, we need to clear it out
-            for state_key in to_delete:
-                if state_key == (EventTypes.Create, ""):
-                    sliding_sync_joined_rooms_insert_map["room_type"] = None
-                elif state_key == (EventTypes.RoomEncryption, ""):
-                    sliding_sync_joined_rooms_insert_map["is_encrypted"] = False
-                elif state_key == (EventTypes.Name, ""):
-                    sliding_sync_joined_rooms_insert_map["room_name"] = None
-
-            # Update the `sliding_sync_joined_rooms` table
-            #
             # Pulling keys/values separately is safe and will produce congruent lists
-            insert_keys = sliding_sync_joined_rooms_insert_map.keys()
-            insert_values = sliding_sync_joined_rooms_insert_map.values()
+            insert_keys = sliding_sync_table_changes.joined_room_updates.keys()
+            insert_values = sliding_sync_table_changes.joined_room_updates.values()
             # We only need to update when one of the relevant state values has changed
             if insert_keys:
                 # If we have some `to_insert` values, we can use the standard upsert
@@ -1422,8 +1397,10 @@ class PersistEventsStore:
 
                     # We don't update `event_stream_ordering` `ON CONFLICT` because it's
                     # simpler and we can just rely on
-                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to do
-                    # the right thing (same for `bump_stamp`).
+                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to
+                    # do the right thing (same for `bump_stamp`). The only reason we're
+                    # inserting `event_stream_ordering` here is because the column has a
+                    # `NON NULL` constraint and we need some answer.
                     txn.execute(
                         f"""
                         INSERT INTO sliding_sync_joined_rooms
@@ -1498,7 +1475,10 @@ class PersistEventsStore:
             txn.execute_batch(
                 "DELETE FROM sliding_sync_membership_snapshots"
                 " WHERE room_id = ? AND user_id = ?",
-                sliding_sync_table_changes.to_delete_membership_snapshots,
+                [
+                    (room_id, user_id)
+                    for user_id in sliding_sync_table_changes.to_delete_membership_snapshots
+                ],
             )
 
         # We do this regardless of whether the server is `no_longer_in_room` or not

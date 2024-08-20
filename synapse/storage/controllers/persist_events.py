@@ -30,7 +30,6 @@ from typing import (
     Awaitable,
     Callable,
     ClassVar,
-    Sequence,
     Collection,
     Deque,
     Dict,
@@ -39,6 +38,7 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
     Set,
     Tuple,
     TypeVar,
@@ -75,10 +75,10 @@ from synapse.storage.databases.main.events import (
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import (
+    MutableStateMap,
     PersistedEventPosition,
     RoomStreamToken,
     StateMap,
-    MutableStateMap,
     get_domain_from_id,
 )
 from synapse.types.state import StateFilter
@@ -782,7 +782,13 @@ class EventsPersistenceStorageController:
         delta_state: DeltaState,
     ) -> SlidingSyncTableChanges:
         """
-        TODO
+        Calculate the changes to the `sliding_sync_membership_snapshots` and
+        `sliding_sync_joined_rooms` tables given the deltas that are going to be used to
+        update the `current_state_events` table.
+
+        Just a bunch of pre-processing so we so we don't need to spend time in the
+        transaction itself gathering all of this info. It's also easier to deal with
+        redactions outside of a transaction.
 
         Args:
             room_id: The room ID currently being processed.
@@ -798,8 +804,10 @@ class EventsPersistenceStorageController:
 
         event_map = {event.event_id: event for event, _ in events_and_contexts}
 
+        # Handle gathering info for the `sliding_sync_membership_snapshots` table
+        #
         # This would only happen if someone was state reset out of the room
-        to_delete_membership_snapshots = [
+        user_ids_to_delete_membership_snapshots = [
             state_key
             for event_type, state_key in to_delete
             if event_type == EventTypes.Member and self.is_mine_id(state_key)
@@ -808,7 +816,9 @@ class EventsPersistenceStorageController:
         membership_snapshot_shared_insert_values: (
             SlidingSyncMembershipSnapshotSharedInsertValues
         ) = {}
-        membership_infos: List[SlidingSyncMembershipInfo] = []
+        membership_infos_to_insert_membership_snapshots: List[
+            SlidingSyncMembershipInfo
+        ] = []
         if to_insert:
             membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
@@ -830,14 +840,16 @@ class EventsPersistenceStorageController:
                 else:
                     missing_membership_event_ids.add(membership_event_id)
 
-            # Otherwise, we need to find a couple previous events that we were reset to.
+            # Otherwise, we need to find a couple events that we were reset to.
             if missing_membership_event_ids:
-                remaining_event_id_to_sender_map = await _get_sender_for_event_ids(
-                    missing_membership_event_ids
+                remaining_event_id_to_sender_map = (
+                    await self.main_store.get_sender_for_event_ids(
+                        missing_membership_event_ids
+                    )
                 )
                 event_id_to_sender_map.update(remaining_event_id_to_sender_map)
 
-            membership_infos = [
+            membership_infos_to_insert_membership_snapshots = [
                 {
                     "user_id": user_id,
                     "sender": event_id_to_sender_map[event_id],
@@ -846,7 +858,7 @@ class EventsPersistenceStorageController:
                 for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
             ]
 
-            if membership_infos:
+            if membership_infos_to_insert_membership_snapshots:
                 current_state_ids_map: MutableStateMap = dict(
                     await self.main_store.get_partial_filtered_current_state_ids(
                         room_id,
@@ -871,11 +883,10 @@ class EventsPersistenceStorageController:
                 )
 
                 current_state_map: StateMap[EventBase] = {
-                    key: fetched_events[event_id]
-                    for key, event_id in current_state_ids_map.items()
+                    state_key: fetched_events[event_id]
+                    for state_key, event_id in current_state_ids_map.items()
                 }
 
-                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
                 if current_state_map:
                     state_insert_values = (
                         self._get_sliding_sync_insert_values_from_state_map(
@@ -902,15 +913,69 @@ class EventsPersistenceStorageController:
                     # valid non-join membership transitions.
                     assert delta_state.no_longer_in_room
 
+        # Handle gathering info for the `sliding_sync_joined_rooms` table
+        #
+        # We only deal with
+        # updating the state related columns. The
+        # `event_stream_ordering`/`bump_stamp` are updated elsewhere in the event
+        # persisting stack (see
+        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
+        #
+        joined_room_updates: SlidingSyncStateInsertValues = {}
+        if not delta_state.no_longer_in_room:
+            # Look through the items we're going to insert into the current state to see
+            # if there is anything that we care about and should also update in the
+            # `sliding_sync_joined_rooms` table.
+            current_state_ids_map = {}
+            for state_key, event_id in to_insert.items():
+                if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
+                    current_state_ids_map[state_key] = event_id
+
+            # Get the full event objects for the current state events
+            #
+            # In normal event persist scenarios, we should be able to find the state
+            # events in the `events_and_contexts` given to us but it's possible a state
+            # reset happened which that reset back to a previous state.
+            current_state_map = {}
+            missing_event_ids: Set[str] = set()
+            for state_key, event_id in current_state_ids_map.items():
+                event = event_map.get(event_id)
+                if event:
+                    current_state_map[state_key] = event
+                else:
+                    missing_event_ids.add(membership_event_id)
+
+            # Otherwise, we need to find a couple events that we were reset to.
+            if missing_event_ids:
+                remaining_events = await self.main_store.get_events(
+                    current_state_ids_map.values()
+                )
+                # There shouldn't be any missing events
+                assert remaining_events.keys() == missing_event_ids
+                for event in remaining_events.values():
+                    current_state_map[(event.type, event.state_key)] = event
+
+            joined_room_updates = self._get_sliding_sync_insert_values_from_state_map(
+                current_state_map
+            )
+
+            # If something is being deleted from the state, we need to clear it out
+            for state_key in to_delete:
+                if state_key == (EventTypes.Create, ""):
+                    joined_room_updates["room_type"] = None
+                elif state_key == (EventTypes.RoomEncryption, ""):
+                    joined_room_updates["is_encrypted"] = False
+                elif state_key == (EventTypes.Name, ""):
+                    joined_room_updates["room_name"] = None
+
         return SlidingSyncTableChanges(
             room_id=room_id,
             # For `sliding_sync_joined_rooms`
-            joined_room_updates=TODO,
-            to_delete_joined_rooms=TODO,
+            joined_room_updates=joined_room_updates,
             # For `sliding_sync_membership_snapshots`
             membership_snapshot_shared_insert_values=membership_snapshot_shared_insert_values,
-            to_insert_membership_snapshots=membership_infos,
-            to_delete_membership_snapshots=to_delete_membership_snapshots,
+            to_insert_membership_snapshots=membership_infos_to_insert_membership_snapshots,
+            to_delete_membership_snapshots=user_ids_to_delete_membership_snapshots,
         )
 
     @classmethod
