@@ -1,5 +1,11 @@
 # Synapse 1.114.0rc1 (2024-08-20)
 
+### Features
+
+- Add a flag to `/versions`, `org.matrix.simplified_msc3575`, to indicate whether experimental sliding sync support has been enabled. ([\#17571](https://github.com/element-hq/synapse/issues/17571))
+- Handle changes in `timeline_limit` in experimental sliding sync. ([\#17579](https://github.com/element-hq/synapse/issues/17579))
+- Correctly track read receipts that should be sent down in experimental sliding sync. ([\#17575](https://github.com/element-hq/synapse/issues/17575), [\#17589](https://github.com/element-hq/synapse/issues/17589), [\#17592](https://github.com/element-hq/synapse/issues/17592))
+
 ### Bugfixes
 
 - Start handlers for new media endpoints when media resource configured. ([\#17483](https://github.com/element-hq/synapse/issues/17483))
@@ -28,10 +34,7 @@
 - Speed up responding to media requests. ([\#17558](https://github.com/element-hq/synapse/issues/17558), [\#17561](https://github.com/element-hq/synapse/issues/17561), [\#17564](https://github.com/element-hq/synapse/issues/17564), [\#17566](https://github.com/element-hq/synapse/issues/17566), [\#17567](https://github.com/element-hq/synapse/issues/17567), [\#17569](https://github.com/element-hq/synapse/issues/17569))
 - Test github token before running release script steps. ([\#17562](https://github.com/element-hq/synapse/issues/17562))
 - Reduce log spam of multipart files. ([\#17563](https://github.com/element-hq/synapse/issues/17563))
-- Add a flag to `/versions`, `org.matrix.simplified_msc3575`, to indicate whether experimental sliding sync support has been enabled. ([\#17571](https://github.com/element-hq/synapse/issues/17571))
 - Refactor per-connection state in experimental sliding sync handler. ([\#17574](https://github.com/element-hq/synapse/issues/17574))
-- Correctly track read receipts that should be sent down in experimental sliding sync. ([\#17575](https://github.com/element-hq/synapse/issues/17575), [\#17589](https://github.com/element-hq/synapse/issues/17589), [\#17592](https://github.com/element-hq/synapse/issues/17592))
-- Handle changes in `timeline_limit` in experimental sliding sync. ([\#17579](https://github.com/element-hq/synapse/issues/17579))
 - Add histogram metrics for sliding sync processing time. ([\#17593](https://github.com/element-hq/synapse/issues/17593))
 
 
