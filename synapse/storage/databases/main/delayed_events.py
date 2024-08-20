@@ -157,7 +157,7 @@ class DelayedEventsStore(SQLBaseStore):
         current_ts: Timestamp,
     ) -> Delay:
         """
-        Restarts the send time of matching delayed event.
+        Restarts the send time of the matching delayed event.
 
         Args:
             delay_id: The ID of the delayed event to restart.
@@ -454,7 +454,7 @@ def _generate_delay_id() -> DelayID:
     """Generates an opaque string, for use as a delay ID"""
 
     # We use the following format for delay IDs:
-    #    syf_<random string>
+    #    syd_<random string>
     # They are scoped to user localparts, so it is possible for
     # the same ID to exist for multiple users.
 
