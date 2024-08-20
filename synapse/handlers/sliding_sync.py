@@ -45,6 +45,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
+from prometheus_client import Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import (
@@ -102,6 +103,13 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+sync_processing_time = Histogram(
+    "synapse_sliding_sync_processing_time",
+    "Time taken to generate a sliding sync response, ignoring wait times.",
+    ["initial"],
+)
 
 
 class Sentinel(enum.Enum):
@@ -571,6 +579,8 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
+        start_time_s = self.clock.time()
+
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -933,6 +943,11 @@ class SlidingSyncHandler:
         # Make it easy to find traces for syncs that aren't empty
         set_tag(SynapseTags.RESULT_PREFIX + "result", bool(sliding_sync_result))
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
+
+        end_time_s = self.clock.time()
+        sync_processing_time.labels(from_token is not None).observe(
+            end_time_s - start_time_s
+        )
 
         return sliding_sync_result
 
