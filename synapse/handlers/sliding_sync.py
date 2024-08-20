@@ -2016,13 +2016,19 @@ class SlidingSyncHandler:
         # Relevant spec issue:
         # https://github.com/matrix-org/matrix-spec/issues/1917
         #
-        # XXX: Odd behavior - We also check if the `timeline_limit` has
-        # increased, if so we ignore the from bound for the timeline to send
-        # down a larger chunk of history and set `unstable_expanded_timeline` to
-        # true. This is a bit different to the behavior of the Sliding Sync
-        # proxy (which sets initial=true, but then doesn't send down the full
-        # state again), but existing apps, e.g. ElementX, just need `limited`
-        # set. In future this behavior is almost certainly going to change.
+        # XXX: Odd behavior - We also check if the `timeline_limit` has increased, if so
+        # we ignore the from bound for the timeline to send down a larger chunk of
+        # history and set `unstable_expanded_timeline` to true. This is only being added
+        # to match the behavior of the Sliding Sync proxy as we expect the ElementX
+        # client to feel a certain way and be able to trickle in a full page of timeline
+        # messages to fill up the screen. This is a bit different to the behavior of the
+        # Sliding Sync proxy (which sets initial=true, but then doesn't send down the
+        # full state again), but existing apps, e.g. ElementX, just need `limited` set.
+        # We don't explicitly set `limited` but this will be the case for any room that
+        # has more history than we're trying to pull out. Using
+        # `unstable_expanded_timeline` allows us to avoid contaminating what `initial`
+        # or `limited` mean for clients that interpret them correctly. In future this
+        # behavior is almost certainly going to change.
         #
         # TODO: Also handle changes to `required_state`
         from_bound = None
