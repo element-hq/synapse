@@ -120,19 +120,26 @@ class SlidingSyncExtensionsTestCase(SlidingSyncBase):
                 "foo-list": {
                     "ranges": [[0, 1]],
                     "required_state": [],
-                    "timeline_limit": 0,
+                    # We set this to `1` because we're testing `receipts` which
+                    # interact with the `timeline`. With receipts, when a room
+                    # hasn't been sent down the connection before or it appears
+                    # as `initial: true`, we only include receipts for events in
+                    # the timeline to avoid bloating and blowing up the sync
+                    # response as the number of users in the room increases.
+                    # (this behavior is part of the spec)
+                    "timeline_limit": 1,
                 },
                 # We expect this list range to include room5, room4, room3
                 "bar-list": {
                     "ranges": [[0, 2]],
                     "required_state": [],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 },
             },
             "room_subscriptions": {
                 room_id1: {
                     "required_state": [],
-                    "timeline_limit": 0,
+                    "timeline_limit": 1,
                 }
             },
         }
