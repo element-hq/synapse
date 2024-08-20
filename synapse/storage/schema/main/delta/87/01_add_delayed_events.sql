@@ -12,12 +12,6 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 CREATE TABLE delayed_events (
-    -- An alias of rowid in SQLite.
-    -- Newly-inserted rows that don't assign a (non-NULL) value for this column
-    -- will have it set to a table-unique value.
-    -- For Postgres to do this, the column must be set as an identity column.
-    delay_rowid INTEGER PRIMARY KEY,
-
     delay_id TEXT NOT NULL,
     user_localpart TEXT NOT NULL,
     delay BIGINT NOT NULL,
@@ -27,8 +21,7 @@ CREATE TABLE delayed_events (
     state_key TEXT,
     origin_server_ts BIGINT,
     content bytea NOT NULL,
-    UNIQUE (delay_id, user_localpart)
+    PRIMARY KEY (delay_id, user_localpart)
 );
 
 CREATE INDEX delayed_events_room_state_event_idx ON delayed_events (room_id, event_type, state_key) WHERE state_key IS NOT NULL;
-CREATE INDEX delayed_events_user_idx ON delayed_events (user_localpart);

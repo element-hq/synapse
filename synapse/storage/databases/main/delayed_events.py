@@ -21,7 +21,7 @@ from typing import List, NewType, Optional, Tuple
 
 from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
-from synapse.storage.database import LoggingTransaction
+from synapse.storage.database import LoggingTransaction, make_tuple_in_list_sql_clause
 from synapse.types import JsonDict, RoomID
 from synapse.util import json_encoder, stringutils as stringutils
 
@@ -73,59 +73,24 @@ class DelayedEventsStore(SQLBaseStore):
         Inserts a new delayed event in the DB.
 
         Returns: The generated ID assigned to the added delayed event.
-
-        Raises:
-            SynapseError: if the delayed event failed to be added.
         """
-
-        def add_txn(txn: LoggingTransaction) -> DelayID:
-            delay_id = _generate_delay_id()
-            sql = """
-                INSERT INTO delayed_events (
-                    delay_id, user_localpart, delay, running_since,
-                    room_id, event_type, state_key, origin_server_ts,
-                    content
-                ) VALUES (
-                    ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?
-                )
-                """
-            if self.database_engine.supports_returning:
-                sql += "RETURNING delay_rowid"
-            txn.execute(
-                sql,
-                (
-                    delay_id,
-                    user_localpart,
-                    delay,
-                    current_ts,
-                    room_id.to_string(),
-                    event_type,
-                    state_key,
-                    origin_server_ts,
-                    json_encoder.encode(content),
-                ),
-            )
-
-            if not self.database_engine.supports_returning:
-                txn.execute(
-                    """
-                    SELECT delay_rowid
-                    FROM delayed_events
-                    WHERE delay_id = ? AND user_localpart = ?
-                    """,
-                    (
-                        delay_id,
-                        user_localpart,
-                    ),
-                )
-            row = txn.fetchone()
-            assert row is not None
-
-            return delay_id
-
-        return await self.db_pool.runInteraction("add", add_txn)
+        delay_id = _generate_delay_id()
+        await self.db_pool.simple_insert(
+            table="delayed_events",
+            values={
+                "delay_id": delay_id,
+                "user_localpart": user_localpart,
+                "delay": delay,
+                "running_since": current_ts,
+                "room_id": room_id.to_string(),
+                "event_type": event_type,
+                "state_key": state_key,
+                "origin_server_ts": origin_server_ts,
+                "content": json_encoder.encode(content),
+            },
+            desc="add",
+        )
+        return delay_id
 
     async def restart(
         self,
@@ -154,7 +119,7 @@ class DelayedEventsStore(SQLBaseStore):
                     UPDATE delayed_events
                     SET running_since = ?
                     WHERE delay_id = ? AND user_localpart = ?
-                    RETURNING delay_rowid, delay
+                    RETURNING delay
                     """,
                     (
                         current_ts,
@@ -165,26 +130,28 @@ class DelayedEventsStore(SQLBaseStore):
                 row = txn.fetchone()
                 if row is None:
                     raise NotFoundError("Delayed event not found")
+                return Delay(row[0])
             else:
-                row = self.db_pool.simple_select_one_txn(
+                keyvalues = {
+                    "delay_id": delay_id,
+                    "user_localpart": user_localpart,
+                }
+                delay = self.db_pool.simple_select_one_onecol_txn(
                     txn,
                     table="delayed_events",
-                    keyvalues={
-                        "delay_id": delay_id,
-                        "user_localpart": user_localpart,
-                    },
-                    retcols=("delay_rowid", "delay"),
+                    keyvalues=keyvalues,
+                    retcol="delay",
                     allow_none=True,
                 )
-                if row is None:
+                if delay is None:
                     raise NotFoundError("Delayed event not found")
                 self.db_pool.simple_update_one_txn(
                     txn,
                     table="delayed_events",
-                    keyvalues={"delay_rowid": row[0]},
+                    keyvalues=keyvalues,
                     updatevalues={"running_since": current_ts},
                 )
-            return Delay(row[1])
+                return Delay(delay)
 
         return await self.db_pool.runInteraction("restart", restart_txn)
 
@@ -251,7 +218,6 @@ class DelayedEventsStore(SQLBaseStore):
             )
             sql_from = "FROM delayed_events WHERE running_since + delay < ?"
             sql_order = "ORDER BY running_since + delay"
-            sql_args = (current_ts,)
             if self.database_engine.supports_returning:
                 txn.execute(
                     f"""
@@ -259,20 +225,21 @@ class DelayedEventsStore(SQLBaseStore):
                         DELETE {sql_from} RETURNING *
                     ) SELECT {sql_cols} FROM timed_out_events {sql_order}
                     """,
-                    sql_args,
+                    (current_ts,),
                 )
                 rows = txn.fetchall()
             else:
                 txn.execute(
-                    f"SELECT {sql_cols}, delay_rowid {sql_from} {sql_order}", sql_args
+                    f"SELECT {sql_cols}, delay_id {sql_from} {sql_order}", (current_ts,)
                 )
                 rows = txn.fetchall()
-                self.db_pool.simple_delete_many_txn(
-                    txn,
-                    table="delayed_events",
-                    column="delay_rowid",
-                    values=tuple(row[-1] for row in rows),
-                    keyvalues={},
+                sql_key_clause, sql_key_args = make_tuple_in_list_sql_clause(
+                    self.database_engine,
+                    ("delay_id", "user_localpart"),
+                    tuple((row[-1], row[0]) for row in rows),
+                )
+                txn.execute(
+                    f"DELETE from delayed_events WHERE {sql_key_clause}", sql_key_args
                 )
             events = [
                 (
@@ -294,7 +261,7 @@ class DelayedEventsStore(SQLBaseStore):
                     running_since + delay - ? AS relative_delay
                 FROM delayed_events
                 """,
-                sql_args,
+                (current_ts,),
             )
             remaining_timeout_delays = [
                 (
