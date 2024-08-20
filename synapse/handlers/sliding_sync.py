@@ -2513,21 +2513,25 @@ class SlidingSyncHandler:
                 required_state_map=room_sync_config.required_state_map,
             )
         elif prev_room_sync_config is not None:
-            # If the result is limited then we need to record that the timeline
-            # limit has been reduced, as if the client later requests more
-            # timeline then we have more data to send.
+            # If the result is `limited` then we need to record that the
+            # `timeline_limit` has been reduced, as when/if the client later requests
+            # more timeline then we have more data to send.
             #
-            # Otherwise we don't need to record that the timeline_limit has been
-            # reduced, as the *effective* timeline limit (i.e. the amount of
-            # timeline we have previously sent) is at least the previous
-            # timeline limit.
+            # Otherwise (when not `limited`) we don't need to record that the
+            # `timeline_limit` has been reduced, as the *effective* `timeline_limit`
+            # (i.e. the amount of timeline we have previously sent to the client) is at
+            # least the previous `timeline_limit`.
             #
-            # This is to handle the case where the timeline limit e.g. goes from
-            # 10 to 5 to 10 again (without any timeline gaps), where there's no
-            # point sending down extra events when the timeline limit is
-            # increased as the client already has the 10 previous events.
-            # However, if is a gap (i.e. limited is True), then we *do* need to
-            # record the reduced timeline.
+            # This is to handle the case where the `timeline_limit` e.g. goes from 10 to
+            # 5 to 10 again (without any timeline gaps), where there's no point sending
+            # down the initial historical chunk events when the `timeline_limit` is
+            # increased as the client already has the 10 previous events. However, if
+            # client has a gap in the timeline (i.e. `limited` is True), then we *do*
+            # need to record the reduced timeline.
+            #
+            # TODO: Handle timeline gaps (`get_timeline_gaps()`) - This is separate from
+            # the gaps we might see on the client because a response was `limited` we're
+            # talking about above.
             if (
                 limited
                 and prev_room_sync_config.timeline_limit
