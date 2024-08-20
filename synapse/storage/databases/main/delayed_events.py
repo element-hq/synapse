@@ -178,13 +178,12 @@ class DelayedEventsStore(SQLBaseStore):
                 )
                 if row is None:
                     raise NotFoundError("Delayed event not found")
-                self.db_pool.simple_update_txn(
+                self.db_pool.simple_update_one_txn(
                     txn,
                     table="delayed_events",
                     keyvalues={"delay_rowid": row[0]},
                     updatevalues={"running_since": current_ts},
                 )
-                assert txn.rowcount == 1
             return Delay(row[1])
 
         return await self.db_pool.runInteraction("restart", restart_txn)
