@@ -92,8 +92,8 @@ class DelayedEventsHandler:
 
         async def _schedule_db_events() -> None:
             # TODO: Sync all state first, so that affected delayed state events will be cancelled
-            events, remaining_timeout_delays = await self._store.process_all_delays(
-                self._get_current_ts()
+            events, remaining_timeout_delays = (
+                await self._store.process_all_delayed_events(self._get_current_ts())
             )
             sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
             for (
@@ -149,7 +149,7 @@ class DelayedEventsHandler:
                 for (
                     removed_timeout_delay_id,
                     removed_timeout_delay_user_localpart,
-                ) in await self._store.remove_state_events(
+                ) in await self._store.remove_delayed_state_events(
                     event.room_id,
                     event.type,
                     state_key,
@@ -215,7 +215,7 @@ class DelayedEventsHandler:
         )
 
         user_localpart = UserLocalpart(requester.user.localpart)
-        delay_id = await self._store.add(
+        delay_id = await self._store.add_delayed_event(
             user_localpart=user_localpart,
             current_ts=self._get_current_ts(),
             room_id=RoomID.from_string(room_id),
@@ -264,7 +264,7 @@ class DelayedEventsHandler:
         delay_id = DelayID(delay_id)
         user_localpart = UserLocalpart(requester.user.localpart)
         async with self._get_delay_context(delay_id, user_localpart):
-            delay = await self._store.restart(
+            delay = await self._store.restart_delayed_event(
                 delay_id,
                 user_localpart,
                 self._get_current_ts(),
@@ -289,7 +289,7 @@ class DelayedEventsHandler:
         delay_id = DelayID(delay_id)
         user_localpart = UserLocalpart(requester.user.localpart)
         async with self._get_delay_context(delay_id, user_localpart):
-            args = await self._store.pop_event(delay_id, user_localpart)
+            args = await self._store.pop_delayed_event(delay_id, user_localpart)
 
             self._unschedule(delay_id, user_localpart)
             await self._send_event(user_localpart, *args)
@@ -301,7 +301,7 @@ class DelayedEventsHandler:
 
         async with self._get_delay_context(delay_id, user_localpart):
             try:
-                args = await self._store.pop_event(delay_id, user_localpart)
+                args = await self._store.pop_delayed_event(delay_id, user_localpart)
             except NotFoundError:
                 logger.debug(
                     "delay_id %s for local user %s was removed from the DB before it timed out (or was always missing)",
@@ -349,7 +349,7 @@ class DelayedEventsHandler:
         """Return all pending delayed events requested by the given user."""
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
-        return await self._store.get_all_for_user(
+        return await self._store.get_all_delayed_events_for_user(
             UserLocalpart(requester.user.localpart)
         )
 

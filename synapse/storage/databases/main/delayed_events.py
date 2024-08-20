@@ -57,7 +57,7 @@ DelayedPartialEventWithUser = Tuple[
 
 # TODO: Try to support workers
 class DelayedEventsStore(SQLBaseStore):
-    async def add(
+    async def add_delayed_event(
         self,
         *,
         user_localpart: UserLocalpart,
@@ -88,11 +88,11 @@ class DelayedEventsStore(SQLBaseStore):
                 "origin_server_ts": origin_server_ts,
                 "content": json_encoder.encode(content),
             },
-            desc="add",
+            desc="add_delayed_event",
         )
         return delay_id
 
-    async def restart(
+    async def restart_delayed_event(
         self,
         delay_id: DelayID,
         user_localpart: UserLocalpart,
@@ -153,9 +153,9 @@ class DelayedEventsStore(SQLBaseStore):
                 )
                 return Delay(delay)
 
-        return await self.db_pool.runInteraction("restart", restart_txn)
+        return await self.db_pool.runInteraction("restart_delayed_event", restart_txn)
 
-    async def get_all_for_user(
+    async def get_all_delayed_events_for_user(
         self,
         user_localpart: UserLocalpart,
     ) -> List[JsonDict]:
@@ -174,7 +174,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "running_since",
                 "content",
             ),
-            desc="get_all_for_user",
+            desc="get_all_delayed_events_for_user",
         )
         return [
             {
@@ -189,7 +189,7 @@ class DelayedEventsStore(SQLBaseStore):
             for row in rows
         ]
 
-    async def process_all_delays(self, current_ts: Timestamp) -> Tuple[
+    async def process_all_delayed_events(self, current_ts: Timestamp) -> Tuple[
         List[DelayedPartialEventWithUser],
         List[Tuple[DelayID, UserLocalpart, Delay]],
     ]:
@@ -274,10 +274,10 @@ class DelayedEventsStore(SQLBaseStore):
             return events, remaining_timeout_delays
 
         return await self.db_pool.runInteraction(
-            "process_all_delays", process_all_delays_txn
+            "process_all_delayed_events", process_all_delays_txn
         )
 
-    async def pop_event(
+    async def pop_delayed_event(
         self,
         delay_id: DelayID,
         user_localpart: UserLocalpart,
@@ -326,9 +326,9 @@ class DelayedEventsStore(SQLBaseStore):
                 db_to_json(row[4]),
             )
 
-        return await self.db_pool.runInteraction("pop_event", pop_event_txn)
+        return await self.db_pool.runInteraction("pop_delayed_event", pop_event_txn)
 
-    async def remove(
+    async def remove_delayed_event(
         self,
         delay_id: DelayID,
         user_localpart: UserLocalpart,
@@ -345,10 +345,10 @@ class DelayedEventsStore(SQLBaseStore):
                 "delay_id": delay_id,
                 "user_localpart": user_localpart,
             },
-            desc="remove",
+            desc="remove_delayed_event",
         )
 
-    async def remove_state_events(
+    async def remove_delayed_state_events(
         self,
         room_id: str,
         event_type: str,
@@ -389,7 +389,7 @@ class DelayedEventsStore(SQLBaseStore):
             ]
 
         return await self.db_pool.runInteraction(
-            "remove_state_events", remove_state_events_txn
+            "remove_delayed_state_events", remove_state_events_txn
         )
 
 
