@@ -793,6 +793,7 @@ class SlidingSyncHandler:
                     )
                     if prev_room_sync_config is not None:
                         # Always include rooms whose timeline limit has increased.
+                        # (see the "XXX: Odd behavior" described below)
                         if (
                             prev_room_sync_config.timeline_limit
                             < room_config.timeline_limit
