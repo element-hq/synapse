@@ -3088,38 +3088,17 @@ class SlidingSyncHandler:
             # from that room but we only want to include receipts for events
             # in the timeline to avoid bloating and blowing up the sync response
             # as the number of users in the room increases. (this behavior is part of the spec)
-            initial_rooms = {
-                room_id
+            initial_rooms_and_event_ids = [
+                (room_id, event.event_id)
                 for room_id in initial_rooms
                 if room_id in actual_room_response_map
-            }
-            if initial_rooms:
-                initial_receipts = await self.store.get_linearized_receipts_for_rooms(
-                    room_ids=initial_rooms,
-                    to_key=to_token.receipt_key,
+                for event in actual_room_response_map[room_id].timeline_events
+            ]
+            if initial_rooms_and_event_ids:
+                initial_receipts = await self.store.get_linearized_receipts_for_events(
+                    room_and_event_ids=initial_rooms_and_event_ids,
                 )
-
-                for receipt in initial_receipts:
-                    relevant_event_ids = {
-                        event.event_id
-                        for event in actual_room_response_map[
-                            receipt["room_id"]
-                        ].timeline_events
-                    }
-
-                    content = {
-                        event_id: content_value
-                        for event_id, content_value in receipt["content"].items()
-                        if event_id in relevant_event_ids
-                    }
-                    if content:
-                        fetched_receipts.append(
-                            {
-                                "type": receipt["type"],
-                                "room_id": receipt["room_id"],
-                                "content": content,
-                            }
-                        )
+                fetched_receipts.extend(initial_receipts)
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
