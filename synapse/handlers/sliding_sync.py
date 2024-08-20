@@ -45,6 +45,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
+from prometheus_client import Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import (
@@ -102,6 +103,13 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+sync_processing_time = Histogram(
+    "synapse_sliding_sync_processing_time",
+    "Time taken to generate a sliding sync response, ignoring wait times.",
+    ["initial"],
+)
 
 
 class Sentinel(enum.Enum):
@@ -571,6 +579,8 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
+        start_time_s = self.clock.time()
+
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -933,6 +943,11 @@ class SlidingSyncHandler:
         # Make it easy to find traces for syncs that aren't empty
         set_tag(SynapseTags.RESULT_PREFIX + "result", bool(sliding_sync_result))
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
+
+        end_time_s = self.clock.time()
+        sync_processing_time.labels(from_token is not None).observe(
+            end_time_s - start_time_s
+        )
 
         return sliding_sync_result
 
@@ -3073,38 +3088,17 @@ class SlidingSyncHandler:
             # from that room but we only want to include receipts for events
             # in the timeline to avoid bloating and blowing up the sync response
             # as the number of users in the room increases. (this behavior is part of the spec)
-            initial_rooms = {
-                room_id
+            initial_rooms_and_event_ids = [
+                (room_id, event.event_id)
                 for room_id in initial_rooms
                 if room_id in actual_room_response_map
-            }
-            if initial_rooms:
-                initial_receipts = await self.store.get_linearized_receipts_for_rooms(
-                    room_ids=initial_rooms,
-                    to_key=to_token.receipt_key,
+                for event in actual_room_response_map[room_id].timeline_events
+            ]
+            if initial_rooms_and_event_ids:
+                initial_receipts = await self.store.get_linearized_receipts_for_events(
+                    room_and_event_ids=initial_rooms_and_event_ids,
                 )
-
-                for receipt in initial_receipts:
-                    relevant_event_ids = {
-                        event.event_id
-                        for event in actual_room_response_map[
-                            receipt["room_id"]
-                        ].timeline_events
-                    }
-
-                    content = {
-                        event_id: content_value
-                        for event_id, content_value in receipt["content"].items()
-                        if event_id in relevant_event_ids
-                    }
-                    if content:
-                        fetched_receipts.append(
-                            {
-                                "type": receipt["type"],
-                                "room_id": receipt["room_id"],
-                                "content": content,
-                            }
-                        )
+                fetched_receipts.extend(initial_receipts)
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
