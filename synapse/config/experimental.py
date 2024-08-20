@@ -449,11 +449,11 @@ class ExperimentalConfig(Config):
             self.msc4140_max_delay = int(experimental["msc4140_max_delay"])
             if self.msc4140_max_delay <= 0:
                 raise ValueError
-        except ValueError:
+        except ValueError as e:
             raise ConfigError(
                 "msc4140_max_delay must be a positive integer",
                 ("experimental", "msc4140_max_delay"),
-            )
+            ) from e
         except KeyError:
             self.msc4140_max_delay = 10 * 365 * 24 * 60 * 60 * 1000  # 10 years
 
