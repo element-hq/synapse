@@ -342,15 +342,25 @@ class AdminHandler:
         return writer.finished()
 
     async def start_redact_events(
-        self, user_id: str, rooms: list, requester: JsonMapping
+        self,
+        user_id: str,
+        rooms: list,
+        requester: JsonMapping,
+        reason: Optional[str],
+        limit: Optional[int],
     ) -> str:
         """
-        Start a task redacting the events of the given user in the givent rooms
+        Start a task redacting the events of the given user in the given rooms
 
         Args:
             user_id: the user ID of the user whose events should be redacted
             rooms: the rooms in which to redact the user's events
             requester: the user requesting the events
+            reason: reason for requesting the redaction, ie spam, etc
+            limit: limit on the number of events in each room to redact
+
+        Returns:
+            a unique ID which can be used to query the status of the task
         """
         active_tasks = await self._task_scheduler.get_tasks(
             actions=[REDACT_ALL_EVENTS_ACTION_NAME],
@@ -366,7 +376,13 @@ class AdminHandler:
         redact_id = await self._task_scheduler.schedule_task(
             REDACT_ALL_EVENTS_ACTION_NAME,
             resource_id=user_id,
-            params={"rooms": rooms, "requester": requester, "user_id": user_id},
+            params={
+                "rooms": rooms,
+                "requester": requester,
+                "user_id": user_id,
+                "reason": reason,
+                "limit": limit,
+            },
         )
 
         logger.info(
@@ -380,7 +396,7 @@ class AdminHandler:
         self, task: ScheduledTask
     ) -> Tuple[TaskStatus, Optional[Mapping[str, Any]], Optional[str]]:
         """
-        Task to redact all a users events in the given rooms, tracking which, if any, events
+        Task to redact all of a users events in the given rooms, tracking which, if any, events
         whose redaction failed
         """
 
@@ -395,30 +411,56 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
-        result: Dict[str, Any] = {"result": []}
+        reason = task.params.get("reason")
+        limit = task.params.get("limit")
+
+        result: Mapping[str, Any] = (
+            task.result
+            if task.result
+            else {"failed_redactions": {}, "successful_redactions": []}
+        )
         for room in rooms:
             room_version = await self._store.get_room_version(room)
-            events = await self._store.get_events_sent_by_user(user_id, room)
+            events = await self._store.get_events_sent_by_user_in_room(
+                user_id, room, limit, "m.room.redaction"
+            )
+
+            if not events:
+                # there's nothing to redact
+                return TaskStatus.COMPLETE, result, None
 
             for event in events:
+                # if we've already successfully redacted this event then skip processing it
+                if event in result["successful_redactions"]:
+                    continue
+
                 event_dict = {
                     "type": EventTypes.Redaction,
-                    "content": {},
+                    "content": {"reason": reason} if reason else {},
                     "room_id": room,
-                    "sender": requester.user.to_string(),
+                    "sender": user_id,
                 }
                 if room_version.updated_redaction_rules:
-                    event_dict["content"]["redacts"] = event[0]
+                    event_dict["content"]["redacts"] = event
                 else:
-                    event_dict["redacts"] = event[0]
+                    event_dict["redacts"] = event
 
                 try:
-                    await self.event_creation_handler.create_and_send_nonmember_event(
-                        requester, event_dict
+                    # set the prev event to the offending message to allow for redactions
+                    # to be processed in the case where the user has been kicked/banned before
+                    # redactions are requested
+                    redaction, _ = (
+                        await self.event_creation_handler.create_and_send_nonmember_event(
+                            requester,
+                            event_dict,
+                            prev_event_ids=[event],
+                            ratelimit=False,
+                        )
                     )
+                    result["successful_redactions"].append(event)
                 except Exception as ex:
-                    logger.info(f"Redaction of event {event[0]} failed due to: {ex}")
-                    result["result"].append(event[0])
+                    logger.info(f"Redaction of event {event} failed due to: {ex}")
+                    result["failed_redactions"][event] = str(ex)
                     await self._task_scheduler.update_task(task.id, result=result)
 
         return TaskStatus.COMPLETE, result, None

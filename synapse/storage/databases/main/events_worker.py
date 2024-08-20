@@ -2440,23 +2440,66 @@ class EventsWorkerStore(SQLBaseStore):
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
 
-    async def get_events_sent_by_user(self, user_id: str, room_id: str) -> List[tuple]:
+    async def get_events_sent_by_user_in_room(
+        self, user_id: str, room_id: str, limit: Optional[int], filter: str = "none"
+    ) -> Optional[List[str]]:
         """
-        Get a list of event ids of events sent by user in room
+        Get a list of event ids and event info of events sent by the user in the specified room
+
+        Args:
+            user_id: user ID to search against
+            room_id: room ID of the room to search for events in
+            filter: type of event to filter out
+            limit: maximum number of event ids to return
         """
 
         def _get_events_by_user_txn(
-            txn: LoggingTransaction, user_id: str, room_id: str
-        ) -> List[tuple]:
-            return self.db_pool.simple_select_many_txn(
-                txn,
-                "events",
-                "sender",
-                [user_id],
-                {"room_id": room_id},
-                retcols=["event_id"],
-            )
+            txn: LoggingTransaction,
+            user_id: str,
+            room_id: str,
+            filter: Optional[str],
+            batch_size: int,
+            offset: int,
+        ) -> Tuple[Optional[List[str]], int]:
 
-        return await self.db_pool.runInteraction(
-            "get_events_by_user", _get_events_by_user_txn, user_id, room_id
-        )
+            sql = """
+                    SELECT event_id FROM events
+                    WHERE sender = ? AND room_id = ?
+                    AND type != ?
+                    ORDER BY received_ts DESC
+                    LIMIT ?
+                    OFFSET ?
+                  """
+            txn.execute(sql, (user_id, room_id, filter, batch_size, offset))
+            res = txn.fetchall()
+            if res:
+                events = [row[0] for row in res]
+            else:
+                events = None
+
+            return events, offset + batch_size
+
+        if not limit:
+            limit = 1000
+
+        offset = 0
+        batch_size = 100
+        if batch_size < limit:
+            batch_size = limit
+
+        selected_ids: List[str] = []
+        while offset < limit:
+            res, offset = await self.db_pool.runInteraction(
+                "get_events_by_user",
+                _get_events_by_user_txn,
+                user_id,
+                room_id,
+                filter,
+                batch_size,
+                offset,
+            )
+            if res:
+                selected_ids = selected_ids + res
+            else:
+                return selected_ids
+        return selected_ids
