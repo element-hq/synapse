@@ -49,7 +49,7 @@ from prometheus_client import Counter, Histogram
 
 from twisted.internet import defer
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, EventContentFields
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -64,8 +64,16 @@ from synapse.logging.opentracing import (
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.controllers.state import StateStorageController
 from synapse.storage.databases import Databases
-from synapse.storage.databases.main.events import DeltaState
+from synapse.storage.databases.main.events import (
+    DeltaState,
+    SlidingSyncTableChanges,
+    SlidingSyncStateInsertValues,
+    SlidingSyncSnapshotInsertValues,
+)
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
+from synapse.storage.databases.main.events import (
+    SLIDING_SYNC_RELEVANT_STATE_SET,
+)
 from synapse.types import (
     PersistedEventPosition,
     RoomStreamToken,
@@ -604,6 +612,7 @@ class EventsPersistenceStorageController:
 
             new_forward_extremities = None
             state_delta_for_room = None
+            sliding_sync_table_changes = None
 
             if not backfilled:
                 with Measure(self._clock, "_calculate_state_and_extrem"):
@@ -615,6 +624,13 @@ class EventsPersistenceStorageController:
                         state_delta_for_room,
                     ) = await self._calculate_new_forward_extremities_and_state_delta(
                         room_id, chunk
+                    )
+
+                with Measure(self._clock, "_calculate_sliding_sync_table_changes"):
+                    sliding_sync_table_changes = (
+                        await self._calculate_sliding_sync_table_changes(
+                            room_id, chunk, state_delta_for_room
+                        )
                     )
 
             with Measure(self._clock, "calculate_chain_cover_index_for_events"):
@@ -636,6 +652,7 @@ class EventsPersistenceStorageController:
                 use_negative_stream_ordering=backfilled,
                 inhibit_local_membership_updates=backfilled,
                 new_event_links=new_event_links,
+                sliding_sync_table_changes=sliding_sync_table_changes,
             )
 
         return replaced_events
@@ -750,6 +767,148 @@ class EventsPersistenceStorageController:
                 delta.no_longer_in_room = True
 
         return (new_forward_extremities, delta)
+
+    async def _calculate_sliding_sync_table_changes(
+        self,
+        room_id: str,
+        events_and_contexts: List[Tuple[EventBase, EventContext]],
+        delta_state: Optional[DeltaState],
+    ) -> Optional[SlidingSyncTableChanges]:
+        """
+        TODO
+        """
+        to_insert = delta_state.to_insert
+        to_delete = delta_state.to_delete
+
+        # This would only happen if someone was state reset out of the room
+        to_delete_membership_snapshots = {
+            (room_id, state_key)
+            for event_type, state_key in to_delete
+            if event_type == EventTypes.Member and self.is_mine_id(state_key)
+        }
+
+        membership_snapshot_updates = {}
+        if to_insert:
+            membership_event_id_to_user_id_map: Dict[str, str] = {}
+            for state_key, event_id in to_insert.items():
+                if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
+                    membership_event_id_to_user_id_map[event_id] = state_key[1]
+
+            if len(membership_event_id_to_user_id_map) > 0:
+                current_state_ids_map = (
+                    await self.main_store.get_partial_filtered_current_state_ids(
+                        room_id,
+                        state_filter=StateFilter.from_types(
+                            SLIDING_SYNC_RELEVANT_STATE_SET
+                        ),
+                    )
+                )
+                # Since we fetched the current state before we took `to_insert`/`to_delete`
+                # into account, we need to do a couple fixups.
+                #
+                # Update the current_state_map with what we have `to_delete`
+                for state_key in to_delete:
+                    current_state_ids_map.pop(state_key, None)
+                # Update the current_state_map with what we have `to_insert`
+                for state_key, event_id in to_insert.items():
+                    if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
+                        current_state_ids_map[state_key] = event_id
+
+                event_map = await self.main_store.get_events(
+                    current_state_ids_map.values()
+                )
+
+                current_state_map = {}
+                for key, event_id in current_state_ids_map.items():
+                    event = event_map.get(event_id)
+                    if event:
+                        current_state_map[key] = event
+
+                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+                sliding_sync_insert_values = None
+                has_known_state = False
+                if current_state_map:
+                    sliding_sync_insert_values = (
+                        self._get_sliding_sync_insert_values_from_state_map(
+                            current_state_map
+                        )
+                    )
+                    # We have current state to work from
+                    has_known_state = True
+                else:
+                    # We don't have any `current_state_events` anymore (previously
+                    # cleared out because of `no_longer_in_room`). This can happen if
+                    # one user is joined and another is invited (some non-join
+                    # membership). If the joined user leaves, we are `no_longer_in_room`
+                    # and `current_state_events` is cleared out. When the invited user
+                    # rejects the invite (leaves the room), we will end up here.
+                    #
+                    # In these cases, we should inherit the meta data from the previous
+                    # snapshot (handled by the default `ON CONFLICT ... DO UPDATE SET`).
+                    # When using sliding sync filters, this will prevent the room from
+                    # disappearing/appearing just because you left the room.
+                    #
+                    # Ideally, we could additionally assert that we're only here for
+                    # valid non-join membership transitions.
+                    assert delta_state.no_longer_in_room
+
+                membership_snapshot_updates = {
+                    (room_id, user_id): SlidingSyncSnapshotInsertValues(
+                        membership_event_id=membership_event_id,
+                        has_known_state=has_known_state,
+                    )
+                    for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
+                }
+
+        return SlidingSyncTableChanges(
+            joined_room_updates=TODO,
+            to_delete_joined_rooms=TODO,
+            membership_snapshot_updates=membership_snapshot_updates,
+            to_delete_membership_snapshots=to_delete_membership_snapshots,
+        )
+
+    @classmethod
+    def _get_sliding_sync_insert_values_from_state_map(
+        cls, state_map: StateMap[EventBase]
+    ) -> SlidingSyncStateInsertValues:
+        """
+        Extract the relevant state values from the `state_map` needed to insert into the
+        `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+
+        Returns:
+            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
+            state values needed to insert into
+            the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+        """
+        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
+
+        # Parse the raw event JSON
+        for state_key, event in state_map.items():
+            if state_key == (EventTypes.Create, ""):
+                room_type = event.content.get(EventContentFields.ROOM_TYPE)
+                sliding_sync_insert_map["room_type"] = room_type
+            elif state_key == (EventTypes.RoomEncryption, ""):
+                encryption_algorithm = event.content.get(
+                    EventContentFields.ENCRYPTION_ALGORITHM
+                )
+                is_encrypted = encryption_algorithm is not None
+                sliding_sync_insert_map["is_encrypted"] = is_encrypted
+            elif state_key == (EventTypes.Name, ""):
+                room_name = event.content.get(EventContentFields.ROOM_NAME)
+                sliding_sync_insert_map["room_name"] = room_name
+            else:
+                # We only expect to see events according to the
+                # `SLIDING_SYNC_RELEVANT_STATE_SET`.
+                raise AssertionError(
+                    f"Unexpected event (we should not be fetching extra events): {state_key} {event.event_id}"
+                )
+
+        return SlidingSyncStateInsertValues(
+            room_type=room_type,
+            is_encrypted=encryption_algorithm,
+            room_name=room_name,
+        )
 
     async def _calculate_new_extremities(
         self,

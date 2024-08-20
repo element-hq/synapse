@@ -621,7 +621,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                 # so we should have some current state for each room
                 assert current_state_map
 
-                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
+                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_ids_map_txn(
                     txn, current_state_map
                 )
                 # We should have some insert values for each room, even if they are `None`
@@ -754,7 +754,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     # for each room
                     assert current_state_map
 
-                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_ids_map_txn(
                         txn, current_state_map
                     )
                     # We should have some insert values for each room, even if they are `None`
@@ -854,7 +854,7 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
                     )
                     state_map = state_by_group[state_group]
 
-                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_map_txn(
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_ids_map_txn(
                         txn, state_map
                     )
                     # We should have some insert values for each room, even if they are `None`
