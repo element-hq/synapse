@@ -18,6 +18,7 @@
 
 """ This module contains REST servlets to do with delayed events: /delayed_events/<paths> """
 import logging
+from enum import Enum
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Tuple
 
@@ -32,6 +33,12 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class _UpdateDelayedEventAction(Enum):
+    CANCEL = "cancel"
+    RESTART = "restart"
+    SEND = "send"
 
 
 # TODO: Needs unit testing
@@ -61,8 +68,22 @@ class UpdateDelayedEventServlet(RestServlet):
                 "'action' is missing",
                 Codes.MISSING_PARAM,
             )
+        try:
+            enum_action = _UpdateDelayedEventAction(action)
+        except ValueError:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "'action' is not one of "
+                + ", ".join(f"'{m.value}'" for m in _UpdateDelayedEventAction),
+                Codes.INVALID_PARAM,
+            )
 
-        await self.delayed_events_handler.update(requester, delay_id, action)
+        if enum_action == _UpdateDelayedEventAction.CANCEL:
+            await self.delayed_events_handler.cancel(requester, delay_id)
+        elif enum_action == _UpdateDelayedEventAction.RESTART:
+            await self.delayed_events_handler.restart(requester, delay_id)
+        elif enum_action == _UpdateDelayedEventAction.SEND:
+            await self.delayed_events_handler.send(requester, delay_id)
         return 200, {}
 
 

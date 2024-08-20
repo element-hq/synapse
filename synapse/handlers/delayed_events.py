@@ -18,7 +18,6 @@
 
 import logging
 from contextlib import asynccontextmanager
-from enum import Enum
 from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
@@ -65,12 +64,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _STATE_LOCK_KEY = "STATE_LOCK_KEY"
-
-
-class _UpdateDelayedEventAction(Enum):
-    CANCEL = "cancel"
-    RESTART = "restart"
-    SEND = "send"
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -237,52 +230,69 @@ class DelayedEventsHandler:
 
         return delay_id
 
-    async def update(self, requester: Requester, delay_id: str, action: str) -> None:
+    async def cancel(self, requester: Requester, delay_id: str) -> None:
         """
-        Executes the appropriate action for the matching delayed event.
+        Cancels the scheduled delivery of the matching delayed event.
 
         Args:
+            requester: The owner of the delayed event to act on.
             delay_id: The ID of the delayed event to act on.
-            action: What to do with the delayed event.
 
         Raises:
-            SynapseError: if the provided action is unknown, or is unsupported for the target delayed event.
             NotFoundError: if no matching delayed event could be found.
         """
-        try:
-            enum_action = _UpdateDelayedEventAction(action)
-        except ValueError:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "'action' is not one of "
-                + ", ".join(f"'{m.value}'" for m in _UpdateDelayedEventAction),
-                Codes.INVALID_PARAM,
-            )
+        await self._request_ratelimiter.ratelimit(requester)
 
         delay_id = DelayID(delay_id)
         user_localpart = UserLocalpart(requester.user.localpart)
+        async with self._get_delay_context(delay_id, user_localpart):
+            self._unschedule(delay_id, user_localpart)
 
+    async def restart(self, requester: Requester, delay_id: str) -> None:
+        """
+        Restarts the scheduled delivery of the matching delayed event.
+
+        Args:
+            requester: The owner of the delayed event to act on.
+            delay_id: The ID of the delayed event to act on.
+
+        Raises:
+            NotFoundError: if no matching delayed event could be found.
+        """
         await self._request_ratelimiter.ratelimit(requester)
 
+        delay_id = DelayID(delay_id)
+        user_localpart = UserLocalpart(requester.user.localpart)
         async with self._get_delay_context(delay_id, user_localpart):
-            if enum_action == _UpdateDelayedEventAction.CANCEL:
-                self._unschedule(delay_id, user_localpart)
+            delay = await self._store.restart(
+                delay_id,
+                user_localpart,
+                self._get_current_ts(),
+            )
 
-            elif enum_action == _UpdateDelayedEventAction.RESTART:
-                delay = await self._store.restart(
-                    delay_id,
-                    user_localpart,
-                    self._get_current_ts(),
-                )
+            self._unschedule(delay_id, user_localpart)
+            self._schedule(delay_id, user_localpart, delay)
 
-                self._unschedule(delay_id, user_localpart)
-                self._schedule(delay_id, user_localpart, delay)
+    async def send(self, requester: Requester, delay_id: str) -> None:
+        """
+        Immediately sends the matching delayed event, instead of waiting for its scheduled delivery.
 
-            elif enum_action == _UpdateDelayedEventAction.SEND:
-                args = await self._store.pop_event(delay_id, user_localpart)
+        Args:
+            requester: The owner of the delayed event to act on.
+            delay_id: The ID of the delayed event to act on.
 
-                self._unschedule(delay_id, user_localpart)
-                await self._send_event(user_localpart, *args)
+        Raises:
+            NotFoundError: if no matching delayed event could be found.
+        """
+        await self._request_ratelimiter.ratelimit(requester)
+
+        delay_id = DelayID(delay_id)
+        user_localpart = UserLocalpart(requester.user.localpart)
+        async with self._get_delay_context(delay_id, user_localpart):
+            args = await self._store.pop_event(delay_id, user_localpart)
+
+            self._unschedule(delay_id, user_localpart)
+            await self._send_event(user_localpart, *args)
 
     async def _send_on_timeout(
         self, delay_id: DelayID, user_localpart: UserLocalpart
