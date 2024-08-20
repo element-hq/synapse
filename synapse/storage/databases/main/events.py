@@ -31,6 +31,7 @@ from typing import (
     Generator,
     Iterable,
     List,
+    Literal,
     Optional,
     Set,
     Tuple,
@@ -125,34 +126,51 @@ class DeltaState:
         return not self.to_delete and not self.to_insert and not self.no_longer_in_room
 
 
-@attr.s(slots=True, auto_attribs=True)
-class SlidingSyncStateInsertValues:
-    """
-    Insert values relevant for the `sliding_sync_joined_rooms` and
-    `sliding_sync_membership_snapshots` database tables.
-    """
-    room_type: Optional[str]
-    is_encrypted: Optional[bool]
-    room_name: Optional[str]
+# @attr.s(slots=True, auto_attribs=True)
+# class SlidingSyncStateInsertValues:
+#     """
+#     Insert values relevant for the `sliding_sync_joined_rooms` and
+#     `sliding_sync_membership_snapshots` database tables.
+#     """
+#     room_type: Optional[str]
+#     is_encrypted: Optional[bool]
+#     room_name: Optional[str]
+
+SlidingSyncStateInsertKeys = Literal["room_type", "is_encrypted", "room_name"]
+SlidingSyncStateInsertValues = Dict[
+    SlidingSyncStateInsertKeys, Optional[Union[str, bool]]
+]
 
 
-@attr.s(slots=True, auto_attribs=True)
-class SlidingSyncMembershipSnapshotSharedInsertValues(SlidingSyncStateInsertValues):
-    """
-    Insert values for `sliding_sync_membership_snapshots` that we can share across
-    multiple memberships
-    """
-    has_known_state: bool
-    # TODO: tombstone_successor_room_id: Optional[str]
+# @attr.s(slots=True, auto_attribs=True)
+# class SlidingSyncMembershipSnapshotSharedInsertValues(SlidingSyncStateInsertValues):
+#     """
+#     Insert values for `sliding_sync_membership_snapshots` that we can share across
+#     multiple memberships
+#     """
+#     has_known_state: bool
+#     # TODO: tombstone_successor_room_id: Optional[str]
 
-@attr.s(slots=True, auto_attribs=True)
-class SlidingSyncMembershipInfo(SlidingSyncStateInsertValues):
-    """
-    Values unique to each membership
-    """
-    user_id: str
-    sender: str
-    membership_event_id: str
+SlidingSyncMembershipSnapshotSharedInsertValues = Dict[
+    # Instead of using a Union, we use a Literal to be compatible with mypy
+    # Literal[SlidingSyncStateInsertKeys, "has_known_state"],
+    Union[SlidingSyncStateInsertKeys, Literal["has_known_state"]],
+    Optional[Union[str, bool]],
+]
+
+# @attr.s(slots=True, auto_attribs=True)
+# class SlidingSyncMembershipInfo(SlidingSyncStateInsertValues):
+#     """
+#     Values unique to each membership
+#     """
+#     user_id: str
+#     sender: str
+#     membership_event_id: str
+
+SlidingSyncMembershipInfo = Dict[
+    Literal["user_id", "sender", "membership_event_id"], Optional[Union[str, bool]]
+]
+
 
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncTableChanges:
@@ -164,7 +182,9 @@ class SlidingSyncTableChanges:
 
     # Shared values to upsert into `sliding_sync_membership_snapshots` for each
     # `to_insert_membership_snapshots`
-    membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues
+    membership_snapshot_shared_insert_values: (
+        SlidingSyncMembershipSnapshotSharedInsertValues
+    )
     # List of membership to insert into `sliding_sync_membership_snapshots`
     to_insert_membership_snapshots: List[SlidingSyncMembershipInfo]
     # List of user_id to delete from `sliding_sync_membership_snapshots`
@@ -667,6 +687,9 @@ class PersistEventsStore:
         # room_memberships, where applicable.
         # NB: This function invalidates all state related caches
         if state_delta_for_room:
+            # If the state delta exists, the sliding sync table changes should also exist
+            assert sliding_sync_table_changes is not None
+
             self._update_current_state_txn(
                 txn,
                 room_id,
@@ -1213,6 +1236,7 @@ class PersistEventsStore:
         self,
         room_id: str,
         state_delta: DeltaState,
+        sliding_sync_table_changes: SlidingSyncTableChanges,
     ) -> None:
         """Update the current state stored in the datatabase for the given room"""
 
@@ -1226,6 +1250,7 @@ class PersistEventsStore:
                 room_id,
                 delta_state=state_delta,
                 stream_id=stream_ordering,
+                sliding_sync_table_changes=sliding_sync_table_changes,
             )
 
     def _update_current_state_txn(
@@ -1234,7 +1259,7 @@ class PersistEventsStore:
         room_id: str,
         delta_state: DeltaState,
         stream_id: int,
-        sliding_sync_table_changes: Optional[SlidingSyncTableChanges],
+        sliding_sync_table_changes: SlidingSyncTableChanges,
     ) -> None:
         to_delete = delta_state.to_delete
         to_insert = delta_state.to_insert
@@ -1249,73 +1274,6 @@ class PersistEventsStore:
             for ev_type, state_key in itertools.chain(to_delete, to_insert)
             if ev_type == EventTypes.Member
         }
-
-        # Handle updating the `sliding_sync_membership_snapshots` table
-        #
-        # This would only happen if someone was state reset out of the room
-        if sliding_sync_table_changes.to_delete_membership_snapshots:
-            txn.execute_batch(
-                "DELETE FROM sliding_sync_membership_snapshots"
-                " WHERE room_id = ? AND user_id = ?",
-                sliding_sync_table_changes.to_delete_membership_snapshots,
-            )
-
-        # We handle `sliding_sync_membership_snapshots` before `current_state_events` so
-        # we can gather the current state before it might be deleted if we are
-        # last ones in the room and now we are `no_longer_in_room`.
-        #
-        # We do this regardless of whether the server is `no_longer_in_room` or not
-        # because we still want a row if a local user was just left/kicked or got banned
-        # from the room.
-        if sliding_sync_table_changes.membership_snapshot_updates:
-
-            # TODO
-            for asdf in sliding_sync_table_changes.membership_snapshot_updates:
-                for attr_name in ["room_type", "is_encrypted", "room_name"]
-                    [
-                        getattr(x, attr_name)
-                        
-                    ]
-
-            # Update the `sliding_sync_membership_snapshots` table
-            #
-            # Pulling keys/values separately is safe and will produce congruent
-            # lists
-            insert_keys = sliding_sync_membership_snapshots_insert_map.keys()
-            insert_values = sliding_sync_membership_snapshots_insert_map.values()
-            # We need to insert/update regardless of whether we have `insert_keys`
-            # because there are other fields in the `ON CONFLICT` upsert to run (see
-            # inherit case above for more context when this happens).
-            txn.execute_batch(
-                f"""
-                INSERT INTO sliding_sync_membership_snapshots
-                    (room_id, user_id, membership_event_id, membership, event_stream_ordering
-                    {("," + ", ".join(insert_keys)) if insert_keys else ""})
-                VALUES (
-                    ?, ?, ?,
-                    (SELECT membership FROM room_memberships WHERE event_id = ?),
-                    (SELECT stream_ordering FROM events WHERE event_id = ?)
-                    {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
-                )
-                ON CONFLICT (room_id, user_id)
-                DO UPDATE SET
-                    membership_event_id = EXCLUDED.membership_event_id,
-                    membership = EXCLUDED.membership,
-                    event_stream_ordering = EXCLUDED.event_stream_ordering
-                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)) if insert_keys else ""}
-                """,
-                [
-                    [
-                        room_id,
-                        user_id,
-                        membership_event_id,
-                        membership_event_id,
-                        membership_event_id,
-                    ]
-                    + list(insert_values)
-                    for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
-                ],
-            )
 
         if delta_state.no_longer_in_room:
             # Server is no longer in the room so we delete the room from
@@ -1542,6 +1500,64 @@ class PersistEventsStore:
                     (room_id, key[1], ev_id, ev_id, ev_id)
                     for key, ev_id in to_insert.items()
                     if key[0] == EventTypes.Member and self.is_mine_id(key[1])
+                ],
+            )
+
+        # Handle updating the `sliding_sync_membership_snapshots` table
+        #
+        # This would only happen if someone was state reset out of the room
+        if sliding_sync_table_changes.to_delete_membership_snapshots:
+            txn.execute_batch(
+                "DELETE FROM sliding_sync_membership_snapshots"
+                " WHERE room_id = ? AND user_id = ?",
+                sliding_sync_table_changes.to_delete_membership_snapshots,
+            )
+
+        # We do this regardless of whether the server is `no_longer_in_room` or not
+        # because we still want a row if a local user was just left/kicked or got banned
+        # from the room.
+        if sliding_sync_table_changes.to_insert_membership_snapshots:
+            # Update the `sliding_sync_membership_snapshots` table
+            #
+            # Pulling keys/values separately is safe and will produce congruent
+            # lists
+            insert_keys = (
+                sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
+            )
+            insert_values = (
+                sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
+            )
+            # We need to insert/update regardless of whether we have `insert_keys`
+            # because there are other fields in the `ON CONFLICT` upsert to run (see
+            # inherit case above for more context when this happens).
+            txn.execute_batch(
+                f"""
+                INSERT INTO sliding_sync_membership_snapshots
+                    (room_id, user_id, membership_event_id, membership, event_stream_ordering
+                    {("," + ", ".join(insert_keys)) if insert_keys else ""})
+                VALUES (
+                    ?, ?, ?,
+                    (SELECT membership FROM room_memberships WHERE event_id = ?),
+                    (SELECT stream_ordering FROM events WHERE event_id = ?)
+                    {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
+                )
+                ON CONFLICT (room_id, user_id)
+                DO UPDATE SET
+                    membership_event_id = EXCLUDED.membership_event_id,
+                    membership = EXCLUDED.membership,
+                    event_stream_ordering = EXCLUDED.event_stream_ordering
+                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)) if insert_keys else ""}
+                """,
+                [
+                    [
+                        room_id,
+                        membership_info["user_id"],
+                        membership_info["membership_event_id"],
+                        membership_info["membership_event_id"],
+                        membership_info["membership_event_id"],
+                    ]
+                    + list(insert_values)
+                    for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
                 ],
             )
 
