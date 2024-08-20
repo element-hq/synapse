@@ -2967,11 +2967,11 @@ class SlidingSyncHandler:
             # from that room but we only want to include receipts for events
             # in the timeline to avoid bloating and blowing up the sync response
             # as the number of users in the room increases. (this behavior is part of the spec)
-            initial_rooms = [
+            initial_rooms = {
                 room_id
                 for room_id in initial_rooms
                 if room_id in actual_room_response_map
-            ]
+            }
             if initial_rooms:
                 initial_receipts = await self.store.get_linearized_receipts_for_rooms(
                     room_ids=initial_rooms,
