@@ -1250,6 +1250,9 @@ class PersistEventsStore:
         to_delete = delta_state.to_delete
         to_insert = delta_state.to_insert
 
+        # Sanity check we're processing the same thing
+        assert room_id == sliding_sync_table_changes.room_id
+
         # Figure out the changes of membership to invalidate the
         # `get_rooms_for_user` cache.
         # We find out which membership events we may have deleted

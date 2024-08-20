@@ -847,12 +847,19 @@ class EventsPersistenceStorageController:
                         missing_membership_event_ids
                     )
                 )
+                # There shouldn't be any missing events
+                assert (
+                    remaining_event_id_to_sender_map.keys()
+                    == missing_membership_event_ids
+                ), missing_membership_event_ids.difference(
+                    remaining_event_id_to_sender_map.keys()
+                )
                 event_id_to_sender_map.update(remaining_event_id_to_sender_map)
 
             membership_infos_to_insert_membership_snapshots = [
                 {
                     "user_id": user_id,
-                    "sender": event_id_to_sender_map[event_id],
+                    "sender": event_id_to_sender_map[membership_event_id],
                     "membership_event_id": membership_event_id,
                 }
                 for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
@@ -943,7 +950,7 @@ class EventsPersistenceStorageController:
                 if event:
                     current_state_map[state_key] = event
                 else:
-                    missing_event_ids.add(membership_event_id)
+                    missing_event_ids.add(event_id)
 
             # Otherwise, we need to find a couple events that we were reset to.
             if missing_event_ids:
@@ -951,7 +958,9 @@ class EventsPersistenceStorageController:
                     current_state_ids_map.values()
                 )
                 # There shouldn't be any missing events
-                assert remaining_events.keys() == missing_event_ids
+                assert (
+                    remaining_events.keys() == missing_event_ids
+                ), missing_event_ids.difference(remaining_events.keys())
                 for event in remaining_events.values():
                     current_state_map[(event.type, event.state_key)] = event
 
