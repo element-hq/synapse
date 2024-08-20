@@ -184,6 +184,9 @@ class SlidingSyncResult:
                 their local state. When there is an update, servers MUST omit this flag
                 entirely and NOT send "initial":false as this is wasteful on bandwidth. The
                 absence of this flag means 'false'.
+            unstable_expanded_timeline: Flag which is set if we're returning more historic
+                events due to the timeline limit having increased. See "XXX: Odd behavior"
+                comment ing `synapse.handlers.sliding_sync`.
             required_state: The current state of the room
             timeline: Latest events in the room. The last event is the most recent.
             bundled_aggregations: A mapping of event ID to the bundled aggregations for
@@ -232,6 +235,7 @@ class SlidingSyncResult:
         heroes: Optional[List[StrippedHero]]
         is_dm: bool
         initial: bool
+        unstable_expanded_timeline: bool
         # Should be empty for invite/knock rooms with `stripped_state`
         required_state: List[EventBase]
         # Should be empty for invite/knock rooms with `stripped_state`
