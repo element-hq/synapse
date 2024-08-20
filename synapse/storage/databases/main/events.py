@@ -1417,17 +1417,10 @@ class PersistEventsStore:
             # persisting stack (see
             # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
             #
-            bump_event_id = None
             current_state_map = {}
             for state_key, event_id in to_insert.items():
                 if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
                     current_state_map[state_key] = event_id
-
-                if (
-                    state_key[0] in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
-                    and state_key[1] == ""
-                ):
-                    bump_event_id = event_id
 
             # Map of values to insert/update in the `sliding_sync_joined_rooms` table
             sliding_sync_joined_rooms_insert_map = (
@@ -1465,37 +1458,20 @@ class PersistEventsStore:
                     # just to account for things changing in the future.
                     next(iter(to_insert.values())),
                 ]
-                # If we have a `bump_event_id`, let's update the `bump_stamp` column
-                bump_stamp_column = ""
-                bump_stamp_values_clause = ""
-                if bump_event_id is not None:
-                    bump_stamp_column = "bump_stamp, "
-                    bump_stamp_values_clause = (
-                        "(SELECT stream_ordering FROM events WHERE event_id = ?),"
-                    )
-                    args.append(bump_event_id)
 
                 args.extend(iter(insert_values))
 
                 # We don't update `event_stream_ordering` `ON CONFLICT` because it's
                 # simpler and we can just rely on
                 # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to do
-                # the right thing.
-                #
-                # We don't update `bump_stamp` `ON CONFLICT` because we're dealing with
-                # state here and the only state event that is also a bump event type is
-                # `m.room.create`. Given the room creation event is the first one in the
-                # room, it's either going to be set on insert, or we've already moved on
-                # to other events with a greater `stream_ordering`/`bump_stamp` and we
-                # don't need to even try.
+                # the right thing (same for `bump_stamp`).
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_joined_rooms
-                        (room_id, event_stream_ordering, {bump_stamp_column} {", ".join(insert_keys)})
+                        (room_id, event_stream_ordering, {", ".join(insert_keys)})
                     VALUES (
                         ?,
                         (SELECT stream_ordering FROM events WHERE event_id = ?),
-                        {bump_stamp_values_clause}
                         {", ".join("?" for _ in insert_values)}
                     )
                     ON CONFLICT (room_id)
