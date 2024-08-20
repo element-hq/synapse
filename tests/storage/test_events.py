@@ -2559,7 +2559,177 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-    # TODO: test_non_join_state_reset
+    def test_non_join_state_reset(self) -> None:
+        """
+        Test a state reset that removes someone from the room.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user2_tok,
+        )
+
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Make sure we see the new room name
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id},
+            exact=True,
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id,
+                # This should be whatever is the last event in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id, user1_id),
+                (room_id, user2_id),
+            },
+            exact=True,
+        )
+        user1_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id,
+            user_id=user1_id,
+            membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user1_id)
+            ].internal_metadata.stream_ordering,
+            has_known_state=True,
+            room_type=None,
+            room_name="my super duper room",
+            is_encrypted=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
+            user1_snapshot,
+        )
+        # Holds the info according to the current state when the user joined (no room
+        # name when the room creator joined)
+        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id,
+            user_id=user2_id,
+            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user2_id)
+            ].internal_metadata.stream_ordering,
+            has_known_state=True,
+            room_type=None,
+            room_name=None,
+            is_encrypted=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
+            user2_snapshot,
+        )
+
+        # Mock a state reset removing the membership for user1 in the current state
+        message_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[state_map[(EventTypes.Name, "")].event_id],
+                auth_event_ids=[
+                    state_map[(EventTypes.Create, "")].event_id,
+                    state_map[(EventTypes.Member, user1_id)].event_id,
+                ],
+                type=EventTypes.Message,
+                content={"body": "foo", "msgtype": "m.text"},
+                sender=user1_id,
+                room_id=room_id,
+                room_version=RoomVersions.V10.identifier,
+            )
+        )
+        event_chunk = [message_tuple]
+        self.get_success(
+            self.persist_events_store._persist_events_and_state_updates(
+                room_id,
+                event_chunk,
+                state_delta_for_room=DeltaState(
+                    # This is the state reset part. We're removing the room name state.
+                    to_delete=[(EventTypes.Member, user1_id)],
+                    to_insert={},
+                ),
+                new_forward_extremities={message_tuple[0].event_id},
+                use_negative_stream_ordering=False,
+                inhibit_local_membership_updates=False,
+                new_event_links={},
+            )
+        )
+
+        # State reset on membership doesn't affect the`sliding_sync_joined_rooms` table
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id},
+            exact=True,
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id,
+                # This should be whatever is the last event in the room
+                event_stream_ordering=message_tuple[
+                    0
+                ].internal_metadata.stream_ordering,
+                bump_stamp=message_tuple[0].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+            ),
+        )
+
+        # State reset on membership should remove the user's snapshot
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                # We shouldn't see user1 in the snapshots table anymore
+                (room_id, user2_id),
+            },
+            exact=True,
+        )
+        # Snapshot for user2 hasn't changed
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
+            user2_snapshot,
+        )
 
     def test_joined_background_update_missing(self) -> None:
         """
