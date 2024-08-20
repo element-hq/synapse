@@ -1370,10 +1370,10 @@ The API is
 POST /_synapse/admin/v1/user/$user_id/redact
 
 {
-  "rooms": [!roomid1, !roomid2]
+  "rooms": ["!roomid1", "!roomid2"]
 }
 ```
-If an empty dict is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted, 
+If an empty list is provided as the key for `rooms`, all events in all the rooms the user is member of will be redacted, 
 otherwise all the events in the rooms provided in the request will be redacted. 
 
 The API starts redaction process running, and returns immediately with a JSON body with
@@ -1393,8 +1393,15 @@ The following parameters should be set in the URL:
 
 The following JSON body parameter must be provided:
 
--  `rooms` - A list of rooms to redact the user's events in, if an empty list is provided all events in all rooms
+-  `rooms` - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
   the user is a member of will be redacted
+
+_Added in Synapse 1.114.0._
+
+The following JSON body parameters are optional:
+
+- `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc
+- `limit` - a limit on the number of events to redact (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
 
 
 ## Check the status of a redaction process
@@ -1430,4 +1437,8 @@ The following parameters should be set in the URL:
 The following fields are returned in the JSON response body:
 
 - status: one of scheduled/active/completed/failed, indicating the status of the redaction job
-- failed: a list of event ids the process was unable to redact, if any
+- failed_redactions: a dict where the keys are event ids the process was unable to redact, if any, and the values are 
+  the corresponding error that caused the redaction to fail
+- successful_redactions: a list of event ids that were successfully redacted
+
+_Added in Synapse 1.114.0._
