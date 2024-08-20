@@ -1074,6 +1074,12 @@ class ReceiptsBackgroundUpdateStore(SQLBaseStore):
             self.RECEIPTS_GRAPH_UNIQUE_INDEX_UPDATE_NAME,
             self._background_receipts_graph_unique_index,
         )
+        self.db_pool.updates.register_background_index_update(
+            update_name="receipts_room_id_event_id_index",
+            index_name="receipts_linearized_event_id",
+            table="receipts_linearized",
+            columns=("room_id", "event_id"),
+        )
 
     async def _populate_receipt_event_stream_ordering(
         self, progress: JsonDict, batch_size: int
