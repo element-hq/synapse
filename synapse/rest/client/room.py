@@ -196,6 +196,7 @@ class RoomStateEventRestServlet(RestServlet):
         self.message_handler = hs.get_message_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4140_max_delay = hs.config.experimental.msc4140_max_delay
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/state/$eventtype
@@ -291,7 +292,7 @@ class RoomStateEventRestServlet(RestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
-        delay = parse_integer(request, "org.matrix.msc4140.delay")
+        delay = _parse_request_delay(request, self._msc4140_max_delay)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -359,6 +360,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         self.event_creation_handler = hs.get_event_creation_handler()
         self.delayed_events_handler = hs.get_delayed_events_handler()
         self.auth = hs.get_auth()
+        self._msc4140_max_delay = hs.config.experimental.msc4140_max_delay
 
     def register(self, http_server: HttpServer) -> None:
         # /rooms/$roomid/send/$event_type[/$txn_id]
@@ -379,7 +381,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
         if requester.app_service:
             origin_server_ts = parse_integer(request, "ts")
 
-        delay = parse_integer(request, "org.matrix.msc4140.delay")
+        delay = _parse_request_delay(request, self._msc4140_max_delay)
         if delay is not None:
             delay_id = await self.delayed_events_handler.add(
                 requester,
@@ -444,6 +446,23 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             event_type,
             txn_id,
         )
+
+
+def _parse_request_delay(request: SynapseRequest, max_delay: int) -> Optional[int]:
+    delay = parse_integer(request, "org.matrix.msc4140.delay")
+    if delay is None:
+        return None
+    if delay > max_delay:
+        raise SynapseError(
+            HTTPStatus.BAD_REQUEST,
+            "The requested delay exceeds the allowed maximum.",
+            Codes.UNKNOWN,
+            {
+                "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
+                "org.matrix.msc4140.max_delay": max_delay,
+            },
+        )
+    return delay
 
 
 # TODO: Needs unit testing for room ID + alias joins
