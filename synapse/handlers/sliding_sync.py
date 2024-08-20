@@ -2979,12 +2979,12 @@ class SlidingSyncHandler:
                 )
 
                 for receipt in initial_receipts:
-                    relevant_event_ids = [
+                    relevant_event_ids = {
                         event.event_id
                         for event in actual_room_response_map[
                             receipt["room_id"]
                         ].timeline_events
-                    ]
+                    }
 
                     content = {
                         event_id: content_value
