@@ -16,9 +16,9 @@ import logging
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, ReceiptTypes
 from synapse.api.room_versions import RoomVersions
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -39,6 +39,7 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        receipts.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -708,3 +709,78 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         self.assertGreater(response_body["rooms"][room_id]["bump_stamp"], 0)
+
+    def test_rooms_notifications_counts(self) -> None:
+        """Testst that the notification counts are correctly set in rooms"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        receipt_channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{join_response['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(receipt_channel.code, 200, receipt_channel.json_body)
+
+        # Send a message from user2 so user1 has an unread notif
+        self.helper.send(room_id1, "message", tok=user2_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 100,
+                }
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # We expect a single notification count, and no highlights
+        self.assertEqual(response_body["rooms"][room_id1]["notification_count"], 1)
+        self.assertEqual(response_body["rooms"][room_id1]["highlight_count"], 0)
+
+        # User2 sends another message, which should bump the notification count
+        # again
+        self.helper.send(room_id1, "message", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["notification_count"], 2)
+        self.assertEqual(response_body["rooms"][room_id1]["highlight_count"], 0)
+
+        # User2 sends a message including user1, which should trigger a
+        # highlight
+        self.helper.send(room_id1, "message user1", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["notification_count"], 3)
+        self.assertEqual(response_body["rooms"][room_id1]["highlight_count"], 1)
+
+        # User1 sends a read receipt for a new message, which should clear the
+        # counts.
+        event_response = self.helper.send(room_id1, "message", tok=user2_tok)
+        receipt_channel = self.make_request(
+            "POST",
+            f"/rooms/{room_id1}/receipt/{ReceiptTypes.READ}/{event_response['event_id']}",
+            {},
+            access_token=user1_tok,
+        )
+        self.assertEqual(receipt_channel.code, 200, receipt_channel.json_body)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertEqual(response_body["rooms"][room_id1]["notification_count"], 0)
+        self.assertEqual(response_body["rooms"][room_id1]["highlight_count"], 0)
