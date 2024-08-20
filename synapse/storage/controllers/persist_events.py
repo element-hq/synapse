@@ -68,7 +68,8 @@ from synapse.storage.databases.main.events import (
     DeltaState,
     SlidingSyncTableChanges,
     SlidingSyncStateInsertValues,
-    SlidingSyncSnapshotInsertValues,
+    SlidingSyncMembershipSnapshotSharedInsertValues,
+    SlidingSyncMembershipInfo,
 )
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.storage.databases.main.events import (
@@ -781,20 +782,31 @@ class EventsPersistenceStorageController:
         to_delete = delta_state.to_delete
 
         # This would only happen if someone was state reset out of the room
-        to_delete_membership_snapshots = {
-            (room_id, state_key)
+        to_delete_membership_snapshots = [
+            state_key
             for event_type, state_key in to_delete
             if event_type == EventTypes.Member and self.is_mine_id(state_key)
-        }
+        ]
 
         membership_snapshot_updates = {}
+        membership_infos: List[SlidingSyncMembershipInfo] = []
         if to_insert:
             membership_event_id_to_user_id_map: Dict[str, str] = {}
             for state_key, event_id in to_insert.items():
                 if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
-            if len(membership_event_id_to_user_id_map) > 0:
+            event_id_to_sender_map = await _get_sender_for_event_ids(membership_event_id_to_user_id_map.keys())
+            membership_infos = [
+                SlidingSyncMembershipInfo(
+                    user_id=user_id,
+                    sender=event_id_to_sender_map[event_id],
+                    membership_event_id=membership_event_id
+                )
+                for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
+            ]
+
+            if membership_infos:
                 current_state_ids_map = (
                     await self.main_store.get_partial_filtered_current_state_ids(
                         room_id,
@@ -825,16 +837,16 @@ class EventsPersistenceStorageController:
                         current_state_map[key] = event
 
                 # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-                sliding_sync_insert_values = None
+                membership_snapshot_shared_insert_values = SlidingSyncMembershipSnapshotSharedInsertValues()
                 has_known_state = False
                 if current_state_map:
-                    sliding_sync_insert_values = (
+                    state_insert_values = (
                         self._get_sliding_sync_insert_values_from_state_map(
                             current_state_map
                         )
                     )
                     # We have current state to work from
-                    has_known_state = True
+                    membership_snapshot_shared_insert_values.has_known_state = True
                 else:
                     # We don't have any `current_state_events` anymore (previously
                     # cleared out because of `no_longer_in_room`). This can happen if
@@ -861,9 +873,13 @@ class EventsPersistenceStorageController:
                 }
 
         return SlidingSyncTableChanges(
+            room_id=room_id,
+            # For `sliding_sync_joined_rooms`
             joined_room_updates=TODO,
             to_delete_joined_rooms=TODO,
-            membership_snapshot_updates=membership_snapshot_updates,
+            # For `sliding_sync_membership_snapshots`
+            membership_snapshot_shared_insert_values=TODO,
+            to_insert_membership_snapshots=membership_infos,
             to_delete_membership_snapshots=to_delete_membership_snapshots,
         )
 

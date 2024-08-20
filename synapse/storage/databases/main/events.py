@@ -127,29 +127,48 @@ class DeltaState:
 
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncStateInsertValues:
+    """
+    Insert values relevant for the `sliding_sync_joined_rooms` and
+    `sliding_sync_membership_snapshots` database tables.
+    """
     room_type: Optional[str]
     is_encrypted: Optional[bool]
     room_name: Optional[str]
 
 
 @attr.s(slots=True, auto_attribs=True)
-class SlidingSyncSnapshotInsertValues(SlidingSyncStateInsertValues):
-    membership_event_id: str
-    has_known_state: Optional[bool]
-    # TODO: `sender`
+class SlidingSyncMembershipSnapshotSharedInsertValues(SlidingSyncStateInsertValues):
+    """
+    Insert values for `sliding_sync_membership_snapshots` that we can share across
+    multiple memberships
+    """
+    has_known_state: bool
+    # TODO: tombstone_successor_room_id: Optional[str]
 
+@attr.s(slots=True, auto_attribs=True)
+class SlidingSyncMembershipInfo(SlidingSyncStateInsertValues):
+    """
+    Values unique to each membership
+    """
+    user_id: str
+    sender: str
+    membership_event_id: str
 
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncTableChanges:
+    room_id: str
     # room_id -> dict to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: Dict[str, SlidingSyncStateInsertValues]
     # room_ids to delete from `sliding_sync_joined_rooms`
     to_delete_joined_rooms: StrCollection
 
-    # (room_id, user_id) -> dict to upsert into sliding_sync_membership_snapshots
-    membership_snapshot_updates: Dict[Tuple[str, str], SlidingSyncSnapshotInsertValues]
-    # List of (room_id, user_id) to delete from `sliding_sync_membership_snapshots`
-    to_delete_membership_snapshots: Set[Tuple[str, str]]
+    # Shared values to upsert into `sliding_sync_membership_snapshots` for each
+    # `to_insert_membership_snapshots`
+    membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues
+    # List of membership to insert into `sliding_sync_membership_snapshots`
+    to_insert_membership_snapshots: List[SlidingSyncMembershipInfo]
+    # List of user_id to delete from `sliding_sync_membership_snapshots`
+    to_delete_membership_snapshots: List[str]
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -1251,10 +1270,12 @@ class PersistEventsStore:
         if sliding_sync_table_changes.membership_snapshot_updates:
 
             # TODO
-            [
-                getattr(x, attr_name)
+            for asdf in sliding_sync_table_changes.membership_snapshot_updates:
                 for attr_name in ["room_type", "is_encrypted", "room_name"]
-            ]
+                    [
+                        getattr(x, attr_name)
+                        
+                    ]
 
             # Update the `sliding_sync_membership_snapshots` table
             #
