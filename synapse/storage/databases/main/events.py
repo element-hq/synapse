@@ -38,6 +38,7 @@ from typing import (
     Union,
     cast,
 )
+from typing_extensions import TypedDict
 
 import attr
 from prometheus_client import Counter
@@ -126,50 +127,37 @@ class DeltaState:
         return not self.to_delete and not self.to_insert and not self.no_longer_in_room
 
 
-# @attr.s(slots=True, auto_attribs=True)
-# class SlidingSyncStateInsertValues:
-#     """
-#     Insert values relevant for the `sliding_sync_joined_rooms` and
-#     `sliding_sync_membership_snapshots` database tables.
-#     """
-#     room_type: Optional[str]
-#     is_encrypted: Optional[bool]
-#     room_name: Optional[str]
+class SlidingSyncStateInsertValues(TypedDict, total=False):
+    """
+    Insert values relevant for the `sliding_sync_joined_rooms` and
+    `sliding_sync_membership_snapshots` database tables.
+    """
 
-SlidingSyncStateInsertKeys = Literal["room_type", "is_encrypted", "room_name"]
-SlidingSyncStateInsertValues = Dict[
-    SlidingSyncStateInsertKeys, Optional[Union[str, bool]]
-]
+    room_type: Optional[str]
+    is_encrypted: Optional[bool]
+    room_name: Optional[str]
 
 
-# @attr.s(slots=True, auto_attribs=True)
-# class SlidingSyncMembershipSnapshotSharedInsertValues(SlidingSyncStateInsertValues):
-#     """
-#     Insert values for `sliding_sync_membership_snapshots` that we can share across
-#     multiple memberships
-#     """
-#     has_known_state: bool
-#     # TODO: tombstone_successor_room_id: Optional[str]
+class SlidingSyncMembershipSnapshotSharedInsertValues(
+    SlidingSyncStateInsertValues, total=False
+):
+    """
+    Insert values for `sliding_sync_membership_snapshots` that we can share across
+    multiple memberships
+    """
 
-SlidingSyncMembershipSnapshotSharedInsertValues = Dict[
-    # Instead of using a Union, we use a Literal to be compatible with mypy
-    # Literal[SlidingSyncStateInsertKeys, "has_known_state"],
-    Union[SlidingSyncStateInsertKeys, Literal["has_known_state"]],
-    Optional[Union[str, bool]],
-]
+    has_known_state: Optional[bool]
+    # TODO: tombstone_successor_room_id: Optional[str]
 
-# @attr.s(slots=True, auto_attribs=True)
-# class SlidingSyncMembershipInfo(SlidingSyncStateInsertValues):
-#     """
-#     Values unique to each membership
-#     """
-#     user_id: str
-#     sender: str
-#     membership_event_id: str
 
-SlidingSyncMembershipInfo = Dict[
-    Literal["user_id", "sender", "membership_event_id"], Optional[Union[str, bool]]
-]
+class SlidingSyncMembershipInfo(TypedDict, total=False):
+    """
+    Values unique to each membership
+    """
+
+    user_id: str
+    sender: str
+    membership_event_id: str
 
 
 @attr.s(slots=True, auto_attribs=True)
