@@ -1445,41 +1445,61 @@ class PersistEventsStore:
             insert_values = sliding_sync_joined_rooms_insert_map.values()
             # We only need to update when one of the relevant state values has changed
             if insert_keys:
-                args: List[Any] = [
-                    room_id,
-                    # Even though `Mapping`/`Dict` have no guaranteed order, some
-                    # implementations may preserve insertion order so we're just going to
-                    # choose the best possible answer by using the "first" event ID which we
-                    # will assume will have the greatest `stream_ordering`. We really just
-                    # need *some* answer in case we are the first ones inserting into the
-                    # table and in reality,
-                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run
-                    # after this function to update it to the correct latest value. This is
-                    # just to account for things changing in the future.
-                    next(iter(to_insert.values())),
-                ]
+                # If we have some `to_insert` values, we can use the standard upsert
+                # pattern because we have access to an `event_id` to use for the
+                # `event_stream_ordering` which has a `NON NULL` constraint.
+                if to_insert:
+                    args: List[Any] = [
+                        room_id,
+                        # Even though `Mapping`/`Dict` have no guaranteed order, some
+                        # implementations may preserve insertion order so we're just
+                        # going to choose the best possible answer by using the "first"
+                        # event ID which we will assume will have the greatest
+                        # `stream_ordering`. We really just need *some* answer in case
+                        # we are the first ones inserting into the table because of the
+                        # `NON NULL` constraint on `event_stream_ordering`. In reality,
+                        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
+                        # is run after this function to update it to the correct latest
+                        # value.
+                        next(iter(to_insert.values())),
+                    ]
 
-                args.extend(iter(insert_values))
+                    args.extend(iter(insert_values))
 
-                # We don't update `event_stream_ordering` `ON CONFLICT` because it's
-                # simpler and we can just rely on
-                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to do
-                # the right thing (same for `bump_stamp`).
-                txn.execute(
-                    f"""
-                    INSERT INTO sliding_sync_joined_rooms
-                        (room_id, event_stream_ordering, {", ".join(insert_keys)})
-                    VALUES (
-                        ?,
-                        (SELECT stream_ordering FROM events WHERE event_id = ?),
-                        {", ".join("?" for _ in insert_values)}
+                    # We don't update `event_stream_ordering` `ON CONFLICT` because it's
+                    # simpler and we can just rely on
+                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to do
+                    # the right thing (same for `bump_stamp`).
+                    txn.execute(
+                        f"""
+                        INSERT INTO sliding_sync_joined_rooms
+                            (room_id, event_stream_ordering, {", ".join(insert_keys)})
+                        VALUES (
+                            ?,
+                            (SELECT stream_ordering FROM events WHERE event_id = ?),
+                            {", ".join("?" for _ in insert_values)}
+                        )
+                        ON CONFLICT (room_id)
+                        DO UPDATE SET
+                            {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                        """,
+                        args,
                     )
-                    ON CONFLICT (room_id)
-                    DO UPDATE SET
-                        {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
-                    """,
-                    args,
-                )
+
+                # If there are only values `to_delete`, we have to use an `UPDATE`
+                # instead because there is no `event_id` to use for the `NON NULL`
+                # constraint on `event_stream_ordering`.
+                elif to_delete:
+                    args = list(insert_values) + [room_id]
+                    txn.execute(
+                        f"""
+                        UPDATE sliding_sync_joined_rooms
+                        SET
+                            {", ".join(f"{key} = ?" for key in insert_keys)}
+                        WHERE room_id = ?
+                        """,
+                        args,
+                    )
 
         # We now update `local_current_membership`. We do this regardless
         # of whether we're still in the room or not to handle the case where
