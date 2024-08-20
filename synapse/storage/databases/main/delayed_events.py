@@ -17,10 +17,9 @@
 #
 
 import logging
-from http import HTTPStatus
 from typing import List, NewType, Optional, Tuple
 
-from synapse.api.errors import NotFoundError, SynapseError
+from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction
 from synapse.types import JsonDict, RoomID
@@ -81,44 +80,33 @@ class DelayedEventsStore(SQLBaseStore):
 
         def add_txn(txn: LoggingTransaction) -> DelayID:
             delay_id = _generate_delay_id()
-            try:
-                sql = """
-                    INSERT INTO delayed_events (
-                        delay_id, user_localpart, delay, running_since,
-                        room_id, event_type, state_key, origin_server_ts,
-                        content
-                    ) VALUES (
-                        ?, ?, ?, ?,
-                        ?, ?, ?, ?,
-                        ?
-                    )
-                    """
-                if self.database_engine.supports_returning:
-                    sql += "RETURNING delay_rowid"
-                txn.execute(
-                    sql,
-                    (
-                        delay_id,
-                        user_localpart,
-                        delay,
-                        current_ts,
-                        room_id.to_string(),
-                        event_type,
-                        state_key,
-                        origin_server_ts,
-                        json_encoder.encode(content),
-                    ),
+            sql = """
+                INSERT INTO delayed_events (
+                    delay_id, user_localpart, delay, running_since,
+                    room_id, event_type, state_key, origin_server_ts,
+                    content
+                ) VALUES (
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?
                 )
-            # TODO: Handle only the error for DB key collisions
-            except Exception as e:
-                logger.debug(
-                    "Error inserting into delayed_events",
-                    str(e),
-                )
-                raise SynapseError(
-                    HTTPStatus.INTERNAL_SERVER_ERROR,
-                    f"Couldn't generate a unique delay_id for user_localpart {user_localpart}",
-                )
+                """
+            if self.database_engine.supports_returning:
+                sql += "RETURNING delay_rowid"
+            txn.execute(
+                sql,
+                (
+                    delay_id,
+                    user_localpart,
+                    delay,
+                    current_ts,
+                    room_id.to_string(),
+                    event_type,
+                    state_key,
+                    origin_server_ts,
+                    json_encoder.encode(content),
+                ),
+            )
 
             if not self.database_engine.supports_returning:
                 txn.execute(
@@ -137,18 +125,7 @@ class DelayedEventsStore(SQLBaseStore):
 
             return delay_id
 
-        attempts_remaining = 10
-        while True:
-            try:
-                return await self.db_pool.runInteraction("add", add_txn)
-            except SynapseError as e:
-                if (
-                    e.code == HTTPStatus.INTERNAL_SERVER_ERROR
-                    and attempts_remaining > 0
-                ):
-                    attempts_remaining -= 1
-                else:
-                    raise e
+        return await self.db_pool.runInteraction("add", add_txn)
 
     async def restart(
         self,
