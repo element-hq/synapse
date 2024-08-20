@@ -2500,6 +2500,8 @@ class SlidingSyncHandler:
 
         unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+        # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
+        # that the `timeline_limit` has increased)
         if ignore_timeline_bound:
             # FIXME: We signal the fact that we're sending down more events to
             # the client by setting `unstable_expanded_timeline` to true (see
