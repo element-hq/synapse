@@ -246,6 +246,8 @@ class DelayedEventsHandler:
         delay_id = DelayID(delay_id)
         user_localpart = UserLocalpart(requester.user.localpart)
         async with self._get_delay_context(delay_id, user_localpart):
+            await self._store.remove_delayed_event(delay_id, user_localpart)
+
             self._unschedule(delay_id, user_localpart)
 
     async def restart(self, requester: Requester, delay_id: str) -> None:
