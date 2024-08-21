@@ -158,9 +158,6 @@ class SlidingSyncMembershipInfo:
     user_id: str
     sender: str
     membership_event_id: str
-    membership: str
-    # Sometimes we're working with events that aren't persisted yet
-    membership_event_stream_ordering: Optional[int]
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -1510,7 +1507,8 @@ class PersistEventsStore:
                     (room_id, user_id, membership_event_id, membership, event_stream_ordering
                     {("," + ", ".join(insert_keys)) if insert_keys else ""})
                 VALUES (
-                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    (SELECT membership FROM room_memberships WHERE event_id = ?),
                     (SELECT stream_ordering FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                 )
@@ -1526,7 +1524,7 @@ class PersistEventsStore:
                         room_id,
                         membership_info.user_id,
                         membership_info.membership_event_id,
-                        membership_info.membership,
+                        membership_info.membership_event_id,
                         membership_info.membership_event_id,
                     ]
                     + list(insert_values)

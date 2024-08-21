@@ -1164,8 +1164,6 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
     #             user_id=user_id,
     #             sender=sender,
     #             membership_event_id=membership_event_id,
-    #             membership=membership,
-    #             membership_event_stream_ordering=membership_event_stream_ordering,
     #         )
 
     #     def _backfill_table_txn(txn: LoggingTransaction) -> None:
@@ -1190,7 +1188,9 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
     #                     (room_id, user_id, membership_event_id, membership, event_stream_ordering
     #                     {("," + ", ".join(insert_keys)) if insert_keys else ""})
     #                 VALUES (
-    #                     ?, ?, ?, ?, ?,
+    #                     ?, ?, ?,
+    #                     (SELECT membership FROM room_memberships WHERE event_id = ?),
+    #                     (SELECT stream_ordering FROM events WHERE event_id = ?)
     #                     {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
     #                 )
     #                 ON CONFLICT (room_id, user_id)
@@ -1200,8 +1200,8 @@ class StateBackgroundUpdateStore(StateGroupBackgroundUpdateStore):
     #                     room_id,
     #                     user_id,
     #                     membership_event_id,
-    #                     membership,
-    #                     membership_event_stream_ordering,
+    #                     membership_event_id,
+    #                     membership_event_id,
     #                 ]
     #                 + list(insert_values),
     #             )
