@@ -1,1 +1,0 @@
-Fix bug where we would respond with an error when a remote server asked for media that had a length of 0, using the new multipart federation media endpoint.
