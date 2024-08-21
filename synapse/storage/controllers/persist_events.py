@@ -50,7 +50,7 @@ from prometheus_client import Counter, Histogram
 
 from twisted.internet import defer
 
-from synapse.api.constants import EventContentFields, EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -68,6 +68,7 @@ from synapse.storage.databases import Databases
 from synapse.storage.databases.main.events import (
     SLIDING_SYNC_RELEVANT_STATE_SET,
     DeltaState,
+    PersistEventsStore,
     SlidingSyncMembershipInfo,
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
@@ -895,10 +896,8 @@ class EventsPersistenceStorageController:
                 }
 
                 if current_state_map:
-                    state_insert_values = (
-                        self._get_sliding_sync_insert_values_from_state_map(
-                            current_state_map
-                        )
+                    state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                        current_state_map
                     )
                     membership_snapshot_shared_insert_values.update(state_insert_values)
                     # We have current state to work from
@@ -964,8 +963,10 @@ class EventsPersistenceStorageController:
                 for event in remaining_events.values():
                     current_state_map[(event.type, event.state_key)] = event
 
-            joined_room_updates = self._get_sliding_sync_insert_values_from_state_map(
-                current_state_map
+            joined_room_updates = (
+                PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                    current_state_map
+                )
             )
 
             # If something is being deleted from the state, we need to clear it out
@@ -986,50 +987,6 @@ class EventsPersistenceStorageController:
             to_insert_membership_snapshots=membership_infos_to_insert_membership_snapshots,
             to_delete_membership_snapshots=user_ids_to_delete_membership_snapshots,
         )
-
-    # TODO: Should we put this next to the other `_get_sliding_sync_*` functions?
-    @classmethod
-    def _get_sliding_sync_insert_values_from_state_map(
-        cls, state_map: StateMap[EventBase]
-    ) -> SlidingSyncStateInsertValues:
-        """
-        Extract the relevant state values from the `state_map` needed to insert into the
-        `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
-
-        Returns:
-            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
-            state values needed to insert into
-            the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
-        """
-        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-        sliding_sync_insert_map: SlidingSyncStateInsertValues = {}
-
-        # Parse the raw event JSON
-        for state_key, event in state_map.items():
-            if state_key == (EventTypes.Create, ""):
-                room_type = event.content.get(EventContentFields.ROOM_TYPE)
-                # Scrutinize JSON values
-                if room_type is None or isinstance(room_type, str):
-                    sliding_sync_insert_map["room_type"] = room_type
-            elif state_key == (EventTypes.RoomEncryption, ""):
-                encryption_algorithm = event.content.get(
-                    EventContentFields.ENCRYPTION_ALGORITHM
-                )
-                is_encrypted = encryption_algorithm is not None
-                sliding_sync_insert_map["is_encrypted"] = is_encrypted
-            elif state_key == (EventTypes.Name, ""):
-                room_name = event.content.get(EventContentFields.ROOM_NAME)
-                # Scrutinize JSON values
-                if room_name is None or isinstance(room_name, str):
-                    sliding_sync_insert_map["room_name"] = room_name
-            else:
-                # We only expect to see events according to the
-                # `SLIDING_SYNC_RELEVANT_STATE_SET`.
-                raise AssertionError(
-                    f"Unexpected event (we should not be fetching extra events): {state_key} {event.event_id}"
-                )
-
-        return sliding_sync_insert_map
 
     async def _calculate_new_extremities(
         self,
