@@ -81,7 +81,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "delay_id": delay_id,
                 "user_localpart": user_localpart,
                 "delay": delay,
-                "running_since": current_ts,
+                "send_ts": current_ts + delay,
                 "room_id": room_id.to_string(),
                 "event_type": event_type,
                 "state_key": state_key,
@@ -104,7 +104,7 @@ class DelayedEventsStore(SQLBaseStore):
         Args:
             delay_id: The ID of the delayed event to restart.
             user_localpart: The localpart of the delayed event's owner.
-            current_ts: The current time, to which the delayed event's "running_since" will be set to.
+            current_ts: The current time, which will be used to calculate the new send time.
 
         Returns: The delay at which the delayed event will be sent (unless it is reset again).
 
@@ -117,7 +117,7 @@ class DelayedEventsStore(SQLBaseStore):
                 txn.execute(
                     """
                     UPDATE delayed_events
-                    SET running_since = ?
+                    SET send_ts = ? + delay
                     WHERE delay_id = ? AND user_localpart = ?
                     RETURNING delay
                     """,
@@ -149,7 +149,7 @@ class DelayedEventsStore(SQLBaseStore):
                     txn,
                     table="delayed_events",
                     keyvalues=keyvalues,
-                    updatevalues={"running_since": current_ts},
+                    updatevalues={"send_ts": current_ts + delay},
                 )
                 return Delay(delay)
 
@@ -171,7 +171,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "event_type",
                 "state_key",
                 "delay",
-                "running_since",
+                "send_ts",
                 "content",
             ),
             desc="get_all_delayed_events_for_user",
@@ -183,7 +183,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "type": EventType(row[2]),
                 **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
                 "delay": Delay(row[4]),
-                "running_since": Timestamp(row[5]),
+                "running_since": Timestamp(row[5] - row[4]),
                 "content": db_to_json(row[6]),
             }
             for row in rows
@@ -216,14 +216,14 @@ class DelayedEventsStore(SQLBaseStore):
                     "content",
                 )
             )
-            sql_from = "FROM delayed_events WHERE running_since + delay < ?"
-            sql_order = "ORDER BY running_since + delay"
+            sql_from = "FROM delayed_events WHERE send_ts <= ?"
+            sql_order = "ORDER BY send_ts"
             if self.database_engine.supports_returning:
                 txn.execute(
                     f"""
-                    WITH timed_out_events AS (
+                    WITH events_to_send AS (
                         DELETE {sql_from} RETURNING *
-                    ) SELECT {sql_cols} FROM timed_out_events {sql_order}
+                    ) SELECT {sql_cols} FROM events_to_send {sql_order}
                     """,
                     (current_ts,),
                 )
@@ -258,7 +258,7 @@ class DelayedEventsStore(SQLBaseStore):
                 SELECT
                     delay_id,
                     user_localpart,
-                    running_since + delay - ? AS relative_delay
+                    send_ts - ? AS relative_delay
                 FROM delayed_events
                 """,
                 (current_ts,),

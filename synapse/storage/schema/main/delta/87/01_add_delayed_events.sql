@@ -15,7 +15,7 @@ CREATE TABLE delayed_events (
     delay_id TEXT NOT NULL,
     user_localpart TEXT NOT NULL,
     delay BIGINT NOT NULL,
-    running_since BIGINT NOT NULL,
+    send_ts BIGINT NOT NULL,
     room_id TEXT NOT NULL,
     event_type TEXT NOT NULL,
     state_key TEXT,
@@ -24,4 +24,5 @@ CREATE TABLE delayed_events (
     PRIMARY KEY (user_localpart, delay_id)
 );
 
+CREATE INDEX delayed_events_send_ts ON delayed_events (send_ts);
 CREATE INDEX delayed_events_room_state_event_idx ON delayed_events (room_id, event_type, state_key) WHERE state_key IS NOT NULL;
