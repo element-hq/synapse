@@ -176,6 +176,15 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "shared_extra_conf": {},
         "worker_extra_conf": "",
     },
+    "sliding_sync": {
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["client"],
+        "endpoint_patterns": [
+            "^/_matrix/client/unstable/org.matrix.simplified_msc3575/sync$",
+        ],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
+    },
     "client_reader": {
         "app": "synapse.app.generic_worker",
         "listener_resources": ["client"],
@@ -273,6 +282,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/join/",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/knock/",
             "^/_matrix/client/(api/v1|r0|v3|unstable)/profile/",
+            "^/_matrix/client/(api/v1|r0|v3|unstable)/createRoom$",
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
