@@ -506,12 +506,14 @@ class _SlidingSyncJoinedRoomResult:
     room_type: Optional[str]
     room_name: Optional[str]
     is_encrypted: bool
+    tombstone_successor_room_id: Optional[str]
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _SlidingSyncMembershipSnapshotResult:
     room_id: str
     user_id: str
+    sender: str
     membership_event_id: str
     membership: str
     # `event_stream_ordering` is only optional to allow easier semantics when we make
@@ -524,6 +526,7 @@ class _SlidingSyncMembershipSnapshotResult:
     room_type: Optional[str]
     room_name: Optional[str]
     is_encrypted: bool
+    tombstone_successor_room_id: Optional[str]
 
 
 class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
@@ -566,6 +569,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                         "room_type",
                         "room_name",
                         "is_encrypted",
+                        "tombstone_successor_room_id",
                     ),
                 ),
             ),
@@ -579,6 +583,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=row[3],
                 room_name=row[4],
                 is_encrypted=bool(row[5]),
+                tombstone_successor_room_id=row[6],
             )
             for row in rows
         }
@@ -601,6 +606,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                     retcols=(
                         "room_id",
                         "user_id",
+                        "sender",
                         "membership_event_id",
                         "membership",
                         "event_stream_ordering",
@@ -608,6 +614,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                         "room_type",
                         "room_name",
                         "is_encrypted",
+                        "tombstone_successor_room_id",
                     ),
                 ),
             ),
@@ -617,13 +624,15 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             (row[0], row[1]): _SlidingSyncMembershipSnapshotResult(
                 room_id=row[0],
                 user_id=row[1],
-                membership_event_id=row[2],
-                membership=row[3],
-                event_stream_ordering=row[4],
-                has_known_state=bool(row[5]),
-                room_type=row[6],
-                room_name=row[7],
-                is_encrypted=bool(row[8]),
+                sender=row[2],
+                membership_event_id=row[3],
+                membership=row[4],
+                event_stream_ordering=row[5],
+                has_known_state=bool(row[6]),
+                room_type=row[7],
+                room_name=row[8],
+                is_encrypted=bool(row[9]),
+                tombstone_successor_room_id=row[10],
             )
             for row in rows
         }

@@ -27,15 +27,31 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
     -- The `stream_ordering` of the last event according to the `bump_event_types`
     bump_stamp BIGINT,
     -- `m.room.create` -> `content.type` (current state)
+    --
+    -- Useful for the `spaces`/`not_spaces` filter in the Sliding Sync API
     room_type TEXT,
     -- `m.room.name` -> `content.name` (current state)
+    --
+    -- Useful for the room meta data and `room_name_like` filter in the Sliding Sync API
     room_name TEXT,
     -- `m.room.encryption` -> `content.algorithm` (current state)
+    --
+    -- Useful for the `is_encrypted` filter in the Sliding Sync API
     is_encrypted BOOLEAN DEFAULT FALSE NOT NULL,
-    -- FIXME: Maybe we want to add `tombstone_successor_room_id` here to help with `include_old_rooms`
-    -- (tracked by https://github.com/element-hq/synapse/issues/17540)
+    -- `m.room.tombstone` -> `content.replacement_room` (according to the current state at the
+    -- time of the membership).
+    --
+    -- Useful for the `include_old_rooms` functionality in the Sliding Sync API
+    tombstone_successor_room_id TEXT,
     PRIMARY KEY (room_id)
 );
+
+-- So we can purge rooms easily.
+--
+-- The primary key is already `room_id`
+
+-- So we can sort by `stream_ordering
+CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_joined_rooms_event_stream_ordering ON sliding_sync_joined_rooms(event_stream_ordering);
 
 -- A table for storing a snapshot of room meta data (historical current state relevant
 -- for sliding sync) at the time of a local user's membership. Only has rows for the
@@ -72,16 +88,25 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     -- no stripped state was provided for a remote invite/knock (False).
     has_known_state BOOLEAN DEFAULT FALSE NOT NULL,
     -- `m.room.create` -> `content.type` (according to the current state at the time of
-    -- the membership)
+    -- the membership).
+    --
+    -- Useful for the `spaces`/`not_spaces` filter in the Sliding Sync API
     room_type TEXT,
     -- `m.room.name` -> `content.name` (according to the current state at the time of
-    -- the membership)
+    -- the membership).
+    --
+    -- Useful for the room meta data and `room_name_like` filter in the Sliding Sync API
     room_name TEXT,
     -- `m.room.encryption` -> `content.algorithm` (according to the current state at the
-    -- time of the membership)
+    -- time of the membership).
+    --
+    -- Useful for the `is_encrypted` filter in the Sliding Sync API
     is_encrypted BOOLEAN DEFAULT FALSE NOT NULL,
-    -- FIXME: Maybe we want to add `tombstone_successor_room_id` here to help with `include_old_rooms`
-    -- (tracked by https://github.com/element-hq/synapse/issues/17540)
+    -- `m.room.tombstone` -> `content.replacement_room` (according to the current state at the
+    -- time of the membership).
+    --
+    -- Useful for the `include_old_rooms` functionality in the Sliding Sync API
+    tombstone_successor_room_id TEXT,
     PRIMARY KEY (room_id, user_id)
 );
 

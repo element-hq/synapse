@@ -97,14 +97,16 @@ event_counter = Counter(
 
 # State event type/key pairs that we need to gather to fill in the
 # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
-SLIDING_SYNC_RELEVANT_STATE_SET = {
-    # So we can fill in the `room_type` column in the `sliding_sync_joined_rooms` table
+SLIDING_SYNC_RELEVANT_STATE_SET = (
+    # So we can fill in the `room_type` column
     (EventTypes.Create, ""),
-    # So we can fill in the `is_encrypted` column in the `sliding_sync_joined_rooms` table
+    # So we can fill in the `is_encrypted` column
     (EventTypes.RoomEncryption, ""),
-    # So we can fill in the `room_name` column in the `sliding_sync_joined_rooms` table
+    # So we can fill in the `room_name` column
     (EventTypes.Name, ""),
-}
+    # So we can fill in the `tombstone_successor_room_id` column
+    (EventTypes.Tombstone, ""),
+)
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -1877,11 +1879,22 @@ class PersistEventsStore:
                 # Scrutinize JSON values
                 if room_name is None or isinstance(room_name, str):
                     sliding_sync_insert_map["room_name"] = room_name
+            elif state_key == (EventTypes.Tombstone, ""):
+                successor_room_id = event.content.get(
+                    EventContentFields.TOMBSTONE_SUCCESSOR_ROOM
+                )
+                # Scrutinize JSON values
+                if successor_room_id is None or isinstance(successor_room_id, str):
+                    sliding_sync_insert_map["tombstone_successor_room_id"] = (
+                        successor_room_id
+                    )
             else:
                 # We only expect to see events according to the
                 # `SLIDING_SYNC_RELEVANT_STATE_SET`.
                 raise AssertionError(
-                    f"Unexpected event (we should not be fetching extra events): {state_key} {event.event_id}"
+                    "Unexpected event (we should not be fetching extra events or this "
+                    + "piece of code needs to be updated to handle a new event type added "
+                    + "to `SLIDING_SYNC_RELEVANT_STATE_SET`): {state_key} {event.event_id}"
                 )
 
         return sliding_sync_insert_map
@@ -1923,6 +1936,8 @@ class PersistEventsStore:
             if create_stripped_event is not None:
                 sliding_sync_insert_map["has_known_state"] = True
 
+                # XXX: Keep this up-to-date with `SLIDING_SYNC_RELEVANT_STATE_SET`
+
                 # Find the room_type
                 sliding_sync_insert_map["room_type"] = (
                     create_stripped_event.content.get(EventContentFields.ROOM_TYPE)
@@ -1948,6 +1963,20 @@ class PersistEventsStore:
                 sliding_sync_insert_map["room_name"] = (
                     room_name_stripped_event.content.get(EventContentFields.ROOM_NAME)
                     if room_name_stripped_event is not None
+                    else None
+                )
+
+                # Find the tombstone_successor_room_id
+                # Note: This isn't one of the stripped state events according to the spec
+                # but seems like there is no reason not to support this kind of thing.
+                tombstone_stripped_event = stripped_state_map.get(
+                    (EventTypes.Tombstone, "")
+                )
+                sliding_sync_insert_map["tombstone_successor_room_id"] = (
+                    tombstone_stripped_event.content.get(
+                        EventContentFields.TOMBSTONE_SUCCESSOR_ROOM
+                    )
+                    if tombstone_stripped_event is not None
                     else None
                 )
 
