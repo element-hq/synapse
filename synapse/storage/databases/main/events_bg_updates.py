@@ -39,11 +39,12 @@ from synapse.storage.databases.main.events import (
     PersistEventsStore,
     SlidingSyncMembershipInfo,
     SlidingSyncMembershipSnapshotSharedInsertValues,
+    SlidingSyncStateInsertValues,
 )
-from synapse.storage.databases.main.events_worker import EventsWorkerStore
-from synapse.storage.engines import BaseDatabaseEngine
+from synapse.storage.databases.main.state_deltas import StateDeltasStore
+from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.types import Cursor
-from synapse.types import JsonDict, StateMap, StrCollection
+from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 
@@ -111,7 +112,7 @@ class _CalculateChainCover:
     finished_room_map: Dict[str, Tuple[int, int]]
 
 
-class EventsBackgroundUpdatesStore(EventsWorkerStore, SQLBaseStore):
+class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -1549,46 +1550,7 @@ class EventsBackgroundUpdatesStore(EventsWorkerStore, SQLBaseStore):
         """
         last_room_id = progress.get("last_room_id", "")
 
-        def make_sql_clause_for_get_last_event_pos_in_room(
-            database_engine: BaseDatabaseEngine,
-            event_types: Optional[StrCollection] = None,
-        ) -> Tuple[str, list]:
-            """
-            Returns the ID and event position of the last event in a room at or before a
-            stream ordering.
-
-            Based on `get_last_event_pos_in_room_before_stream_ordering(...)`
-
-            Args:
-                database_engine
-                event_types: Optional allowlist of event types to filter by
-
-            Returns:
-                A tuple of SQL query and the args
-            """
-            event_type_clause = ""
-            event_type_args: List[str] = []
-            if event_types is not None and len(event_types) > 0:
-                event_type_clause, event_type_args = make_in_list_sql_clause(
-                    database_engine, "type", event_types
-                )
-                event_type_clause = f"AND {event_type_clause}"
-
-            sql = f"""
-            SELECT stream_ordering
-            FROM events
-            LEFT JOIN rejections USING (event_id)
-            WHERE room_id = ?
-                {event_type_clause}
-                AND NOT outlier
-                AND rejections.event_id IS NULL
-            ORDER BY stream_ordering DESC
-            LIMIT 1
-            """
-
-            return sql, event_type_args
-
-        def _txn(txn: LoggingTransaction) -> int:
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[str]:
             # Fetch the set of room IDs that we want to update
             txn.execute(
                 """
@@ -1600,85 +1562,162 @@ class EventsBackgroundUpdatesStore(EventsWorkerStore, SQLBaseStore):
                 (last_room_id, batch_size),
             )
 
-            rooms_to_update_rows = txn.fetchall()
-            if not rooms_to_update_rows:
-                return 0
+            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
 
-            for (room_id,) in rooms_to_update_rows:
-                # TODO: Handle redactions
-                current_state_map = PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn(
-                    txn, room_id
+            return [row[0] for row in rooms_to_update_rows]
+
+        rooms_to_update = await self.db_pool.runInteraction(
+            "_sliding_sync_joined_rooms_backfill._get_rooms_to_update_txn",
+            _get_rooms_to_update_txn,
+        )
+
+        if not rooms_to_update:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL
+            )
+            return 0
+
+        # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table
+        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        # Map from room_id to stream_ordering/bump_stamp/last_current_state_delta_stream_id values
+        joined_room_stream_ordering_updates: Dict[str, Tuple[int, int, int]] = {}
+        for room_id in rooms_to_update:
+            current_state_ids_map, last_current_state_delta_stream_id = (
+                await self.db_pool.runInteraction(
+                    "_sliding_sync_joined_rooms_backfill._get_relevant_sliding_sync_current_state_event_ids_txn",
+                    PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
+                    room_id,
                 )
-                # We're iterating over rooms pulled from the current_state_events table
-                # so we should have some current state for each room
-                assert current_state_map
+            )
+            # We're iterating over rooms pulled from the current_state_events table
+            # so we should have some current state for each room
+            assert current_state_ids_map
 
-                sliding_sync_joined_rooms_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_state_ids_map_txn(
-                    txn, current_state_map
+            fetched_events = await self.get_events(current_state_ids_map.values())
+
+            current_state_map: StateMap[EventBase] = {
+                state_key: fetched_events[event_id]
+                for state_key, event_id in current_state_ids_map.items()
+            }
+
+            state_insert_values = (
+                PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                    current_state_map
                 )
-                # We should have some insert values for each room, even if they are `None`
-                assert sliding_sync_joined_rooms_insert_map
+            )
+            # We should have some insert values for each room, even if they are `None`
+            assert state_insert_values
+            joined_room_updates[room_id] = state_insert_values
 
+            # Figure out the stream_ordering of the latest event in the room
+            most_recent_event_pos_results = await self.get_last_event_pos_in_room(
+                room_id, event_types=None
+            )
+            assert (
+                most_recent_event_pos_results
+            ), "We should not be seeing `None` here because the room should at-least have a create event"
+            # Figure out the latest bump_stamp in the room
+            bump_stamp_event_pos_results = await self.get_last_event_pos_in_room(
+                room_id, event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+            )
+            assert bump_stamp_event_pos_results, (
+                "We should not be seeing `None` here because the room should at-least have a create event "
+                + "(unless `SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES` no longer includes the room create event)"
+            )
+            joined_room_stream_ordering_updates[room_id] = (
+                most_recent_event_pos_results[1].stream,
+                bump_stamp_event_pos_results[1].stream,
+                last_current_state_delta_stream_id,
+            )
+
+        def _backfill_table_txn(txn: LoggingTransaction) -> None:
+            last_successful_room_id: Optional[str] = None
+            for room_id, insert_map in joined_room_updates.items():
                 (
-                    most_recent_event_stream_ordering_clause,
-                    most_recent_event_stream_ordering_args,
-                ) = make_sql_clause_for_get_last_event_pos_in_room(
-                    txn.database_engine, event_types=None
-                )
-                bump_stamp_clause, bump_stamp_args = (
-                    make_sql_clause_for_get_last_event_pos_in_room(
-                        txn.database_engine,
-                        event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+                    event_stream_ordering,
+                    bump_stamp,
+                    last_current_state_delta_stream_id,
+                ) = joined_room_stream_ordering_updates[room_id]
+
+                # Check if the current state has been updated since we gathered it
+                state_deltas_since_we_gathered_current_state = (
+                    self.get_current_state_deltas_for_room_txn(
+                        txn,
+                        room_id,
+                        from_token=RoomStreamToken(
+                            stream=last_current_state_delta_stream_id
+                        ),
+                        to_token=None,
                     )
                 )
+                for state_delta in state_deltas_since_we_gathered_current_state:
+                    # We only need to check if the state is relevant to the
+                    # `sliding_sync_joined_rooms` table.
+                    if (
+                        state_delta.event_type,
+                        state_delta.state_key,
+                    ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                        # Save our progress before we exit early
+                        if last_successful_room_id is not None:
+                            self.db_pool.updates._background_update_progress_txn(
+                                txn,
+                                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                                {"last_room_id": room_id},
+                            )
+                        # Raising exception so we can just exit and try again
+                        raise Exception(
+                            "Current state was updated after we gathered it to update "
+                            + "`sliding_sync_joined_rooms` in the background update. "
+                            + "Raising exception so we can just try again."
+                        )
 
                 # Pulling keys/values separately is safe and will produce congruent
                 # lists
-                insert_keys = sliding_sync_joined_rooms_insert_map.keys()
-                insert_values = sliding_sync_joined_rooms_insert_map.values()
-
+                insert_keys = insert_map.keys()
+                insert_values = insert_map.values()
+                # Since we partially update the `sliding_sync_joined_rooms` as new state
+                # is sent, we need to update the fields `ON CONFLICT`. We just have to be careful
+                # we're not overwriting it with stale data.
                 sql = f"""
                     INSERT INTO sliding_sync_joined_rooms
                         (room_id, event_stream_ordering, bump_stamp, {", ".join(insert_keys)})
                     VALUES (
-                        ?,
-                        ({most_recent_event_stream_ordering_clause}),
-                        ({bump_stamp_clause}),
+                        ?, ?, ?,
                         {", ".join("?" for _ in insert_values)}
                     )
                     ON CONFLICT (room_id)
                     DO UPDATE SET
-                        event_stream_ordering = EXCLUDED.event_stream_ordering,
-                        bump_stamp = EXCLUDED.bump_stamp,
+                        event_stream_ordering = CASE
+                            WHEN event_stream_ordering IS NULL OR event_stream_ordering < EXCLUDED.event_stream_ordering
+                                THEN EXCLUDED.event_stream_ordering
+                            ELSE event_stream_ordering
+                        END,
+                        bump_stamp = CASE
+                            WHEN bump_stamp IS NULL OR bump_stamp < EXCLUDED.bump_stamp
+                                THEN EXCLUDED.bump_stamp
+                            ELSE bump_stamp
+                        END,
                         {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
                     """
-                args = (
-                    [room_id, room_id]
-                    + most_recent_event_stream_ordering_args
-                    + [room_id]
-                    + bump_stamp_args
-                    + list(insert_values)
+                args = [room_id, event_stream_ordering, bump_stamp] + list(
+                    insert_values
                 )
                 txn.execute(sql, args)
 
-            self.db_pool.updates._background_update_progress_txn(
-                txn,
-                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
-                {"last_room_id": rooms_to_update_rows[-1][0]},
-            )
+                # Keep track of the last successful room_id
+                last_successful_room_id = room_id
 
-            return len(rooms_to_update_rows)
-
-        count = await self.db_pool.runInteraction(
-            "sliding_sync_joined_rooms_backfill", _txn
+        await self.db_pool.runInteraction(
+            "sliding_sync_joined_rooms_backfill", _backfill_table_txn
         )
 
-        if not count:
-            await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL
-            )
+        # Update the progress
+        await self.db_pool.updates._background_update_progress(
+            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+            {"last_room_id": rooms_to_update[-1]},
+        )
 
-        return count
+        return len(rooms_to_update)
 
     async def _sliding_sync_membership_snapshots_backfill(
         self, progress: JsonDict, batch_size: int

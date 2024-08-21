@@ -1549,20 +1549,24 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
-    # TODO: We can probably remove this function in favor of other stuff.
-    # TODO: This doesn't take into account redactions
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
         cls, txn: LoggingTransaction, room_id: str
-    ) -> MutableStateMap[str]:
+    ) -> Tuple[MutableStateMap[str], int]:
         """
         Fetch the current state event IDs for the relevant (to the
         `sliding_sync_joined_rooms` table) state types for the given room.
 
         Returns:
-            StateMap of event IDs necessary to to fetch the relevant state values needed
-            to insert into the
-            `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`.
+            A tuple of:
+                1. StateMap of event IDs necessary to to fetch the relevant state values
+                   needed to insert into the
+                   `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`.
+                2. The corresponding latest `stream_id` in the
+                   `current_state_delta_stream` table. This is useful to compare against
+                   the `current_state_delta_stream` table later so you can check whether
+                   the current state has changed since you last fetched the current
+                   state.
         """
         # Fetch the current state event IDs from the database
         (
@@ -1587,75 +1591,25 @@ class PersistEventsStore:
             (event_type, state_key): event_id for event_id, event_type, state_key in txn
         }
 
-        return current_state_map
-
-    # TODO: We can probably remove this function in favor of other stuff.
-    # TODO: Should we put this next to the other `_get_sliding_sync_*` function?
-    @classmethod
-    def _get_sliding_sync_insert_values_from_state_ids_map_txn(
-        cls, txn: LoggingTransaction, state_map: StateMap[str]
-    ) -> SlidingSyncStateInsertValues:
-        """
-        Fetch events in the `state_map` and extract the relevant state values needed to
-        insert into the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
-        tables.
-
-        Returns:
-            Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
-            state values needed to insert into
-            the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
-        """
-        # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-        sliding_sync_insert_map: SlidingSyncStateInsertValues = {}
-        # Fetch the raw event JSON from the database
-        (
-            event_id_in_list_clause,
-            event_id_args,
-        ) = make_in_list_sql_clause(
-            txn.database_engine,
-            "event_id",
-            state_map.values(),
-        )
         txn.execute(
-            f"""
-            SELECT type, state_key, json FROM event_json
-            INNER JOIN events USING (event_id)
-            WHERE {event_id_in_list_clause}
+            """
+            SELECT stream_id
+            FROM current_state_delta_stream
+            WHERE
+                room_id = ?
+            ORDER BY stream_id DESC
+            LIMIT 1
             """,
-            event_id_args,
+            (room_id,),
         )
+        row = txn.fetchone()
+        # If we're able to fetch the `current_state_events` above, we should have rows
+        # in `current_state_delta_stream` as well.
+        assert row, "Failed to fetch the `last_current_state_delta_stream_id`"
+        last_current_state_delta_stream_id = row[0]
 
-        # Parse the raw event JSON
-        for row in txn:
-            event_type, state_key, json = row
-            event_json = db_to_json(json)
+        return current_state_map, last_current_state_delta_stream_id
 
-            if event_type == EventTypes.Create:
-                room_type = event_json.get("content", {}).get(
-                    EventContentFields.ROOM_TYPE
-                )
-                sliding_sync_insert_map["room_type"] = room_type
-            elif event_type == EventTypes.RoomEncryption:
-                encryption_algorithm = event_json.get("content", {}).get(
-                    EventContentFields.ENCRYPTION_ALGORITHM
-                )
-                is_encrypted = encryption_algorithm is not None
-                sliding_sync_insert_map["is_encrypted"] = is_encrypted
-            elif event_type == EventTypes.Name:
-                room_name = event_json.get("content", {}).get(
-                    EventContentFields.ROOM_NAME
-                )
-                sliding_sync_insert_map["room_name"] = room_name
-            else:
-                # We only expect to see events according to the
-                # `SLIDING_SYNC_RELEVANT_STATE_SET`.
-                raise AssertionError(
-                    f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
-                )
-
-        return sliding_sync_insert_map
-
-    # TODO: Should we put this next to the other `_get_sliding_sync_*` functions?
     @classmethod
     def _get_sliding_sync_insert_values_from_state_map(
         cls, state_map: StateMap[EventBase]
@@ -1699,7 +1653,6 @@ class PersistEventsStore:
 
         return sliding_sync_insert_map
 
-    # TODO: Should we put this next to the other `_get_sliding_sync_*` function?
     @classmethod
     def _get_sliding_sync_insert_values_from_stripped_state_txn(
         cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
