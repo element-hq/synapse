@@ -160,6 +160,8 @@ class SlidingSyncMembershipInfo:
     user_id: str
     sender: str
     membership_event_id: str
+    membership: str
+    membership_event_stream_ordering: int
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -401,7 +403,7 @@ class PersistEventsStore:
                 if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
-            event_id_to_sender_map: Dict[str, str] = {}
+            membership_event_map: Dict[str, EventBase] = {}
             # In normal event persist scenarios, we should be able to find the
             # membership events in the `events_and_contexts` given to us but it's
             # possible a state reset happened which added us to the room without a
@@ -410,36 +412,40 @@ class PersistEventsStore:
             for membership_event_id in membership_event_id_to_user_id_map.keys():
                 membership_event = event_map.get(membership_event_id)
                 if membership_event:
-                    event_id_to_sender_map[membership_event_id] = (
-                        membership_event.sender
-                    )
+                    membership_event_map[membership_event_id] = membership_event
                 else:
                     missing_membership_event_ids.add(membership_event_id)
 
             # Otherwise, we need to find a couple events that we were reset to.
             if missing_membership_event_ids:
-                remaining_event_id_to_sender_map = (
-                    await self.store.get_sender_for_event_ids(
-                        missing_membership_event_ids
-                    )
+                remaining_events = await self.store.get_events(
+                    missing_membership_event_ids
                 )
                 # There shouldn't be any missing events
                 assert (
-                    remaining_event_id_to_sender_map.keys()
-                    == missing_membership_event_ids
-                ), missing_membership_event_ids.difference(
-                    remaining_event_id_to_sender_map.keys()
-                )
-                event_id_to_sender_map.update(remaining_event_id_to_sender_map)
+                    remaining_events.keys() == missing_membership_event_ids
+                ), missing_membership_event_ids.difference(remaining_events.keys())
+                membership_event_map.update(remaining_events)
 
-            membership_infos_to_insert_membership_snapshots = [
-                SlidingSyncMembershipInfo(
-                    user_id=user_id,
-                    sender=event_id_to_sender_map[membership_event_id],
-                    membership_event_id=membership_event_id,
+            for (
+                membership_event_id,
+                user_id,
+            ) in membership_event_id_to_user_id_map.items():
+                # We should only be seeing events with stream_ordering assigned by this point
+                membership_event_stream_ordering = membership_event_map[
+                    membership_event_id
+                ].internal_metadata.stream_ordering
+                assert membership_event_stream_ordering is not None
+
+                membership_infos_to_insert_membership_snapshots.append(
+                    SlidingSyncMembershipInfo(
+                        user_id=user_id,
+                        sender=membership_event_map[membership_event_id].sender,
+                        membership_event_id=membership_event_id,
+                        membership=membership_event_map[membership_event_id].membership,
+                        membership_event_stream_ordering=membership_event_stream_ordering,
+                    )
                 )
-                for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
-            ]
 
             if membership_infos_to_insert_membership_snapshots:
                 current_state_ids_map: MutableStateMap[str] = dict(
@@ -1717,9 +1723,7 @@ class PersistEventsStore:
                     (room_id, user_id, membership_event_id, membership, event_stream_ordering
                     {("," + ", ".join(insert_keys)) if insert_keys else ""})
                 VALUES (
-                    ?, ?, ?,
-                    (SELECT membership FROM room_memberships WHERE event_id = ?),
-                    (SELECT stream_ordering FROM events WHERE event_id = ?)
+                    ?, ?, ?, ?, ?
                     {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
@@ -1734,8 +1738,8 @@ class PersistEventsStore:
                         room_id,
                         membership_info.user_id,
                         membership_info.membership_event_id,
-                        membership_info.membership_event_id,
-                        membership_info.membership_event_id,
+                        membership_info.membership,
+                        membership_info.membership_event_stream_ordering,
                     ]
                     + list(insert_values)
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots

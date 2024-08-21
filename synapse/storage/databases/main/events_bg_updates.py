@@ -1960,6 +1960,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 user_id=user_id,
                 sender=sender,
                 membership_event_id=membership_event_id,
+                membership=membership,
+                membership_event_stream_ordering=membership_event_stream_ordering,
             )
 
         def _backfill_table_txn(txn: LoggingTransaction) -> None:
@@ -1967,6 +1969,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 room_id, user_id = key
                 membership_info = to_insert_membership_infos[key]
                 membership_event_id = membership_info.membership_event_id
+                membership = membership_info.membership
+                membership_event_stream_ordering = (
+                    membership_info.membership_event_stream_ordering
+                )
 
                 # Pulling keys/values separately is safe and will produce congruent
                 # lists
@@ -1980,9 +1986,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         (room_id, user_id, membership_event_id, membership, event_stream_ordering
                         {("," + ", ".join(insert_keys)) if insert_keys else ""})
                     VALUES (
-                        ?, ?, ?,
-                        (SELECT membership FROM room_memberships WHERE event_id = ?),
-                        (SELECT stream_ordering FROM events WHERE event_id = ?)
+                        ?, ?, ?, ?, ?
                         {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                     )
                     ON CONFLICT (room_id, user_id)
@@ -1992,8 +1996,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         room_id,
                         user_id,
                         membership_event_id,
-                        membership_event_id,
-                        membership_event_id,
+                        membership,
+                        membership_event_stream_ordering,
                     ]
                     + list(insert_values),
                 )
