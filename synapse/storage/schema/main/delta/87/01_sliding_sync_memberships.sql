@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms(
 CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
     user_id TEXT NOT NULL,
+    -- Useful to be able to tell leaves from kicks (where the `user_id` is different from the `sender`)
+    sender TEXT NOT NULL,
     membership_event_id TEXT NOT NULL REFERENCES events(event_id),
     membership TEXT NOT NULL,
     -- `stream_ordering` of the `membership_event_id`

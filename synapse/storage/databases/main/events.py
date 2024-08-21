@@ -1720,10 +1720,10 @@ class PersistEventsStore:
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_membership_snapshots
-                    (room_id, user_id, membership_event_id, membership, event_stream_ordering
+                    (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering
                     {("," + ", ".join(insert_keys)) if insert_keys else ""})
                 VALUES (
-                    ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?
                     {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
@@ -1737,6 +1737,7 @@ class PersistEventsStore:
                     [
                         room_id,
                         membership_info.user_id,
+                        membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
                         membership_info.membership_event_stream_ordering,
@@ -2693,6 +2694,7 @@ class PersistEventsStore:
                     raw_stripped_state_events = knock_room_state
 
                 insert_values = {
+                    "sender": event.sender,
                     "membership_event_id": event.event_id,
                     "membership": event.membership,
                     "event_stream_ordering": event.internal_metadata.stream_ordering,

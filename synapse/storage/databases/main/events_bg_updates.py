@@ -1631,6 +1631,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         def _backfill_table_txn(txn: LoggingTransaction) -> None:
+            # Handle updating the `sliding_sync_joined_rooms` table
+            #
             last_successful_room_id: Optional[str] = None
             for room_id, insert_map in joined_room_updates.items():
                 (
@@ -1965,9 +1967,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         def _backfill_table_txn(txn: LoggingTransaction) -> None:
+            # Handle updating the `sliding_sync_membership_snapshots` table
+            #
             for key, insert_map in to_insert_membership_snapshots.items():
                 room_id, user_id = key
                 membership_info = to_insert_membership_infos[key]
+                sender = membership_info.sender
                 membership_event_id = membership_info.membership_event_id
                 membership = membership_info.membership
                 membership_event_stream_ordering = (
@@ -1983,10 +1988,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_membership_snapshots
-                        (room_id, user_id, membership_event_id, membership, event_stream_ordering
+                        (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering
                         {("," + ", ".join(insert_keys)) if insert_keys else ""})
                     VALUES (
-                        ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?, ?
                         {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                     )
                     ON CONFLICT (room_id, user_id)
@@ -1995,6 +2000,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     [
                         room_id,
                         user_id,
+                        sender,
                         membership_event_id,
                         membership,
                         membership_event_stream_ordering,
