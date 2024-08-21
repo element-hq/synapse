@@ -1610,7 +1610,24 @@ class PersistEventsStore:
                 if to_insert:
                     args: List[Any] = [
                         room_id,
-                        stream_id,
+                        # XXX: We can't use `stream_id` for the `event_stream_ordering`
+                        # here because we have a foreign key constraint on
+                        # `event_stream_ordering` that it should point to a valid event.
+                        # When re-syncing the state of a partial-state room, `stream_id`
+                        # is set to the next possible stream position for a future event
+                        # that doesn't exist yet.
+                        #
+                        # Even though `Mapping`/`Dict` have no guaranteed order, some
+                        # implementations may preserve insertion order so we're just
+                        # going to choose the best possible answer by using the "first"
+                        # event ID which we will assume will have the greatest
+                        # `stream_ordering`. We really just need *some* answer in case
+                        # we are the first ones inserting into the table because of the
+                        # `NON NULL` constraint on `event_stream_ordering`. In reality,
+                        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
+                        # is run after this function to update it to the correct latest
+                        # value.
+                        next(iter(to_insert.values())),
                     ]
 
                     args.extend(iter(insert_values))
@@ -1626,7 +1643,8 @@ class PersistEventsStore:
                         INSERT INTO sliding_sync_joined_rooms
                             (room_id, event_stream_ordering, {", ".join(insert_keys)})
                         VALUES (
-                            ?, ?,
+                            ?,
+                            (SELECT stream_ordering FROM events WHERE event_id = ?),
                             {", ".join("?" for _ in insert_values)}
                         )
                         ON CONFLICT (room_id)
