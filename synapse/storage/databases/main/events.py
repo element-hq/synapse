@@ -1383,17 +1383,7 @@ class PersistEventsStore:
                 if to_insert:
                     args: List[Any] = [
                         room_id,
-                        # Even though `Mapping`/`Dict` have no guaranteed order, some
-                        # implementations may preserve insertion order so we're just
-                        # going to choose the best possible answer by using the "first"
-                        # event ID which we will assume will have the greatest
-                        # `stream_ordering`. We really just need *some* answer in case
-                        # we are the first ones inserting into the table because of the
-                        # `NON NULL` constraint on `event_stream_ordering`. In reality,
-                        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
-                        # is run after this function to update it to the correct latest
-                        # value.
-                        next(iter(to_insert.values())),
+                        stream_id,
                     ]
 
                     args.extend(iter(insert_values))
@@ -1409,8 +1399,7 @@ class PersistEventsStore:
                         INSERT INTO sliding_sync_joined_rooms
                             (room_id, event_stream_ordering, {", ".join(insert_keys)})
                         VALUES (
-                            ?,
-                            (SELECT stream_ordering FROM events WHERE event_id = ?),
+                            ?, ?,
                             {", ".join("?" for _ in insert_values)}
                         )
                         ON CONFLICT (room_id)
