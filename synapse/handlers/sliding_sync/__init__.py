@@ -45,13 +45,6 @@ from synapse.events.utils import parse_stripped_state_event, strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-    RoomSyncConfig,
-    StateValues,
-)
 from synapse.logging.opentracing import (
     SynapseTags,
     log_kv,
@@ -83,7 +76,16 @@ from synapse.types import (
     StreamToken,
     UserID,
 )
-from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    OperationType,
+    PerConnectionState,
+    RoomSyncConfig,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+    StateValues,
+)
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
