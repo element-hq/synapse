@@ -557,7 +557,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             Mapping from room_id to _SlidingSyncJoinedRoomResult.
         """
         rows = cast(
-            List[Tuple[str, int, int, str, str, bool]],
+            List[Tuple[str, int, int, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_joined_rooms",
@@ -598,7 +598,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             Mapping from the (room_id, user_id) to _SlidingSyncMembershipSnapshotResult.
         """
         rows = cast(
-            List[Tuple[str, str, str, str, int, bool, str, str, bool]],
+            List[Tuple[str, str, str, str, str, int, bool, str, str, bool, str]],
             self.get_success(
                 self.store.db_pool.simple_select_list(
                     "sliding_sync_membership_snapshots",
@@ -799,6 +799,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -818,6 +819,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -827,6 +829,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -882,6 +885,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -902,6 +906,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -911,6 +916,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -919,6 +925,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -931,6 +938,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # this state set yet.
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -985,6 +993,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1005,6 +1014,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1014,6 +1024,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -1022,6 +1033,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1033,6 +1045,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # joined at the room creation time which didn't have this state set yet.
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1082,6 +1095,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1133,6 +1147,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room was renamed",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1153,6 +1168,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1162,6 +1178,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -1170,6 +1187,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1179,6 +1197,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1228,6 +1247,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1246,6 +1266,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user1_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id1,
             user_id=user1_id,
+            sender=user1_id,
             membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -1255,6 +1276,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name="my super duper room",
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id1, user1_id)),
@@ -1264,6 +1286,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user2_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id1,
             user_id=user2_id,
+            sender=user2_id,
             membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -1273,6 +1296,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name=None,
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
@@ -1304,6 +1328,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1373,6 +1398,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1390,6 +1416,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user1_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id,
             user_id=user1_id,
+            sender=user1_id,
             membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -1399,6 +1426,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name="my super duper room",
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
@@ -1409,6 +1437,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user2_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id,
             user_id=user2_id,
+            sender=user2_id,
             membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -1418,6 +1447,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name=None,
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
@@ -1480,6 +1510,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # This was state reset back to None
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1579,6 +1610,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space was renamed",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1599,6 +1631,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invited_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=user1_invited_event_pos.stream,
@@ -1606,6 +1639,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -1614,6 +1648,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1623,6 +1658,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1681,6 +1717,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1702,6 +1739,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invited_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=user1_invited_event_pos.stream,
@@ -1709,6 +1747,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -1717,6 +1756,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -1726,6 +1766,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user was banned
@@ -1734,6 +1775,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user3_id,
+                sender=user2_id,
                 membership_event_id=user3_ban_response["event_id"],
                 membership=Membership.BAN,
                 event_stream_ordering=user3_ban_event_pos.stream,
@@ -1741,6 +1783,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1795,6 +1838,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=user1_leave_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=user1_leave_event_pos.stream,
@@ -1802,6 +1846,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the left
@@ -1810,6 +1855,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=user2_leave_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=user2_leave_event_pos.stream,
@@ -1817,6 +1863,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1874,6 +1921,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1895,6 +1943,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invited_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=user1_invited_event_pos.stream,
@@ -1904,12 +1953,14 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # see it unset here
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
         user2_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id1,
             user_id=user2_id,
+            sender=user2_id,
             membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -1919,6 +1970,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name=None,
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
@@ -1951,6 +2003,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -1972,6 +2025,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=user1_joined_response["event_id"],
                 membership=Membership.JOIN,
                 event_stream_ordering=user1_joined_event_pos.stream,
@@ -1981,6 +2035,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # change
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -2017,6 +2072,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2038,6 +2094,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_ban_response["event_id"],
                 membership=Membership.BAN,
                 event_stream_ordering=user1_ban_event_pos.stream,
@@ -2047,6 +2104,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 # change
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -2108,6 +2166,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=user1_leave_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=user1_leave_event_pos.stream,
@@ -2115,6 +2174,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -2122,6 +2182,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id1,
                 user_id=user2_id,
+                sender=user2_id,
                 membership_event_id=user2_leave_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=user2_leave_event_pos.stream,
@@ -2129,6 +2190,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2180,6 +2242,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=remote_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
@@ -2188,6 +2251,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2251,6 +2315,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=remote_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
@@ -2258,6 +2323,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2321,6 +2387,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=remote_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
@@ -2328,6 +2395,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2401,6 +2469,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=remote_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=remote_invite_event.internal_metadata.stream_ordering,
@@ -2408,6 +2477,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2480,6 +2550,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=user1_leave_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=user1_leave_pos.stream,
@@ -2487,6 +2558,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2558,6 +2630,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=remote_invite_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=remote_invite_retraction_event.event_id,
                 membership=Membership.LEAVE,
                 event_stream_ordering=remote_invite_retraction_event.internal_metadata.stream_ordering,
@@ -2565,6 +2638,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2613,6 +2687,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2630,6 +2705,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user1_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id,
             user_id=user1_id,
+            sender=user1_id,
             membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -2639,6 +2715,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name="my super duper room",
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
@@ -2649,6 +2726,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         user2_snapshot = _SlidingSyncMembershipSnapshotResult(
             room_id=room_id,
             user_id=user2_id,
+            sender=user2_id,
             membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
             membership=Membership.JOIN,
             event_stream_ordering=state_map[
@@ -2658,6 +2736,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_type=None,
             room_name=None,
             is_encrypted=False,
+            tombstone_successor_room_id=None,
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
@@ -2719,6 +2798,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2840,6 +2920,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         state_map = self.get_success(
@@ -2859,6 +2940,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         state_map = self.get_success(
@@ -2878,6 +2960,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2943,6 +3026,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -2980,6 +3064,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -3083,6 +3168,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_no_info,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -3092,6 +3178,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         state_map = self.get_success(
@@ -3104,6 +3191,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_with_info,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -3113,6 +3201,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         state_map = self.get_success(
@@ -3123,6 +3212,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.JOIN,
                 event_stream_ordering=state_map[
@@ -3132,6 +3222,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -3269,6 +3360,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_no_info,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invite_room_id_no_info_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=self.get_success(
@@ -3280,6 +3372,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3289,6 +3382,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_with_info,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invite_room_id_with_info_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=self.get_success(
@@ -3300,6 +3394,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3307,6 +3402,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender=user2_id,
                 membership_event_id=user1_invite_space_room_id_response["event_id"],
                 membership=Membership.INVITE,
                 event_stream_ordering=self.get_success(
@@ -3318,6 +3414,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -3476,6 +3573,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_unknown_state,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=room_id_unknown_state_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=room_id_unknown_state_invite_event.internal_metadata.stream_ordering,
@@ -3483,6 +3581,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3490,6 +3589,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_no_info,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=room_id_no_info_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=room_id_no_info_invite_event.internal_metadata.stream_ordering,
@@ -3497,6 +3597,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3506,6 +3607,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_with_info,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=room_id_with_info_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=room_id_with_info_invite_event.internal_metadata.stream_ordering,
@@ -3513,6 +3615,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3520,6 +3623,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=space_room_id_invite_event.event_id,
                 membership=Membership.INVITE,
                 event_stream_ordering=space_room_id_invite_event.internal_metadata.stream_ordering,
@@ -3527,6 +3631,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
@@ -3702,6 +3807,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_unknown_state,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=room_id_unknown_state_leave_event_response[
                     "event_id"
                 ],
@@ -3715,6 +3821,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3722,6 +3829,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_no_info,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=room_id_no_info_leave_event.event_id,
                 membership=Membership.LEAVE,
                 event_stream_ordering=room_id_no_info_leave_event.internal_metadata.stream_ordering,
@@ -3729,6 +3837,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3738,6 +3847,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_with_info,
                 user_id=user1_id,
+                sender=user1_id,
                 membership_event_id=room_id_with_info_leave_event_response["event_id"],
                 membership=Membership.LEAVE,
                 event_stream_ordering=self.get_success(
@@ -3749,6 +3859,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3756,6 +3867,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                sender="@inviter:remote_server",
                 membership_event_id=space_room_id_leave_event.event_id,
                 membership=Membership.LEAVE,
                 event_stream_ordering=space_room_id_leave_event.internal_metadata.stream_ordering,
@@ -3763,11 +3875,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
 
     @parameterized.expand(
         [
+            # We'll do a kick for this
             (Membership.LEAVE,),
             (Membership.BAN,),
         ]
@@ -3825,15 +3939,36 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         self.helper.join(space_room_id, user1_id, tok=user1_tok)
 
         if test_membership == Membership.LEAVE:
-            # Have user1 leave the rooms
-            user1_membership_room_id_no_info_response = self.helper.leave(
-                room_id_no_info, user1_id, tok=user1_tok
+            # Kick user1 from the rooms
+            user1_membership_room_id_no_info_response = self.helper.change_membership(
+                room=room_id_no_info,
+                src=user2_id,
+                targ=user1_id,
+                tok=user2_tok,
+                membership=Membership.LEAVE,
+                extra_data={
+                    "reason": "Bad manners",
+                },
             )
-            user1_membership_room_id_with_info_response = self.helper.leave(
-                room_id_with_info, user1_id, tok=user1_tok
+            user1_membership_room_id_with_info_response = self.helper.change_membership(
+                room=room_id_with_info,
+                src=user2_id,
+                targ=user1_id,
+                tok=user2_tok,
+                membership=Membership.LEAVE,
+                extra_data={
+                    "reason": "Bad manners",
+                },
             )
-            user1_membership_space_room_id_response = self.helper.leave(
-                space_room_id, user1_id, tok=user1_tok
+            user1_membership_space_room_id_response = self.helper.change_membership(
+                room=space_room_id,
+                src=user2_id,
+                targ=user1_id,
+                tok=user2_tok,
+                membership=Membership.LEAVE,
+                extra_data={
+                    "reason": "Bad manners",
+                },
             )
         elif test_membership == Membership.BAN:
             # Ban user1 from the rooms
@@ -3927,6 +4062,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_no_info,
                 user_id=user1_id,
+                # Because user2 kicked/banned user1 from the room
+                sender=user2_id,
                 membership_event_id=user1_membership_room_id_no_info_response[
                     "event_id"
                 ],
@@ -3940,6 +4077,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3949,6 +4087,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id_with_info,
                 user_id=user1_id,
+                # Because user2 kicked/banned user1 from the room
+                sender=user2_id,
                 membership_event_id=user1_membership_room_id_with_info_response[
                     "event_id"
                 ],
@@ -3962,6 +4102,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                tombstone_successor_room_id=None,
             ),
         )
         self.assertEqual(
@@ -3969,6 +4110,8 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=space_room_id,
                 user_id=user1_id,
+                # Because user2 kicked/banned user1 from the room
+                sender=user2_id,
                 membership_event_id=user1_membership_space_room_id_response["event_id"],
                 membership=test_membership,
                 event_stream_ordering=self.get_success(
@@ -3980,5 +4123,6 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
+                tombstone_successor_room_id=None,
             ),
         )

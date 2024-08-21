@@ -139,6 +139,7 @@ class SlidingSyncStateInsertValues(TypedDict, total=False):
     room_type: Optional[str]
     is_encrypted: Optional[bool]
     room_name: Optional[str]
+    tombstone_successor_room_id: Optional[str]
 
 
 class SlidingSyncMembershipSnapshotSharedInsertValues(
@@ -150,7 +151,6 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     """
 
     has_known_state: Optional[bool]
-    # TODO: tombstone_successor_room_id: Optional[str]
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -1748,6 +1748,7 @@ class PersistEventsStore:
                 )
                 ON CONFLICT (room_id, user_id)
                 DO UPDATE SET
+                    sender = EXCLUDED.sender,
                     membership_event_id = EXCLUDED.membership_event_id,
                     membership = EXCLUDED.membership,
                     event_stream_ordering = EXCLUDED.event_stream_ordering
