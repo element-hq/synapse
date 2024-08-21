@@ -86,7 +86,7 @@ from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
-from synapse.util.metrics import Measure, measure_func
+from synapse.util.metrics import Measure
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -1779,8 +1779,15 @@ class SyncHandler:
                     )
 
                 if include_device_list_updates:
-                    device_lists = await self._generate_sync_entry_for_device_list(
-                        sync_result_builder,
+                    # include_device_list_updates can only be True if we have a
+                    # since token.
+                    assert since_token is not None
+
+                    device_lists = await self._device_handler.generate_sync_entry_for_device_list(
+                        user_id=user_id,
+                        since_token=since_token,
+                        now_token=sync_result_builder.now_token,
+                        joined_room_ids=sync_result_builder.joined_room_ids,
                         newly_joined_rooms=newly_joined_rooms,
                         newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                         newly_left_rooms=newly_left_rooms,
@@ -1892,8 +1899,14 @@ class SyncHandler:
                 newly_left_users,
             ) = sync_result_builder.calculate_user_changes()
 
-            device_lists = await self._generate_sync_entry_for_device_list(
-                sync_result_builder,
+            # include_device_list_updates can only be True if we have a
+            # since token.
+            assert since_token is not None
+            device_lists = await self._device_handler.generate_sync_entry_for_device_list(
+                user_id=user_id,
+                since_token=since_token,
+                now_token=sync_result_builder.now_token,
+                joined_room_ids=sync_result_builder.joined_room_ids,
                 newly_joined_rooms=newly_joined_rooms,
                 newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                 newly_left_rooms=newly_left_rooms,
@@ -2069,94 +2082,6 @@ class SyncHandler:
         )
 
         return sync_result_builder
-
-    @measure_func("_generate_sync_entry_for_device_list")
-    async def _generate_sync_entry_for_device_list(
-        self,
-        sync_result_builder: "SyncResultBuilder",
-        newly_joined_rooms: AbstractSet[str],
-        newly_joined_or_invited_or_knocked_users: AbstractSet[str],
-        newly_left_rooms: AbstractSet[str],
-        newly_left_users: AbstractSet[str],
-    ) -> DeviceListUpdates:
-        """Generate the DeviceListUpdates section of sync
-
-        Args:
-            sync_result_builder
-            newly_joined_rooms: Set of rooms user has joined since previous sync
-            newly_joined_or_invited_or_knocked_users: Set of users that have joined,
-                been invited to a room or are knocking on a room since
-                previous sync.
-            newly_left_rooms: Set of rooms user has left since previous sync
-            newly_left_users: Set of users that have left a room we're in since
-                previous sync
-        """
-
-        user_id = sync_result_builder.sync_config.user.to_string()
-        since_token = sync_result_builder.since_token
-        assert since_token is not None
-
-        # Take a copy since these fields will be mutated later.
-        newly_joined_or_invited_or_knocked_users = set(
-            newly_joined_or_invited_or_knocked_users
-        )
-        newly_left_users = set(newly_left_users)
-
-        # We want to figure out what user IDs the client should refetch
-        # device keys for, and which users we aren't going to track changes
-        # for anymore.
-        #
-        # For the first step we check:
-        #   a. if any users we share a room with have updated their devices,
-        #      and
-        #   b. we also check if we've joined any new rooms, or if a user has
-        #      joined a room we're in.
-        #
-        # For the second step we just find any users we no longer share a
-        # room with by looking at all users that have left a room plus users
-        # that were in a room we've left.
-
-        users_that_have_changed = set()
-
-        joined_room_ids = sync_result_builder.joined_room_ids
-
-        # Step 1a, check for changes in devices of users we share a room
-        # with
-        users_that_have_changed = (
-            await self._device_handler.get_device_changes_in_shared_rooms(
-                user_id,
-                joined_room_ids,
-                from_token=since_token,
-                now_token=sync_result_builder.now_token,
-            )
-        )
-
-        # Step 1b, check for newly joined rooms
-        for room_id in newly_joined_rooms:
-            joined_users = await self.store.get_users_in_room(room_id)
-            newly_joined_or_invited_or_knocked_users.update(joined_users)
-
-        # TODO: Check that these users are actually new, i.e. either they
-        # weren't in the previous sync *or* they left and rejoined.
-        users_that_have_changed.update(newly_joined_or_invited_or_knocked_users)
-
-        user_signatures_changed = await self.store.get_users_whose_signatures_changed(
-            user_id, since_token.device_list_key
-        )
-        users_that_have_changed.update(user_signatures_changed)
-
-        # Now find users that we no longer track
-        for room_id in newly_left_rooms:
-            left_users = await self.store.get_users_in_room(room_id)
-            newly_left_users.update(left_users)
-
-        # Remove any users that we still share a room with.
-        left_users_rooms = await self.store.get_rooms_for_users(newly_left_users)
-        for user_id, entries in left_users_rooms.items():
-            if any(rid in joined_room_ids for rid in entries):
-                newly_left_users.discard(user_id)
-
-        return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
 
     @trace
     async def _generate_sync_entry_for_to_device(

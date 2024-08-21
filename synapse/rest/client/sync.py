@@ -1044,6 +1044,11 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
+            if room_result.unstable_expanded_timeline:
+                serialized_rooms[room_id][
+                    "unstable_expanded_timeline"
+                ] = room_result.unstable_expanded_timeline
+
             # This will be omitted for invite/knock rooms with `stripped_state`
             if (
                 room_result.required_state is not None

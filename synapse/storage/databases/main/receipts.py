@@ -43,6 +43,7 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_tuple_in_list_sql_clause,
 )
 from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
@@ -51,10 +52,12 @@ from synapse.types import (
     JsonMapping,
     MultiWriterStreamToken,
     PersistedPosition,
+    StrCollection,
 )
 from synapse.util import json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
+from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -479,6 +482,83 @@ class ReceiptsWorkerStore(SQLBaseStore):
         }
         return results
 
+    async def get_linearized_receipts_for_events(
+        self,
+        room_and_event_ids: Collection[Tuple[str, str]],
+    ) -> Sequence[JsonMapping]:
+        """Get all receipts for the given set of events.
+
+        Arguments:
+            room_and_event_ids: A collection of 2-tuples of room ID and
+                event IDs to fetch receipts for
+
+        Returns:
+            A list of receipts, one per room.
+        """
+
+        def get_linearized_receipts_for_events_txn(
+            txn: LoggingTransaction,
+            room_id_event_id_tuples: Collection[Tuple[str, str]],
+        ) -> List[Tuple[str, str, str, str, Optional[str], str]]:
+            clause, args = make_tuple_in_list_sql_clause(
+                self.database_engine, ("room_id", "event_id"), room_id_event_id_tuples
+            )
+
+            sql = f"""
+                SELECT room_id, receipt_type, user_id, event_id, thread_id, data
+                FROM receipts_linearized
+                WHERE {clause}
+            """
+
+            txn.execute(sql, args)
+
+            return txn.fetchall()
+
+        # room_id -> event_id -> receipt_type -> user_id -> receipt data
+        room_to_content: Dict[str, Dict[str, Dict[str, Dict[str, JsonMapping]]]] = {}
+        for batch in batch_iter(room_and_event_ids, 1000):
+            batch_results = await self.db_pool.runInteraction(
+                "get_linearized_receipts_for_events",
+                get_linearized_receipts_for_events_txn,
+                batch,
+            )
+
+            for (
+                room_id,
+                receipt_type,
+                user_id,
+                event_id,
+                thread_id,
+                data,
+            ) in batch_results:
+                content = room_to_content.setdefault(room_id, {})
+                user_receipts = content.setdefault(event_id, {}).setdefault(
+                    receipt_type, {}
+                )
+
+                receipt_data = db_to_json(data)
+                if thread_id is not None:
+                    receipt_data["thread_id"] = thread_id
+
+                # MSC4102: always replace threaded receipts with unthreaded ones
+                # if there is a clash. Specifically:
+                # - if there is no existing receipt, great, set the data.
+                # - if there is an existing receipt, is it threaded (thread_id
+                #    present)? YES: replace if this receipt has no thread id.
+                # NO: do not replace. This means we will drop some receipts, but
+                # MSC4102 is designed to drop semantically meaningless receipts,
+                # so this is okay. Previously, we would drop meaningful data!
+                if user_id in user_receipts:
+                    if "thread_id" in user_receipts[user_id] and not thread_id:
+                        user_receipts[user_id] = receipt_data
+                else:
+                    user_receipts[user_id] = receipt_data
+
+        return [
+            {"type": EduTypes.RECEIPT, "room_id": room_id, "content": content}
+            for room_id, content in room_to_content.items()
+        ]
+
     @cached(
         num_args=2,
     )
@@ -547,6 +627,46 @@ class ReceiptsWorkerStore(SQLBaseStore):
             receipt_type_dict = event_entry.setdefault(receipt_type, {})
 
             receipt_type_dict[user_id] = db_to_json(data)
+
+        return results
+
+    async def get_rooms_with_receipts_between(
+        self,
+        room_ids: StrCollection,
+        from_key: MultiWriterStreamToken,
+        to_key: MultiWriterStreamToken,
+    ) -> StrCollection:
+        """Given a set of room_ids, find out which ones (may) have receipts
+        between the two tokens (> `from_token` and <= `to_token`)."""
+
+        room_ids = self._receipts_stream_cache.get_entities_changed(
+            room_ids, from_key.stream
+        )
+        if not room_ids:
+            return []
+
+        def f(txn: LoggingTransaction, room_ids: StrCollection) -> StrCollection:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "room_id", room_ids
+            )
+
+            sql = f"""
+                SELECT DISTINCT room_id FROM receipts_linearized
+                WHERE {clause} AND ? < stream_id AND stream_id <= ?
+            """
+            args.append(from_key.stream)
+            args.append(to_key.get_max_stream_pos())
+
+            txn.execute(sql, args)
+
+            return [room_id for room_id, in txn]
+
+        results: List[str] = []
+        for batch in batch_iter(room_ids, 1000):
+            batch_result = await self.db_pool.runInteraction(
+                "get_rooms_with_receipts_between", f, batch
+            )
+            results.extend(batch_result)
 
         return results
 
@@ -953,6 +1073,12 @@ class ReceiptsBackgroundUpdateStore(SQLBaseStore):
         self.db_pool.updates.register_background_update_handler(
             self.RECEIPTS_GRAPH_UNIQUE_INDEX_UPDATE_NAME,
             self._background_receipts_graph_unique_index,
+        )
+        self.db_pool.updates.register_background_index_update(
+            update_name="receipts_room_id_event_id_index",
+            index_name="receipts_linearized_event_id",
+            table="receipts_linearized",
+            columns=("room_id", "event_id"),
         )
 
     async def _populate_receipt_event_stream_ordering(
