@@ -18,7 +18,6 @@
 
 import logging
 from contextlib import asynccontextmanager
-from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AsyncContextManager,
@@ -35,7 +34,7 @@ import attr
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
-from synapse.api.errors import Codes, NotFoundError, ShadowBanError, SynapseError
+from synapse.api.errors import NotFoundError, ShadowBanError
 from synapse.events import EventBase
 from synapse.logging.opentracing import set_tag
 from synapse.metrics.background_process_metrics import run_as_background_process
@@ -186,18 +185,6 @@ class DelayedEventsHandler:
         Returns:
             The ID of the added delayed event.
         """
-        max_delay = self._config.experimental.msc4140_max_delay
-        if delay > max_delay:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "The requested delay exceeds the allowed maximum.",
-                Codes.UNKNOWN,
-                {
-                    "org.matrix.msc4140.errcode": "M_MAX_DELAY_EXCEEDED",
-                    "org.matrix.msc4140.max_delay": max_delay,
-                },
-            )
-
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
