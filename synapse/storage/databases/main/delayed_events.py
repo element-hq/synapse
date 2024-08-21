@@ -182,7 +182,7 @@ class DelayedEventsStore(SQLBaseStore):
                 "room_id": str(RoomID.from_string(row[1])),
                 "type": EventType(row[2]),
                 **({"state_key": StateKey(row[3])} if row[3] is not None else {}),
-                **({"delay": Delay(row[4])} if row[4] is not None else {}),
+                "delay": Delay(row[4]),
                 "running_since": Timestamp(row[5]),
                 "content": db_to_json(row[6]),
             }
