@@ -825,7 +825,7 @@ class EventsPersistenceStorageController:
                 if state_key[0] == EventTypes.Member and self.is_mine_id(state_key[1]):
                     membership_event_id_to_user_id_map[event_id] = state_key[1]
 
-            event_id_to_sender_map: Dict[str, str] = {}
+            membership_event_map: Dict[str, EventBase] = {}
             # In normal event persist scenarios, we should be able to find the
             # membership events in the `events_and_contexts` given to us but it's
             # possible a state reset happened which added us to the room without a
@@ -834,39 +834,34 @@ class EventsPersistenceStorageController:
             for membership_event_id in membership_event_id_to_user_id_map.keys():
                 membership_event = event_map.get(membership_event_id)
                 if membership_event:
-                    event_id_to_sender_map[membership_event_id] = (
-                        membership_event.sender
-                    )
+                    membership_event_map[membership_event_id] = membership_event
                 else:
                     missing_membership_event_ids.add(membership_event_id)
 
             # Otherwise, we need to find a couple events that we were reset to.
             if missing_membership_event_ids:
-                remaining_event_id_to_sender_map = (
-                    await self.main_store.get_sender_for_event_ids(
-                        missing_membership_event_ids
-                    )
+                remaining_events = await self.main_store.get_events(
+                    missing_membership_event_ids
                 )
                 # There shouldn't be any missing events
                 assert (
-                    remaining_event_id_to_sender_map.keys()
-                    == missing_membership_event_ids
-                ), missing_membership_event_ids.difference(
-                    remaining_event_id_to_sender_map.keys()
-                )
-                event_id_to_sender_map.update(remaining_event_id_to_sender_map)
+                    remaining_events.keys() == missing_membership_event_ids
+                ), missing_membership_event_ids.difference(remaining_events.keys())
+                membership_event_map.update(remaining_events)
 
             membership_infos_to_insert_membership_snapshots = [
-                {
-                    "user_id": user_id,
-                    "sender": event_id_to_sender_map[membership_event_id],
-                    "membership_event_id": membership_event_id,
-                }
+                SlidingSyncMembershipInfo(
+                    user_id=user_id,
+                    sender=membership_event_map[membership_event_id].sender,
+                    membership_event_id=membership_event_id,
+                    membership=membership_event_map[membership_event_id].membership,
+                    membership_event_stream_ordering=None,
+                )
                 for membership_event_id, user_id in membership_event_id_to_user_id_map.items()
             ]
 
             if membership_infos_to_insert_membership_snapshots:
-                current_state_ids_map: MutableStateMap = dict(
+                current_state_ids_map: MutableStateMap[str] = dict(
                     await self.main_store.get_partial_filtered_current_state_ids(
                         room_id,
                         state_filter=StateFilter.from_types(
@@ -987,6 +982,7 @@ class EventsPersistenceStorageController:
             to_delete_membership_snapshots=user_ids_to_delete_membership_snapshots,
         )
 
+    # TODO: Should we put this next to the other `_get_sliding_sync_*` functions?
     @classmethod
     def _get_sliding_sync_insert_values_from_state_map(
         cls, state_map: StateMap[EventBase]

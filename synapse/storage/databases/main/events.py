@@ -34,7 +34,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Union,
     cast,
 )
 
@@ -150,7 +149,8 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     # TODO: tombstone_successor_room_id: Optional[str]
 
 
-class SlidingSyncMembershipInfo(TypedDict, total=False):
+@attr.s(slots=True, auto_attribs=True)
+class SlidingSyncMembershipInfo:
     """
     Values unique to each membership
     """
@@ -158,6 +158,9 @@ class SlidingSyncMembershipInfo(TypedDict, total=False):
     user_id: str
     sender: str
     membership_event_id: str
+    membership: str
+    # Sometimes we're working with events that aren't persisted yet
+    membership_event_stream_ordering: Optional[int]
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -1507,8 +1510,7 @@ class PersistEventsStore:
                     (room_id, user_id, membership_event_id, membership, event_stream_ordering
                     {("," + ", ".join(insert_keys)) if insert_keys else ""})
                 VALUES (
-                    ?, ?, ?,
-                    (SELECT membership FROM room_memberships WHERE event_id = ?),
+                    ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                 )
@@ -1522,10 +1524,10 @@ class PersistEventsStore:
                 [
                     [
                         room_id,
-                        membership_info["user_id"],
-                        membership_info["membership_event_id"],
-                        membership_info["membership_event_id"],
-                        membership_info["membership_event_id"],
+                        membership_info.user_id,
+                        membership_info.membership_event_id,
+                        membership_info.membership,
+                        membership_info.membership_event_id,
                     ]
                     + list(insert_values)
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
@@ -1549,6 +1551,8 @@ class PersistEventsStore:
             txn, {m for m in members_to_cache_bust if not self.hs.is_mine_id(m)}
         )
 
+    # TODO: We can probably remove this function in favor of other stuff.
+    # TODO: This doesn't take into account redactions
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
         cls, txn: LoggingTransaction, room_id: str
@@ -1587,10 +1591,12 @@ class PersistEventsStore:
 
         return current_state_map
 
+    # TODO: We can probably remove this function in favor of other stuff.
+    # TODO: Should we put this next to the other `_get_sliding_sync_*` function?
     @classmethod
     def _get_sliding_sync_insert_values_from_state_ids_map_txn(
         cls, txn: LoggingTransaction, state_map: StateMap[str]
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> SlidingSyncStateInsertValues:
         """
         Fetch events in the `state_map` and extract the relevant state values needed to
         insert into the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
@@ -1602,7 +1608,7 @@ class PersistEventsStore:
             the `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
         """
         # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
+        sliding_sync_insert_map: SlidingSyncStateInsertValues = {}
         # Fetch the raw event JSON from the database
         (
             event_id_in_list_clause,
@@ -1644,19 +1650,18 @@ class PersistEventsStore:
                 sliding_sync_insert_map["room_name"] = room_name
             else:
                 # We only expect to see events according to the
-                # `SLIDING_SYNC_RELEVANT_STATE_SET` which is what will
-                # `_get_relevant_sliding_sync_current_state_event_ids_txn()` will
-                # return.
+                # `SLIDING_SYNC_RELEVANT_STATE_SET`.
                 raise AssertionError(
                     f"Unexpected event (we should not be fetching extra events): ({event_type}, {state_key})"
                 )
 
         return sliding_sync_insert_map
 
+    # TODO: Should we put this next to the other `_get_sliding_sync_*` function?
     @classmethod
     def _get_sliding_sync_insert_values_from_stripped_state_txn(
         cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
-    ) -> Dict[str, Optional[Union[str, bool]]]:
+    ) -> SlidingSyncMembershipSnapshotSharedInsertValues:
         """
         Pull out the relevant state values from the stripped state needed to insert into
         the `sliding_sync_membership_snapshots` tables.
@@ -1666,7 +1671,7 @@ class PersistEventsStore:
             state values needed to insert into the `sliding_sync_membership_snapshots` tables.
         """
         # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-        sliding_sync_insert_map: Dict[str, Optional[Union[str, bool]]] = {}
+        sliding_sync_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
 
         if unsigned_stripped_state_events is not None:
             stripped_state_map: MutableStateMap[StrippedStateEvent] = {}

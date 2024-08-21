@@ -81,7 +81,7 @@ from synapse.storage.util.id_generators import (
     MultiWriterIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
-from synapse.types import JsonDict, StrCollection, get_domain_from_id
+from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
@@ -510,6 +510,8 @@ class EventsWorkerStore(SQLBaseStore):
         allow_rejected: bool = False,
     ) -> Dict[str, EventBase]:
         """Get events from the database
+
+        Unknown events will be omitted from the response.
 
         Args:
             event_ids: The event_ids of the events to fetch
@@ -1978,34 +1980,6 @@ class EventsWorkerStore(SQLBaseStore):
             )
 
         return int(res[0]), int(res[1])
-
-    async def get_sender_for_event_ids(
-        self, event_ids: StrCollection
-    ) -> Mapping[str, str]:
-        """
-        Get the sender for a list of event IDs.
-
-        Args:
-            event_ids: The event IDs to look up.
-
-        Returns:
-            A mapping from event ID to event sender.
-        """
-        rows = cast(
-            List[Tuple[str, str]],
-            await self.db_pool.simple_select_many_batch(
-                table="events",
-                column="event_id",
-                iterable=event_ids,
-                retcols=(
-                    "event_id",
-                    "sender",
-                ),
-                desc="get_sender_for_event_ids",
-            ),
-        )
-
-        return dict(rows)
 
     async def get_next_event_to_expire(self) -> Optional[Tuple[str, int]]:
         """Retrieve the entry with the lowest expiry timestamp in the event_expiry
