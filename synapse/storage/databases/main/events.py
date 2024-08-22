@@ -605,22 +605,17 @@ class PersistEventsStore:
                 best_effort_most_recent_stream_ordering = events_and_contexts[-1][
                     0
                 ].internal_metadata.stream_ordering
-            elif to_insert:
-                # Even though `Mapping`/`Dict` have no guaranteed order, some
-                # implementations may preserve insertion order so we're just
-                # going to choose the best possible answer by using the "first"
-                # event ID which we will assume will have the greatest
-                # `stream_ordering`. We really just need *some* answer in case
-                # we are the first ones inserting into the table because of the
-                # `NON NULL` constraint on `event_stream_ordering`. In reality,
-                # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
-                # is run after this function to update it to the correct latest
-                # value.
-                event_id = next(iter(to_insert.values()))
-                event_pos = await self.store.get_position_for_event(event_id)
-                best_effort_most_recent_stream_ordering = event_pos.stream
-
             else:
+                # If there are no `events_and_contexts`, we assume it's one of two scenarios:
+                #  1. If there are new state `to_insert` but no `events_and_contexts`,
+                #     then it's a state reset.
+                #  2. Otherwise, it's some partial-state room re-syncing the current state and
+                #     going through un-partial process.
+                #
+                # Either way, we assume no new events are being persisted and we can
+                # find the latest already in the database. Since this is a best-effort
+                # value, we don't need to be perfect although I think we're pretty close
+                # here.
                 most_recent_event_pos_results = (
                     await self.store.get_last_event_pos_in_room(
                         room_id, event_types=None
