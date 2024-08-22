@@ -294,7 +294,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             where_clause="NOT outlier",
         )
 
-        # Backfill the sliding sync tables
+        # Add some background updates to populate the sliding sync tables
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
             self._sliding_sync_joined_rooms_bg_update,
@@ -1546,7 +1546,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         self, progress: JsonDict, batch_size: int
     ) -> int:
         """
-        Handles backfilling the `sliding_sync_joined_rooms` table.
+        Background update to populate the `sliding_sync_joined_rooms` table.
         """
         last_room_id = progress.get("last_room_id", "")
 
@@ -1631,7 +1631,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 last_current_state_delta_stream_id,
             )
 
-        def _backfill_table_txn(txn: LoggingTransaction) -> None:
+        def _fill_table_txn(txn: LoggingTransaction) -> None:
             # Handle updating the `sliding_sync_joined_rooms` table
             #
             last_successful_room_id: Optional[str] = None
@@ -1710,7 +1710,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 last_successful_room_id = room_id
 
         await self.db_pool.runInteraction(
-            "sliding_sync_joined_rooms_bg_update", _backfill_table_txn
+            "sliding_sync_joined_rooms_bg_update", _fill_table_txn
         )
 
         # Update the progress
@@ -1725,7 +1725,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         self, progress: JsonDict, batch_size: int
     ) -> int:
         """
-        Handles backfilling the `sliding_sync_membership_snapshots` table.
+        Background update to populate the `sliding_sync_membership_snapshots` table.
         """
         last_event_stream_ordering = progress.get(
             "last_event_stream_ordering", -(1 << 31)
@@ -1967,7 +1967,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 membership_event_stream_ordering=membership_event_stream_ordering,
             )
 
-        def _backfill_table_txn(txn: LoggingTransaction) -> None:
+        def _fill_table_txn(txn: LoggingTransaction) -> None:
             # Handle updating the `sliding_sync_membership_snapshots` table
             #
             for key, insert_map in to_insert_membership_snapshots.items():
@@ -2019,7 +2019,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
         await self.db_pool.runInteraction(
-            "sliding_sync_membership_snapshots_bg_update", _backfill_table_txn
+            "sliding_sync_membership_snapshots_bg_update", _fill_table_txn
         )
 
         # Update the progress

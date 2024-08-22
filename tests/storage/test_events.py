@@ -2860,7 +2860,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_joined_background_update_missing(self) -> None:
         """
-        Test that the background update for `sliding_sync_joined_rooms` backfills missing rows
+        Test that the background update for `sliding_sync_joined_rooms` populates missing rows
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -3004,7 +3004,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
 
     def test_joined_background_update_partial(self) -> None:
         """
-        Test that the background update for `sliding_sync_joined_rooms` backfills
+        Test that the background update for `sliding_sync_joined_rooms` populates
         partially updated rows.
         """
         user1_id = self.register_user("user1", "pass")
@@ -3109,7 +3109,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     def test_membership_snapshots_background_update_joined(self) -> None:
         """
         Test that the background update for `sliding_sync_membership_snapshots`
-        backfills missing rows for join memberships.
+        populates missing rows for join memberships.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -3274,7 +3274,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     def test_membership_snapshots_background_update_local_invite(self) -> None:
         """
         Test that the background update for `sliding_sync_membership_snapshots`
-        backfills missing rows for invite memberships.
+        populates missing rows for invite memberships.
         """
         user1_id = self.register_user("user1", "pass")
         _user1_tok = self.login(user1_id, "pass")
@@ -3479,7 +3479,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     ) -> None:
         """
         Test that the background update for `sliding_sync_membership_snapshots`
-        backfills missing rows for remote invites (out-of-band memberships).
+        populates missing rows for remote invites (out-of-band memberships).
         """
         user1_id = self.register_user("user1", "pass")
         _user1_tok = self.login(user1_id, "pass")
@@ -3696,7 +3696,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     ) -> None:
         """
         Test that the background update for `sliding_sync_membership_snapshots`
-        backfills missing rows for remote invite rejections/retractions (out-of-band memberships).
+        populates missing rows for remote invite rejections/retractions (out-of-band memberships).
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -3947,7 +3947,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
     ) -> None:
         """
         Test that the background update for `sliding_sync_membership_snapshots`
-        backfills missing rows for leave memberships.
+        populates missing rows for leave memberships.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
