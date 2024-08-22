@@ -1784,44 +1784,36 @@ class PersistEventsStore:
         if sliding_sync_table_changes.to_insert_membership_snapshots:
             # Update the `sliding_sync_membership_snapshots` table
             #
-            # Pulling keys/values separately is safe and will produce congruent
-            # lists
-            sliding_sync_snapshot_keys = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
-            )
-            sliding_sync_snapshot_values = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
-            )
             # We need to insert/update regardless of whether we have `sliding_sync_snapshot_keys`
             # because there are other fields in the `ON CONFLICT` upsert to run (see
             # inherit case above for more context when this happens).
-            txn.execute_batch(
-                f"""
-                INSERT INTO sliding_sync_membership_snapshots
-                    (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering
-                    {("," + ", ".join(sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""})
-                VALUES (
-                    ?, ?, ?, ?, ?, ?
-                    {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
-                )
-                ON CONFLICT (room_id, user_id)
-                DO UPDATE SET
-                    sender = EXCLUDED.sender,
-                    membership_event_id = EXCLUDED.membership_event_id,
-                    membership = EXCLUDED.membership,
-                    event_stream_ordering = EXCLUDED.event_stream_ordering
-                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""}
-                """,
-                [
+            self.db_pool.simple_upsert_many_txn(
+                txn=txn,
+                table="sliding_sync_membership_snapshots",
+                key_names=("room_id", "user_id"),
+                key_values=[
+                    (room_id, membership_info.user_id)
+                    for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
+                ],
+                value_names=[
+                    "sender",
+                    "membership_event_id",
+                    "membership",
+                    "event_stream_ordering",
+                ]
+                + list(
+                    sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
+                ),
+                value_values=[
                     [
-                        room_id,
-                        membership_info.user_id,
                         membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
                         membership_info.membership_event_stream_ordering,
                     ]
-                    + list(sliding_sync_snapshot_values)
+                    + list(
+                        sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
+                    )
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
                 ],
             )
