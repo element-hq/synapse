@@ -1998,7 +1998,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         {("," + ", ".join(insert_keys)) if insert_keys else ""})
                     VALUES (
                         ?, ?, ?, ?, ?,
-                        (SELECT forgotten FROM room_memberships WHERE room_id = ? AND user_id = ?),
+                        (SELECT forgotten FROM room_memberships WHERE event_id = ?),
                         ?
                         {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                     )
@@ -2012,8 +2012,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         sender,
                         membership_event_id,
                         membership,
-                        room_id,
-                        user_id,
+                        membership_event_id,
                         membership_event_stream_ordering,
                     ]
                     + list(insert_values),
