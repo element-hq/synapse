@@ -682,7 +682,7 @@ class HaveSentRoomFlag(Enum):
     LIVE = "live"
 
 
-T = TypeVar("T")
+T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -797,7 +797,7 @@ class MutableRoomStatusMap(RoomStatusMap[T]):
             self._statuses[room_id] = HaveSentRoom.previously(from_token)
 
 
-@attr.s(auto_attribs=True)
+@attr.s(auto_attribs=True, frozen=True)
 class PerConnectionState:
     """The per-connection state. A snapshot of what we've sent down the
     connection before.
