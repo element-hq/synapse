@@ -35,6 +35,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -1966,8 +1967,8 @@ class DatabasePool:
     def simple_update_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        updatevalues: Dict[str, Any],
+        keyvalues: Mapping[str, Any],
+        updatevalues: Mapping[str, Any],
     ) -> int:
         """
         Update rows in the given database table.

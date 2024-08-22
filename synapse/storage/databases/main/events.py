@@ -1708,16 +1708,18 @@ class PersistEventsStore:
                 # instead because there is no `event_id` to use for the `NON NULL`
                 # constraint on `event_stream_ordering`.
                 elif to_delete:
-                    args = list(sliding_sync_updates_values) + [room_id]
-                    txn.execute(
-                        f"""
-                        UPDATE sliding_sync_joined_rooms
-                        SET
-                            {", ".join(f"{key} = ?" for key in sliding_sync_updates_keys)}
-                        WHERE room_id = ?
-                        """,
-                        args,
+                    num_rows_updated = self.db_pool.simple_update_txn(
+                        txn,
+                        table="sliding_sync_joined_rooms",
+                        keyvalues={
+                            "room_id": room_id,
+                        },
+                        updatevalues=sliding_sync_table_changes.joined_room_updates,
                     )
+                    # TODO: Is this assumption correct?
+                    assert (
+                        num_rows_updated > 0
+                    ), "Expected to only run this against existing rows"
 
         # We now update `local_current_membership`. We do this regardless
         # of whether we're still in the room or not to handle the case where
