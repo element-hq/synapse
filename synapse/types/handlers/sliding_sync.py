@@ -18,6 +18,7 @@ from collections import ChainMap
 from enum import Enum
 from typing import (
     TYPE_CHECKING,
+    AbstractSet,
     Callable,
     Dict,
     Final,
@@ -411,7 +412,7 @@ class StateValues:
 
 # We can't freeze this class because we want to update it in place with the
 # de-duplicated data.
-@attr.s(slots=True, auto_attribs=True)
+@attr.s(slots=True, auto_attribs=True, frozen=True)
 class RoomSyncConfig:
     """
     Holds the config for what data we should fetch for a room in the sync response.
@@ -425,7 +426,7 @@ class RoomSyncConfig:
     """
 
     timeline_limit: int
-    required_state_map: Dict[str, Set[str]]
+    required_state_map: Mapping[str, AbstractSet[str]]
 
     @classmethod
     def from_room_config(
@@ -499,7 +500,7 @@ class RoomSyncConfig:
 
     def deep_copy(self) -> "RoomSyncConfig":
         required_state_map: Dict[str, Set[str]] = {
-            state_type: state_key_set.copy()
+            state_type: set(state_key_set)
             for state_type, state_key_set in self.required_state_map.items()
         }
 
@@ -510,14 +511,20 @@ class RoomSyncConfig:
 
     def combine_room_sync_config(
         self, other_room_sync_config: "RoomSyncConfig"
-    ) -> None:
+    ) -> "RoomSyncConfig":
         """
-        Combine this `RoomSyncConfig` with another `RoomSyncConfig` and take the
+        Combine this `RoomSyncConfig` with another `RoomSyncConfig` and return the
         superset union of the two.
         """
+        timeline_limit = self.timeline_limit
+        required_state_map = {
+            event_type: set(state_keys)
+            for event_type, state_keys in self.required_state_map.items()
+        }
+
         # Take the highest timeline limit
         if self.timeline_limit < other_room_sync_config.timeline_limit:
-            self.timeline_limit = other_room_sync_config.timeline_limit
+            timeline_limit = other_room_sync_config.timeline_limit
 
         # Union the required state
         for (
@@ -526,14 +533,14 @@ class RoomSyncConfig:
         ) in other_room_sync_config.required_state_map.items():
             # If we already have a wildcard for everything, we don't need to add
             # anything else
-            if StateValues.WILDCARD in self.required_state_map.get(
+            if StateValues.WILDCARD in required_state_map.get(
                 StateValues.WILDCARD, set()
             ):
                 break
 
             # If we already have a wildcard `state_key` for this `state_type`, we don't need
             # to add anything else
-            if StateValues.WILDCARD in self.required_state_map.get(state_type, set()):
+            if StateValues.WILDCARD in required_state_map.get(state_type, set()):
                 continue
 
             # If we're getting wildcards for the `state_type` and `state_key`, that's
@@ -542,16 +549,14 @@ class RoomSyncConfig:
                 state_type == StateValues.WILDCARD
                 and StateValues.WILDCARD in state_key_set
             ):
-                self.required_state_map = {state_type: {StateValues.WILDCARD}}
+                required_state_map = {state_type: {StateValues.WILDCARD}}
                 # We can break, since we don't need to add anything else
                 break
 
             for state_key in state_key_set:
                 # If we already have a wildcard for this specific `state_key`, we don't need
                 # to add it since the wildcard already covers it.
-                if state_key in self.required_state_map.get(
-                    StateValues.WILDCARD, set()
-                ):
+                if state_key in required_state_map.get(StateValues.WILDCARD, set()):
                     continue
 
                 # If we're getting a wildcard for the `state_type`, get rid of any other
@@ -562,7 +567,7 @@ class RoomSyncConfig:
                     # Make a copy so we don't run into an error: `dictionary changed size
                     # during iteration`, when we remove items
                     for existing_state_type, existing_state_key_set in list(
-                        self.required_state_map.items()
+                        required_state_map.items()
                     ):
                         # Make a copy so we don't run into an error: `Set changed size during
                         # iteration`, when we filter out and remove items
@@ -572,19 +577,21 @@ class RoomSyncConfig:
 
                         # If we've the left the `set()` empty, remove it from the map
                         if existing_state_key_set == set():
-                            self.required_state_map.pop(existing_state_type, None)
+                            required_state_map.pop(existing_state_type, None)
 
                 # If we're getting a wildcard `state_key`, get rid of any other state_keys
                 # for this `state_type` since the wildcard will cover it already.
                 if state_key == StateValues.WILDCARD:
-                    self.required_state_map[state_type] = {state_key}
+                    required_state_map[state_type] = {state_key}
                     break
                 # Otherwise, just add it to the set
                 else:
-                    if self.required_state_map.get(state_type) is None:
-                        self.required_state_map[state_type] = {state_key}
+                    if required_state_map.get(state_type) is None:
+                        required_state_map[state_type] = {state_key}
                     else:
-                        self.required_state_map[state_type].add(state_key)
+                        required_state_map[state_type].add(state_key)
+
+        return RoomSyncConfig(timeline_limit, required_state_map)
 
     def must_await_full_state(
         self,

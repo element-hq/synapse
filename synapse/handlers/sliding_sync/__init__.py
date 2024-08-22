@@ -432,15 +432,11 @@ class SlidingSyncHandler:
                                     room_id
                                 )
                                 if existing_room_sync_config is not None:
-                                    existing_room_sync_config.combine_room_sync_config(
+                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
                                         room_sync_config
                                     )
-                                else:
-                                    # Make a copy so if we modify it later, it doesn't
-                                    # affect all references.
-                                    relevant_room_map[room_id] = (
-                                        room_sync_config.deep_copy()
-                                    )
+
+                                relevant_room_map[room_id] = room_sync_config
 
                                 room_ids_in_list.append(room_id)
 
@@ -505,11 +501,13 @@ class SlidingSyncHandler:
                     # and need to fetch more info about.
                     existing_room_sync_config = relevant_room_map.get(room_id)
                     if existing_room_sync_config is not None:
-                        existing_room_sync_config.combine_room_sync_config(
-                            room_sync_config
+                        room_sync_config = (
+                            existing_room_sync_config.combine_room_sync_config(
+                                room_sync_config
+                            )
                         )
-                    else:
-                        relevant_room_map[room_id] = room_sync_config
+
+                    relevant_room_map[room_id] = room_sync_config
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
