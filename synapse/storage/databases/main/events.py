@@ -271,7 +271,6 @@ class PersistEventsStore:
                 from being updated by these events. This should be set to True
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
-            sliding_sync_table_changes: TODO
 
         Returns:
             Resolves when the events have been persisted
@@ -792,7 +791,10 @@ class PersistEventsStore:
             state_delta_for_room: The current-state delta for the room.
             new_forward_extremities: The new forward extremities for the room:
                 a set of the event ids which are the forward extremities.
-            sliding_sync_table_changes: TODO
+            sliding_sync_table_changes: Changes to the
+                `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
+                derived from the given `delta_state` (see
+                `_calculate_sliding_sync_table_changes(...)`)
 
         Raises:
             PartialStateConflictError: if attempting to persist a partial state event in
@@ -1453,7 +1455,17 @@ class PersistEventsStore:
         state_delta: DeltaState,
         sliding_sync_table_changes: SlidingSyncTableChanges,
     ) -> None:
-        """Update the current state stored in the datatabase for the given room"""
+        """
+        Update the current state stored in the datatabase for the given room
+
+        Args:
+            room_id
+            state_delta: Changes to the current state of the room
+            sliding_sync_table_changes: Changes to the
+                `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
+                derived from the given `delta_state` (see
+                `_calculate_sliding_sync_table_changes(...)`)
+        """
 
         if state_delta.is_noop():
             return
@@ -1476,6 +1488,19 @@ class PersistEventsStore:
         stream_id: int,
         sliding_sync_table_changes: SlidingSyncTableChanges,
     ) -> None:
+        """
+        Handles updating tables that track the current state of a room.
+
+        Args:
+            txn
+            room_id
+            delta_state: Changes to the current state of the room
+            stream_id: TODO
+            sliding_sync_table_changes: Changes to the
+                `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
+                derived from the given `delta_state` (see
+                `_calculate_sliding_sync_table_changes(...)`)
+        """
         to_delete = delta_state.to_delete
         to_insert = delta_state.to_insert
 
