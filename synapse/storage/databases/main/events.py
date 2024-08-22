@@ -1761,13 +1761,12 @@ class PersistEventsStore:
         #
         # This would only happen if someone was state reset out of the room
         if sliding_sync_table_changes.to_delete_membership_snapshots:
-            txn.execute_batch(
-                "DELETE FROM sliding_sync_membership_snapshots"
-                " WHERE room_id = ? AND user_id = ?",
-                [
-                    (room_id, user_id)
-                    for user_id in sliding_sync_table_changes.to_delete_membership_snapshots
-                ],
+            self.db_pool.simple_delete_many_txn(
+                txn,
+                table="sliding_sync_membership_snapshots",
+                column="user_id",
+                values=sliding_sync_table_changes.to_delete_membership_snapshots,
+                keyvalues={"room_id": room_id},
             )
 
         # We do this regardless of whether the server is `no_longer_in_room` or not
