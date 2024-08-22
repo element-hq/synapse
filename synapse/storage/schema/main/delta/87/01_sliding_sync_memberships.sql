@@ -129,6 +129,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream
 
 -- Add some background updates to populate the new tables
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8701, 'sliding_sync_joined_rooms_backfill', '{}');
+  (8701, 'sliding_sync_joined_rooms_bg_update', '{}');
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8701, 'sliding_sync_membership_snapshots_backfill', '{}');
+  (8701, 'sliding_sync_membership_snapshots_bg_update', '{}');

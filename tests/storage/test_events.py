@@ -2926,7 +2926,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -3073,7 +3073,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -3184,7 +3184,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -3381,7 +3381,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -3599,7 +3599,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -3833,7 +3833,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -4094,7 +4094,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -4248,7 +4248,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )
@@ -4408,7 +4408,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
                     "progress_json": "{}",
                 },
             )

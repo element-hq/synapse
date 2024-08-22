@@ -88,9 +88,9 @@ class _BackgroundUpdates:
 
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
 
-    SLIDING_SYNC_JOINED_ROOMS_BACKFILL = "sliding_sync_joined_rooms_backfill"
-    SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL = (
-        "sliding_sync_membership_snapshots_backfill"
+    SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE = "sliding_sync_joined_rooms_bg_update"
+    SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE = (
+        "sliding_sync_membership_snapshots_bg_update"
     )
 
 
@@ -296,12 +296,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # Backfill the sliding sync tables
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
-            self._sliding_sync_joined_rooms_backfill,
+            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
+            self._sliding_sync_joined_rooms_bg_update,
         )
         self.db_pool.updates.register_background_update_handler(
-            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
-            self._sliding_sync_membership_snapshots_backfill,
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+            self._sliding_sync_membership_snapshots_bg_update,
         )
 
     async def _background_reindex_fields_sender(
@@ -1542,7 +1542,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         return batch_size
 
-    async def _sliding_sync_joined_rooms_backfill(
+    async def _sliding_sync_joined_rooms_bg_update(
         self, progress: JsonDict, batch_size: int
     ) -> int:
         """
@@ -1567,13 +1567,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return [row[0] for row in rooms_to_update_rows]
 
         rooms_to_update = await self.db_pool.runInteraction(
-            "_sliding_sync_joined_rooms_backfill._get_rooms_to_update_txn",
+            "_sliding_sync_joined_rooms_bg_update._get_rooms_to_update_txn",
             _get_rooms_to_update_txn,
         )
 
         if not rooms_to_update:
             await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
             )
             return 0
 
@@ -1584,7 +1584,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         for room_id in rooms_to_update:
             current_state_ids_map, last_current_state_delta_stream_id = (
                 await self.db_pool.runInteraction(
-                    "_sliding_sync_joined_rooms_backfill._get_relevant_sliding_sync_current_state_event_ids_txn",
+                    "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
                     PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
                     room_id,
                 )
@@ -1664,7 +1664,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         if last_successful_room_id is not None:
                             self.db_pool.updates._background_update_progress_txn(
                                 txn,
-                                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+                                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                                 {"last_room_id": room_id},
                             )
                         # Raising exception so we can just exit and try again. It would
@@ -1710,18 +1710,18 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 last_successful_room_id = room_id
 
         await self.db_pool.runInteraction(
-            "sliding_sync_joined_rooms_backfill", _backfill_table_txn
+            "sliding_sync_joined_rooms_bg_update", _backfill_table_txn
         )
 
         # Update the progress
         await self.db_pool.updates._background_update_progress(
-            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BACKFILL,
+            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
             {"last_room_id": rooms_to_update[-1]},
         )
 
         return len(rooms_to_update)
 
-    async def _sliding_sync_membership_snapshots_backfill(
+    async def _sliding_sync_membership_snapshots_bg_update(
         self, progress: JsonDict, batch_size: int
     ) -> int:
         """
@@ -1761,13 +1761,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             return memberships_to_update_rows
 
         memberships_to_update_rows = await self.db_pool.runInteraction(
-            "sliding_sync_membership_snapshots_backfill._find_memberships_to_update_txn",
+            "sliding_sync_membership_snapshots_bg_update._find_memberships_to_update_txn",
             _find_memberships_to_update_txn,
         )
 
         if not memberships_to_update_rows:
             await self.db_pool.updates._end_background_update(
-                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE
             )
             return 0
 
@@ -1882,7 +1882,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 if membership == Membership.LEAVE and is_outlier:
                     invite_or_knock_event_id, invite_or_knock_membership = (
                         await self.db_pool.runInteraction(
-                            "sliding_sync_membership_snapshots_backfill._find_previous_membership",
+                            "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
                             _find_previous_membership_txn,
                             room_id,
                             user_id,
@@ -1906,7 +1906,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     raw_stripped_state_events = knock_room_state
 
                 sliding_sync_membership_snapshots_insert_map = await self.db_pool.runInteraction(
-                    "sliding_sync_membership_snapshots_backfill._get_sliding_sync_insert_values_from_stripped_state_txn",
+                    "sliding_sync_membership_snapshots_bg_update._get_sliding_sync_insert_values_from_stripped_state_txn",
                     PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state_txn,
                     raw_stripped_state_events,
                 )
@@ -2019,7 +2019,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
         await self.db_pool.runInteraction(
-            "sliding_sync_membership_snapshots_backfill", _backfill_table_txn
+            "sliding_sync_membership_snapshots_bg_update", _backfill_table_txn
         )
 
         # Update the progress
@@ -2033,7 +2033,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             _is_outlier,
         ) = memberships_to_update_rows[-1]
         await self.db_pool.updates._background_update_progress(
-            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BACKFILL,
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             {"last_event_stream_ordering": membership_event_stream_ordering},
         )
 
