@@ -1984,19 +1984,27 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # lists
                 insert_keys = insert_map.keys()
                 insert_values = insert_map.values()
-                # We don't need to do anything `ON CONFLICT` because we never partially
-                # insert/update the snapshots
+                # We don't need to update the state `ON CONFLICT` because we never
+                # partially insert/update the snapshots and anything already there is
+                # up-to-date EXCEPT for the `forgotten` field since that is updated out
+                # of band from the membership changes.
+                #
+                # We need to find the `forgotten` value during the transaction because
+                # we can't risk inserting stale data.
                 txn.execute(
                     f"""
                     INSERT INTO sliding_sync_membership_snapshots
-                        (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering
+                        (room_id, user_id, sender, membership_event_id, membership, forgotten, event_stream_ordering
                         {("," + ", ".join(insert_keys)) if insert_keys else ""})
                     VALUES (
-                        ?, ?, ?, ?, ?, ?
+                        ?, ?, ?, ?, ?,
+                        (SELECT forgotten FROM room_memberships WHERE room_id = ? AND user_id = ?),
+                        ?
                         {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
                     )
                     ON CONFLICT (room_id, user_id)
-                    DO NOTHING
+                    DO UPDATE SET
+                        forgotten = EXCLUDED.forgotten
                     """,
                     [
                         room_id,
@@ -2004,6 +2012,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         sender,
                         membership_event_id,
                         membership,
+                        room_id,
+                        user_id,
                         membership_event_stream_ordering,
                     ]
                     + list(insert_values),

@@ -1337,6 +1337,12 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 keyvalues={"user_id": user_id, "room_id": room_id},
                 updatevalues={"forgotten": 1},
             )
+            self.db_pool.simple_update_txn(
+                txn,
+                table="sliding_sync_membership_snapshots",
+                keyvalues={"user_id": user_id, "room_id": room_id},
+                updatevalues={"forgotten": 1},
+            )
 
             self._invalidate_cache_and_stream(txn, self.did_forget, (user_id, room_id))
             self._invalidate_cache_and_stream(

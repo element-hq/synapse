@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     sender TEXT NOT NULL,
     membership_event_id TEXT NOT NULL REFERENCES events(event_id),
     membership TEXT NOT NULL,
+    -- This is an integer just to match `room_memberships` and also means we don't need
+    -- to do any casting.
+    forgotten INTEGER DEFAULT 0 NOT NULL,
     -- `stream_ordering` of the `membership_event_id`
     event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
     -- For remote invites/knocks that don't include any stripped state, we want to be
