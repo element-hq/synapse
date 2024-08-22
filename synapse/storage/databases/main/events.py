@@ -932,8 +932,9 @@ class PersistEventsStore:
                 sliding_sync_table_changes,
             )
 
+        # We only update the sliding sync tables for non-backfilled events.
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
-            txn, events_and_contexts
+            txn, room_id, events_and_contexts
         )
 
     def _persist_event_auth_chain_txn(
@@ -2048,6 +2049,7 @@ class PersistEventsStore:
     def _update_sliding_sync_tables_with_new_persisted_events_txn(
         self,
         txn: LoggingTransaction,
+        room_id: str,
         events_and_contexts: List[Tuple[EventBase, EventContext]],
     ) -> None:
         """
@@ -2060,42 +2062,57 @@ class PersistEventsStore:
 
         Args:
             txn
-            events_and_contexts: The events being persisted
+            room_id: The room that all of the events belong to
+            events_and_contexts: The events being persisted. We assume the list is
+                sorted ascending by `stream_ordering`. We don't care about the sort when the
+                events are backfilled (with negative `stream_ordering`).
         """
 
-        # Handle updating the `sliding_sync_joined_rooms` table.
-        room_id_to_stream_ordering_map: Dict[str, int] = {}
-        room_id_to_bump_stamp_map: Dict[str, int] = {}
-        for event, _ in events_and_contexts:
-            existing_stream_ordering = room_id_to_stream_ordering_map.get(event.room_id)
-            # This should exist for persisted events
-            assert event.internal_metadata.stream_ordering is not None
+        # Nothing to do if there are no events
+        if len(events_and_contexts) == 0:
+            return
 
-            # Ignore backfilled events which will have a negative stream ordering
-            if event.internal_metadata.stream_ordering < 0:
-                continue
+        # We only update the sliding sync tables for non-backfilled events.
+        #
+        # Check if the first event is a backfilled event (with a negative
+        # `stream_ordering`). If one event is backfilled, we assume this whole batch was
+        # backfilled.
+        first_event_stream_ordering = events_and_contexts[0][
+            0
+        ].internal_metadata.stream_ordering
+        # This should exist for persisted events
+        assert first_event_stream_ordering is not None
+        if first_event_stream_ordering < 0:
+            return
 
-            if (
-                existing_stream_ordering is None
-                or existing_stream_ordering < event.internal_metadata.stream_ordering
-            ):
-                room_id_to_stream_ordering_map[event.room_id] = (
-                    event.internal_metadata.stream_ordering
-                )
+        # Since the list is sorted ascending by `stream_ordering`, the last event should
+        # have the highest `stream_ordering`.
+        max_stream_ordering = events_and_contexts[-1][
+            0
+        ].internal_metadata.stream_ordering
+        max_bump_stamp = None
+        for event, _ in reversed(events_and_contexts):
+            # Sanity check that all events belong to the same room
+            assert event.room_id == room_id
 
             if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                existing_bump_stamp = room_id_to_bump_stamp_map.get(event.room_id)
-                # This should exist at this point because we're inserting events here which require it
+                # This should exist for persisted events
                 assert event.internal_metadata.stream_ordering is not None
-                if (
-                    existing_bump_stamp is None
-                    or existing_bump_stamp < event.internal_metadata.stream_ordering
-                ):
-                    room_id_to_bump_stamp_map[event.room_id] = (
-                        event.internal_metadata.stream_ordering
-                    )
 
-        txn.execute_batch(
+                max_bump_stamp = event.internal_metadata.stream_ordering
+
+                # Since we're iterating in reverse, we can break as soon as we find a
+                # matching bump event which should have the highest `stream_ordering`.
+                break
+
+        # We should have exited earlier if there were no events
+        assert (
+            max_stream_ordering is not None
+        ), "Expected to have a stream_ordering if we have events"
+
+        # Handle updating the `sliding_sync_joined_rooms` table.
+        #
+        txn.execute(
             """
             UPDATE sliding_sync_joined_rooms
             SET
@@ -2111,17 +2128,15 @@ class PersistEventsStore:
                 END
             WHERE room_id = ?
             """,
-            [
-                [
-                    room_id_to_stream_ordering_map[room_id],
-                    room_id_to_stream_ordering_map[room_id],
-                    room_id_to_bump_stamp_map.get(room_id),
-                    room_id_to_bump_stamp_map.get(room_id),
-                    room_id,
-                ]
-                for room_id in room_id_to_stream_ordering_map.keys()
-            ],
+            (
+                max_stream_ordering,
+                max_stream_ordering,
+                max_bump_stamp,
+                max_bump_stamp,
+                room_id,
+            ),
         )
+        # This may or may not update any rows depending if we are `no_longer_in_room`
 
     def _upsert_room_version_txn(self, txn: LoggingTransaction, room_id: str) -> None:
         """Update the room version in the database based off current state
