@@ -17,6 +17,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import io
 from typing import Any, Dict, Generator
 from unittest.mock import ANY, Mock, create_autospec
 
@@ -32,7 +33,9 @@ from twisted.web.http import HTTPChannel
 from twisted.web.http_headers import Headers
 
 from synapse.api.errors import HttpResponseException, RequestSendFailed
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.config._base import ConfigError
+from synapse.config.ratelimiting import RatelimitSettings
 from synapse.http.matrixfederationclient import (
     ByteParser,
     MatrixFederationHttpClient,
@@ -336,6 +339,71 @@ class FederationClientTests(HomeserverTestCase):
         # We should get a successful response
         r = self.successResultOf(d)
         self.assertEqual(r.code, 200)
+
+    def test_authed_media_redirect_response(self) -> None:
+        """
+        Validate that, when following a `Location` redirect, the
+        maximum size is _not_ set to the initial response `Content-Length` and
+        the media file can be downloaded.
+        """
+        limiter = Ratelimiter(
+            store=self.hs.get_datastores().main,
+            clock=self.clock,
+            cfg=RatelimitSettings(key="", per_second=0.17, burst_count=1048576),
+        )
+
+        output_stream = io.BytesIO()
+
+        d = defer.ensureDeferred(
+            self.cl.federation_get_file(
+                "testserv:8008", "path", output_stream, limiter, "127.0.0.1", 10000
+            )
+        )
+
+        self.pump()
+
+        conn = Mock()
+        clients = self.reactor.tcpClients
+        client = clients[0][2].buildProtocol(None)
+        client.makeConnection(conn)
+
+        # Deferred does not have a result
+        self.assertNoResult(d)
+
+        redirect_data = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nLocation: http://testserv:8008/ab/c1/2345.txt\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
+        client.dataReceived(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Server: Fake\r\n"
+            b"Content-Length: %i\r\n"
+            b"Content-Type: multipart/mixed; boundary=6067d4698f8d40a0a794ea7d7379d53a\r\n\r\n"
+            % (len(redirect_data))
+        )
+        client.dataReceived(redirect_data)
+
+        # Still no result, not followed the redirect yet
+        self.assertNoResult(d)
+
+        # Now send the response returned by the server at `Location`
+        conn = Mock()
+        clients = self.reactor.tcpClients
+        client = clients[1][2].buildProtocol(None)
+        client.makeConnection(conn)
+
+        # make sure the length is longer than the initial response
+        data = b"Hello world!" * 30
+        client.dataReceived(
+            b"HTTP/1.1 200 OK\r\n"
+            b"Server: Fake\r\n"
+            b"Content-Length: %i\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"\r\n"
+            b"%s\r\n"
+            b"\r\n" % (len(data), data)
+        )
+
+        # We should get a successful response
+        length, _, _ = self.successResultOf(d)
+        self.assertEqual(length, len(data))
 
     @parameterized.expand(["get_json", "post_json", "delete_json", "put_json"])
     def test_timeout_reading_body(self, method_name: str) -> None:
