@@ -1646,10 +1646,14 @@ class PersistEventsStore:
             # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
             #
             # Pulling keys/values separately is safe and will produce congruent lists
-            insert_keys = sliding_sync_table_changes.joined_room_updates.keys()
-            insert_values = sliding_sync_table_changes.joined_room_updates.values()
+            sliding_sync_updates_keys = (
+                sliding_sync_table_changes.joined_room_updates.keys()
+            )
+            sliding_sync_updates_values = (
+                sliding_sync_table_changes.joined_room_updates.values()
+            )
             # We only need to update when one of the relevant state values has changed
-            if insert_keys:
+            if sliding_sync_updates_keys:
                 # If we have some `to_insert` values, we can use the standard upsert
                 # pattern because we have access to an `event_id` to use for the
                 # `event_stream_ordering` which has a `NON NULL` constraint.
@@ -1676,7 +1680,7 @@ class PersistEventsStore:
                         next(iter(to_insert.values())),
                     ]
 
-                    args.extend(iter(insert_values))
+                    args.extend(iter(sliding_sync_updates_values))
 
                     # We don't update `event_stream_ordering` `ON CONFLICT` because it's
                     # simpler and we can just rely on
@@ -1687,15 +1691,15 @@ class PersistEventsStore:
                     txn.execute(
                         f"""
                         INSERT INTO sliding_sync_joined_rooms
-                            (room_id, event_stream_ordering, {", ".join(insert_keys)})
+                            (room_id, event_stream_ordering, {", ".join(sliding_sync_updates_keys)})
                         VALUES (
                             ?,
                             (SELECT stream_ordering FROM events WHERE event_id = ?),
-                            {", ".join("?" for _ in insert_values)}
+                            {", ".join("?" for _ in sliding_sync_updates_values)}
                         )
                         ON CONFLICT (room_id)
                         DO UPDATE SET
-                            {", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)}
+                            {", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_updates_keys)}
                         """,
                         args,
                     )
@@ -1704,12 +1708,12 @@ class PersistEventsStore:
                 # instead because there is no `event_id` to use for the `NON NULL`
                 # constraint on `event_stream_ordering`.
                 elif to_delete:
-                    args = list(insert_values) + [room_id]
+                    args = list(sliding_sync_updates_values) + [room_id]
                     txn.execute(
                         f"""
                         UPDATE sliding_sync_joined_rooms
                         SET
-                            {", ".join(f"{key} = ?" for key in insert_keys)}
+                            {", ".join(f"{key} = ?" for key in sliding_sync_updates_keys)}
                         WHERE room_id = ?
                         """,
                         args,
@@ -1772,23 +1776,23 @@ class PersistEventsStore:
             #
             # Pulling keys/values separately is safe and will produce congruent
             # lists
-            insert_keys = (
+            sliding_sync_snapshot_keys = (
                 sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
             )
-            insert_values = (
+            sliding_sync_snapshot_values = (
                 sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
             )
-            # We need to insert/update regardless of whether we have `insert_keys`
+            # We need to insert/update regardless of whether we have `sliding_sync_snapshot_keys`
             # because there are other fields in the `ON CONFLICT` upsert to run (see
             # inherit case above for more context when this happens).
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_membership_snapshots
                     (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering
-                    {("," + ", ".join(insert_keys)) if insert_keys else ""})
+                    {("," + ", ".join(sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""})
                 VALUES (
                     ?, ?, ?, ?, ?, ?
-                    {("," + ", ".join("?" for _ in insert_values)) if insert_values else ""}
+                    {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
                 DO UPDATE SET
@@ -1796,7 +1800,7 @@ class PersistEventsStore:
                     membership_event_id = EXCLUDED.membership_event_id,
                     membership = EXCLUDED.membership,
                     event_stream_ordering = EXCLUDED.event_stream_ordering
-                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in insert_keys)) if insert_keys else ""}
+                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""}
                 """,
                 [
                     [
@@ -1807,7 +1811,7 @@ class PersistEventsStore:
                         membership_info.membership,
                         membership_info.membership_event_stream_ordering,
                     ]
-                    + list(insert_values)
+                    + list(sliding_sync_snapshot_values)
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
                 ],
             )
