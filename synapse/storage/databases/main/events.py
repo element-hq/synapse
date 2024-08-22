@@ -376,7 +376,7 @@ class PersistEventsStore:
                 save us from fetching the events from the database if we already have
                 them.
             delta_state: Deltas that are going to be used to update the
-                `current_state_events` table.
+                `current_state_events` table. Changes to the current state of the room.
         """
         to_insert = delta_state.to_insert
         to_delete = delta_state.to_delete
@@ -788,7 +788,8 @@ class PersistEventsStore:
             delete_existing True to purge existing table rows for the events
                 from the database. This is useful when retrying due to
                 IntegrityError.
-            state_delta_for_room: The current-state delta for the room.
+            state_delta_for_room: Deltas that are going to be used to update the
+                `current_state_events` table. Changes to the current state of the room.
             new_forward_extremities: The new forward extremities for the room:
                 a set of the event ids which are the forward extremities.
             sliding_sync_table_changes: Changes to the
@@ -1460,7 +1461,8 @@ class PersistEventsStore:
 
         Args:
             room_id
-            state_delta: Changes to the current state of the room
+            state_delta: Deltas that are going to be used to update the
+                `current_state_events` table. Changes to the current state of the room.
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
@@ -1494,7 +1496,8 @@ class PersistEventsStore:
         Args:
             txn
             room_id
-            delta_state: Changes to the current state of the room
+            delta_state: Deltas that are going to be used to update the
+                `current_state_events` table. Changes to the current state of the room.
             stream_id: TODO
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
