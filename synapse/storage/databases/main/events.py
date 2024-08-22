@@ -623,7 +623,7 @@ class PersistEventsStore:
                 )
                 assert most_recent_event_pos_results, (
                     f"We should not be seeing `None` here because we are still in the room ({room_id}) and "
-                    + "it should at-least have a create event."
+                    + "it should at-least have a join membership event that's keeping us here."
                 )
                 best_effort_most_recent_stream_ordering = most_recent_event_pos_results[
                     1
