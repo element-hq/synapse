@@ -22,7 +22,6 @@
 import logging
 from typing import List, Optional
 
-
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership

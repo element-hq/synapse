@@ -1580,7 +1580,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table
         joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
         # Map from room_id to stream_ordering/bump_stamp/last_current_state_delta_stream_id values
-        joined_room_stream_ordering_updates: Dict[str, Tuple[int, int, int]] = {}
+        joined_room_stream_ordering_updates: Dict[
+            str, Tuple[int, Optional[int], int]
+        ] = {}
         for room_id in rooms_to_update:
             current_state_ids_map, last_current_state_delta_stream_id = (
                 await self.db_pool.runInteraction(
@@ -1613,21 +1615,32 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             most_recent_event_pos_results = await self.get_last_event_pos_in_room(
                 room_id, event_types=None
             )
-            assert most_recent_event_pos_results, (
+            assert most_recent_event_pos_results is not None, (
                 f"We should not be seeing `None` here because the room ({room_id}) should at-least have a create event "
                 + "given we pulled the room out of `current_state_events`"
             )
-            # Figure out the latest bump_stamp in the room
+            most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
+            assert most_recent_event_stream_ordering > 0, (
+                "We should have at-least one event in the room (our own join membership event for example) "
+                + "that isn't backfilled (negative `stream_ordering`)  if we are joined to the room."
+            )
+            # Figure out the latest bump_stamp in the room. This could be `None` for a
+            # federated room you just joined where all of events are still `outliers` or
+            # backfilled history. In the Sliding Sync API, we default to the user's
+            # membership event `stream_ordering` if we don't have a `bump_stamp`.
             bump_stamp_event_pos_results = await self.get_last_event_pos_in_room(
                 room_id, event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
             )
-            assert bump_stamp_event_pos_results, (
-                f"We should not be seeing `None` here because the room ({room_id}) should at-least have a create event "
-                + "(unless `SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES` no longer includes the room create event)"
-            )
+            most_recent_bump_stamp = None
+            if (
+                bump_stamp_event_pos_results is not None
+                and bump_stamp_event_pos_results[1].stream > 0
+            ):
+                most_recent_bump_stamp = bump_stamp_event_pos_results[1].stream
+
             joined_room_stream_ordering_updates[room_id] = (
-                most_recent_event_pos_results[1].stream,
-                bump_stamp_event_pos_results[1].stream,
+                most_recent_event_stream_ordering,
+                most_recent_bump_stamp,
                 last_current_state_delta_stream_id,
             )
 
