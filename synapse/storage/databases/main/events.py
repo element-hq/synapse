@@ -468,14 +468,30 @@ class PersistEventsStore:
                     if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
                         current_state_ids_map[state_key] = event_id
 
-                fetched_events = await self.store.get_events(
-                    current_state_ids_map.values()
-                )
+                current_state_map: MutableStateMap[EventBase] = {}
+                # In normal event persist scenarios, we probably won't be able to find
+                # these state events in `events_and_contexts` since we don't generally
+                # batch up local membership changes with other events, but it can
+                # happen.
+                missing_state_event_ids: Set[str] = set()
+                for state_key, event_id in current_state_ids_map.items():
+                    event = event_map.get(event_id)
+                    if event:
+                        current_state_map[state_key] = event
+                    else:
+                        missing_state_event_ids.add(event_id)
 
-                current_state_map: StateMap[EventBase] = {
-                    state_key: fetched_events[event_id]
-                    for state_key, event_id in current_state_ids_map.items()
-                }
+                # Otherwise, we need to find a couple events
+                if missing_state_event_ids:
+                    remaining_events = await self.store.get_events(
+                        missing_state_event_ids
+                    )
+                    # There shouldn't be any missing events
+                    assert (
+                        remaining_events.keys() == missing_state_event_ids
+                    ), missing_state_event_ids.difference(remaining_events.keys())
+                    for event in remaining_events.values():
+                        current_state_map[(event.type, event.state_key)] = event
 
                 if current_state_map:
                     state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
