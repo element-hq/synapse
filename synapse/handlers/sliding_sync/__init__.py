@@ -333,11 +333,6 @@ class SlidingSyncHandler:
             )
         )
 
-        await self.connection_store.mark_token_seen(
-            sync_config=sync_config,
-            from_token=from_token,
-        )
-
         # Get all of the room IDs that the user should be able to see in the sync
         # response
         has_lists = sync_config.lists is not None and len(sync_config.lists) > 0

@@ -121,11 +121,3 @@ class SlidingSyncConnectionStore:
             from_token.connection_position if from_token else None,
             new_connection_state,
         )
-
-    @trace
-    async def mark_token_seen(
-        self,
-        sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> None:
-        pass
