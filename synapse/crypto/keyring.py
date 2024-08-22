@@ -589,7 +589,7 @@ class BaseV2KeyFetcher(KeyFetcher):
                 % (server_name,)
             )
 
-        for key_id, key_data in response_json["old_verify_keys"].items():
+        for key_id, key_data in response_json.get("old_verify_keys", {}).items():
             if is_signing_algorithm_supported(key_id):
                 key_base64 = key_data["key"]
                 key_bytes = decode_base64(key_base64)

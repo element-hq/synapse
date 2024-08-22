@@ -148,7 +148,7 @@ class PaginationTestCase(HomeserverTestCase):
         """Make a request to /messages with a filter, returns the chunk of events."""
 
         events, next_key = self.get_success(
-            self.hs.get_datastores().main.paginate_room_events(
+            self.hs.get_datastores().main.paginate_room_events_by_topological_ordering(
                 room_id=self.room_id,
                 from_key=self.from_token.room_key,
                 to_key=None,

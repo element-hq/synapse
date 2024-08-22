@@ -271,6 +271,10 @@ SERVLET_GROUPS: Dict[str, Iterable[Type[BaseFederationServlet]]] = {
     "federation": FEDERATION_SERVLET_CLASSES,
     "room_list": (PublicRoomList,),
     "openid": (OpenIdUserInfo,),
+    "media": (
+        FederationMediaDownloadServlet,
+        FederationMediaThumbnailServlet,
+    ),
 }
 
 

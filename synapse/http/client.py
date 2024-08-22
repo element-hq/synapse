@@ -1057,11 +1057,11 @@ class _MultipartParserProtocol(protocol.Protocol):
         if not self.parser:
 
             def on_header_field(data: bytes, start: int, end: int) -> None:
-                if data[start:end] == b"Location":
+                if data[start:end].lower() == b"location":
                     self.has_redirect = True
-                if data[start:end] == b"Content-Disposition":
+                if data[start:end].lower() == b"content-disposition":
                     self.in_disposition = True
-                if data[start:end] == b"Content-Type":
+                if data[start:end].lower() == b"content-type":
                     self.in_content_type = True
 
             def on_header_value(data: bytes, start: int, end: int) -> None:
@@ -1088,7 +1088,6 @@ class _MultipartParserProtocol(protocol.Protocol):
                     return
                 # otherwise we are in the file part
                 else:
-                    logger.info("Writing multipart file data to stream")
                     try:
                         self.stream.write(data[start:end])
                     except Exception as e:
