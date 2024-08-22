@@ -169,6 +169,17 @@ class SlidingSyncMembershipInfo:
 @attr.s(slots=True, auto_attribs=True)
 class SlidingSyncTableChanges:
     room_id: str
+    # `stream_ordering` of the most recent event being persisted in the room. This doesn't
+    # need to be perfect, we just need *some* answer that points to a real event in the
+    # room in case we are the first ones inserting into the `sliding_sync_joined_rooms`
+    # table because of the `NON NULL` constraint on `event_stream_ordering`. In reality,
+    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run after
+    # `_update_current_state_txn()` whenever a new event is persisted to update it to the
+    # correct latest value.
+    #
+    # This should be *some* value that points to a real event in the room if we are
+    # still joined to the room.
+    joined_room_best_effort_most_recent_stream_ordering: Optional[int]
     # Values to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: SlidingSyncStateInsertValues
 
@@ -374,7 +385,9 @@ class PersistEventsStore:
             events_and_contexts: List of tuples of (event, context) being persisted.
                 This is completely optional (you can pass an empty list) and will just
                 save us from fetching the events from the database if we already have
-                them.
+                them. We assume the list is sorted ascending by `stream_ordering`. We
+                don't care about the sort when the events are backfilled (with negative
+                `stream_ordering`).
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
         """
@@ -526,6 +539,7 @@ class PersistEventsStore:
         # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
         #
         joined_room_updates: SlidingSyncStateInsertValues = {}
+        best_effort_most_recent_stream_ordering: Optional[int] = None
         if not delta_state.no_longer_in_room:
             # Look through the items we're going to insert into the current state to see
             # if there is anything that we care about and should also update in the
@@ -576,9 +590,57 @@ class PersistEventsStore:
                 elif state_key == (EventTypes.Name, ""):
                     joined_room_updates["room_name"] = None
 
+            # Figure out `best_effort_most_recent_stream_ordering`. This doesn't need to
+            # be perfect, we just need *some* answer that points to a real event in the
+            # room in case we are the first ones inserting into the
+            # `sliding_sync_joined_rooms` table because of the `NON NULL` constraint on
+            # `event_stream_ordering`. In reality,
+            # `_update_sliding_sync_tables_with_new_persisted_events_txn()` is run after
+            # `_update_current_state_txn()` whenever a new event is persisted to update
+            # it to the correct latest value.
+            #
+            if len(events_and_contexts) > 0:
+                # Since the list is sorted ascending by `stream_ordering`, the last event
+                # should have the highest `stream_ordering`.
+                best_effort_most_recent_stream_ordering = events_and_contexts[-1][
+                    0
+                ].internal_metadata.stream_ordering
+            elif to_insert:
+                # Even though `Mapping`/`Dict` have no guaranteed order, some
+                # implementations may preserve insertion order so we're just
+                # going to choose the best possible answer by using the "first"
+                # event ID which we will assume will have the greatest
+                # `stream_ordering`. We really just need *some* answer in case
+                # we are the first ones inserting into the table because of the
+                # `NON NULL` constraint on `event_stream_ordering`. In reality,
+                # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
+                # is run after this function to update it to the correct latest
+                # value.
+                event_id = next(iter(to_insert.values()))
+                event_pos = await self.store.get_position_for_event(event_id)
+                best_effort_most_recent_stream_ordering = event_pos.stream
+
+            else:
+                most_recent_event_pos_results = (
+                    await self.store.get_last_event_pos_in_room(
+                        room_id, event_types=None
+                    )
+                )
+                assert most_recent_event_pos_results, (
+                    f"We should not be seeing `None` here because we are still in the room ({room_id}) and "
+                    + "it should at-least have a create event."
+                )
+                best_effort_most_recent_stream_ordering = most_recent_event_pos_results[
+                    1
+                ].stream
+
+            # We should have found a value if we are still in the room
+            assert best_effort_most_recent_stream_ordering is not None
+
         return SlidingSyncTableChanges(
             room_id=room_id,
             # For `sliding_sync_joined_rooms`
+            joined_room_best_effort_most_recent_stream_ordering=best_effort_most_recent_stream_ordering,
             joined_room_updates=joined_room_updates,
             # For `sliding_sync_membership_snapshots`
             membership_snapshot_shared_insert_values=membership_snapshot_shared_insert_values,
@@ -1655,72 +1717,39 @@ class PersistEventsStore:
             )
             # We only need to update when one of the relevant state values has changed
             if sliding_sync_updates_keys:
-                # If we have some `to_insert` values, we can use the standard upsert
-                # pattern because we have access to an `event_id` to use for the
-                # `event_stream_ordering` which has a `NON NULL` constraint.
-                if to_insert:
-                    args: List[Any] = [
-                        room_id,
-                        # XXX: We can't use `stream_id` for the `event_stream_ordering`
-                        # here because we have a foreign key constraint on
-                        # `event_stream_ordering` that it should point to a valid event.
-                        # When re-syncing the state of a partial-state room, `stream_id`
-                        # is set to the next possible stream position for a future event
-                        # that doesn't exist yet.
-                        #
-                        # Even though `Mapping`/`Dict` have no guaranteed order, some
-                        # implementations may preserve insertion order so we're just
-                        # going to choose the best possible answer by using the "first"
-                        # event ID which we will assume will have the greatest
-                        # `stream_ordering`. We really just need *some* answer in case
-                        # we are the first ones inserting into the table because of the
-                        # `NON NULL` constraint on `event_stream_ordering`. In reality,
-                        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
-                        # is run after this function to update it to the correct latest
-                        # value.
-                        next(iter(to_insert.values())),
-                    ]
+                # This should be *some* value that points to a real event in the room if
+                # we are still joined to the room.
+                assert (
+                    sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering
+                    is not None
+                )
 
-                    args.extend(iter(sliding_sync_updates_values))
+                args: List[Any] = [
+                    room_id,
+                    sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering,
+                ]
+                args.extend(iter(sliding_sync_updates_values))
 
-                    # We don't update `event_stream_ordering` `ON CONFLICT` because it's
-                    # simpler and we can just rely on
-                    # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to
-                    # do the right thing (same for `bump_stamp`). The only reason we're
-                    # inserting `event_stream_ordering` here is because the column has a
-                    # `NON NULL` constraint and we need some answer.
-                    txn.execute(
-                        f"""
-                        INSERT INTO sliding_sync_joined_rooms
-                            (room_id, event_stream_ordering, {", ".join(sliding_sync_updates_keys)})
-                        VALUES (
-                            ?,
-                            (SELECT stream_ordering FROM events WHERE event_id = ?),
-                            {", ".join("?" for _ in sliding_sync_updates_values)}
-                        )
-                        ON CONFLICT (room_id)
-                        DO UPDATE SET
-                            {", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_updates_keys)}
-                        """,
-                        args,
+                # We don't update `event_stream_ordering` `ON CONFLICT` because it's
+                # simpler and we can just rely on
+                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to
+                # do the right thing (same for `bump_stamp`). The only reason we're
+                # inserting `event_stream_ordering` here is because the column has a
+                # `NON NULL` constraint and we need some answer.
+                txn.execute(
+                    f"""
+                    INSERT INTO sliding_sync_joined_rooms
+                        (room_id, event_stream_ordering, {", ".join(sliding_sync_updates_keys)})
+                    VALUES (
+                        ?, ?,
+                        {", ".join("?" for _ in sliding_sync_updates_values)}
                     )
-
-                # If there are only values `to_delete`, we have to use an `UPDATE`
-                # instead because there is no `event_id` to use for the `NON NULL`
-                # constraint on `event_stream_ordering`.
-                elif to_delete:
-                    num_rows_updated = self.db_pool.simple_update_txn(
-                        txn,
-                        table="sliding_sync_joined_rooms",
-                        keyvalues={
-                            "room_id": room_id,
-                        },
-                        updatevalues=sliding_sync_table_changes.joined_room_updates,
-                    )
-                    # TODO: Is this assumption correct?
-                    assert (
-                        num_rows_updated > 0
-                    ), "Expected to only run this against existing rows"
+                    ON CONFLICT (room_id)
+                    DO UPDATE SET
+                        {", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_updates_keys)}
+                    """,
+                    args,
+                )
 
         # We now update `local_current_membership`. We do this regardless
         # of whether we're still in the room or not to handle the case where
