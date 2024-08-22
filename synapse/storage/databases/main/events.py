@@ -1951,12 +1951,13 @@ class PersistEventsStore:
         return sliding_sync_insert_map
 
     @classmethod
-    def _get_sliding_sync_insert_values_from_stripped_state_txn(
-        cls, txn: LoggingTransaction, unsigned_stripped_state_events: Any
+    def _get_sliding_sync_insert_values_from_stripped_state(
+        cls, unsigned_stripped_state_events: Any
     ) -> SlidingSyncMembershipSnapshotSharedInsertValues:
         """
-        Pull out the relevant state values from the stripped state needed to insert into
-        the `sliding_sync_membership_snapshots` tables.
+        Pull out the relevant state values from the stripped state on an invite or knock
+        membership event needed to insert into the `sliding_sync_membership_snapshots`
+        tables.
 
         Returns:
             Map from column names (`room_type`, `is_encrypted`, `room_name`) to relevant
@@ -2032,13 +2033,13 @@ class PersistEventsStore:
                 )
 
             else:
-                # No strip state provided
+                # No stripped state provided
                 sliding_sync_insert_map["has_known_state"] = False
                 sliding_sync_insert_map["room_type"] = None
                 sliding_sync_insert_map["room_name"] = None
                 sliding_sync_insert_map["is_encrypted"] = False
         else:
-            # No strip state provided
+            # No stripped state provided
             sliding_sync_insert_map["has_known_state"] = False
             sliding_sync_insert_map["room_type"] = None
             sliding_sync_insert_map["room_name"] = None
@@ -2818,8 +2819,8 @@ class PersistEventsStore:
                     pass
                 elif event.membership in (Membership.INVITE, Membership.KNOCK):
                     extra_insert_values = (
-                        self._get_sliding_sync_insert_values_from_stripped_state_txn(
-                            txn, raw_stripped_state_events
+                        self._get_sliding_sync_insert_values_from_stripped_state(
+                            raw_stripped_state_events
                         )
                     )
                     insert_values.update(extra_insert_values)

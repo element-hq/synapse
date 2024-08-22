@@ -1905,10 +1905,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     )
                     raw_stripped_state_events = knock_room_state
 
-                sliding_sync_membership_snapshots_insert_map = await self.db_pool.runInteraction(
-                    "sliding_sync_membership_snapshots_bg_update._get_sliding_sync_insert_values_from_stripped_state_txn",
-                    PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state_txn,
-                    raw_stripped_state_events,
+                sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
+                    raw_stripped_state_events
                 )
 
                 # We should have some insert values for each room, even if no
