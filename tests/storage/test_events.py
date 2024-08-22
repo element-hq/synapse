@@ -857,6 +857,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
             tok=user2_tok,
         )
+        # Add a tombstone
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Tombstone,
+            {EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room"},
+            tok=user2_tok,
+        )
 
         # User1 joins the room
         self.helper.join(room_id1, user1_id, tok=user1_tok)
@@ -885,7 +892,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
 
@@ -916,7 +923,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -933,9 +940,9 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 ].internal_metadata.stream_ordering,
                 has_known_state=True,
                 room_type=None,
-                # Even though this room does have a name and is encrypted, user2 is the
-                # room creator and joined at the room creation time which didn't have
-                # this state set yet.
+                # Even though this room does have a name, is encrypted, and has a
+                # tombstone, user2 is the room creator and joined at the room creation
+                # time which didn't have this state set yet.
                 room_name=None,
                 is_encrypted=False,
                 tombstone_successor_room_id=None,
@@ -1566,6 +1573,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
             tok=user2_tok,
         )
+        # Add a tombstone
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Tombstone,
+            {EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room"},
+            tok=user2_tok,
+        )
 
         # User1 is invited to the room
         user1_invited_response = self.helper.invite(
@@ -1610,7 +1624,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space was renamed",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
 
@@ -1639,7 +1653,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
         # Holds the info according to the current state when the user joined
@@ -2358,6 +2372,25 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                             EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2",
                         },
                     ),
+                    # This is not one of the stripped state events according to the state
+                    # but we still handle it.
+                    StrippedStateEvent(
+                        type=EventTypes.Tombstone,
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room",
+                        },
+                    ),
+                    # Also test a random event that we don't care about
+                    StrippedStateEvent(
+                        type="org.matrix.foo_state",
+                        state_key="",
+                        sender="@inviter:remote_server",
+                        content={
+                            "foo": "qux",
+                        },
+                    ),
                 ],
             )
         )
@@ -2395,7 +2428,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
 
@@ -2481,7 +2514,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             ),
         )
 
-    def test_non_join_rejected_remote_invite(self) -> None:
+    def test_non_join_reject_remote_invite(self) -> None:
         """
         Test rejected remote invite (user decided to leave the room) inherits meta data
         from when the remote invite stripped state and shows up in
@@ -3095,6 +3128,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
             tok=user1_tok,
         )
+        # Add a tombstone
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Tombstone,
+            {EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room"},
+            tok=user1_tok,
+        )
 
         space_room_id = self.helper.create_room_as(
             user1_id,
@@ -3201,7 +3241,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
         state_map = self.get_success(
@@ -3253,6 +3293,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             room_id_with_info,
             EventTypes.RoomEncryption,
             {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user2_tok,
+        )
+        # Add a tombstone
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Tombstone,
+            {EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room"},
             tok=user2_tok,
         )
 
@@ -3394,6 +3441,10 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
+                # The tombstone isn't showing here ("another_room") because it's not one
+                # of the stripped events that we hand out as part of the invite event.
+                # Even though we handle this scenario from other remote homservers,
+                # Synapse does not include the tombstone in the invite event.
                 tombstone_successor_room_id=None,
             ),
         )
@@ -3917,6 +3968,13 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
             tok=user2_tok,
         )
+        # Add a tombstone
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Tombstone,
+            {EventContentFields.TOMBSTONE_SUCCESSOR_ROOM: "another_room"},
+            tok=user2_tok,
+        )
 
         space_room_id = self.helper.create_room_as(
             user1_id,
@@ -4102,7 +4160,7 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
                 room_type=None,
                 room_name="my super duper room",
                 is_encrypted=True,
-                tombstone_successor_room_id=None,
+                tombstone_successor_room_id="another_room",
             ),
         )
         self.assertEqual(
