@@ -1613,15 +1613,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             most_recent_event_pos_results = await self.get_last_event_pos_in_room(
                 room_id, event_types=None
             )
-            assert (
-                most_recent_event_pos_results
-            ), "We should not be seeing `None` here because the room should at-least have a create event"
+            assert most_recent_event_pos_results, (
+                f"We should not be seeing `None` here because the room ({room_id}) should at-least have a create event "
+                + "given we pulled the room out of `current_state_events`"
+            )
             # Figure out the latest bump_stamp in the room
             bump_stamp_event_pos_results = await self.get_last_event_pos_in_room(
                 room_id, event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
             )
             assert bump_stamp_event_pos_results, (
-                "We should not be seeing `None` here because the room should at-least have a create event "
+                f"We should not be seeing `None` here because the room ({room_id}) should at-least have a create event "
                 + "(unless `SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES` no longer includes the room create event)"
             )
             joined_room_stream_ordering_updates[room_id] = (
