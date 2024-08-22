@@ -1708,15 +1708,8 @@ class PersistEventsStore:
             # persisting stack (see
             # `_update_sliding_sync_tables_with_new_persisted_events_txn()`)
             #
-            # Pulling keys/values separately is safe and will produce congruent lists
-            sliding_sync_updates_keys = (
-                sliding_sync_table_changes.joined_room_updates.keys()
-            )
-            sliding_sync_updates_values = (
-                sliding_sync_table_changes.joined_room_updates.values()
-            )
             # We only need to update when one of the relevant state values has changed
-            if sliding_sync_updates_keys:
+            if sliding_sync_table_changes.joined_room_updates:
                 # This should be *some* value that points to a real event in the room if
                 # we are still joined to the room.
                 assert (
@@ -1724,31 +1717,22 @@ class PersistEventsStore:
                     is not None
                 )
 
-                args: List[Any] = [
-                    room_id,
-                    sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering,
-                ]
-                args.extend(iter(sliding_sync_updates_values))
-
-                # We don't update `event_stream_ordering` `ON CONFLICT` because it's
-                # simpler and we can just rely on
-                # `_update_sliding_sync_tables_with_new_persisted_events_txn()` to
-                # do the right thing (same for `bump_stamp`). The only reason we're
-                # inserting `event_stream_ordering` here is because the column has a
-                # `NON NULL` constraint and we need some answer.
-                txn.execute(
-                    f"""
-                    INSERT INTO sliding_sync_joined_rooms
-                        (room_id, event_stream_ordering, {", ".join(sliding_sync_updates_keys)})
-                    VALUES (
-                        ?, ?,
-                        {", ".join("?" for _ in sliding_sync_updates_values)}
-                    )
-                    ON CONFLICT (room_id)
-                    DO UPDATE SET
-                        {", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_updates_keys)}
-                    """,
-                    args,
+                self.db_pool.simple_upsert_txn(
+                    txn,
+                    table="sliding_sync_joined_rooms",
+                    keyvalues={"room_id": room_id},
+                    values=sliding_sync_table_changes.joined_room_updates,
+                    insertion_values={
+                        # The reason we're only *inserting* `event_stream_ordering` here
+                        # is because the column has a `NON NULL` constraint and we need
+                        # *some* answer. If the row already exists, we are trying to
+                        # avoid doing an `UPDATE` and accidentally overwriting the value
+                        # with some stale data since this is just a "best effort" value.
+                        # It's better to just rely on
+                        # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
+                        # to do the right thing (same for `bump_stamp`).
+                        "event_stream_ordering": sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering
+                    },
                 )
 
         # We now update `local_current_membership`. We do this regardless
