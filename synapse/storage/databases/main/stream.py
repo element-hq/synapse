@@ -1310,14 +1310,17 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 [room_id] + event_type_args,
             )
 
-            row = cast(Tuple[str, int, str], txn.fetchone())
-            event_id, stream_ordering, instance_name = row
+            row = cast(Optional[Tuple[str, int, str]], txn.fetchone())
+            if row is not None:
+                event_id, stream_ordering, instance_name = row
 
-            return event_id, PersistedEventPosition(
-                # If instance_name is null we default to "master"
-                instance_name or "master",
-                stream_ordering,
-            )
+                return event_id, PersistedEventPosition(
+                    # If instance_name is null we default to "master"
+                    instance_name or "master",
+                    stream_ordering,
+                )
+
+            return None
 
         return await self.db_pool.runInteraction(
             "get_last_event_pos_in_room",
