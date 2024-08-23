@@ -1599,7 +1599,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             current_state_map: StateMap[EventBase] = {
                 state_key: fetched_events[event_id]
                 for state_key, event_id in current_state_ids_map.items()
+                if event_id in fetched_events
             }
+
+            # Can happen for old room versions.
+            if not current_state_map:
+                continue
 
             state_insert_values = (
                 PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
