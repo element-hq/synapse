@@ -377,6 +377,8 @@ class SlidingSyncHandler:
                             room_id: sync_room_map[room_id]
                             for room_id in previous_found_rooms
                         }
+
+                        # TODO: Record changes to the list.
                     else:
                         filtered_sync_room_map = sync_room_map
                         if list_config.filters is not None:
