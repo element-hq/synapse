@@ -1730,12 +1730,11 @@ class PersistEventsStore:
                     keyvalues={"room_id": room_id},
                     values=sliding_sync_table_changes.joined_room_updates,
                     insertion_values={
-                        # The reason we're only *inserting* `event_stream_ordering` here
-                        # is because the column has a `NON NULL` constraint and we need
-                        # *some* answer. If the row already exists, we are trying to
-                        # avoid doing an `UPDATE` and accidentally overwriting the value
-                        # with some stale data since this is just a "best effort" value.
-                        # It's better to just rely on
+                        # The reason we're only *inserting* (not *updating*)
+                        # `event_stream_ordering` here is because the column has a `NON
+                        # NULL` constraint and we need *some* answer. And if the row
+                        # already exists, it already has the correct value and it's
+                        # better to just rely on
                         # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
                         # to do the right thing (same for `bump_stamp`).
                         "event_stream_ordering": sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering
