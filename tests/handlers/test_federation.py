@@ -681,6 +681,17 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             f" failed do_invite_join!",
         )
 
+        # Sanity check that we're not leaving behind any current state events.
+        current_state_check_rows = self.get_success(
+            store.db_pool.simple_select_list(
+                table="current_state_events",
+                keyvalues={"room_id": room_id},
+                retcols=("event_id",),
+                desc="check current_state_events in test",
+            )
+        )
+        self.assertEqual(len(current_state_check_rows), 0)
+
     def test_duplicate_partial_state_room_syncs(self) -> None:
         """
         Tests that concurrent partial state syncs are not started for the same room.
