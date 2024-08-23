@@ -19,6 +19,7 @@
 #
 #
 import logging
+from http import HTTPStatus
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
@@ -37,7 +38,6 @@ from typing import (
 )
 
 import attr
-from http import HTTPStatus
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError

@@ -6,7 +6,7 @@ import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import LimitExceededError, SynapseError
+from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import FrozenEventV3
 from synapse.federation.federation_client import SendJoinResult
@@ -22,7 +22,6 @@ from tests.unittest import (
     override_config,
 )
 
-from http import HTTPStatus
 
 class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
     servlets = [
@@ -387,14 +386,19 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
     def test_nonlocal_room_user_action(self) -> None:
         """Test that nonlocal user ids can not perform room actions."""
         alien_user_id = UserID.from_string("@cheeky_monkey:matrix.org")
+        bad_room_id = f"{self.room_id}+BAD_ID"
 
-        self.get_failure(
+        exc = self.get_failure(
             self.handler.update_membership(
-                create_requester(self.alice), alien_user_id, self.room_id+"BAD_ID", "unban"
+                create_requester(self.alice),
+                alien_user_id,
+                bad_room_id,
+                "unban",
             ),
             SynapseError,
-        )
+        ).value
 
+        self.assertEqual(exc.errcode, Codes.BAD_JSON)
 
     def test_rejoin_forgotten_by_user(self) -> None:
         """Test that a user that has forgotten a room can do a re-join.
