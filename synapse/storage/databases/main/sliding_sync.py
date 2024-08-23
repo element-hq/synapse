@@ -256,6 +256,22 @@ class SlidingSyncStore(SQLBaseStore):
             value_values=values,
         )
 
+        # Persist changes to the room lists
+        for list_name, list_room_ids in per_connection_state.list_to_rooms.items():
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="sliding_sync_connection_room_lists",
+                keyvalues={"connection_key": connection_key, "list_name": list_name},
+            )
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                table="sliding_sync_connection_room_lists",
+                keys=("connection_key", "list_name", "room_id"),
+                values=[
+                    (connection_key, list_name, room_id) for room_id in list_room_ids
+                ],
+            )
+
         return connection_position
 
     @cached(iterable=True, max_entries=100000)
@@ -374,11 +390,24 @@ class SlidingSyncStore(SQLBaseStore):
             elif stream == "receipts":
                 receipts[room_id] = have_sent_room
 
+        # Fetch any stored lists for the connection
+        rows = self.db_pool.simple_select_list_txn(
+            txn,
+            table="sliding_sync_connection_room_lists",
+            keyvalues={
+                connection_key: connection_key,
+            },
+            retcols=("list_name", "room_id"),
+        )
+        list_to_rooms: Dict[str, Set[str]] = {}
+        for list_name, room_id in rows:
+            list_to_rooms.setdefault(list_name, set()).add(room_id)
+
         return PerConnectionStateDB(
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             room_configs=room_configs,
-            list_to_rooms={},
+            list_to_rooms=list_to_rooms,
         )
 
 

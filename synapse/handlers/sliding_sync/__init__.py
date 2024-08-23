@@ -387,30 +387,30 @@ class SlidingSyncHandler:
                                 to_token,
                             )
 
-                        # Find which rooms are partially stated and may need to be filtered out
-                        # depending on the `required_state` requested (see below).
-                        partial_state_room_map = (
-                            await self.store.is_partial_state_room_batched(
-                                filtered_sync_room_map.keys()
-                            )
-                        )
-
-                        # Since creating the `RoomSyncConfig` takes some work, let's just do it
-                        # once and make a copy whenever we need it.
-                        room_sync_config = RoomSyncConfig.from_room_config(list_config)
-
-                        # Exclude partially-stated rooms if we must wait for the room to be
-                        # fully-stated
-                        if room_sync_config.must_await_full_state(self.is_mine_id):
-                            filtered_sync_room_map = {
-                                room_id: room
-                                for room_id, room in filtered_sync_room_map.items()
-                                if not partial_state_room_map.get(room_id)
-                            }
-
                         new_connection_state.list_to_rooms[list_key] = set(
                             filtered_sync_room_map.keys()
                         )
+
+                    # Find which rooms are partially stated and may need to be filtered out
+                    # depending on the `required_state` requested (see below).
+                    partial_state_room_map = (
+                        await self.store.is_partial_state_room_batched(
+                            filtered_sync_room_map.keys()
+                        )
+                    )
+
+                    # Since creating the `RoomSyncConfig` takes some work, let's just do it
+                    # once and make a copy whenever we need it.
+                    room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        filtered_sync_room_map = {
+                            room_id: room
+                            for room_id, room in filtered_sync_room_map.items()
+                            if not partial_state_room_map.get(room_id)
+                        }
 
                     all_rooms.update(filtered_sync_room_map)
 
