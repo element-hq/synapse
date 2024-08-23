@@ -840,14 +840,18 @@ class PerConnectionState:
 
     room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
+    list_to_rooms: Mapping[str, AbstractSet[str]] = attr.Factory(dict)
+
     def get_mutable(self) -> "MutablePerConnectionState":
         """Get a mutable copy of this state."""
         room_configs = cast(MutableMapping[str, RoomSyncConfig], self.room_configs)
+        list_to_rooms = cast(MutableMapping[str, Set[str]], self.list_to_rooms)
 
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
             room_configs=ChainMap({}, room_configs),
+            list_to_rooms=ChainMap({}, list_to_rooms),
         )
 
     def copy(self) -> "PerConnectionState":
@@ -855,10 +859,16 @@ class PerConnectionState:
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
             room_configs=dict(self.room_configs),
+            list_to_rooms=dict(self.list_to_rooms),
         )
 
     def __len__(self) -> int:
-        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
+        return (
+            len(self.rooms)
+            + len(self.receipts)
+            + len(self.room_configs)
+            + len(self.list_to_rooms)
+        )
 
 
 @attr.s(auto_attribs=True)
@@ -870,13 +880,20 @@ class MutablePerConnectionState(PerConnectionState):
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
+    list_to_rooms: typing.ChainMap[str, Set[str]]
+
     def has_updates(self) -> bool:
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
             or bool(self.get_room_config_updates())
+            or bool(self.list_to_rooms.maps[0])
         )
 
     def get_room_config_updates(self) -> Mapping[str, RoomSyncConfig]:
         """Get updates to the room sync config"""
         return self.room_configs.maps[0]
+
+    def get_list_to_rooms_updates(self) -> Mapping[str, StrCollection]:
+        """Get updates to the `list_to_rooms`"""
+        return self.list_to_rooms.maps[0]

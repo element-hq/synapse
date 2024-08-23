@@ -17,6 +17,7 @@ import logging
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
+    AbstractSet,
     Any,
     Dict,
     List,
@@ -321,6 +322,7 @@ class SlidingSyncHandler:
                 sync_config, from_token
             )
         )
+        new_connection_state = previous_connection_state.get_mutable()
 
         # Get all of the room IDs that the user should be able to see in the sync
         # response
@@ -338,6 +340,10 @@ class SlidingSyncHandler:
                 )
             )
 
+        lists_to_rooms: Mapping[str, AbstractSet[str]] = {}
+        if previous_connection_state is not None:
+            lists_to_rooms = previous_connection_state.list_to_rooms
+
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
@@ -354,13 +360,26 @@ class SlidingSyncHandler:
 
                 for list_key, list_config in sync_config.lists.items():
                     # Apply filters
-                    filtered_sync_room_map = sync_room_map
-                    if list_config.filters is not None:
-                        filtered_sync_room_map = await self.filter_rooms(
-                            sync_config.user,
-                            sync_room_map,
-                            list_config.filters,
-                            to_token,
+                    previous_found_rooms = lists_to_rooms.get(list_key)
+                    if previous_found_rooms:
+                        filtered_sync_room_map = {
+                            room_id: sync_room_map[room_id]
+                            for room_id in previous_found_rooms
+                        }
+
+                        # TODO: Record changes to the list.
+                    else:
+                        filtered_sync_room_map = sync_room_map
+                        if list_config.filters is not None:
+                            filtered_sync_room_map = await self.filter_rooms(
+                                sync_config.user,
+                                sync_room_map,
+                                list_config.filters,
+                                to_token,
+                            )
+
+                        new_connection_state.list_to_rooms[list_key] = set(
+                            filtered_sync_room_map.keys()
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
@@ -552,8 +571,6 @@ class SlidingSyncHandler:
                     for room_id, room_sync_config in relevant_room_map.items()
                     if room_id in rooms_should_send
                 }
-
-        new_connection_state = previous_connection_state.get_mutable()
 
         @trace
         @tag_args
