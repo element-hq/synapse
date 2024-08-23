@@ -13,7 +13,7 @@
 #
 
 
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
+from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, cast
 
 import attr
 
@@ -378,6 +378,7 @@ class SlidingSyncStore(SQLBaseStore):
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             room_configs=room_configs,
+            list_to_rooms={},
         )
 
 
@@ -396,6 +397,7 @@ class PerConnectionStateDB:
     receipts: "RoomStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
+    list_to_rooms: Mapping[str, AbstractSet[str]]
 
     @staticmethod
     async def from_state(
@@ -438,6 +440,7 @@ class PerConnectionStateDB:
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             room_configs=per_connection_state.room_configs.maps[0],
+            list_to_rooms=per_connection_state.list_to_rooms.maps[0],
         )
 
     async def to_state(self, store: "DataStore") -> "PerConnectionState":
@@ -470,4 +473,5 @@ class PerConnectionStateDB:
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
             room_configs=self.room_configs,
+            list_to_rooms=self.list_to_rooms,
         )
