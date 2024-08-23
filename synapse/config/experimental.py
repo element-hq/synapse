@@ -140,6 +140,12 @@ class MSC3861:
                 ("experimental", "msc3861", "client_auth_method"),
             )
 
+    introspection_endpoint: Optional[str] = attr.ib(
+        default=None,
+        validator=attr.validators.optional(attr.validators.instance_of(str)),
+    )
+    """The URL of the introspection endpoint used to validate access tokens."""
+
     account_management_url: Optional[str] = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
@@ -435,10 +441,6 @@ class ExperimentalConfig(Config):
 
         self.msc3823_account_suspension = experimental.get(
             "msc3823_account_suspension", False
-        )
-
-        self.msc3916_authenticated_media_enabled = experimental.get(
-            "msc3916_authenticated_media_enabled", False
         )
 
         # MSC4151: Report room API (Client-Server API)

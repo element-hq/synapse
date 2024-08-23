@@ -11,6 +11,9 @@ DIST=$(cut -d ':' -f2 <<< "${distro:?}")
 cp -aT /synapse/source /synapse/build
 cd /synapse/build
 
+# Delete any existing `.so` files to ensure a clean build.
+rm -f /synapse/build/synapse/*.so
+
 # if this is a prerelease, set the Section accordingly.
 #
 # When the package is later added to the package repo, reprepro will use the

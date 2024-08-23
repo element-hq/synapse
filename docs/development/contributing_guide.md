@@ -449,9 +449,9 @@ For example, a fix in PR #1234 would have its changelog entry in
 > The security levels of Florbs are now validated when received
 > via the `/federation/florb` endpoint. Contributed by Jane Matrix.
 
-If there are multiple pull requests involved in a single bugfix/feature/etc,
-then the content for each `changelog.d` file should be the same. Towncrier will
-merge the matching files together into a single changelog entry when we come to
+If there are multiple pull requests involved in a single bugfix/feature/etc, then the
+content for each `changelog.d` file and file extension should be the same. Towncrier
+will merge the matching files together into a single changelog entry when we come to
 release.
 
 ### How do I know what to call the changelog file before I create the PR?

@@ -45,7 +45,7 @@ from typing_extensions import Literal
 from twisted.test.proto_helpers import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import Membership
+from synapse.api.constants import Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -261,9 +261,9 @@ class RestHelper:
         targ: str,
         expect_code: int = HTTPStatus.OK,
         tok: Optional[str] = None,
-    ) -> None:
+    ) -> JsonDict:
         """A convenience helper: `change_membership` with `membership` preset to "ban"."""
-        self.change_membership(
+        return self.change_membership(
             room=room,
             src=src,
             targ=targ,
@@ -944,3 +944,15 @@ class RestHelper:
         assert len(p.links) == 1, "not exactly one link in confirmation page"
         oauth_uri = p.links[0]
         return oauth_uri
+
+    def send_read_receipt(self, room_id: str, event_id: str, *, tok: str) -> None:
+        """Send a read receipt into the room at the given event"""
+        channel = make_request(
+            self.reactor,
+            self.site,
+            method="POST",
+            path=f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            content={},
+            access_token=tok,
+        )
+        assert channel.code == HTTPStatus.OK, channel.text_body

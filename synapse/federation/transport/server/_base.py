@@ -362,7 +362,9 @@ class BaseFederationServlet:
                                 return None
                             if (
                                 func.__self__.__class__.__name__  # type: ignore
-                                == "FederationUnstableMediaDownloadServlet"
+                                == "FederationMediaDownloadServlet"
+                                or func.__self__.__class__.__name__  # type: ignore
+                                == "FederationMediaThumbnailServlet"
                             ):
                                 response = await func(
                                     origin, content, request, *args, **kwargs
@@ -374,7 +376,9 @@ class BaseFederationServlet:
                     else:
                         if (
                             func.__self__.__class__.__name__  # type: ignore
-                            == "FederationUnstableMediaDownloadServlet"
+                            == "FederationMediaDownloadServlet"
+                            or func.__self__.__class__.__name__  # type: ignore
+                            == "FederationMediaThumbnailServlet"
                         ):
                             response = await func(
                                 origin, content, request, *args, **kwargs

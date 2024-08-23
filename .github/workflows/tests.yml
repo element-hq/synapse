@@ -73,7 +73,7 @@ jobs:
             - 'pyproject.toml'
             - 'poetry.lock'
             - '.github/workflows/tests.yml'
-          
+
           linting_readme:
             - 'README.rst'
 
@@ -139,7 +139,7 @@ jobs:
 
       - name: Semantic checks (ruff)
         # --quiet suppresses the update check.
-        run: poetry run ruff --quiet .
+        run: poetry run ruff check --quiet .
 
   lint-mypy:
     runs-on: ubuntu-latest
@@ -305,7 +305,7 @@ jobs:
       - lint-readme
     runs-on: ubuntu-latest
     steps:
-      - uses: matrix-org/done-action@v2
+      - uses: matrix-org/done-action@v3
         with:
           needs: ${{ toJSON(needs) }}
 
@@ -737,7 +737,7 @@ jobs:
       - linting-done
     runs-on: ubuntu-latest
     steps:
-      - uses: matrix-org/done-action@v2
+      - uses: matrix-org/done-action@v3
         with:
           needs: ${{ toJSON(needs) }}
 

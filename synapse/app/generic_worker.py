@@ -74,6 +74,9 @@ from synapse.storage.databases.main.event_push_actions import (
     EventPushActionsWorkerStore,
 )
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
+from synapse.storage.databases.main.experimental_features import (
+    ExperimentalFeaturesStore,
+)
 from synapse.storage.databases.main.filtering import FilteringWorkerStore
 from synapse.storage.databases.main.keys import KeyStore
 from synapse.storage.databases.main.lock import LockStore
@@ -155,6 +158,7 @@ class GenericWorkerStore(
     LockStore,
     SessionStore,
     TaskSchedulerWorkerStore,
+    ExperimentalFeaturesStore,
 ):
     # Properties that multiple storage classes define. Tell mypy what the
     # expected type is.
@@ -163,7 +167,7 @@ class GenericWorkerStore(
 
 
 class GenericWorkerServer(HomeServer):
-    DATASTORE_CLASS = GenericWorkerStore  # type: ignore
+    DATASTORE_CLASS = GenericWorkerStore
 
     def _listen_http(self, listener_config: ListenerConfig) -> None:
         assert listener_config.http_options is not None
@@ -202,6 +206,21 @@ class GenericWorkerServer(HomeServer):
                                 "/_synapse/admin": admin_resource,
                             }
                         )
+
+                        if "federation" not in res.names:
+                            # Only load the federation media resource separately if federation
+                            # resource is not specified since federation resource includes media
+                            # resource.
+                            resources[FEDERATION_PREFIX] = TransportLayerServer(
+                                self, servlet_groups=["media"]
+                            )
+                        if "client" not in res.names:
+                            # Only load the client media resource separately if client
+                            # resource is not specified since client resource includes media
+                            # resource.
+                            resources[CLIENT_API_PREFIX] = ClientRestResource(
+                                self, servlet_groups=["media"]
+                            )
                     else:
                         logger.warning(
                             "A 'media' listener is configured but the media"

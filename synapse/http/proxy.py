@@ -62,6 +62,15 @@ HOP_BY_HOP_HEADERS = {
     "Upgrade",
 }
 
+if hasattr(Headers, "_canonicalNameCaps"):
+    # Twisted < 24.7.0rc1
+    _canonicalHeaderName = Headers()._canonicalNameCaps  # type: ignore[attr-defined]
+else:
+    # Twisted >= 24.7.0rc1
+    # But note that `_encodeName` still exists on prior versions,
+    # it just encodes differently
+    _canonicalHeaderName = Headers()._encodeName
+
 
 def parse_connection_header_value(
     connection_header_value: Optional[bytes],
@@ -85,11 +94,10 @@ def parse_connection_header_value(
         The set of header names that should not be copied over from the remote response.
         The keys are capitalized in canonical capitalization.
     """
-    headers = Headers()
     extra_headers_to_remove: Set[str] = set()
     if connection_header_value:
         extra_headers_to_remove = {
-            headers._canonicalNameCaps(connection_option.strip()).decode("ascii")
+            _canonicalHeaderName(connection_option.strip()).decode("ascii")
             for connection_option in connection_header_value.split(b",")
         }
 

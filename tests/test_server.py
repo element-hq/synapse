@@ -392,8 +392,7 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(channel.code, 301)
-        headers = channel.result["headers"]
-        location_headers = [v for k, v in headers if k == b"Location"]
+        location_headers = channel.headers.getRawHeaders(b"Location", [])
         self.assertEqual(location_headers, [b"/look/an/eagle"])
 
     def test_redirect_exception_with_cookie(self) -> None:
@@ -415,10 +414,10 @@ class WrapHtmlRequestHandlerTests(unittest.TestCase):
         )
 
         self.assertEqual(channel.code, 304)
-        headers = channel.result["headers"]
-        location_headers = [v for k, v in headers if k == b"Location"]
+        headers = channel.headers
+        location_headers = headers.getRawHeaders(b"Location", [])
         self.assertEqual(location_headers, [b"/no/over/there"])
-        cookies_headers = [v for k, v in headers if k == b"Set-Cookie"]
+        cookies_headers = headers.getRawHeaders(b"Set-Cookie", [])
         self.assertEqual(cookies_headers, [b"session=yespls"])
 
     def test_head_request(self) -> None:

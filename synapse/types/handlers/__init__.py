@@ -18,7 +18,7 @@
 #
 #
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, Final, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, Final, List, Mapping, Optional, Sequence, Tuple
 
 import attr
 from typing_extensions import TypedDict
@@ -31,8 +31,19 @@ else:
     from pydantic import Extra
 
 from synapse.events import EventBase
-from synapse.types import JsonMapping, StreamToken, UserID
+from synapse.types import (
+    DeviceListUpdates,
+    JsonDict,
+    JsonMapping,
+    Requester,
+    SlidingSyncStreamToken,
+    StreamToken,
+    UserID,
+)
 from synapse.types.rest.client import SlidingSyncBody
+
+if TYPE_CHECKING:
+    from synapse.handlers.relations import BundledAggregations
 
 
 class ShutdownRoomParams(TypedDict):
@@ -99,7 +110,7 @@ class SlidingSyncConfig(SlidingSyncBody):
     """
 
     user: UserID
-    device_id: Optional[str]
+    requester: Requester
 
     # Pydantic config
     class Config:
@@ -141,7 +152,7 @@ class SlidingSyncResult:
     Attributes:
         next_pos: The next position token in the sliding window to request (next_batch).
         lists: Sliding window API. A map of list key to list results.
-        rooms: Room subscription API. A map of room ID to room subscription to room results.
+        rooms: Room subscription API. A map of room ID to room results.
         extensions: Extensions API. A map of extension key to extension results.
     """
 
@@ -153,21 +164,43 @@ class SlidingSyncResult:
             avatar: Room avatar
             heroes: List of stripped membership events (containing `user_id` and optionally
                 `avatar_url` and `displayname`) for the users used to calculate the room name.
+            is_dm: Flag to specify whether the room is a direct-message room (most likely
+                between two people).
             initial: Flag which is set when this is the first time the server is sending this
                 data on this connection. Clients can use this flag to replace or update
                 their local state. When there is an update, servers MUST omit this flag
                 entirely and NOT send "initial":false as this is wasteful on bandwidth. The
                 absence of this flag means 'false'.
+            unstable_expanded_timeline: Flag which is set if we're returning more historic
+                events due to the timeline limit having increased. See "XXX: Odd behavior"
+                comment ing `synapse.handlers.sliding_sync`.
             required_state: The current state of the room
-            timeline: Latest events in the room. The last event is the most recent
-            is_dm: Flag to specify whether the room is a direct-message room (most likely
-                between two people).
-            invite_state: Stripped state events. Same as `rooms.invite.$room_id.invite_state`
-                in sync v2, absent on joined/left rooms
+            timeline: Latest events in the room. The last event is the most recent.
+            bundled_aggregations: A mapping of event ID to the bundled aggregations for
+                the timeline events above. This allows clients to show accurate reaction
+                counts (or edits, threads), even if some of the reaction events were skipped
+                over in a gappy sync.
+            stripped_state: Stripped state events (for rooms where the usre is
+                invited/knocked). Same as `rooms.invite.$room_id.invite_state` in sync v2,
+                absent on joined/left rooms
             prev_batch: A token that can be passed as a start parameter to the
                 `/rooms/<room_id>/messages` API to retrieve earlier messages.
-            limited: True if their are more events than fit between the given position and now.
-                Sync again to get more.
+            limited: True if there are more events than `timeline_limit` looking
+                backwards from the `response.pos` to the `request.pos`.
+            num_live: The number of timeline events which have just occurred and are not historical.
+                The last N events are 'live' and should be treated as such. This is mostly
+                useful to determine whether a given @mention event should make a noise or not.
+                Clients cannot rely solely on the absence of `initial: true` to determine live
+                events because if a room not in the sliding window bumps into the window because
+                of an @mention it will have `initial: true` yet contain a single live event
+                (with potentially other old events in the timeline).
+            bump_stamp: The `stream_ordering` of the last event according to the
+                `bump_event_types`. This helps clients sort more readily without them
+                needing to pull in a bunch of the timeline to determine the last activity.
+                `bump_event_types` is a thing because for example, we don't want display
+                name changes to mark the room as unread and bump it to the top. For
+                encrypted rooms, we just have to consider any activity as a bump because we
+                can't see the content and the client has to figure it out for themselves.
             joined_count: The number of users with membership of join, including the client's
                 own user ID. (same as sync `v2 m.joined_member_count`)
             invited_count: The number of users with membership of invite. (same as sync v2
@@ -176,30 +209,49 @@ class SlidingSyncResult:
                 as sync v2)
             highlight_count: The number of unread notifications for this room with the highlight
                 flag set. (same as sync v2)
-            num_live: The number of timeline events which have just occurred and are not historical.
-                The last N events are 'live' and should be treated as such. This is mostly
-                useful to determine whether a given @mention event should make a noise or not.
-                Clients cannot rely solely on the absence of `initial: true` to determine live
-                events because if a room not in the sliding window bumps into the window because
-                of an @mention it will have `initial: true` yet contain a single live event
-                (with potentially other old events in the timeline).
         """
 
-        name: str
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class StrippedHero:
+            user_id: str
+            display_name: Optional[str]
+            avatar_url: Optional[str]
+
+        name: Optional[str]
         avatar: Optional[str]
-        heroes: Optional[List[EventBase]]
-        initial: bool
-        required_state: List[EventBase]
-        timeline: List[EventBase]
+        heroes: Optional[List[StrippedHero]]
         is_dm: bool
-        invite_state: List[EventBase]
-        prev_batch: StreamToken
-        limited: bool
+        initial: bool
+        unstable_expanded_timeline: bool
+        # Should be empty for invite/knock rooms with `stripped_state`
+        required_state: List[EventBase]
+        # Should be empty for invite/knock rooms with `stripped_state`
+        timeline_events: List[EventBase]
+        bundled_aggregations: Optional[Dict[str, "BundledAggregations"]]
+        # Optional because it's only relevant to invite/knock rooms
+        stripped_state: List[JsonDict]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        prev_batch: Optional[StreamToken]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        limited: Optional[bool]
+        # Only optional because it won't be included for invite/knock rooms with `stripped_state`
+        num_live: Optional[int]
+        bump_stamp: int
         joined_count: int
         invited_count: int
         notification_count: int
         highlight_count: int
-        num_live: int
+
+        def __bool__(self) -> bool:
+            return (
+                # If this is the first time the client is seeing the room, we should not filter it out
+                # under any circumstance.
+                self.initial
+                # We need to let the client know if there are any new events
+                or bool(self.required_state)
+                or bool(self.timeline_events)
+                or bool(self.stripped_state)
+            )
 
     @attr.s(slots=True, frozen=True, auto_attribs=True)
     class SlidingWindowList:
@@ -229,24 +281,155 @@ class SlidingSyncResult:
         count: int
         ops: List[Operation]
 
-    next_pos: StreamToken
+    @attr.s(slots=True, frozen=True, auto_attribs=True)
+    class Extensions:
+        """Responses for extensions
+
+        Attributes:
+            to_device: The to-device extension (MSC3885)
+            e2ee: The E2EE device extension (MSC3884)
+        """
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ToDeviceExtension:
+            """The to-device extension (MSC3885)
+
+            Attributes:
+                next_batch: The to-device stream token the client should use
+                    to get more results
+                events: A list of to-device messages for the client
+            """
+
+            next_batch: str
+            events: Sequence[JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.events)
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class E2eeExtension:
+            """The E2EE device extension (MSC3884)
+
+            Attributes:
+                device_list_updates: List of user_ids whose devices have changed or left (only
+                    present on incremental syncs).
+                device_one_time_keys_count: Map from key algorithm to the number of
+                    unclaimed one-time keys currently held on the server for this device. If
+                    an algorithm is unlisted, the count for that algorithm is assumed to be
+                    zero. If this entire parameter is missing, the count for all algorithms
+                    is assumed to be zero.
+                device_unused_fallback_key_types: List of unused fallback key algorithms
+                    for this device.
+            """
+
+            # Only present on incremental syncs
+            device_list_updates: Optional[DeviceListUpdates]
+            device_one_time_keys_count: Mapping[str, int]
+            device_unused_fallback_key_types: Sequence[str]
+
+            def __bool__(self) -> bool:
+                # Note that "signed_curve25519" is always returned in key count responses
+                # regardless of whether we uploaded any keys for it. This is necessary until
+                # https://github.com/matrix-org/matrix-doc/issues/3298 is fixed.
+                #
+                # Also related:
+                # https://github.com/element-hq/element-android/issues/3725 and
+                # https://github.com/matrix-org/synapse/issues/10456
+                default_otk = self.device_one_time_keys_count.get("signed_curve25519")
+                more_than_default_otk = len(self.device_one_time_keys_count) > 1 or (
+                    default_otk is not None and default_otk > 0
+                )
+
+                return bool(
+                    more_than_default_otk
+                    or self.device_list_updates
+                    or self.device_unused_fallback_key_types
+                )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class AccountDataExtension:
+            """The Account Data extension (MSC3959)
+
+            Attributes:
+                global_account_data_map: Mapping from `type` to `content` of global account
+                    data events.
+                account_data_by_room_map: Mapping from room_id to mapping of `type` to
+                    `content` of room account data events.
+            """
+
+            global_account_data_map: Mapping[str, JsonMapping]
+            account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
+
+            def __bool__(self) -> bool:
+                return bool(
+                    self.global_account_data_map or self.account_data_by_room_map
+                )
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class ReceiptsExtension:
+            """The Receipts extension (MSC3960)
+
+            Attributes:
+                room_id_to_receipt_map: Mapping from room_id to `m.receipt` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_receipt_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_receipt_map)
+
+        @attr.s(slots=True, frozen=True, auto_attribs=True)
+        class TypingExtension:
+            """The Typing Notification extension (MSC3961)
+
+            Attributes:
+                room_id_to_typing_map: Mapping from room_id to `m.typing` ephemeral
+                    event (type, content)
+            """
+
+            room_id_to_typing_map: Mapping[str, JsonMapping]
+
+            def __bool__(self) -> bool:
+                return bool(self.room_id_to_typing_map)
+
+        to_device: Optional[ToDeviceExtension] = None
+        e2ee: Optional[E2eeExtension] = None
+        account_data: Optional[AccountDataExtension] = None
+        receipts: Optional[ReceiptsExtension] = None
+        typing: Optional[TypingExtension] = None
+
+        def __bool__(self) -> bool:
+            return bool(
+                self.to_device
+                or self.e2ee
+                or self.account_data
+                or self.receipts
+                or self.typing
+            )
+
+    next_pos: SlidingSyncStreamToken
     lists: Dict[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
-    extensions: JsonMapping
+    extensions: Extensions
 
     def __bool__(self) -> bool:
         """Make the result appear empty if there are no updates. This is used
         to tell if the notifier needs to wait for more events when polling for
         events.
         """
-        return bool(self.lists or self.rooms or self.extensions)
+        # We don't include `self.lists` here, as a) `lists` is always non-empty even if
+        # there are no changes, and b) since we're sorting rooms by `stream_ordering` of
+        # the latest activity, anything that would cause the order to change would end
+        # up in `self.rooms` and cause us to send down the change.
+        return bool(self.rooms or self.extensions)
 
     @staticmethod
-    def empty(next_pos: StreamToken) -> "SlidingSyncResult":
+    def empty(next_pos: SlidingSyncStreamToken) -> "SlidingSyncResult":
         "Return a new empty result"
         return SlidingSyncResult(
             next_pos=next_pos,
             lists={},
             rooms={},
-            extensions={},
+            extensions=SlidingSyncResult.Extensions(),
         )
