@@ -1888,24 +1888,7 @@ class PersistEventsStore:
             (event_type, state_key): event_id for event_id, event_type, state_key in txn
         }
 
-        txn.execute(
-            """
-            SELECT stream_id
-            FROM current_state_delta_stream
-            WHERE
-                room_id = ?
-            ORDER BY stream_id DESC
-            LIMIT 1
-            """,
-            (room_id,),
-        )
-        row = txn.fetchone()
-        # If we're able to fetch the `current_state_events` above, we should have rows
-        # in `current_state_delta_stream` as well.
-        assert row, "Failed to fetch the `last_current_state_delta_stream_id`"
-        last_current_state_delta_stream_id = row[0]
-
-        return current_state_map, last_current_state_delta_stream_id
+        return current_state_map
 
     @classmethod
     def _get_sliding_sync_insert_values_from_state_map(

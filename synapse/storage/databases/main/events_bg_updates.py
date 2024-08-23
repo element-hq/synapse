@@ -1583,13 +1583,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         joined_room_stream_ordering_updates: Dict[
             str, Tuple[int, Optional[int], int]
         ] = {}
+        current_stream_id = await self.get_max_stream_id_in_current_state_deltas()
         for room_id in rooms_to_update:
-            current_state_ids_map, last_current_state_delta_stream_id = (
-                await self.db_pool.runInteraction(
-                    "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
-                    PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
-                    room_id,
-                )
+            current_state_ids_map = await self.db_pool.runInteraction(
+                "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
+                PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
+                room_id,
             )
             # We're iterating over rooms pulled from the current_state_events table
             # so we should have some current state for each room
@@ -1641,7 +1640,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             joined_room_stream_ordering_updates[room_id] = (
                 most_recent_event_stream_ordering,
                 most_recent_bump_stamp,
-                last_current_state_delta_stream_id,
+                current_stream_id,
             )
 
         def _fill_table_txn(txn: LoggingTransaction) -> None:
