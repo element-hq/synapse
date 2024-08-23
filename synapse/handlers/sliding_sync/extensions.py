@@ -19,11 +19,6 @@ from typing_extensions import assert_never
 
 from synapse.api.constants import AccountDataTypes
 from synapse.handlers.receipts import ReceiptEventSource
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-)
 from synapse.logging.opentracing import trace
 from synapse.types import (
     DeviceListUpdates,
@@ -32,7 +27,14 @@ from synapse.types import (
     SlidingSyncStreamToken,
     StreamToken,
 )
-from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    OperationType,
+    PerConnectionState,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

@@ -13,18 +13,18 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Optional
 
 import attr
 
-from synapse.api.errors import SlidingSyncUnknownPosition
-from synapse.handlers.sliding_sync.types import (
+from synapse.logging.opentracing import trace
+from synapse.storage.databases.main import DataStore
+from synapse.types import SlidingSyncStreamToken
+from synapse.types.handlers.sliding_sync import (
     MutablePerConnectionState,
     PerConnectionState,
+    SlidingSyncConfig,
 )
-from synapse.logging.opentracing import trace
-from synapse.types import SlidingSyncStreamToken
-from synapse.types.handlers import SlidingSyncConfig
 
 if TYPE_CHECKING:
     pass
@@ -61,20 +61,7 @@ class SlidingSyncConnectionStore:
             to mapping of room ID to `HaveSentRoom`.
     """
 
-    # `(user_id, conn_id)` -> `connection_position` -> `PerConnectionState`
-    _connections: Dict[Tuple[str, str], Dict[int, PerConnectionState]] = attr.Factory(
-        dict
-    )
-
-    async def is_valid_token(
-        self, sync_config: SlidingSyncConfig, connection_token: int
-    ) -> bool:
-        """Return whether the connection token is valid/recognized"""
-        if connection_token == 0:
-            return True
-
-        conn_key = self._get_connection_key(sync_config)
-        return connection_token in self._connections.get(conn_key, {})
+    store: "DataStore"
 
     async def get_per_connection_state(
         self,
@@ -86,23 +73,20 @@ class SlidingSyncConnectionStore:
         Raises:
             SlidingSyncUnknownPosition if the connection_token is unknown
         """
-        if from_token is None:
+        if from_token is None or from_token.connection_position == 0:
             return PerConnectionState()
 
-        connection_position = from_token.connection_position
-        if connection_position == 0:
-            # Initial sync (request without a `from_token`) starts at `0` so
-            # there is no existing per-connection state
-            return PerConnectionState()
+        conn_id = sync_config.conn_id or ""
 
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.get(conn_key, {})
-        connection_state = sync_statuses.get(connection_position)
+        device_id = sync_config.requester.device_id
+        assert device_id is not None
 
-        if connection_state is None:
-            raise SlidingSyncUnknownPosition()
-
-        return connection_state
+        return await self.store.get_per_connection_state(
+            sync_config.user.to_string(),
+            device_id,
+            conn_id,
+            from_token.connection_position,
+        )
 
     @trace
     async def record_new_state(
@@ -116,85 +100,24 @@ class SlidingSyncConnectionStore:
         If there are no changes to the state this may return the same token as
         the existing per-connection state.
         """
-        prev_connection_token = 0
-        if from_token is not None:
-            prev_connection_token = from_token.connection_position
-
         if not new_connection_state.has_updates():
-            return prev_connection_token
+            if from_token is not None:
+                return from_token.connection_position
+            else:
+                return 0
 
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.setdefault(conn_key, {})
+        if from_token is not None and from_token.connection_position == 0:
+            from_token = None
 
-        # Generate a new token, removing any existing entries in that token
-        # (which can happen if requests get resent).
-        new_store_token = prev_connection_token + 1
-        sync_statuses.pop(new_store_token, None)
-
-        # We copy the `MutablePerConnectionState` so that the inner `ChainMap`s
-        # don't grow forever.
-        sync_statuses[new_store_token] = new_connection_state.copy()
-
-        return new_store_token
-
-    @trace
-    async def mark_token_seen(
-        self,
-        sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> None:
-        """We have received a request with the given token, so we can clear out
-        any other tokens associated with the connection.
-
-        If there is no from token then we have started afresh, and so we delete
-        all tokens associated with the device.
-        """
-        # Clear out any tokens for the connection that doesn't match the one
-        # from the request.
-
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.pop(conn_key, {})
-        if from_token is None:
-            return
-
-        sync_statuses = {
-            connection_token: room_statuses
-            for connection_token, room_statuses in sync_statuses.items()
-            if connection_token == from_token.connection_position
-        }
-        if sync_statuses:
-            self._connections[conn_key] = sync_statuses
-
-    @staticmethod
-    def _get_connection_key(sync_config: SlidingSyncConfig) -> Tuple[str, str]:
-        """Return a unique identifier for this connection.
-
-        The first part is simply the user ID.
-
-        The second part is generally a combination of device ID and conn_id.
-        However, both these two are optional (e.g. puppet access tokens don't
-        have device IDs), so this handles those edge cases.
-
-        We use this over the raw `conn_id` to avoid clashes between different
-        clients that use the same `conn_id`. Imagine a user uses a web client
-        that uses `conn_id: main_sync_loop` and an Android client that also has
-        a `conn_id: main_sync_loop`.
-        """
-
-        user_id = sync_config.user.to_string()
-
-        # Only one sliding sync connection is allowed per given conn_id (empty
-        # or not).
         conn_id = sync_config.conn_id or ""
 
-        if sync_config.requester.device_id:
-            return (user_id, f"D/{sync_config.requester.device_id}/{conn_id}")
+        device_id = sync_config.requester.device_id
+        assert device_id is not None
 
-        if sync_config.requester.access_token_id:
-            # If we don't have a device, then the access token ID should be a
-            # stable ID.
-            return (user_id, f"A/{sync_config.requester.access_token_id}/{conn_id}")
-
-        # If we have neither then its likely an AS or some weird token. Either
-        # way we can just fail here.
-        raise Exception("Cannot use sliding sync with access token type")
+        return await self.store.persist_per_connection_state(
+            sync_config.user.to_string(),
+            device_id,
+            conn_id,
+            from_token.connection_position if from_token else None,
+            new_connection_state,
+        )

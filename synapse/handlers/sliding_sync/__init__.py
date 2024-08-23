@@ -45,13 +45,6 @@ from synapse.events.utils import parse_stripped_state_event, strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-    RoomSyncConfig,
-    StateValues,
-)
 from synapse.logging.opentracing import (
     SynapseTags,
     log_kv,
@@ -83,7 +76,16 @@ from synapse.types import (
     StreamToken,
     UserID,
 )
-from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    OperationType,
+    PerConnectionState,
+    RoomSyncConfig,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+    StateValues,
+)
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
@@ -206,7 +208,7 @@ class SlidingSyncHandler:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
-        self.connection_store = SlidingSyncConnectionStore()
+        self.connection_store = SlidingSyncConnectionStore(self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
 
     async def wait_for_sync_for_user(
@@ -331,11 +333,6 @@ class SlidingSyncHandler:
             )
         )
 
-        await self.connection_store.mark_token_seen(
-            sync_config=sync_config,
-            from_token=from_token,
-        )
-
         # Get all of the room IDs that the user should be able to see in the sync
         # response
         has_lists = sync_config.lists is not None and len(sync_config.lists) > 0
@@ -430,15 +427,11 @@ class SlidingSyncHandler:
                                     room_id
                                 )
                                 if existing_room_sync_config is not None:
-                                    existing_room_sync_config.combine_room_sync_config(
+                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
                                         room_sync_config
                                     )
-                                else:
-                                    # Make a copy so if we modify it later, it doesn't
-                                    # affect all references.
-                                    relevant_room_map[room_id] = (
-                                        room_sync_config.deep_copy()
-                                    )
+
+                                relevant_room_map[room_id] = room_sync_config
 
                                 room_ids_in_list.append(room_id)
 
@@ -503,11 +496,13 @@ class SlidingSyncHandler:
                     # and need to fetch more info about.
                     existing_room_sync_config = relevant_room_map.get(room_id)
                     if existing_room_sync_config is not None:
-                        existing_room_sync_config.combine_room_sync_config(
-                            room_sync_config
+                        room_sync_config = (
+                            existing_room_sync_config.combine_room_sync_config(
+                                room_sync_config
+                            )
                         )
-                    else:
-                        relevant_room_map[room_id] = room_sync_config
+
+                    relevant_room_map[room_id] = room_sync_config
 
         # Fetch room data
         rooms: Dict[str, SlidingSyncResult.RoomResult] = {}
