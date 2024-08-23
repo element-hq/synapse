@@ -1131,6 +1131,8 @@ class PersistEventsStore:
     ) -> None:
         """Update the current state stored in the datatabase for the given room"""
 
+        logger.info("asdf state_delta: %s", state_delta)
+
         if state_delta.is_noop():
             return
 

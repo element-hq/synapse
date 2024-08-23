@@ -1114,6 +1114,9 @@ class EventsPersistenceStorageController:
             if ev_id != existing_state.get(key)
         }
 
+        logger.info("asdf _calculate_state_delta existing_state %s", existing_state)
+        logger.info("asdf _calculate_state_delta current_state %s", current_state)
+
         return DeltaState(to_delete=to_delete, to_insert=to_insert)
 
     async def _is_server_still_joined(
