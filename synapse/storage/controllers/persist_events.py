@@ -502,8 +502,15 @@ class EventsPersistenceStorageController:
         """
         state = await self._calculate_current_state(room_id)
         delta = await self._calculate_state_delta(room_id, state)
+        sliding_sync_table_changes = (
+            await self.persist_events_store._calculate_sliding_sync_table_changes(
+                room_id, [], delta
+            )
+        )
 
-        await self.persist_events_store.update_current_state(room_id, delta)
+        await self.persist_events_store.update_current_state(
+            room_id, delta, sliding_sync_table_changes
+        )
 
     async def _calculate_current_state(self, room_id: str) -> StateMap[str]:
         """Calculate the current state of a room, based on the forward extremities

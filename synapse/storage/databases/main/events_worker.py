@@ -511,6 +511,8 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Dict[str, EventBase]:
         """Get events from the database
 
+        Unknown events will be omitted from the response.
+
         Args:
             event_ids: The event_ids of the events to fetch
 

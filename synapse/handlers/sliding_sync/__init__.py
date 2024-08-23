@@ -77,6 +77,7 @@ from synapse.types import (
     UserID,
 )
 from synapse.types.handlers.sliding_sync import (
+    SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
     HaveSentRoomFlag,
     MutablePerConnectionState,
     OperationType,
@@ -107,18 +108,6 @@ class Sentinel(enum.Enum):
     # defining a sentinel in this way allows mypy to correctly handle the
     # type of a dictionary lookup and subsequent type narrowing.
     UNSET_SENTINEL = object()
-
-
-# The event types that clients should consider as new activity.
-DEFAULT_BUMP_EVENT_TYPES = {
-    EventTypes.Create,
-    EventTypes.Message,
-    EventTypes.Encrypted,
-    EventTypes.Sticker,
-    EventTypes.CallInvite,
-    EventTypes.PollStart,
-    EventTypes.LiveLocationShareStart,
-}
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -2224,7 +2213,9 @@ class SlidingSyncHandler:
         # Figure out the last bump event in the room
         last_bump_event_result = (
             await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+                room_id,
+                to_token.room_key,
+                event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
             )
         )
 

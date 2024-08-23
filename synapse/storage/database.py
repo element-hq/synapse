@@ -35,6 +35,7 @@ from typing import (
     Iterable,
     Iterator,
     List,
+    Mapping,
     Optional,
     Sequence,
     Tuple,
@@ -1299,9 +1300,9 @@ class DatabasePool:
         self,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        values: Dict[str, Any],
-        insertion_values: Optional[Dict[str, Any]] = None,
+        keyvalues: Mapping[str, Any],
+        values: Mapping[str, Any],
+        insertion_values: Optional[Mapping[str, Any]] = None,
         where_clause: Optional[str] = None,
     ) -> bool:
         """
@@ -1344,9 +1345,9 @@ class DatabasePool:
         self,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        values: Dict[str, Any],
-        insertion_values: Optional[Dict[str, Any]] = None,
+        keyvalues: Mapping[str, Any],
+        values: Mapping[str, Any],
+        insertion_values: Optional[Mapping[str, Any]] = None,
         where_clause: Optional[str] = None,
         lock: bool = True,
     ) -> bool:
@@ -1425,9 +1426,9 @@ class DatabasePool:
         self,
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        values: Dict[str, Any],
-        insertion_values: Optional[Dict[str, Any]] = None,
+        keyvalues: Mapping[str, Any],
+        values: Mapping[str, Any],
+        insertion_values: Optional[Mapping[str, Any]] = None,
         where_clause: Optional[str] = None,
     ) -> bool:
         """
@@ -2011,8 +2012,8 @@ class DatabasePool:
     def simple_update_txn(
         txn: LoggingTransaction,
         table: str,
-        keyvalues: Dict[str, Any],
-        updatevalues: Dict[str, Any],
+        keyvalues: Mapping[str, Any],
+        updatevalues: Mapping[str, Any],
     ) -> int:
         """
         Update rows in the given database table.
