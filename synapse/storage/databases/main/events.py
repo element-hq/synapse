@@ -178,7 +178,7 @@ class SlidingSyncTableChanges:
     # correct latest value.
     #
     # This should be *some* value that points to a real event in the room if we are
-    # still joined to the room.
+    # still joined to the room and some state is changing (`to_insert` or `to_delete`).
     joined_room_best_effort_most_recent_stream_ordering: Optional[int]
     # Values to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: SlidingSyncStateInsertValues
@@ -393,6 +393,18 @@ class PersistEventsStore:
         """
         to_insert = delta_state.to_insert
         to_delete = delta_state.to_delete
+
+        # If no state is changing, we don't need to do anything. This can happen when a
+        # partial-stated room is re-syncing the current state.
+        if not to_insert and not to_delete:
+            return SlidingSyncTableChanges(
+                room_id=room_id,
+                joined_room_best_effort_most_recent_stream_ordering=None,
+                joined_room_updates={},
+                membership_snapshot_shared_insert_values={},
+                to_insert_membership_snapshots=[],
+                to_delete_membership_snapshots=[],
+            )
 
         event_map = {event.event_id: event for event, _ in events_and_contexts}
 
