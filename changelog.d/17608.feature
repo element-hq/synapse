@@ -1,0 +1,1 @@
+hash_password now accepts input from stdin

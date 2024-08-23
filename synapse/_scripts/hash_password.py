@@ -56,7 +56,9 @@ def main() -> None:
     password_pepper = password_config.get("pepper", password_pepper)
     password = args.password
 
-    if not password:
+    if not password and not sys.stdin.isatty():
+        password = sys.stdin.readline().strip()
+    elif not password:
         password = prompt_for_pass()
 
     # On Python 2, make sure we decode it to Unicode before we normalise it
