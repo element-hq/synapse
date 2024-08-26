@@ -1624,10 +1624,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 "We should have at-least one event in the room (our own join membership event for example) "
                 + "that isn't backfilled (negative `stream_ordering`)  if we are joined to the room."
             )
-            # Figure out the latest bump_stamp in the room. This could be `None` for a
+            # Figure out the latest `bump_stamp` in the room. This could be `None` for a
             # federated room you just joined where all of events are still `outliers` or
             # backfilled history. In the Sliding Sync API, we default to the user's
-            # membership event `stream_ordering` if we don't have a `bump_stamp`.
+            # membership event `stream_ordering` if we don't have a `bump_stamp` so
+            # having it as `None` in this table is fine.
             bump_stamp_event_pos_results = await self.get_last_event_pos_in_room(
                 room_id, event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
             )
