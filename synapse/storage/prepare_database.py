@@ -576,20 +576,20 @@ def _upgrade_existing_database(
     # foreground update for
     # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
     # https://github.com/element-hq/synapse/issues/TODO)
-    _clear_out_of_date_sliding_sync_tables(
+    _clear_stale_data_in_sliding_sync_tables(
         txn=cur,
     )
 
 
-def _clear_out_of_date_sliding_sync_tables(
+def _clear_stale_data_in_sliding_sync_tables(
     txn: LoggingTransaction,
 ) -> None:
     """
-    Clears out-of-date entries from the
+    Clears stale/out-of-date entries from the
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
 
     This accounts for when someone downgrades their Synapse version and then upgrades it
-    again. This will ensure that we don't have any out-of-date/stale data in the
+    again. This will ensure that we don't have any stale/out-of-date data in the
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables since any new
     events sent in rooms would have also needed to be written to the sliding sync
     tables. For example a new event needs to bump `event_stream_ordering` in
@@ -597,33 +597,28 @@ def _clear_out_of_date_sliding_sync_tables(
     name). Or another example of someone's membership changing in a room affecting
     `sliding_sync_membership_snapshots`.
 
+    This way, if a row exists in the sliding sync tables, we are able to rely on it
+    (accurate data). So if a row doesn't exist, we use a fallback to get the same info
+    until the background updates fill in the rows or a new event comes in triggering it
+    to be fully inserted.
+
     FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
     foreground update for
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
     https://github.com/element-hq/synapse/issues/TODO)
     """
 
-    _clear_out_of_date_sliding_sync_joined_rooms_table(txn)
-    _clear_out_of_date_sliding_sync_membership_snapshots_table(txn)
+    _clear_stale_data_in_sliding_sync_joined_rooms_table(txn)
+    _clear_stale_data_in_sliding_sync_membership_snapshots_table(txn)
 
 
-def _clear_out_of_date_sliding_sync_joined_rooms_table(
+def _clear_stale_data_in_sliding_sync_joined_rooms_table(
     txn: LoggingTransaction,
 ) -> None:
     """
-    Clears out-of-date entries from the `sliding_sync_joined_rooms` table.
+    Clears stale/out-of-date entries from the `sliding_sync_joined_rooms` table.
 
-    This accounts for when someone downgrades their Synapse version and then upgrades it
-    again. This will ensure that we don't have any out-of-date/stale data in the
-    `sliding_sync_joined_rooms` table since any new events sent in rooms would have also
-    needed to be written to the `sliding_sync_joined_rooms` table or some state in the
-    room changing (like the room name). For example a new event needs to bump
-    `event_stream_ordering` in `sliding_sync_joined_rooms`.
-
-    FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
-    foreground update for
-    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
-    https://github.com/element-hq/synapse/issues/TODO)
+    See `_clear_out_of_date_sliding_sync_tables()` description above for more context.
     """
 
     # Find the point when we stopped writing to the `sliding_sync_joined_rooms` table
@@ -673,22 +668,13 @@ def _clear_out_of_date_sliding_sync_joined_rooms_table(
         )
 
 
-def _clear_out_of_date_sliding_sync_membership_snapshots_table(
+def _clear_stale_data_in_sliding_sync_membership_snapshots_table(
     txn: LoggingTransaction,
 ) -> None:
     """
-    Clears out-of-date entries from the `sliding_sync_membership_snapshots` table.
+    Clears stale/out-of-date entries from the `sliding_sync_membership_snapshots` table.
 
-    This accounts for when someone downgrades their Synapse version and then upgrades it
-    again. This will ensure that we don't have any out-of-date/stale data in the
-    `sliding_sync_membership_snapshots` table since any new membership changes in rooms
-    would have also needed to be written to the `sliding_sync_membership_snapshots`
-    table.
-
-    FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
-    foreground update for
-    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
-    https://github.com/element-hq/synapse/issues/TODO)
+    See `_clear_out_of_date_sliding_sync_tables()` description above for more context.
     """
 
     # Find the point when we stopped writing to the `sliding_sync_membership_snapshots` table
