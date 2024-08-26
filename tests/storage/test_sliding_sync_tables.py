@@ -81,9 +81,9 @@ class _SlidingSyncMembershipSnapshotResult:
     forgotten: bool = False
 
 
-class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
+class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
     """
-    Tests to make sure the
+    Helpers to deal with testing that the
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` database tables are
     populated correctly.
     """
@@ -318,6 +318,14 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         )
 
         return persisted_event
+
+
+class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
+    """
+    Tests to make sure the
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` database tables are
+    populated and updated correctly as new events are sent.
+    """
 
     def test_joined_room_with_no_info(self) -> None:
         """
@@ -2407,6 +2415,183 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
             user2_snapshot,
         )
 
+    def test_membership_snapshot_forget(self) -> None:
+        """
+        Test forgetting a room will update `sliding_sync_membership_snapshots`
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        # User1 leaves the room (we have to leave in order to forget the room)
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # Check on the `sliding_sync_membership_snapshots` table (nothing should be
+        # forgotten yet)
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id, user1_id),
+                (room_id, user2_id),
+            },
+            exact=True,
+        )
+        # Holds the info according to the current state when the user joined
+        user1_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id,
+            user_id=user1_id,
+            sender=user1_id,
+            membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+            membership=Membership.LEAVE,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user1_id)
+            ].internal_metadata.stream_ordering,
+            has_known_state=True,
+            room_type=None,
+            room_name=None,
+            is_encrypted=False,
+            tombstone_successor_room_id=None,
+            # Room is not forgotten
+            forgotten=False,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
+            user1_snapshot,
+        )
+        # Holds the info according to the current state when the user joined
+        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
+            room_id=room_id,
+            user_id=user2_id,
+            sender=user2_id,
+            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
+            membership=Membership.JOIN,
+            event_stream_ordering=state_map[
+                (EventTypes.Member, user2_id)
+            ].internal_metadata.stream_ordering,
+            has_known_state=True,
+            room_type=None,
+            room_name=None,
+            is_encrypted=False,
+            tombstone_successor_room_id=None,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
+            user2_snapshot,
+        )
+
+        # Forget the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Check on the `sliding_sync_membership_snapshots` table
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id, user1_id),
+                (room_id, user2_id),
+            },
+            exact=True,
+        )
+        # Room is now forgotten for user1
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
+            attr.evolve(user1_snapshot, forgotten=True),
+        )
+        # Nothing changed for user2
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
+            user2_snapshot,
+        )
+
+    def test_membership_snapshot_missing_forget(
+        self,
+    ) -> None:
+        """
+        Test forgetting a room with no existing row in `sliding_sync_membership_snapshots`.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        # User1 leaves the room (we have to leave in order to forget the room)
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+
+        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
+        # happen during event creation.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_membership_snapshots",
+                column="room_id",
+                iterable=(room_id,),
+                keyvalues={},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_forgotten_missing",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Forget the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # It doesn't explode
+
+        # We still shouldn't find anything in the table because nothing has re-created them
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            set(),
+            exact=True,
+        )
+
+
+class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
+    """
+    Test the background updates that populate the `sliding_sync_joined_rooms` and
+    `sliding_sync_membership_snapshots` tables.
+    """
+
     def test_joined_background_update_missing(self) -> None:
         """
         Test that the background update for `sliding_sync_joined_rooms` populates missing rows
@@ -3986,174 +4171,4 @@ class SlidingSyncPrePopulatedTablesTestCase(HomeserverTestCase):
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
             user2_snapshot,
-        )
-
-    def test_membership_snapshot_forget(self) -> None:
-        """
-        Test forgetting a room will update `sliding_sync_membership_snapshots`
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
-
-        # User1 joins the room
-        self.helper.join(room_id, user1_id, tok=user1_tok)
-        # User1 leaves the room (we have to leave in order to forget the room)
-        self.helper.leave(room_id, user1_id, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id)
-        )
-
-        # Check on the `sliding_sync_membership_snapshots` table (nothing should be
-        # forgotten yet)
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (room_id, user1_id),
-                (room_id, user2_id),
-            },
-            exact=True,
-        )
-        # Holds the info according to the current state when the user joined
-        user1_snapshot = _SlidingSyncMembershipSnapshotResult(
-            room_id=room_id,
-            user_id=user1_id,
-            sender=user1_id,
-            membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
-            membership=Membership.LEAVE,
-            event_stream_ordering=state_map[
-                (EventTypes.Member, user1_id)
-            ].internal_metadata.stream_ordering,
-            has_known_state=True,
-            room_type=None,
-            room_name=None,
-            is_encrypted=False,
-            tombstone_successor_room_id=None,
-            # Room is not forgotten
-            forgotten=False,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
-            user1_snapshot,
-        )
-        # Holds the info according to the current state when the user joined
-        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
-            room_id=room_id,
-            user_id=user2_id,
-            sender=user2_id,
-            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
-            membership=Membership.JOIN,
-            event_stream_ordering=state_map[
-                (EventTypes.Member, user2_id)
-            ].internal_metadata.stream_ordering,
-            has_known_state=True,
-            room_type=None,
-            room_name=None,
-            is_encrypted=False,
-            tombstone_successor_room_id=None,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
-            user2_snapshot,
-        )
-
-        # Forget the room
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/rooms/{room_id}/forget",
-            content={},
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-
-        # Check on the `sliding_sync_membership_snapshots` table
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (room_id, user1_id),
-                (room_id, user2_id),
-            },
-            exact=True,
-        )
-        # Room is now forgotten for user1
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
-            attr.evolve(user1_snapshot, forgotten=True),
-        )
-        # Nothing changed for user2
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
-            user2_snapshot,
-        )
-
-    def test_membership_snapshot_missing_forget(
-        self,
-    ) -> None:
-        """
-        Test forgetting a room with no existing row in `sliding_sync_membership_snapshots`.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
-
-        # User1 joins the room
-        self.helper.join(room_id, user1_id, tok=user1_tok)
-        # User1 leaves the room (we have to leave in order to forget the room)
-        self.helper.leave(room_id, user1_id, tok=user1_tok)
-
-        # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
-        # happen during event creation.
-        self.get_success(
-            self.store.db_pool.simple_delete_many(
-                table="sliding_sync_membership_snapshots",
-                column="room_id",
-                iterable=(room_id,),
-                keyvalues={},
-                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_forgotten_missing",
-            )
-        )
-
-        # We shouldn't find anything in the table because we just deleted them in
-        # preparation for the test.
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            set(),
-            exact=True,
-        )
-
-        # Forget the room
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/rooms/{room_id}/forget",
-            content={},
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-
-        # It doesn't explode
-
-        # We still shouldn't find anything in the table because nothing has re-created them
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            set(),
-            exact=True,
         )
