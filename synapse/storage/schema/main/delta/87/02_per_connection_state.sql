@@ -28,6 +28,7 @@ CREATE TABLE sliding_sync_connections(
 );
 
 CREATE INDEX sliding_sync_connections_idx ON sliding_sync_connections(user_id, device_id, conn_id);
+CREATE INDEX sliding_sync_connections_ts_idx ON sliding_sync_connections(created_ts);
 
 -- We track per-connection state by associating changes to the state with
 -- connection positions. This ensures that we correctly track state even if we
