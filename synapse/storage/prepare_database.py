@@ -718,6 +718,12 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
 
     max_stream_ordering_sliding_sync_membership_snapshots_table = row[0]
 
+    # XXX: Since `forgotten` is simply a flag on the `room_memberships` table that is
+    # set out-of-band, there is no way to tell whether it was set while Synapse was
+    # downgraded. The only thing the user can do is `/forget` again if they run into
+    # this.
+    #
+    # This only picks up changes to memberships.
     txn.execute(
         """
         SELECT DISTINCT(user_id, room_id)
