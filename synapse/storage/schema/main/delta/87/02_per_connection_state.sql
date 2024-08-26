@@ -53,7 +53,7 @@ CREATE TABLE sliding_sync_connection_required_state(
     required_state TEXT NOT NULL  -- We store this as a json list of event type / state key tuples.
 );
 
-CREATE INDEX sliding_sync_connection_required_state_conn_pos ON sliding_sync_connections(connection_key);
+CREATE INDEX sliding_sync_connection_required_state_conn_pos ON sliding_sync_connection_required_state(connection_key);
 
 
 -- Stores the room configs we have seen for rooms in a connection.

@@ -73,6 +73,7 @@ class SlidingSyncConnectionStore:
         Raises:
             SlidingSyncUnknownPosition if the connection_token is unknown
         """
+        # If this is our first request, there is no previous connection state to fetch out of the database
         if from_token is None or from_token.connection_position == 0:
             return PerConnectionState()
 

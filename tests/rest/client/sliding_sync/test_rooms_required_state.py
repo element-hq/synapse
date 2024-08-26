@@ -196,7 +196,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             self.store.db_pool.simple_delete(
                 table="sliding_sync_connections",
                 keyvalues={"user_id": user1_id},
-                desc="clear_cache",
+                desc="clear_sliding_sync_connections_cache",
             )
         )
 

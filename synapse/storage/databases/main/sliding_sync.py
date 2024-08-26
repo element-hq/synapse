@@ -75,7 +75,7 @@ class SlidingSyncStore(SQLBaseStore):
         previous_connection_position: Optional[int],
         per_connection_state: "PerConnectionStateDB",
     ) -> int:
-        # First we fetch the (or create) the connection key associated with the
+        # First we fetch (or create) the connection key associated with the
         # previous connection position.
         if previous_connection_position is not None:
             # The `previous_connection_position` is a user-supplied value, so we
@@ -97,9 +97,11 @@ class SlidingSyncStore(SQLBaseStore):
 
             (connection_key,) = row
         else:
-            # We're restarting the connection, so we clear all existing
-            # connections. We do this here to ensure that if we get lots of
-            # one-shot requests we don't stack up lots of entries.
+            # We're restarting the connection, so we clear the previous existing data we
+            # used to track it. We do this here to ensure that if we get lots of
+            # one-shot requests we don't stack up lots of entries. We have `ON DELETE
+            # CASCADE` setup on the dependent tables so this will clear out all the
+            # associated data.
             self.db_pool.simple_delete_txn(
                 txn,
                 table="sliding_sync_connections",
@@ -373,6 +375,8 @@ class SlidingSyncStore(SQLBaseStore):
                 rooms[room_id] = have_sent_room
             elif stream == "receipts":
                 receipts[room_id] = have_sent_room
+            else
+                raise AssertionError(...)
 
         return PerConnectionStateDB(
             rooms=RoomStatusMap(rooms),
