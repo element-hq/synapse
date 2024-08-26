@@ -671,6 +671,22 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
             values=chunk,
         )
 
+    # Now kick-off the background update to catch-up with what we missed while Synapse
+    # was downgraded.
+    DatabasePool.simple_upsert_txn_native_upsert(
+        txn,
+        table="background_updates",
+        keyvalues={
+            "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
+        },
+        values={},
+        # Only insert the row if it doesn't already exist. If it already exists, we will
+        # eventually fill in the rows we're trying to populate.
+        insertion_values={
+            "progress_json": f'{ "last_event_stream_ordering": {str(max_stream_ordering_sliding_sync_joined_rooms_table)} }',
+        },
+    )
+
 
 def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
     txn: LoggingTransaction,
