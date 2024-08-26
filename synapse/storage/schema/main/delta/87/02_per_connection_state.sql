@@ -73,7 +73,7 @@ CREATE TABLE sliding_sync_connection_streams(
     stream TEXT NOT NULL,  -- e.g. "events" or "receipts"
     room_id TEXT NOT NULL,
     room_status TEXT NOT NULL,  -- "live" or "previously", i.e. the `HaveSentRoomFlag` value
-    last_position TEXT  -- For "previously" the token for the stream we have sent up to.
+    last_token TEXT  -- For "previously" the token for the stream we have sent up to.
 );
 
 CREATE UNIQUE INDEX sliding_sync_connection_streams_idx ON sliding_sync_connection_streams(connection_position, room_id, stream);

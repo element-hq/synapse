@@ -189,8 +189,8 @@ class SlidingSyncStore(SQLBaseStore):
         if previous_connection_position is not None:
             sql = """
                 INSERT INTO sliding_sync_connection_streams
-                (connection_position, stream, room_id, room_status, last_position)
-                SELECT ?, stream, room_id, room_status, last_position
+                (connection_position, stream, room_id, room_status, last_token)
+                SELECT ?, stream, room_id, room_status, last_token
                 FROM sliding_sync_connection_streams
                 WHERE connection_position = ?
             """
@@ -231,7 +231,7 @@ class SlidingSyncStore(SQLBaseStore):
             key_values=key_values,
             value_names=(
                 "room_status",
-                "last_position",
+                "last_token",
             ),
             value_values=value_values,
         )
@@ -364,12 +364,12 @@ class SlidingSyncStore(SQLBaseStore):
                 "stream",
                 "room_id",
                 "room_status",
-                "last_position",
+                "last_token",
             ),
         )
-        for stream, room_id, room_status, last_position in receipt_rows:
+        for stream, room_id, room_status, last_token in receipt_rows:
             have_sent_room: HaveSentRoom[str] = HaveSentRoom(
-                status=HaveSentRoomFlag(room_status), last_token=last_position
+                status=HaveSentRoomFlag(room_status), last_token=last_token
             )
             if stream == "rooms":
                 rooms[room_id] = have_sent_room
