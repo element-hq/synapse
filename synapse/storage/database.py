@@ -1115,7 +1115,7 @@ class DatabasePool:
                 ", ".join(k for k in returning),
             )
 
-            txn.execute(sql, values.values())
+            txn.execute(sql, list(values.values()))
             row = txn.fetchone()
             assert row is not None
             return row

@@ -375,7 +375,7 @@ class SlidingSyncStore(SQLBaseStore):
                 rooms[room_id] = have_sent_room
             elif stream == "receipts":
                 receipts[room_id] = have_sent_room
-            else
+            else:
                 raise AssertionError(...)
 
         return PerConnectionStateDB(
