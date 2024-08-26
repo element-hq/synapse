@@ -1680,15 +1680,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             dict
         """
 
-        stream_ordering, topological_ordering = cast(
-            Tuple[int, int],
-            self.db_pool.simple_select_one_txn(
-                txn,
-                "events",
-                keyvalues={"event_id": event_id, "room_id": room_id},
-                retcols=["stream_ordering", "topological_ordering"],
-            ),
+        row = self.db_pool.simple_select_one_txn(
+            txn,
+            "events",
+            keyvalues={"event_id": event_id, "room_id": room_id},
+            retcols=("stream_ordering", "topological_ordering"),
         )
+        stream_ordering = int(row[0])
+        topological_ordering = int(row[1])
 
         # Paginating backwards includes the event at the token, but paginating
         # forward doesn't.
