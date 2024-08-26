@@ -1323,7 +1323,7 @@ class DatabasePool:
 
         if lock:
             # We need to lock the table :(
-            self.engine.lock_table(txn, table)
+            txn.database_engine.lock_table(txn, table)
 
         def _getwhere(key: str) -> str:
             # If the value we're passing in is None (aka NULL), we need to use
@@ -1377,8 +1377,8 @@ class DatabasePool:
         # successfully inserted
         return True
 
+    @staticmethod
     def simple_upsert_txn_native_upsert(
-        self,
         txn: LoggingTransaction,
         table: str,
         keyvalues: Mapping[str, Any],

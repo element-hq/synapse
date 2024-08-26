@@ -1552,6 +1552,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[str]:
             # Fetch the set of room IDs that we want to update
+            #
+            # We use `current_state_events` table as the barometer for whether the
+            # server is still participating in the room because if we're
+            # `no_longer_in_room`, this table would be cleared out for the given
+            # `room_id`.
             txn.execute(
                 """
                 SELECT DISTINCT room_id FROM current_state_events

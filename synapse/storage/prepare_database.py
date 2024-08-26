@@ -42,6 +42,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 from synapse.storage.schema import SCHEMA_COMPAT_VERSION, SCHEMA_VERSION
 from synapse.storage.types import Cursor
@@ -576,12 +577,12 @@ def _upgrade_existing_database(
     # foreground update for
     # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
     # https://github.com/element-hq/synapse/issues/TODO)
-    _clear_stale_data_in_sliding_sync_tables(
+    _resolve_stale_data_in_sliding_sync_tables(
         txn=cur,
     )
 
 
-def _clear_stale_data_in_sliding_sync_tables(
+def _resolve_stale_data_in_sliding_sync_tables(
     txn: LoggingTransaction,
 ) -> None:
     """
@@ -598,7 +599,7 @@ def _clear_stale_data_in_sliding_sync_tables(
     `sliding_sync_membership_snapshots`.
 
     This way, if a row exists in the sliding sync tables, we are able to rely on it
-    (accurate data). So if a row doesn't exist, we use a fallback to get the same info
+    (accurate data). And if a row doesn't exist, we use a fallback to get the same info
     until the background updates fill in the rows or a new event comes in triggering it
     to be fully inserted.
 
@@ -608,17 +609,20 @@ def _clear_stale_data_in_sliding_sync_tables(
     https://github.com/element-hq/synapse/issues/TODO)
     """
 
-    _clear_stale_data_in_sliding_sync_joined_rooms_table(txn)
-    _clear_stale_data_in_sliding_sync_membership_snapshots_table(txn)
+    _resolve_stale_data_in_sliding_sync_joined_rooms_table(txn)
+    _resolve_stale_data_in_sliding_sync_membership_snapshots_table(txn)
 
 
-def _clear_stale_data_in_sliding_sync_joined_rooms_table(
+def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
     txn: LoggingTransaction,
 ) -> None:
     """
-    Clears stale/out-of-date entries from the `sliding_sync_joined_rooms` table.
+    Clears stale/out-of-date entries from the `sliding_sync_joined_rooms` table and
+    kicks-off the background update to catch-up with what we missed while Synapse was
+    downgraded.
 
-    See `_clear_out_of_date_sliding_sync_tables()` description above for more context.
+    See `_resolve_stale_data_in_sliding_sync_tables()` description above for more
+    context.
     """
 
     # Find the point when we stopped writing to the `sliding_sync_joined_rooms` table
@@ -668,13 +672,16 @@ def _clear_stale_data_in_sliding_sync_joined_rooms_table(
         )
 
 
-def _clear_stale_data_in_sliding_sync_membership_snapshots_table(
+def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
     txn: LoggingTransaction,
 ) -> None:
     """
-    Clears stale/out-of-date entries from the `sliding_sync_membership_snapshots` table.
+    Clears stale/out-of-date entries from the `sliding_sync_membership_snapshots` table
+    and kicks-off the background update to catch-up with what we missed while Synapse
+    was downgraded.
 
-    See `_clear_out_of_date_sliding_sync_tables()` description above for more context.
+    See `_resolve_stale_data_in_sliding_sync_tables()` description above for more
+    context.
     """
 
     # Find the point when we stopped writing to the `sliding_sync_membership_snapshots` table
@@ -698,7 +705,7 @@ def _clear_stale_data_in_sliding_sync_membership_snapshots_table(
     txn.execute(
         """
         SELECT DISTINCT(user_id, room_id)
-        FROM room_memberships
+        FROM local_current_membership
         WHERE event_stream_ordering > ?
         ORDER BY event_stream_ordering DESC
         """,
@@ -722,6 +729,22 @@ def _clear_stale_data_in_sliding_sync_membership_snapshots_table(
             keys=("user_id", "room_id"),
             values=chunk,
         )
+
+    # Now kick-off the background update to catch-up with what we missed while Synapse
+    # was downgraded.
+    DatabasePool.simple_upsert_txn_native_upsert(
+        txn,
+        table="background_updates",
+        keyvalues={
+            "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE
+        },
+        values={},
+        # Only insert the row if it doesn't already exist. If it already exists, we will
+        # eventually fill in the rows we're trying to populate.
+        insertion_values={
+            "progress_json": f'{ "last_event_stream_ordering": {str(max_stream_ordering_sliding_sync_membership_snapshots_table)} }',
+        },
+    )
 
 
 def _apply_module_schemas(
