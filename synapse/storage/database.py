@@ -1108,16 +1108,14 @@ class DatabasePool:
         """
 
         if txn.database_engine.supports_returning:
-            keys, vals = zip(*values.items())
-
             sql = "INSERT INTO %s (%s) VALUES(%s) RETURNING %s" % (
                 table,
-                ", ".join(k for k in keys),
-                ", ".join("?" for _ in keys),
+                ", ".join(k for k in values.keys()),
+                ", ".join("?" for _ in values.keys()),
                 ", ".join(k for k in returning),
             )
 
-            txn.execute(sql, vals)
+            txn.execute(sql, values.values())
             row = txn.fetchone()
             assert row is not None
             return row
