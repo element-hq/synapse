@@ -107,8 +107,12 @@ class SlidingSyncConnectionStore:
             else:
                 return 0
 
-        if from_token is not None and from_token.connection_position == 0:
-            from_token = None
+        # A from token with a zero connection position means there was no
+        # previously stored connection state, so we treat a zero the same as
+        # there being no previous position.
+        previous_connection_position = None
+        if from_token is not None and from_token.connection_position != 0:
+            previous_connection_position = from_token.connection_position
 
         conn_id = sync_config.conn_id or ""
 
@@ -119,6 +123,6 @@ class SlidingSyncConnectionStore:
             sync_config.user.to_string(),
             device_id,
             conn_id,
-            from_token.connection_position if from_token else None,
+            previous_connection_position,
             new_connection_state,
         )
