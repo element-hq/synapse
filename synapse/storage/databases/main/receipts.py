@@ -30,10 +30,12 @@ from typing import (
     Mapping,
     Optional,
     Sequence,
+    Set,
     Tuple,
     cast,
 )
 
+import attr
 from immutabledict import immutabledict
 
 from synapse.api.constants import EduTypes
@@ -63,6 +65,57 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class ReceiptInRoom:
+    receipt_type: str
+    user_id: str
+    event_id: str
+    thread_id: Optional[str]
+    data: JsonMapping
+
+    @staticmethod
+    def merge_to_content(receipts: Collection["ReceiptInRoom"]) -> JsonMapping:
+        """Merge the given set of receipts (in a room) into the receipt
+        content format.
+
+        Returns:
+            A mapping of the combined receipts: event ID -> receipt type -> user
+            ID -> receipt data.
+        """
+        # MSC4102: always replace threaded receipts with unthreaded ones if
+        # there is a clash. This means we will drop some receipts, but MSC4102
+        # is designed to drop semantically meaningless receipts, so this is
+        # okay. Previously, we would drop meaningful data!
+        #
+        # We do this by finding the unthreaded receipts, and then filtering out
+        # matching threaded receipts.
+
+        # Set of (user_id, event_id)
+        unthreaded_receipts: Set[Tuple[str, str]] = {
+            (receipt.user_id, receipt.event_id)
+            for receipt in receipts
+            if receipt.thread_id is None
+        }
+
+        # event_id -> receipt_type -> user_id -> receipt data
+        content: Dict[str, Dict[str, Dict[str, JsonMapping]]] = {}
+        for receipt in receipts:
+            data = receipt.data
+            if receipt.thread_id is not None:
+                if (receipt.user_id, receipt.event_id) in unthreaded_receipts:
+                    # Ignore threaded receipts if we have an unthreaded one.
+                    continue
+
+                data = dict(data)
+                data["thread_id"] = receipt.thread_id
+
+            content.setdefault(receipt.event_id, {}).setdefault(
+                receipt.receipt_type, {}
+            )[receipt.user_id] = data
+
+        return content
 
 
 class ReceiptsWorkerStore(SQLBaseStore):
