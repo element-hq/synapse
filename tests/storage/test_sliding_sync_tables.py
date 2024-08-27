@@ -4208,7 +4208,7 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
         # underlying background update to populate these tables is the same as this
         # catch-up routine, we are going to rely on
         # `SlidingSyncTablesBackgroundUpdatesTestCase` to cover that logic.
-        room_id_with_info = self.helper.create_room_as(user1_id, tok=user1_tok)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         # Get a snapshot of the `sliding_sync_joined_rooms` table before we add some state
         sliding_sync_joined_rooms_results_before_state = (
@@ -4216,13 +4216,13 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
         )
         self.assertIncludes(
             set(sliding_sync_joined_rooms_results_before_state.keys()),
-            {room_id_with_info},
+            {room_id},
             exact=True,
         )
 
         # Add a room name
         self.helper.send_state(
-            room_id_with_info,
+            room_id,
             EventTypes.Name,
             {"name": "my super duper room"},
             tok=user1_tok,
@@ -4244,16 +4244,16 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
         self.get_success(
             self.store.db_pool.simple_update(
                 table="sliding_sync_joined_rooms",
-                keyvalues={"room_id": room_id_with_info},
+                keyvalues={"room_id": room_id},
                 updatevalues={
                     # Clear the room name
                     "room_name": None,
                     # Reset the `event_stream_ordering` back to the value before the room name
                     "event_stream_ordering": sliding_sync_joined_rooms_results_before_state[
-                        room_id_with_info
+                        room_id
                     ].event_stream_ordering,
                 },
-                desc="sliding_sync_joined_rooms.test_joined_background_update_catch_up",
+                desc="simulate new events while Synapse was downgraded",
             )
         )
 
@@ -4283,7 +4283,97 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
         sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
         self.assertIncludes(
             set(sliding_sync_joined_rooms_results.keys()),
-            {room_id_with_info},
+            {room_id},
+            exact=True,
+        )
+
+    def test_joined_background_update_catch_up_no_rooms(self) -> None:
+        """
+        Test that if you start your homeserver with no rooms on a Synapse version that
+        supports the sliding sync tables and the historical background update completes
+        (because no rooms to process), then Synapse is downgraded and new rooms are
+        created/joined; when Synapse is upgraded, the rooms will be processed catch-up
+        routine is run.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Instead of testing with various levels of room state that should appear in the
+        # table, we're only using one room to keep this test simple. Because the
+        # underlying background update to populate these tables is the same as this
+        # catch-up routine, we are going to rely on
+        # `SlidingSyncTablesBackgroundUpdatesTestCase` to cover that logic.
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Get a snapshot of the `sliding_sync_joined_rooms` table before we add some state
+        sliding_sync_joined_rooms_results_before_state = (
+            self._get_sliding_sync_joined_rooms()
+        )
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results_before_state.keys()),
+            {room_id},
+            exact=True,
+        )
+
+        # Make sure all of the background updates have finished before we start the
+        # catch-up. Even though it should work fine if the other background update is
+        # still running, we want to see the catch-up routine restore the progress
+        # correctly.
+        #
+        # We also don't want the normal background update messing with our results so we
+        # run this before we do our manual database clean-up to simulate room being
+        # created while Synapse was downgraded.
+        self.wait_for_background_updates()
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the the room never made
+        # it into the table. This is to simulate the room being created while Synapse
+        # was downgraded.
+        self.get_success(
+            self.store.db_pool.simple_delete_many(
+                table="sliding_sync_joined_rooms",
+                column="room_id",
+                iterable=(room_id,),
+                keyvalues={},
+                desc="simulate room being created while Synapse was downgraded",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # The function under test. It should clear out stale data and start the
+        # background update to catch-up on the missing data.
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "_resolve_stale_data_in_sliding_sync_joined_rooms_table",
+                _resolve_stale_data_in_sliding_sync_joined_rooms_table,
+            )
+        )
+
+        # We still shouldn't find any data yet
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Wait for the catch-up background update to finish
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Ensure that the table is populated correctly after the catch-up background
+        # update finishes
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id},
             exact=True,
         )
 
