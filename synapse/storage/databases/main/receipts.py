@@ -534,7 +534,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
     async def get_linearized_receipts_for_events(
         self,
         room_and_event_ids: Collection[Tuple[str, str]],
-    ) -> Sequence[JsonMapping]:
+    ) -> Mapping[str, Sequence[ReceiptInRoom]]:
         """Get all receipts for the given set of events.
 
         Arguments:
@@ -544,6 +544,8 @@ class ReceiptsWorkerStore(SQLBaseStore):
         Returns:
             A list of receipts, one per room.
         """
+        if not room_and_event_ids:
+            return {}
 
         def get_linearized_receipts_for_events_txn(
             txn: LoggingTransaction,
@@ -590,14 +592,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
                     )
                 )
 
-        return [
-            {
-                "type": EduTypes.RECEIPT,
-                "room_id": room_id,
-                "content": ReceiptInRoom.merge_to_content(receipts),
-            }
-            for room_id, receipts in room_to_receipts.items()
-        ]
+        return room_to_receipts
 
     @cached(
         num_args=2,
@@ -669,6 +664,74 @@ class ReceiptsWorkerStore(SQLBaseStore):
             receipt_type_dict[user_id] = db_to_json(data)
 
         return results
+
+    async def get_linearized_receipts_for_user_in_rooms(
+        self, user_id: str, room_ids: StrCollection, to_key: MultiWriterStreamToken
+    ) -> Mapping[str, Sequence[ReceiptInRoom]]:
+        """Fetch all receipts for the user in the given room.
+
+        Returns:
+            A dict from room ID to receipts in the room.
+        """
+
+        def get_linearized_receipts_for_user_in_rooms_txn(
+            txn: LoggingTransaction,
+            batch_room_ids: StrCollection,
+        ) -> List[Tuple[str, str, str, str, Optional[str], str]]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "room_id", batch_room_ids
+            )
+
+            sql = f"""
+                SELECT instance_name, stream_id, room_id, receipt_type, user_id, event_id, thread_id, data
+                FROM receipts_linearized
+                WHERE {clause} AND user_id = ? AND stream_id <= ?
+            """
+
+            args.append(user_id)
+            args.append(to_key.get_max_stream_pos())
+
+            txn.execute(sql, args)
+
+            return [
+                (room_id, receipt_type, user_id, event_id, thread_id, data)
+                for instance_name, stream_id, room_id, receipt_type, user_id, event_id, thread_id, data in txn
+                if MultiWriterStreamToken.is_stream_position_in_range(
+                    low=None,
+                    high=to_key,
+                    instance_name=instance_name,
+                    pos=stream_id,
+                )
+            ]
+
+        # room_id -> receipts
+        room_to_receipts: Dict[str, List[ReceiptInRoom]] = {}
+        for batch in batch_iter(room_ids, 1000):
+            batch_results = await self.db_pool.runInteraction(
+                "get_linearized_receipts_for_events",
+                get_linearized_receipts_for_user_in_rooms_txn,
+                batch,
+            )
+
+            for (
+                room_id,
+                receipt_type,
+                user_id,
+                event_id,
+                thread_id,
+                data,
+            ) in batch_results:
+                room_to_receipts.setdefault(room_id, []).append(
+                    ReceiptInRoom(
+                        receipt_type=receipt_type,
+                        user_id=user_id,
+                        event_id=event_id,
+                        thread_id=thread_id,
+                        data=db_to_json(data),
+                    )
+                )
+
+        return room_to_receipts
 
     async def get_rooms_with_receipts_between(
         self,
