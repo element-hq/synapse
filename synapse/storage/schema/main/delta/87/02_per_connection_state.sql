@@ -44,6 +44,7 @@ CREATE TABLE sliding_sync_connection_positions(
 );
 
 CREATE INDEX sliding_sync_connection_positions_key ON sliding_sync_connection_positions(connection_key);
+CREATE INDEX sliding_sync_connection_positions_ts_idx ON sliding_sync_connection_positions(created_ts);
 
 
 -- To save space we deduplicate the `required_state` json by assigning IDs to
