@@ -13,6 +13,7 @@
 #
 
 
+import logging
 from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
 
 import attr
@@ -35,6 +36,8 @@ from synapse.util.caches.descriptors import cached
 
 if TYPE_CHECKING:
     from synapse.storage.databases.main import DataStore
+
+logger = logging.getLogger(__name__)
 
 
 class SlidingSyncStore(SQLBaseStore):
@@ -376,7 +379,9 @@ class SlidingSyncStore(SQLBaseStore):
             elif stream == "receipts":
                 receipts[room_id] = have_sent_room
             else:
-                raise AssertionError(...)
+                # For forwards compatibility we ignore unknown streams, as in
+                # future we want to be able to easily add more stream types.
+                logger.warning("Unrecognized sliding sync stream in DB %r", stream)
 
         return PerConnectionStateDB(
             rooms=RoomStatusMap(rooms),
