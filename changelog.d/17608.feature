@@ -1,1 +1,1 @@
-hash_password now accepts input from stdin
+Make `hash_password` accept password input from stdin.
