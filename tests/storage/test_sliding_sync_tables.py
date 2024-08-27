@@ -4172,3 +4172,27 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
             sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
             user2_snapshot,
         )
+
+
+class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
+    """
+    Test the background updates for catch-up after Synapse downgrade populate the `sliding_sync_joined_rooms` and
+    `sliding_sync_membership_snapshots` tables.
+
+    FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+    foreground update for
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+    https://github.com/element-hq/synapse/issues/TODO)
+    """
+
+    def test_joined_background_update_catch_up(self) -> None:
+        """
+        TODO
+        """
+        pass
+
+    def test_membership_snapshots_background_update_catch_up(self) -> None:
+        """
+        TODO
+        """
+        pass
