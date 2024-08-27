@@ -207,8 +207,7 @@ class RoomSummaryHandler:
             if not root_room_entry:
                 raise UnstableSpecAuthError(
                     500,
-                    "Failed to get room preview for %s"
-                    % (requested_room_id),
+                    "Failed to get room preview for %s" % (requested_room_id),
                     errcode=Codes.UNKNOWN,
                 )
             if not await self._is_remote_room_accessible(
