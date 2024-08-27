@@ -454,7 +454,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
         def f(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, str, str, Optional[str], str]]:
+        ) -> Mapping[str, Sequence[ReceiptInRoom]]:
             if from_key:
                 sql = """
                     SELECT stream_id, instance_name, room_id, receipt_type,
@@ -484,50 +484,46 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
                 txn.execute(sql + clause, [to_key.get_max_stream_pos()] + list(args))
 
-            return [
-                (room_id, receipt_type, user_id, event_id, thread_id, data)
-                for stream_id, instance_name, room_id, receipt_type, user_id, event_id, thread_id, data in txn
-                if MultiWriterStreamToken.is_stream_position_in_range(
+            results: Dict[str, List[ReceiptInRoom]] = {}
+            for (
+                stream_id,
+                instance_name,
+                room_id,
+                receipt_type,
+                user_id,
+                event_id,
+                thread_id,
+                data,
+            ) in txn:
+                if not MultiWriterStreamToken.is_stream_position_in_range(
                     from_key, to_key, instance_name, stream_id
+                ):
+                    continue
+
+                results.setdefault(room_id, []).append(
+                    ReceiptInRoom(
+                        receipt_type=receipt_type,
+                        user_id=user_id,
+                        event_id=event_id,
+                        thread_id=thread_id,
+                        data=db_to_json(data),
+                    )
                 )
-            ]
+
+            return results
 
         txn_results = await self.db_pool.runInteraction(
             "_get_linearized_receipts_for_rooms", f
         )
 
-        results: JsonDict = {}
-        for room_id, receipt_type, user_id, event_id, thread_id, data in txn_results:
-            # We want a single event per room, since we want to batch the
-            # receipts by room, event and type.
-            room_event = results.setdefault(
-                room_id,
-                {"type": EduTypes.RECEIPT, "room_id": room_id, "content": {}},
-            )
-
-            # The content is of the form:
-            # {"$foo:bar": { "read": { "@user:host": <receipt> }, .. }, .. }
-            event_entry = room_event["content"].setdefault(event_id, {})
-            receipt_type_dict = event_entry.setdefault(receipt_type, {})
-
-            # MSC4102: always replace threaded receipts with unthreaded ones if there is a clash.
-            # Specifically:
-            # - if there is no existing receipt, great, set the data.
-            # - if there is an existing receipt, is it threaded (thread_id present)?
-            #    YES: replace if this receipt has no thread id. NO: do not replace.
-            # This means we will drop some receipts, but MSC4102 is designed to drop semantically
-            # meaningless receipts, so this is okay. Previously, we would drop meaningful data!
-            receipt_data = db_to_json(data)
-            if user_id in receipt_type_dict:  # existing receipt
-                # is the existing receipt threaded and we are currently processing an unthreaded one?
-                if "thread_id" in receipt_type_dict[user_id] and not thread_id:
-                    receipt_type_dict[user_id] = (
-                        receipt_data  # replace with unthreaded one
-                    )
-            else:  # receipt does not exist, just set it
-                receipt_type_dict[user_id] = receipt_data
-                if thread_id:
-                    receipt_type_dict[user_id]["thread_id"] = thread_id
+        results: JsonDict = {
+            room_id: {
+                "room_id": room_id,
+                "type": EduTypes.RECEIPT,
+                "content": ReceiptInRoom.merge_to_content(receipts),
+            }
+            for room_id, receipts in txn_results.items()
+        }
 
         results = {
             room_id: [results[room_id]] if room_id in results else []
@@ -567,8 +563,8 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
             return txn.fetchall()
 
-        # room_id -> event_id -> receipt_type -> user_id -> receipt data
-        room_to_content: Dict[str, Dict[str, Dict[str, Dict[str, JsonMapping]]]] = {}
+        # room_id -> receipts
+        room_to_receipts: Dict[str, List[ReceiptInRoom]] = {}
         for batch in batch_iter(room_and_event_ids, 1000):
             batch_results = await self.db_pool.runInteraction(
                 "get_linearized_receipts_for_events",
@@ -584,32 +580,23 @@ class ReceiptsWorkerStore(SQLBaseStore):
                 thread_id,
                 data,
             ) in batch_results:
-                content = room_to_content.setdefault(room_id, {})
-                user_receipts = content.setdefault(event_id, {}).setdefault(
-                    receipt_type, {}
+                room_to_receipts.setdefault(room_id, []).append(
+                    ReceiptInRoom(
+                        receipt_type=receipt_type,
+                        user_id=user_id,
+                        event_id=event_id,
+                        thread_id=thread_id,
+                        data=db_to_json(data),
+                    )
                 )
 
-                receipt_data = db_to_json(data)
-                if thread_id is not None:
-                    receipt_data["thread_id"] = thread_id
-
-                # MSC4102: always replace threaded receipts with unthreaded ones
-                # if there is a clash. Specifically:
-                # - if there is no existing receipt, great, set the data.
-                # - if there is an existing receipt, is it threaded (thread_id
-                #    present)? YES: replace if this receipt has no thread id.
-                # NO: do not replace. This means we will drop some receipts, but
-                # MSC4102 is designed to drop semantically meaningless receipts,
-                # so this is okay. Previously, we would drop meaningful data!
-                if user_id in user_receipts:
-                    if "thread_id" in user_receipts[user_id] and not thread_id:
-                        user_receipts[user_id] = receipt_data
-                else:
-                    user_receipts[user_id] = receipt_data
-
         return [
-            {"type": EduTypes.RECEIPT, "room_id": room_id, "content": content}
-            for room_id, content in room_to_content.items()
+            {
+                "type": EduTypes.RECEIPT,
+                "room_id": room_id,
+                "content": ReceiptInRoom.merge_to_content(receipts),
+            }
+            for room_id, receipts in room_to_receipts.items()
         ]
 
     @cached(
