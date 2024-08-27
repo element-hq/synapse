@@ -40,6 +40,11 @@ from synapse.api.constants import (
 )
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
+from synapse.handlers.sliding_sync.types import (
+    HaveSentRoomFlag,
+    PerConnectionState,
+    RoomSyncConfig,
+)
 from synapse.logging.opentracing import start_active_span, trace
 from synapse.storage.databases.main.state import (
     ROOM_UNKNOWN_SENTINEL,
@@ -56,7 +61,7 @@ from synapse.types import (
     StreamToken,
     UserID,
 )
-from synapse.types.handlers import SlidingSyncConfig
+from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
 from synapse.types.state import StateFilter
 
 if TYPE_CHECKING:
@@ -64,6 +69,30 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class SlidingSyncInterestedRooms:
+    """The set of rooms and metadata a client is interested in based on their
+    sliding sync request.
+
+    Returned by `compute_interested_rooms`.
+
+    Attributes:
+        lists: A mapping from list name to the list result for the response
+        relevant_room_map: A map from rooms that match the sync request to
+            their room sync config.
+        relevant_rooms_to_send_map: Subset of `relevant_room_map` that
+            includes the rooms that *may* have relevant updates. Rooms not
+            in this map will definitely not have room updates (though
+            extensions may have updates in these rooms).
+    """
+
+    lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
+    relevant_room_map: Mapping[str, RoomSyncConfig]
+    relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig]
+    all_rooms: Set[str]
+    room_membership_for_user_map: Mapping[str, "_RoomMembershipForUser"]
 
 
 class Sentinel(enum.Enum):
@@ -154,6 +183,246 @@ class SlidingSyncRoomLists:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+        self.is_mine_id = hs.is_mine_id
+
+    async def compute_interested_rooms(
+        self,
+        sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> SlidingSyncInterestedRooms:
+        """Fetch the set of rooms that match the request"""
+
+        room_membership_for_user_map = (
+            await self.get_room_membership_for_user_at_to_token(
+                sync_config.user, to_token, from_token
+            )
+        )
+
+        # Assemble sliding window lists
+        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        # Keep track of the rooms that we can display and need to fetch more info about
+        relevant_room_map: Dict[str, RoomSyncConfig] = {}
+        # The set of room IDs of all rooms that could appear in any list. These
+        # include rooms that are outside the list ranges.
+        all_rooms: Set[str] = set()
+
+        if sync_config.lists:
+            with start_active_span("assemble_sliding_window_lists"):
+                sync_room_map = await self.filter_rooms_relevant_for_sync(
+                    user=sync_config.user,
+                    room_membership_for_user_map=room_membership_for_user_map,
+                )
+
+                for list_key, list_config in sync_config.lists.items():
+                    # Apply filters
+                    filtered_sync_room_map = sync_room_map
+                    if list_config.filters is not None:
+                        filtered_sync_room_map = await self.filter_rooms(
+                            sync_config.user,
+                            sync_room_map,
+                            list_config.filters,
+                            to_token,
+                        )
+
+                    # Find which rooms are partially stated and may need to be filtered out
+                    # depending on the `required_state` requested (see below).
+                    partial_state_room_map = (
+                        await self.store.is_partial_state_room_batched(
+                            filtered_sync_room_map.keys()
+                        )
+                    )
+
+                    # Since creating the `RoomSyncConfig` takes some work, let's just do it
+                    # once and make a copy whenever we need it.
+                    room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        filtered_sync_room_map = {
+                            room_id: room
+                            for room_id, room in filtered_sync_room_map.items()
+                            if not partial_state_room_map.get(room_id)
+                        }
+
+                    all_rooms.update(filtered_sync_room_map)
+
+                    # Sort the list
+                    sorted_room_info = await self.sort_rooms(
+                        filtered_sync_room_map, to_token
+                    )
+
+                    ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+                    if list_config.ranges:
+                        for range in list_config.ranges:
+                            room_ids_in_list: List[str] = []
+
+                            # We're going to loop through the sorted list of rooms starting
+                            # at the range start index and keep adding rooms until we fill
+                            # up the range or run out of rooms.
+                            #
+                            # Both sides of range are inclusive so we `+ 1`
+                            max_num_rooms = range[1] - range[0] + 1
+                            for room_membership in sorted_room_info[range[0] :]:
+                                room_id = room_membership.room_id
+
+                                if len(room_ids_in_list) >= max_num_rooms:
+                                    break
+
+                                # Take the superset of the `RoomSyncConfig` for each room.
+                                #
+                                # Update our `relevant_room_map` with the room we're going
+                                # to display and need to fetch more info about.
+                                existing_room_sync_config = relevant_room_map.get(
+                                    room_id
+                                )
+                                if existing_room_sync_config is not None:
+                                    existing_room_sync_config.combine_room_sync_config(
+                                        room_sync_config
+                                    )
+                                else:
+                                    # Make a copy so if we modify it later, it doesn't
+                                    # affect all references.
+                                    relevant_room_map[room_id] = (
+                                        room_sync_config.deep_copy()
+                                    )
+
+                                room_ids_in_list.append(room_id)
+
+                            ops.append(
+                                SlidingSyncResult.SlidingWindowList.Operation(
+                                    op=OperationType.SYNC,
+                                    range=range,
+                                    room_ids=room_ids_in_list,
+                                )
+                            )
+
+                    lists[list_key] = SlidingSyncResult.SlidingWindowList(
+                        count=len(sorted_room_info),
+                        ops=ops,
+                    )
+
+        if sync_config.room_subscriptions:
+            with start_active_span("assemble_room_subscriptions"):
+                # Find which rooms are partially stated and may need to be filtered out
+                # depending on the `required_state` requested (see below).
+                partial_state_room_map = await self.store.is_partial_state_room_batched(
+                    sync_config.room_subscriptions.keys()
+                )
+
+                for (
+                    room_id,
+                    room_subscription,
+                ) in sync_config.room_subscriptions.items():
+                    room_membership_for_user_at_to_token = (
+                        await self.check_room_subscription_allowed_for_user(
+                            room_id=room_id,
+                            room_membership_for_user_map=room_membership_for_user_map,
+                            to_token=to_token,
+                        )
+                    )
+
+                    # Skip this room if the user isn't allowed to see it
+                    if not room_membership_for_user_at_to_token:
+                        continue
+
+                    all_rooms.add(room_id)
+
+                    room_membership_for_user_map[room_id] = (
+                        room_membership_for_user_at_to_token
+                    )
+
+                    # Take the superset of the `RoomSyncConfig` for each room.
+                    room_sync_config = RoomSyncConfig.from_room_config(
+                        room_subscription
+                    )
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        if partial_state_room_map.get(room_id):
+                            continue
+
+                    all_rooms.add(room_id)
+
+                    # Update our `relevant_room_map` with the room we're going to display
+                    # and need to fetch more info about.
+                    existing_room_sync_config = relevant_room_map.get(room_id)
+                    if existing_room_sync_config is not None:
+                        existing_room_sync_config.combine_room_sync_config(
+                            room_sync_config
+                        )
+                    else:
+                        relevant_room_map[room_id] = room_sync_config
+
+        # Filtered subset of `relevant_room_map` for rooms that may have updates
+        # (in the event stream)
+        relevant_rooms_to_send_map: Dict[str, RoomSyncConfig] = relevant_room_map
+        if relevant_room_map:
+            with start_active_span("filter_relevant_rooms_to_send"):
+                if from_token:
+                    rooms_should_send = set()
+
+                    # First we check if there are rooms that match a list/room
+                    # subscription and have updates we need to send (i.e. either because
+                    # we haven't sent the room down, or we have but there are missing
+                    # updates).
+                    for room_id, room_config in relevant_room_map.items():
+                        prev_room_sync_config = (
+                            previous_connection_state.room_configs.get(room_id)
+                        )
+                        if prev_room_sync_config is not None:
+                            # Always include rooms whose timeline limit has increased.
+                            # (see the "XXX: Odd behavior" described below)
+                            if (
+                                prev_room_sync_config.timeline_limit
+                                < room_config.timeline_limit
+                            ):
+                                rooms_should_send.add(room_id)
+                                continue
+
+                        status = previous_connection_state.rooms.have_sent_room(room_id)
+                        if (
+                            # The room was never sent down before so the client needs to know
+                            # about it regardless of any updates.
+                            status.status == HaveSentRoomFlag.NEVER
+                            # `PREVIOUSLY` literally means the "room was sent down before *AND*
+                            # there are updates we haven't sent down" so we already know this
+                            # room has updates.
+                            or status.status == HaveSentRoomFlag.PREVIOUSLY
+                        ):
+                            rooms_should_send.add(room_id)
+                        elif status.status == HaveSentRoomFlag.LIVE:
+                            # We know that we've sent all updates up until `from_token`,
+                            # so we just need to check if there have been updates since
+                            # then.
+                            pass
+                        else:
+                            assert_never(status.status)
+
+                    # We only need to check for new events since any state changes
+                    # will also come down as new events.
+                    rooms_that_have_updates = (
+                        self.store.get_rooms_that_might_have_updates(
+                            relevant_room_map.keys(), from_token.room_key
+                        )
+                    )
+                    rooms_should_send.update(rooms_that_have_updates)
+                    relevant_rooms_to_send_map = {
+                        room_id: room_sync_config
+                        for room_id, room_sync_config in relevant_room_map.items()
+                        if room_id in rooms_should_send
+                    }
+
+        return SlidingSyncInterestedRooms(
+            lists=lists,
+            relevant_room_map=relevant_room_map,
+            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
+            all_rooms=all_rooms,
+            room_membership_for_user_map=room_membership_for_user_map,
+        )
 
     @trace
     async def get_room_membership_for_user_at_to_token(
