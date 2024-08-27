@@ -24,6 +24,7 @@ import os
 import re
 from collections import Counter
 from typing import (
+    cast,
     Collection,
     Counter as CounterType,
     Generator,
@@ -36,6 +37,7 @@ from typing import (
 
 import attr
 
+from synapse.util import Clock, json_encoder
 from synapse.config.homeserver import HomeServerConfig
 from synapse.storage.database import (
     DatabasePool,
@@ -683,7 +685,13 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
         # Only insert the row if it doesn't already exist. If it already exists, we will
         # eventually fill in the rows we're trying to populate.
         insertion_values={
-            "progress_json": f'{ "last_event_stream_ordering": {str(max_stream_ordering_sliding_sync_joined_rooms_table)} }',
+            "progress_json": json_encoder.encode(
+                {
+                    "last_event_stream_ordering": {
+                        str(max_stream_ordering_sliding_sync_joined_rooms_table)
+                    }
+                }
+            ),
         },
     )
 
@@ -710,50 +718,58 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
         """,
     )
 
-    row = txn.fetchone()
-    # We have nothing written to the `sliding_sync_membership_snapshots` table so there is
-    # nothing to clean up
-    if row is None:
-        return
+    # If we have nothing written to the `sliding_sync_membership_snapshots` table,
+    # there is nothing to clean up
+    row = cast(Tuple[int], txn.fetchone())
+    max_stream_ordering_sliding_sync_membership_snapshots_table = None
+    if row is not None:
+        max_stream_ordering_sliding_sync_membership_snapshots_table = row[0]
 
-    max_stream_ordering_sliding_sync_membership_snapshots_table = row[0]
-
-    # XXX: Since `forgotten` is simply a flag on the `room_memberships` table that is
-    # set out-of-band, there is no way to tell whether it was set while Synapse was
-    # downgraded. The only thing the user can do is `/forget` again if they run into
-    # this.
-    #
-    # This only picks up changes to memberships.
-    txn.execute(
-        """
-        SELECT DISTINCT(user_id, room_id)
-        FROM local_current_membership
-        WHERE event_stream_ordering > ?
-        ORDER BY event_stream_ordering DESC
-        """,
-        (max_stream_ordering_sliding_sync_membership_snapshots_table,),
-    )
-
-    membership_rows = txn.fetchall()
-    # No new events have been written to the `events` table since the last time we wrote
-    # to the `sliding_sync_membership_snapshots` table so there is nothing to clean up.
-    # This is the expected normal scenario for people who have not downgraded their
-    # Synapse version.
-    if not membership_rows:
-        return
-
-    for chunk in batch_iter(membership_rows, 1000):
-        # Handle updating the `sliding_sync_membership_snapshots` table
+        # XXX: Since `forgotten` is simply a flag on the `room_memberships` table that is
+        # set out-of-band, there is no way to tell whether it was set while Synapse was
+        # downgraded. The only thing the user can do is `/forget` again if they run into
+        # this.
         #
-        DatabasePool.simple_delete_many_batch_txn(
-            txn,
-            table="sliding_sync_membership_snapshots",
-            keys=("user_id", "room_id"),
-            values=chunk,
+        # This only picks up changes to memberships.
+        txn.execute(
+            """
+            SELECT DISTINCT(user_id, room_id)
+            FROM local_current_membership
+            WHERE event_stream_ordering > ?
+            ORDER BY event_stream_ordering DESC
+            """,
+            (max_stream_ordering_sliding_sync_membership_snapshots_table,),
         )
+
+        membership_rows = txn.fetchall()
+        # No new events have been written to the `events` table since the last time we wrote
+        # to the `sliding_sync_membership_snapshots` table so there is nothing to clean up.
+        # This is the expected normal scenario for people who have not downgraded their
+        # Synapse version.
+        if not membership_rows:
+            return
+
+        for chunk in batch_iter(membership_rows, 1000):
+            # Handle updating the `sliding_sync_membership_snapshots` table
+            #
+            DatabasePool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_membership_snapshots",
+                keys=("user_id", "room_id"),
+                values=chunk,
+            )
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.
+    #
+    progress_json = {}
+    if max_stream_ordering_sliding_sync_membership_snapshots_table is not None:
+        progress_json["last_event_stream_ordering"] = (
+            max_stream_ordering_sliding_sync_membership_snapshots_table
+        )
+
+    # We still need to kick off the background update to catch-up regardless of whether
+    # there was anything to clean up.
     DatabasePool.simple_upsert_txn_native_upsert(
         txn,
         table="background_updates",
@@ -764,7 +780,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
         # Only insert the row if it doesn't already exist. If it already exists, we will
         # eventually fill in the rows we're trying to populate.
         insertion_values={
-            "progress_json": f'{ "last_event_stream_ordering": {str(max_stream_ordering_sliding_sync_membership_snapshots_table)} }',
+            "progress_json": json_encoder.encode(progress_json),
         },
     )
 
