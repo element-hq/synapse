@@ -24,7 +24,6 @@ import os
 import re
 from collections import Counter
 from typing import (
-    cast,
     Collection,
     Counter as CounterType,
     Generator,
@@ -33,11 +32,11 @@ from typing import (
     Optional,
     TextIO,
     Tuple,
+    cast,
 )
 
 import attr
 
-from synapse.util import Clock, json_encoder
 from synapse.config.homeserver import HomeServerConfig
 from synapse.storage.database import (
     DatabasePool,
@@ -49,6 +48,7 @@ from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3E
 from synapse.storage.schema import SCHEMA_COMPAT_VERSION, SCHEMA_VERSION
 from synapse.storage.types import Cursor
 from synapse.types import JsonDict
+from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter
 
 logger = logging.getLogger(__name__)

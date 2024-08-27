@@ -34,6 +34,9 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
+from synapse.storage.prepare_database import (
+    _resolve_stale_data_in_sliding_sync_joined_rooms_table,
+)
 from synapse.util import Clock
 
 from tests.test_utils.event_injection import create_event
@@ -4176,8 +4179,14 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
 
 class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
     """
-    Test the background updates for catch-up after Synapse downgrade populate the `sliding_sync_joined_rooms` and
-    `sliding_sync_membership_snapshots` tables.
+    Test the background updates for catch-up after Synapse downgrade to populate the
+    `sliding_sync_joined_rooms` and `sliding_sync_membership_snapshots` tables.
+
+    This to test the "catch-up" version of the background update vs the "normal"
+    background update to populate the tables with all of the historical data. Both
+    versions share the same background update but just serve different purposes. We
+    check if the "catch-up" version needs to run on start-up based on whether there have
+    been any changes to rooms that aren't reflected in the sliding sync tables.
 
     FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
     foreground update for
@@ -4187,12 +4196,98 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
 
     def test_joined_background_update_catch_up(self) -> None:
         """
-        TODO
+        Test that new events while Synapse is downgraded (making
+        `sliding_sync_joined_rooms` stale) will be caught when Synapse is upgraded and
+        the catch-up routine is run.
         """
-        pass
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Instead of testing with various levels of room state that should appear in the
+        # table, we're only using one room to keep this test simple. Because the
+        # underlying background update to populate these tables is the same as this
+        # catch-up routine, we are going to rely on
+        # `SlidingSyncTablesBackgroundUpdatesTestCase` to cover that logic.
+        room_id_with_info = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Get a snapshot of the `sliding_sync_joined_rooms` table before we add some state
+        sliding_sync_joined_rooms_results_before_state = (
+            self._get_sliding_sync_joined_rooms()
+        )
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results_before_state.keys()),
+            {room_id_with_info},
+            exact=True,
+        )
+
+        # Add a room name
+        self.helper.send_state(
+            room_id_with_info,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user1_tok,
+        )
+
+        # Make sure all of the background updates have finished before we start the
+        # catch-up. Even though it should work fine if the other background update is
+        # still running, we want to see the catch-up routine restore the progress
+        # correctly.
+        #
+        # We also don't want the normal background update messing with our results so we
+        # run this before we do our manual database clean-up to simulate new events
+        # being sent while Synapse was downgraded.
+        self.wait_for_background_updates()
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the the room name
+        # never made it into the table. This is to simulate the room name event
+        # being sent while Synapse was downgraded.
+        self.get_success(
+            self.store.db_pool.simple_update(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id_with_info},
+                updatevalues={
+                    # Clear the room name
+                    "room_name": None,
+                    # Reset the `event_stream_ordering` back to the value before the room name
+                    "event_stream_ordering": sliding_sync_joined_rooms_results_before_state[
+                        room_id_with_info
+                    ].event_stream_ordering,
+                },
+                desc="sliding_sync_joined_rooms.test_joined_background_update_catch_up",
+            )
+        )
+
+        # The function under test. It should clear out stale data and start the
+        # background update to catch-up on the missing data.
+        self.get_success(
+            self.store.db_pool.runInteraction(
+                "_resolve_stale_data_in_sliding_sync_joined_rooms_table",
+                _resolve_stale_data_in_sliding_sync_joined_rooms_table,
+            )
+        )
+
+        # Ensure that the stale data is deleted from the table
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Wait for the catch-up background update to finish
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Ensure that the table is populated correctly after the catch-up background
+        # update finishes
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id_with_info},
+            exact=True,
+        )
 
     def test_membership_snapshots_background_update_catch_up(self) -> None:
         """
         TODO
         """
-        pass
