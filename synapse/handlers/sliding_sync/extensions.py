@@ -484,15 +484,21 @@ class SlidingSyncExtensionHandler:
                     initial_rooms.add(room_id)
                     continue
 
-                # If we're sending down the room from scratch again for some reason, we
-                # should always resend the receipts as well (regardless of if
-                # we've sent them down before). This is to mimic the behaviour
-                # of what happens on initial sync, where you get a chunk of
-                # timeline with all of the corresponding receipts for the events in the timeline.
+                # If we're sending down the room from scratch again for some
+                # reason, we should always resend the receipts as well
+                # (regardless of if we've sent them down before). This is to
+                # mimic the behaviour of what happens on initial sync, where you
+                # get a chunk of timeline with all of the corresponding receipts
+                # for the events in the timeline.
+                #
+                # We also resend down receipts when we "expand" the timeline,
+                # (see the "XXX: Odd behavior" in
+                # `synapse.handlers.sliding_sync`).
                 room_result = actual_room_response_map.get(room_id)
-                if room_result is not None and room_result.initial:
-                    initial_rooms.add(room_id)
-                    continue
+                if room_result is not None:
+                    if room_result.initial or room_result.unstable_expanded_timeline:
+                        initial_rooms.add(room_id)
+                        continue
 
                 room_status = previous_connection_state.receipts.have_sent_room(room_id)
                 if room_status.status == HaveSentRoomFlag.LIVE:
