@@ -1595,11 +1595,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # `_resolve_stale_data_in_sliding_sync_tables()`).
             txn.execute(
                 """
-                SELECT room_id, max(event_stream_ordering)
+                SELECT room_id, MAX(event_stream_ordering)
                 FROM current_state_events
                 WHERE event_stream_ordering > ?
                 GROUP BY room_id
-                ORDER BY event_stream_ordering ASC
+                ORDER BY MAX(event_stream_ordering) ASC
                 LIMIT ?
                 """,
                 (last_event_stream_ordering, batch_size),
