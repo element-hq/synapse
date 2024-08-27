@@ -63,7 +63,7 @@ class SlidingSyncConnectionStore:
 
     store: "DataStore"
 
-    async def get_per_connection_state(
+    async def get_and_clear_connection_positions(
         self,
         sync_config: SlidingSyncConfig,
         from_token: Optional[SlidingSyncStreamToken],
@@ -82,7 +82,7 @@ class SlidingSyncConnectionStore:
         device_id = sync_config.requester.device_id
         assert device_id is not None
 
-        return await self.store.get_per_connection_state(
+        return await self.store.get_and_clear_connection_positions(
             sync_config.user.to_string(),
             device_id,
             conn_id,

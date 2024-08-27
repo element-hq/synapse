@@ -328,7 +328,7 @@ class SlidingSyncHandler:
         # amount of time (more with round-trips and re-processing) in the end to
         # get everything again.
         previous_connection_state = (
-            await self.connection_store.get_per_connection_state(
+            await self.connection_store.get_and_clear_connection_positions(
                 sync_config, from_token
             )
         )

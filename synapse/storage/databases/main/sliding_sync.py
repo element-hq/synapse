@@ -261,14 +261,14 @@ class SlidingSyncStore(SQLBaseStore):
         return connection_position
 
     @cached(iterable=True, max_entries=100000)
-    async def get_per_connection_state(
+    async def get_and_clear_connection_positions(
         self, user_id: str, device_id: str, conn_id: str, connection_position: int
     ) -> "PerConnectionState":
         """Get the per-connection state for the given connection position."""
 
         per_connection_state_db = await self.db_pool.runInteraction(
-            "get_per_connection_state",
-            self._get_per_connection_state_txn,
+            "get_and_clear_connection_positions",
+            self._get_and_clear_connection_positions_txn,
             user_id=user_id,
             device_id=device_id,
             conn_id=conn_id,
@@ -277,7 +277,7 @@ class SlidingSyncStore(SQLBaseStore):
         store = cast("DataStore", self)
         return await per_connection_state_db.to_state(store)
 
-    def _get_per_connection_state_txn(
+    def _get_and_clear_connection_positions_txn(
         self,
         txn: LoggingTransaction,
         user_id: str,
