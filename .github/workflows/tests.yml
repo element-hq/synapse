@@ -131,15 +131,8 @@ jobs:
         with:
           install-project: "false"
 
-      - name: Import order (isort)
-        run: poetry run isort --check --diff .
-
-      - name: Code style (black)
-        run: poetry run black --check --diff .
-
-      - name: Semantic checks (ruff)
-        # --quiet suppresses the update check.
-        run: poetry run ruff check --quiet .
+      - name: Check style
+        run: poetry run ruff check --output-format=github .
 
   lint-mypy:
     runs-on: ubuntu-latest
