@@ -457,6 +457,8 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Optional[EventBase]:
         """Get an event from the database by event_id.
 
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_id: The event_id of the event to fetch
 
@@ -513,6 +515,8 @@ class EventsWorkerStore(SQLBaseStore):
 
         Unknown events will be omitted from the response.
 
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_ids: The event_ids of the events to fetch
 
@@ -554,6 +558,8 @@ class EventsWorkerStore(SQLBaseStore):
         as given by `event_ids` arg.
 
         Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
 
         Args:
             event_ids: The event_ids of the events to fetch

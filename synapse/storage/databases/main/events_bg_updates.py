@@ -1650,7 +1650,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             current_state_map: StateMap[EventBase] = {
                 state_key: fetched_events[event_id]
                 for state_key, event_id in current_state_ids_map.items()
+                # `get_events(...)` will filter out events for unknown room versions
+                if event_id in fetched_events
             }
+
+            # Can happen for unknown room versions (old room versions that aren't known
+            # anymore) since `get_events(...)` will filter out events for unknown room
+            # versions
+            if not current_state_map:
+                continue
 
             state_insert_values = (
                 PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
@@ -1929,7 +1937,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 current_state_map: StateMap[EventBase] = {
                     state_key: fetched_events[event_id]
                     for state_key, event_id in current_state_ids_map.items()
+                    # `get_events(...)` will filter out events for unknown room versions
+                    if event_id in fetched_events
                 }
+
+                # Can happen for unknown room versions (old room versions that aren't known
+                # anymore) since `get_events(...)` will filter out events for unknown room
+                # versions
+                if not current_state_map:
+                    continue
 
                 state_insert_values = (
                     PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
@@ -2006,7 +2022,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 state_map: StateMap[EventBase] = {
                     state_key: fetched_events[event_id]
                     for state_key, event_id in state_ids_map.items()
+                    # `get_events(...)` will filter out events for unknown room versions
+                    if event_id in fetched_events
                 }
+
+                # Can happen for unknown room versions (old room versions that aren't known
+                # anymore) since `get_events(...)` will filter out events for unknown room
+                # versions
+                if not state_map:
+                    continue
 
                 state_insert_values = (
                     PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
