@@ -1865,6 +1865,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Fetch the set of event IDs that we want to update
 
             if initial_phase:
+                # There are some old out-of-band memberships (before
+                # https://github.com/matrix-org/synapse/issues/6983) where we don't have
+                # the corresponding room stored in the `rooms` table`. We use `INNER
+                # JOIN rooms USING (room_id)` to ignore those events because we have a
+                # `FOREIGN KEY` constraint on the `sliding_sync_membership_snapshots`
+                # table. This means we will be ignoring invites/invite-rejections from
+                # before 2020 but that's probably *fine*.
                 txn.execute(
                     """
                     SELECT
@@ -1877,6 +1884,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.outlier
                     FROM local_current_membership as c
                     INNER JOIN events AS e USING (event_id)
+                    INNER JOIN rooms USING (room_id)
                     WHERE c.room_id > ?
                     ORDER BY c.room_id ASC
                     LIMIT ?
