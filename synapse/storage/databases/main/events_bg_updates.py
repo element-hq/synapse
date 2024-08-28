@@ -1861,21 +1861,20 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, str, str, str, str, int, bool]]:
+        ) -> List[Tuple[str, Optional[str], str, str, str, str, int, bool]]:
             # Fetch the set of event IDs that we want to update
 
             if initial_phase:
                 # There are some old out-of-band memberships (before
                 # https://github.com/matrix-org/synapse/issues/6983) where we don't have
-                # the corresponding room stored in the `rooms` table`. We use `INNER
-                # JOIN rooms USING (room_id)` to ignore those events because we have a
-                # `FOREIGN KEY` constraint on the `sliding_sync_membership_snapshots`
-                # table. This means we will be ignoring invites/invite-rejections from
-                # before 2020 but that's probably *fine*.
+                # the corresponding room stored in the `rooms` table`. We use `LEFT JOIN
+                # rooms AS r USING (room_id)` to find the rooms missing from `rooms` and
+                # insert a row for them below.
                 txn.execute(
                     """
                     SELECT
                         c.room_id,
+                        r.room_id,
                         c.user_id,
                         e.sender,
                         c.event_id,
@@ -1884,7 +1883,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.outlier
                     FROM local_current_membership as c
                     INNER JOIN events AS e USING (event_id)
-                    INNER JOIN rooms USING (room_id)
+                    LEFT JOIN rooms AS r USING (room_id)
                     WHERE c.room_id > ?
                     ORDER BY c.room_id ASC
                     LIMIT ?
@@ -1897,9 +1896,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # to start the catch-up process, we can safely assume that it will
                 # eventually get to the rooms we want to catch-up on anyway (see
                 # `_resolve_stale_data_in_sliding_sync_tables()`).
+                #
+                # `c.room_id` is duplicated to make it match what we're doing in the
+                # `initial_phase`. But we can avoid doing the extra `rooms` table join
+                # because we can assume all of these new events won't have this problem.
                 txn.execute(
                     """
                     SELECT
+                        c.room_id,
                         c.room_id,
                         c.user_id,
                         e.sender,
@@ -1919,7 +1923,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 raise Exception("last_event_stream_ordering should not be None")
 
             memberships_to_update_rows = cast(
-                List[Tuple[str, str, str, str, str, int, bool]], txn.fetchall()
+                List[Tuple[str, Optional[str], str, str, str, str, int, bool]],
+                txn.fetchall(),
             )
 
             return memberships_to_update_rows
@@ -1979,6 +1984,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         )
         for (
             room_id,
+            room_id_from_rooms_table,
             user_id,
             sender,
             membership_event_id,
@@ -1995,6 +2001,26 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 Membership.LEAVE,
                 Membership.BAN,
             )
+
+            # There are some old out-of-band memberships (before
+            # https://github.com/matrix-org/synapse/issues/6983) where we don't have the
+            # corresponding room stored in the `rooms` table`. We have a `FOREIGN KEY`
+            # constraint on the `sliding_sync_membership_snapshots` table so we have to
+            # fix-up these memberships by adding the room to the `rooms` table.
+            if room_id_from_rooms_table is None:
+                await self.db_pool.simple_insert(
+                    table="rooms",
+                    values={
+                        "room_id": room_id,
+                        # Only out-of-band memberships are missing from the `rooms`
+                        # table so that is the only type of membership we're dealing
+                        # with here. Since we don't calculate the "chain cover" for
+                        # out-of-band memberships, we can just set this to `True` as if
+                        # the user ever joins the room, we will end up calculating the
+                        # "chain cover" anyway.
+                        "has_auth_chain_index": True,
+                    },
+                )
 
             # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
             sliding_sync_membership_snapshots_insert_map: (
@@ -2207,6 +2233,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # Update the progress
         (
             room_id,
+            _room_id_from_rooms_table,
             _user_id,
             _sender,
             _membership_event_id,
