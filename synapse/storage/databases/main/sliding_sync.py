@@ -56,7 +56,11 @@ class SlidingSyncStore(SQLBaseStore):
             The connection position of the newly persisted state.
         """
 
+        # This cast is safe because the downstream code only cares about
+        # `store.get_id_for_instance(...)` and `StreamWorkerStore` is mixed
+        # alongside `SlidingSyncStore` wherever we create a store.
         store = cast("DataStore", self)
+
         return await self.db_pool.runInteraction(
             "persist_per_connection_state",
             self.persist_per_connection_state_txn,
@@ -277,7 +281,12 @@ class SlidingSyncStore(SQLBaseStore):
             conn_id=conn_id,
             connection_position=connection_position,
         )
+
+        # This cast is safe because the downstream code only cares about
+        # `store.get_id_for_instance(...)` and `StreamWorkerStore` is mixed
+        # alongside `SlidingSyncStore` wherever we create a store.
         store = cast("DataStore", self)
+
         return await per_connection_state_db.to_state(store)
 
     def _get_and_clear_connection_positions_txn(
