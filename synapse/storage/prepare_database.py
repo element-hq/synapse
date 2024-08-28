@@ -642,6 +642,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
     # nothing to clean up
     row = cast(Optional[Tuple[int]], txn.fetchone())
     max_stream_ordering_sliding_sync_joined_rooms_table = None
+    depends_on = None
     if row is not None:
         (max_stream_ordering_sliding_sync_joined_rooms_table,) = row
 
@@ -668,12 +669,51 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
         for chunk in batch_iter(room_rows, 1000):
             # Handle updating the `sliding_sync_joined_rooms` table
             #
+            # Clear out the stale data
             DatabasePool.simple_delete_many_batch_txn(
                 txn,
                 table="sliding_sync_joined_rooms",
                 keys=("room_id",),
                 values=chunk,
             )
+
+            # Update the `sliding_sync_joined_rooms_to_recalculate` table with the rooms
+            # that went stale and now need to be recalculated.
+            #
+            # FIXME: There is potentially a race where the unique index (added via
+            # `_BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE`)
+            # hasn't been added at this point so we won't be able to upsert
+            DatabasePool.simple_upsert_many_txn_native_upsert(
+                txn,
+                table="sliding_sync_joined_rooms_to_recalculate",
+                key_names=("room_id",),
+                key_values=chunk,
+                value_names=(),
+                # No value columns, therefore make a blank list so that the following
+                # zip() works correctly.
+                value_values=[() for x in range(len(chunk))],
+            )
+    else:
+        # Re-run the `sliding_sync_joined_rooms_to_recalculate` prefill if there is
+        # nothing in the `sliding_sync_joined_rooms` table
+        DatabasePool.simple_upsert_txn_native_upsert(
+            txn,
+            table="background_updates",
+            keyvalues={
+                "update_name": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+            },
+            values={},
+            # Only insert the row if it doesn't already exist. If it already exists,
+            # we're already working on it
+            insertion_values={
+                "progress_json": "{}",
+                # Since we're going to upsert, we need to make sure the unique index is in place
+                "depends_on": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+            },
+        )
+        depends_on = (
+            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+        )
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.
@@ -682,13 +722,6 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
     # `sliding_sync_joined_rooms` table yet. This could happen if someone had zero rooms
     # on their server (so the normal background update completes), downgrade Synapse
     # versions, join and create some new rooms, and upgrade again.
-    #
-    progress_json: JsonDict = {}
-    if max_stream_ordering_sliding_sync_joined_rooms_table is not None:
-        progress_json["last_event_stream_ordering"] = (
-            max_stream_ordering_sliding_sync_joined_rooms_table
-        )
-
     DatabasePool.simple_upsert_txn_native_upsert(
         txn,
         table="background_updates",
@@ -699,7 +732,10 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
         # Only insert the row if it doesn't already exist. If it already exists, we will
         # eventually fill in the rows we're trying to populate.
         insertion_values={
-            "progress_json": json_encoder.encode(progress_json),
+            # Empty progress is expected since it's not used for this background update.
+            "progress_json": "{}",
+            # Wait for the prefill to finish
+            "depends_on": depends_on,
         },
     )
 

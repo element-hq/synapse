@@ -1536,8 +1536,8 @@ class DatabasePool:
 
             self.simple_upsert_txn_emulated(txn, table, _keys, _vals, lock=False)
 
+    @staticmethod
     def simple_upsert_many_txn_native_upsert(
-        self,
         txn: LoggingTransaction,
         table: str,
         key_names: Collection[str],

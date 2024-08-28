@@ -20,7 +20,6 @@
 #
 
 import logging
-from collections import OrderedDict
 from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
 
 import attr
@@ -322,7 +321,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         self.db_pool.updates.register_background_index_update(
             _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
             index_name="sliding_sync_joined_rooms_to_recalculate_room_id_idx",
-            table="sliding_sync_joined_rooms",
+            table="sliding_sync_joined_rooms_to_recalculate",
             columns=["room_id"],
             unique=True,
         )
@@ -1575,21 +1574,43 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         return batch_size
 
     async def _sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update(
-        self, _progress: JsonDict, _batch_size: int
+        self, progress: JsonDict, _batch_size: int
     ) -> int:
         """
         Prefill `sliding_sync_joined_rooms_to_recalculate` table with all rooms we know about already.
         """
+        initial_insert = progress.get("initial_insert", False)
 
         def _txn(txn: LoggingTransaction) -> None:
             # We do this as one big bulk insert. This has been tested on a bigger
             # homeserver with ~10M rooms and took 11s. There is potential for this to
             # starve disk usage while this goes on.
-            txn.execute(
-                """
-                INSERT INTO sliding_sync_joined_rooms_to_recalculate (room_id) SELECT room_id FROM rooms;
-                """,
-            )
+            if initial_insert:
+                txn.execute(
+                    """
+                    INSERT INTO sliding_sync_joined_rooms_to_recalculate
+                        (room_id)
+                    SELECT room_id FROM rooms;
+                    """,
+                )
+            else:
+                # We can only upsert once the unique index has been added to the table
+                # (see
+                # `_BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE`)
+                #
+                # We upsert in case we have to run this multiple times.
+                #
+                # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
+                txn.execute(
+                    """
+                    INSERT INTO sliding_sync_joined_rooms_to_recalculate
+                        (room_id)
+                    SELECT room_id FROM rooms WHERE ?
+                    ON CONFLICT (room_id)
+                    DO NOTHING;
+                    """,
+                    (True,),
+                )
 
         await self.db_pool.runInteraction(
             "_sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update",
@@ -1608,11 +1629,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         """
         Background update to populate the `sliding_sync_joined_rooms` table.
         """
-        last_event_stream_ordering = progress.get(
-            "last_event_stream_ordering", -(1 << 31)
-        )
+        # We don't need to fetch any progress state because we just grab the next N
+        # events in `sliding_sync_joined_rooms_to_recalculate`
 
-        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str, int]]:
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str]]:
             """
             Returns:
                 A list of room ID's to update along with the progress value
@@ -1625,30 +1645,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # server is still participating in the room because if we're
             # `no_longer_in_room`, this table would be cleared out for the given
             # `room_id`.
-            #
-            # Because we're using `event_stream_ordering` as the progress marker, we're
-            # going to be pulling out the same rooms over and over again but we can
-            # at-least re-use this background update for the catch-up background
-            # process as well (see `_resolve_stale_data_in_sliding_sync_tables()`).
-            #
-            # It's important to sort by `event_stream_ordering` *ascending* (oldest to
-            # newest) so that if we see that this background update in progress and want
-            # to start the catch-up process, we can safely assume that it will
-            # eventually get to the rooms we want to catch-up on anyway (see
-            # `_resolve_stale_data_in_sliding_sync_tables()`).
             txn.execute(
                 """
-                SELECT room_id, MAX(event_stream_ordering)
-                FROM current_state_events
-                WHERE event_stream_ordering > ?
-                GROUP BY room_id
-                ORDER BY MAX(event_stream_ordering) ASC
+                SELECT room_id
+                FROM sliding_sync_joined_rooms_to_recalculate
                 LIMIT ?
                 """,
-                (last_event_stream_ordering, batch_size),
+                (batch_size,),
             )
 
-            rooms_to_update_rows = cast(List[Tuple[str, int]], txn.fetchall())
+            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
 
             return rooms_to_update_rows
 
@@ -1669,28 +1675,23 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         joined_room_stream_ordering_updates: Dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
-        # Map from room_id to the progress value (event_stream_ordering)
-        #
-        # This needs to be an `OrderedDict` because we need to process things in
-        # `event_stream_ordering` order *ascending* to save our progress position
-        # correctly if we need to exit early.
-        room_id_to_progress_marker_map: OrderedDict[str, int] = OrderedDict()
         # As long as we get this value before we fetch the current state, we can use it
         # to check if something has changed since that point.
         most_recent_current_state_delta_stream_id = (
             await self.get_max_stream_id_in_current_state_deltas()
         )
-        for room_id, progress_event_stream_ordering in rooms_to_update:
-            room_id_to_progress_marker_map[room_id] = progress_event_stream_ordering
-
+        for (room_id,) in rooms_to_update:
             current_state_ids_map = await self.db_pool.runInteraction(
                 "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
                 PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
                 room_id,
             )
-            # We're iterating over rooms pulled from the current_state_events table
-            # so we should have some current state for each room
-            assert current_state_ids_map
+
+            # If we're not joined to the room a) it doesn't belong in the
+            # `sliding_sync_joined_rooms` table so we should skip and b) we won't have
+            # any `current_state_events` for the room.
+            if not current_state_ids_map:
+                continue
 
             fetched_events = await self.get_events(current_state_ids_map.values())
 
@@ -1701,9 +1702,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 if event_id in fetched_events
             }
 
-            # Can happen for unknown room versions (old room versions that aren't known
-            # anymore) since `get_events(...)` will filter out events for unknown room
-            # versions
+            # Even if we are joined to the room, this can happen for unknown room
+            # versions (old room versions that aren't known anymore) since
+            # `get_events(...)` will filter out events for unknown room versions
             if not current_state_map:
                 continue
 
@@ -1754,23 +1755,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         def _fill_table_txn(txn: LoggingTransaction) -> None:
             # Handle updating the `sliding_sync_joined_rooms` table
             #
-            last_successful_room_id: Optional[str] = None
-            # Process the rooms in `event_stream_ordering` order *ascending* so we can
-            # save our position correctly if we need to exit early.
-            # `progress_event_stream_ordering` is an `OrderedDict` which remembers
-            # insertion order (and we inserted in the correct order) so this should be
-            # the correct thing to do.
             for (
                 room_id,
-                progress_event_stream_ordering,
-            ) in room_id_to_progress_marker_map.items():
-                update_map = joined_room_updates[room_id]
-
-                joined_room_update = joined_room_stream_ordering_updates[room_id]
-                event_stream_ordering = (
-                    joined_room_update.most_recent_event_stream_ordering
+                update_map,
+            ) in joined_room_updates.items():
+                joined_room_stream_ordering_update = (
+                    joined_room_stream_ordering_updates[room_id]
                 )
-                bump_stamp = joined_room_update.most_recent_bump_stamp
+                event_stream_ordering = (
+                    joined_room_stream_ordering_update.most_recent_event_stream_ordering
+                )
+                bump_stamp = joined_room_stream_ordering_update.most_recent_bump_stamp
 
                 # Check if the current state has been updated since we gathered it
                 state_deltas_since_we_gathered_current_state = (
@@ -1790,15 +1785,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         state_delta.event_type,
                         state_delta.state_key,
                     ) in SLIDING_SYNC_RELEVANT_STATE_SET:
-                        # Save our progress before we exit early
-                        if last_successful_room_id is not None:
-                            self.db_pool.updates._background_update_progress_txn(
-                                txn,
-                                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
-                                {
-                                    "last_event_stream_ordering": progress_event_stream_ordering
-                                },
-                            )
                         # Raising exception so we can just exit and try again. It would
                         # be hard to resolve this within the transaction because we need
                         # to get full events out that take redactions into account. We
@@ -1829,18 +1815,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     },
                 )
 
-                # Keep track of the last successful room_id
-                last_successful_room_id = room_id
+                # Now that we've processed the room, we can remove it from the queue
+                self.db_pool.simple_delete_txn(
+                    txn,
+                    table="sliding_sync_joined_rooms_to_recalculate",
+                    keyvalues={"room_id": room_id},
+                )
 
         await self.db_pool.runInteraction(
             "sliding_sync_joined_rooms_bg_update", _fill_table_txn
-        )
-
-        # Update the progress
-        _ = room_id_to_progress_marker_map.values()
-        await self.db_pool.updates._background_update_progress(
-            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
-            {"last_event_stream_ordering": rooms_to_update[-1][1]},
         )
 
         return len(rooms_to_update)

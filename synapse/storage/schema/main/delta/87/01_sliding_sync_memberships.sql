@@ -150,7 +150,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream
 --   3. Add a background update to populate the new `sliding_sync_joined_rooms` table
 --
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8701, 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update', '{}');
+  (8701, 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update', '{ "initial_insert": true }');
 INSERT INTO background_updates (ordering, update_name, progress_json, depends_on) VALUES
   (8701, 'sliding_sync_index_joined_rooms_to_recalculate_table_bg_update', '{}', 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update');
 INSERT INTO background_updates (ordering, update_name, progress_json, depends_on) VALUES
