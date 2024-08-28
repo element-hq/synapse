@@ -2323,6 +2323,10 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 value_values=[() for x in range(len(chunk))],
             )
     else:
+        # Avoid adding the background updates when there is no data to run them on (if
+        # the homeserver has no rooms). The portdb script refuses to run with pending
+        # background updates and since we potentially add them every time the server
+        # starts, we add this check for to allow the script to breath.
         txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
         row = txn.fetchone()
         if row is None:
@@ -2437,6 +2441,10 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
                 values=chunk,
             )
     else:
+        # Avoid adding the background updates when there is no data to run them on (if
+        # the homeserver has no rooms). The portdb script refuses to run with pending
+        # background updates and since we potentially add them every time the server
+        # starts, we add this check for to allow the script to breath.
         txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
         row = txn.fetchone()
         if row is None:
