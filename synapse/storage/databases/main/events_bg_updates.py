@@ -1586,7 +1586,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _txn(txn: LoggingTransaction) -> None:
             # We do this as one big bulk insert. This has been tested on a bigger
-            # homeserver with ~10M rooms and took 11s. There is potential for this to
+            # homeserver with ~10M rooms and took 60s. There is potential for this to
             # starve disk usage while this goes on.
             #
             # We upsert in case we have to run this multiple times.
