@@ -22,12 +22,13 @@
 CREATE TABLE sliding_sync_connections(
     connection_key $%AUTO_INCREMENT_PRIMARY_KEY%$,
     user_id TEXT NOT NULL,
-    device_id TEXT NOT NULL,
+    -- Generally the device ID, but may be something else for e.g. puppeted accounts.
+    effective_device_id TEXT NOT NULL,
     conn_id TEXT NOT NULL,
     created_ts BIGINT NOT NULL
 );
 
-CREATE INDEX sliding_sync_connections_idx ON sliding_sync_connections(user_id, device_id, conn_id);
+CREATE INDEX sliding_sync_connections_idx ON sliding_sync_connections(user_id, effective_device_id, conn_id);
 CREATE INDEX sliding_sync_connections_ts_idx ON sliding_sync_connections(created_ts);
 
 -- We track per-connection state by associating changes to the state with

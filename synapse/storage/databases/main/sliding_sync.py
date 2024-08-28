@@ -93,7 +93,7 @@ class SlidingSyncStore(SQLBaseStore):
                 INNER JOIN sliding_sync_connections USING (connection_key)
                 WHERE
                     connection_position = ?
-                    AND user_id = ? AND device_id = ? AND conn_id = ?
+                    AND user_id = ? AND effective_device_id = ? AND conn_id = ?
             """
             txn.execute(
                 sql, (previous_connection_position, user_id, device_id, conn_id)
@@ -114,7 +114,7 @@ class SlidingSyncStore(SQLBaseStore):
                 table="sliding_sync_connections",
                 keyvalues={
                     "user_id": user_id,
-                    "device_id": device_id,
+                    "effective_device_id": device_id,
                     "conn_id": conn_id,
                 },
             )
@@ -124,7 +124,7 @@ class SlidingSyncStore(SQLBaseStore):
                 table="sliding_sync_connections",
                 values={
                     "user_id": user_id,
-                    "device_id": device_id,
+                    "effective_device_id": device_id,
                     "conn_id": conn_id,
                     "created_ts": self._clock.time_msec(),
                 },
@@ -305,7 +305,7 @@ class SlidingSyncStore(SQLBaseStore):
             INNER JOIN sliding_sync_connections USING (connection_key)
             WHERE
                 connection_position = ?
-                AND user_id = ? AND device_id = ? AND conn_id = ?
+                AND user_id = ? AND effective_device_id = ? AND conn_id = ?
         """
         txn.execute(sql, (connection_position, user_id, device_id, conn_id))
         row = txn.fetchone()
