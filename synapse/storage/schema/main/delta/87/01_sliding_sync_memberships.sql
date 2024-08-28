@@ -100,6 +100,9 @@ CREATE TABLE IF NOT EXISTS sliding_sync_membership_snapshots(
     forgotten INTEGER DEFAULT 0 NOT NULL,
     -- `stream_ordering` of the `membership_event_id`
     event_stream_ordering BIGINT NOT NULL REFERENCES events(stream_ordering),
+    -- `instance_name` of the worker that persisted the `membership_event_id`.
+    -- Useful for crafting `PersistedEventPosition(...)`
+    event_instance_name TEXT NOT NULL,
     -- For remote invites/knocks that don't include any stripped state, we want to be
     -- able to distinguish between a room with `None` as valid value for some state and
     -- room where the state is completely unknown. Basically, this should be True unless

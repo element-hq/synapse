@@ -164,6 +164,7 @@ class SlidingSyncMembershipInfo:
     membership_event_id: str
     membership: str
     membership_event_stream_ordering: int
+    membership_event_instance_name: str
 
 
 @attr.s(slots=True, auto_attribs=True)
@@ -457,11 +458,15 @@ class PersistEventsStore:
                 membership_event_id,
                 user_id,
             ) in membership_event_id_to_user_id_map.items():
-                # We should only be seeing events with stream_ordering assigned by this point
+                # We should only be seeing events with `stream_ordering`/`instance_name` assigned by this point
                 membership_event_stream_ordering = membership_event_map[
                     membership_event_id
                 ].internal_metadata.stream_ordering
                 assert membership_event_stream_ordering is not None
+                membership_event_instance_name = membership_event_map[
+                    membership_event_id
+                ].internal_metadata.instance_name
+                assert membership_event_instance_name is not None
 
                 membership_infos_to_insert_membership_snapshots.append(
                     SlidingSyncMembershipInfo(
@@ -470,6 +475,7 @@ class PersistEventsStore:
                         membership_event_id=membership_event_id,
                         membership=membership_event_map[membership_event_id].membership,
                         membership_event_stream_ordering=membership_event_stream_ordering,
+                        membership_event_instance_name=membership_event_instance_name,
                     )
                 )
 
@@ -1811,6 +1817,7 @@ class PersistEventsStore:
                     "membership_event_id",
                     "membership",
                     "event_stream_ordering",
+                    "event_instance_name",
                 ]
                 + list(
                     sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
@@ -1821,6 +1828,7 @@ class PersistEventsStore:
                         membership_info.membership_event_id,
                         membership_info.membership,
                         membership_info.membership_event_stream_ordering,
+                        membership_info.membership_event_instance_name,
                     ]
                     + list(
                         sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
@@ -2755,6 +2763,7 @@ class PersistEventsStore:
         for event in events:
             # Sanity check that we're working with persisted events
             assert event.internal_metadata.stream_ordering is not None
+            assert event.internal_metadata.instance_name is not None
 
             # We update the local_current_membership table only if the event is
             # "current", i.e., its something that has just happened.
@@ -2805,6 +2814,7 @@ class PersistEventsStore:
                     "membership_event_id": event.event_id,
                     "membership": event.membership,
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
+                    "event_instance_name": event.internal_metadata.instance_name,
                 }
                 if event.membership == Membership.LEAVE:
                     # Inherit the meta data from the remote invite/knock. When using

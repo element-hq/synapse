@@ -1861,7 +1861,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
-        ) -> List[Tuple[str, Optional[str], str, str, str, str, int, bool]]:
+        ) -> List[
+            Tuple[str, Optional[str], str, str, str, str, int, Optional[str], bool]
+        ]:
             # Fetch the set of event IDs that we want to update
 
             if initial_phase:
@@ -1880,6 +1882,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         c.event_id,
                         c.membership,
                         e.stream_ordering,
+                        e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
@@ -1910,6 +1913,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         c.event_id,
                         c.membership,
                         c.event_stream_ordering,
+                        e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
@@ -1923,7 +1927,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 raise Exception("last_event_stream_ordering should not be None")
 
             memberships_to_update_rows = cast(
-                List[Tuple[str, Optional[str], str, str, str, str, int, bool]],
+                List[
+                    Tuple[
+                        str, Optional[str], str, str, str, str, int, Optional[str], bool
+                    ]
+                ],
                 txn.fetchall(),
             )
 
@@ -1990,6 +1998,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             membership_event_id,
             membership,
             membership_event_stream_ordering,
+            membership_event_instance_name,
             is_outlier,
         ) in memberships_to_update_rows:
             # We don't know how to handle `membership` values other than these. The
@@ -2174,6 +2183,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 membership_event_id=membership_event_id,
                 membership=membership,
                 membership_event_stream_ordering=membership_event_stream_ordering,
+                # If instance_name is null we default to "master"
+                membership_event_instance_name=membership_event_instance_name
+                or "master",
             )
 
         def _fill_table_txn(txn: LoggingTransaction) -> None:
@@ -2187,6 +2199,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 membership = membership_info.membership
                 membership_event_stream_ordering = (
                     membership_info.membership_event_stream_ordering
+                )
+                membership_event_instance_name = (
+                    membership_info.membership_event_instance_name
                 )
 
                 # We don't need to upsert the state because we never partially
@@ -2208,6 +2223,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         "membership_event_id": membership_event_id,
                         "membership": membership,
                         "event_stream_ordering": membership_event_stream_ordering,
+                        "event_instance_name": membership_event_instance_name,
                     },
                 )
                 # We need to find the `forgotten` value during the transaction because
@@ -2239,6 +2255,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             _membership_event_id,
             _membership,
             membership_event_stream_ordering,
+            _membership_event_instance_name,
             _is_outlier,
         ) = memberships_to_update_rows[-1]
 
