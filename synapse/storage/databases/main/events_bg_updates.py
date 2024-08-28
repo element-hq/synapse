@@ -2323,6 +2323,12 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 value_values=[() for x in range(len(chunk))],
             )
     else:
+        txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
+        row = txn.fetchone()
+        if row is None:
+            # There are no rooms, so don't schedule the bg update.
+            return
+
         # Re-run the `sliding_sync_joined_rooms_to_recalculate` prefill if there is
         # nothing in the `sliding_sync_joined_rooms` table
         DatabasePool.simple_upsert_txn_native_upsert(
@@ -2430,6 +2436,12 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
                 keys=("user_id", "room_id"),
                 values=chunk,
             )
+    else:
+        txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
+        row = txn.fetchone()
+        if row is None:
+            # There are no rooms, so don't schedule the bg update.
+            return
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.
