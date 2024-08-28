@@ -782,7 +782,6 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
             max_stream_ordering_sliding_sync_membership_snapshots_table
         )
 
-    logger.info("asdf insert catch-up bg update progress_json %s", progress_json)
     DatabasePool.simple_upsert_txn_native_upsert(
         txn,
         table="background_updates",
