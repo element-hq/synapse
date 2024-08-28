@@ -2311,6 +2311,32 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
 
+    def test_delayed_event_unsupported_by_default(self) -> None:
+        """Test that sending a delayed event is unsupported with the default config."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+
+    @unittest.override_config({"max_event_delay_duration": "1000"})
+    def test_delayed_event_exceeds_max_delay(self) -> None:
+        """Test that sending a delayed event fails if its delay is longer than allowed."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_message_event(self) -> None:
         """Test sending a delayed event with invalid content."""
         channel = self.make_request(
@@ -2323,6 +2349,7 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
+    @unittest.override_config({"max_event_delay_duration": "24h"})
     def test_send_delayed_state_event(self) -> None:
         """Test sending a delayed event with invalid content."""
         channel = self.make_request(

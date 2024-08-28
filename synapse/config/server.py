@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -779,6 +779,17 @@ class ServerConfig(Config):
             )
         else:
             self.delete_stale_devices_after = None
+
+        # The maximum allowed delay duration for delayed events (MSC4140).
+        max_event_delay_duration = config.get("max_event_delay_duration")
+        if max_event_delay_duration is not None:
+            self.max_event_delay_ms: Optional[int] = self.parse_duration(
+                max_event_delay_duration
+            )
+            if self.max_event_delay_ms <= 0:
+                raise ConfigError("max_event_delay_duration must be a positive value")
+        else:
+            self.max_event_delay_ms = None
 
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)

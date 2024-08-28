@@ -760,6 +760,18 @@ email:
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
 ```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per MSC4140.
+Must be a positive value if set.
+
+Defaults to no duration, which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
+```
 
 ## Homeserver blocking
 Useful options for Synapse admins.

@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023-2024 New Vector, Ltd
+# Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -442,20 +442,6 @@ class ExperimentalConfig(Config):
         self.msc3823_account_suspension = experimental.get(
             "msc3823_account_suspension", False
         )
-
-        # MSC4140: Delayed events
-        # The maximum allowed duration for delayed events.
-        try:
-            self.msc4140_max_delay = int(experimental["msc4140_max_delay"])
-            if self.msc4140_max_delay <= 0:
-                raise ValueError
-        except ValueError as e:
-            raise ConfigError(
-                "msc4140_max_delay must be a positive integer",
-                ("experimental", "msc4140_max_delay"),
-            ) from e
-        except KeyError:
-            self.msc4140_max_delay = 10 * 365 * 24 * 60 * 60 * 1000  # 10 years
 
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
