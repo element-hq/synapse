@@ -67,6 +67,7 @@
 # in the project's README), this script may be run multiple times, and functionality should
 # continue to work if so.
 
+import json
 import os
 import platform
 import re
@@ -759,6 +760,28 @@ def parse_worker_types(
 
     return dict_to_return
 
+def generate_metrics_scrape_config(
+    metrics_ports: Dict[str, int]
+) -> None:
+    out_scrape_configs = []
+
+    for worker_name, worker_metrics_port in metrics_ports.items():
+        job = worker_name.rstrip("0123456789")
+        index = int(worker_name[len(job):])
+
+        out_scrape_configs.append({
+            "targets": [f"127.0.0.1:{worker_metrics_port}"],
+            "labels": {
+                "job": f"synapse-{job}",
+                "index": f"{index}",
+                # we want all instance names to be the same, even on different scrape addresses
+                "instance": "synapse",
+            }
+        })
+
+    with open("/out_scrape.json", "w") as fout:
+        json.dump(out_scrape_configs, fout)
+
 
 def generate_worker_files(
     environ: Mapping[str, str],
@@ -841,6 +864,9 @@ def generate_worker_files(
     # with nginx_upstreams and placed in /etc/nginx/conf.d.
     nginx_locations: Dict[str, str] = {}
 
+    # A map from worker name to which HTTP port is in use for its metrics.
+    metrics_ports: Dict[str, int] = {}
+
     # Create the worker configuration directory if it doesn't already exist
     workers_config_dir = os.path.join(config_dir, "workers")
     os.makedirs(workers_config_dir, exist_ok=True)
@@ -892,6 +918,8 @@ def generate_worker_files(
         worker_config.update(
             {"name": worker_name, "port": worker_port}
         )
+
+        metrics_ports[worker_name] = worker_port + 1
 
         # Update the shared config with any worker_type specific options. The first of a
         # given worker_type needs to stay assigned and not be replaced.
@@ -1043,6 +1071,9 @@ def generate_worker_files(
     log_dir = data_dir + "/logs"
     if not os.path.exists(log_dir):
         os.mkdir(log_dir)
+
+    # Add metrics scraping configurations
+    generate_metrics_scrape_config(metrics_ports)
 
 
 def generate_worker_log_config(
