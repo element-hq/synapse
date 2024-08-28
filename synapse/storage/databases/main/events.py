@@ -1849,7 +1849,7 @@ class PersistEventsStore:
     @classmethod
     def _get_relevant_sliding_sync_current_state_event_ids_txn(
         cls, txn: LoggingTransaction, room_id: str
-    ) -> Tuple[MutableStateMap[str], int]:
+    ) -> MutableStateMap[str]:
         """
         Fetch the current state event IDs for the relevant (to the
         `sliding_sync_joined_rooms` table) state types for the given room.
