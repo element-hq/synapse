@@ -270,9 +270,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
         return invite_room_id, persisted_event
 
     def _retract_remote_invite_for_user(
-        self,
-        user_id: str,
-        remote_room_id: str,
+        self, user_id: str, remote_room_id: str, invite_event_id: str
     ) -> EventBase:
         """
         Create a fake invite retraction for a remote room and persist it.
@@ -285,6 +283,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             user_id: The person who was invited and we're going to retract the
                 invite for.
             remote_room_id: The room ID that the invite was for.
+            invite_event_id: The event ID of the invite
 
         Returns:
             The persisted leave (kick) event.
@@ -298,7 +297,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             "origin_server_ts": 1,
             "type": EventTypes.Member,
             "content": {"membership": Membership.LEAVE},
-            "auth_events": [],
+            "auth_events": [invite_event_id],
             "prev_events": [],
         }
 
@@ -2202,6 +2201,7 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         remote_invite_retraction_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=remote_invite_room_id,
+            invite_event_id=remote_invite_event.event_id,
         )
 
         # No one local is joined to the remote room
@@ -3549,6 +3549,7 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
         room_id_no_info_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=room_id_no_info,
+            invite_event_id=room_id_no_info_invite_event.event_id,
         )
         room_id_with_info_leave_event_response = self.helper.leave(
             room_id_with_info, user1_id, tok=user1_tok
@@ -3556,6 +3557,7 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
         space_room_id_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=space_room_id,
+            invite_event_id=space_room_id_invite_event.event_id,
         )
 
         # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not
