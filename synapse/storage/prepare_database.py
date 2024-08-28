@@ -647,10 +647,11 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
         txn.execute(
             """
-            SELECT DISTINCT(room_id)
+            SELECT room_id
             FROM events
             WHERE stream_ordering > ?
-            ORDER BY stream_ordering DESC
+            GROUP BY room_id
+            ORDER BY MAX(stream_ordering) ASC
             """,
             (max_stream_ordering_sliding_sync_joined_rooms_table,),
         )
@@ -740,10 +741,10 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
         # This only picks up changes to memberships.
         txn.execute(
             """
-            SELECT DISTINCT(user_id, room_id)
+            SELECT user_id, room_id
             FROM local_current_membership
             WHERE event_stream_ordering > ?
-            ORDER BY event_stream_ordering DESC
+            ORDER BY event_stream_ordering ASC
             """,
             (max_stream_ordering_sliding_sync_membership_snapshots_table,),
         )
@@ -781,6 +782,7 @@ def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
             max_stream_ordering_sliding_sync_membership_snapshots_table
         )
 
+    logger.info("asdf insert catch-up bg update progress_json %s", progress_json)
     DatabasePool.simple_upsert_txn_native_upsert(
         txn,
         table="background_updates",
