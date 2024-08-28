@@ -89,6 +89,12 @@ class _BackgroundUpdates:
 
     EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
 
+    SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
+        "sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update"
+    )
+    SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
+        "sliding_sync_index_joined_rooms_to_recalculate_table_bg_update"
+    )
     SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE = "sliding_sync_joined_rooms_bg_update"
     SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE = (
         "sliding_sync_membership_snapshots_bg_update"
@@ -307,6 +313,19 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             where_clause="NOT outlier",
         )
 
+        # Handle background updates for Sliding Sync tables
+        #
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+            self._sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update,
+        )
+        self.db_pool.updates.register_background_index_update(
+            _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+            index_name="sliding_sync_joined_rooms_to_recalculate_room_id_idx",
+            table="sliding_sync_joined_rooms",
+            columns=["room_id"],
+            unique=True,
+        )
         # Add some background updates to populate the sliding sync tables
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
@@ -1554,6 +1573,34 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
 
         return batch_size
+
+    async def _sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update(
+        self, _progress: JsonDict, _batch_size: int
+    ) -> int:
+        """
+        Prefill `sliding_sync_joined_rooms_to_recalculate` table with all rooms we know about already.
+        """
+
+        def _txn(txn: LoggingTransaction) -> None:
+            # We do this as one big bulk insert. This has been tested on a bigger
+            # homeserver with ~10M rooms and took 11s. There is potential for this to
+            # starve disk usage while this goes on.
+            txn.execute(
+                """
+                INSERT INTO sliding_sync_joined_rooms_to_recalculate (room_id) SELECT room_id FROM rooms;
+                """,
+            )
+
+        await self.db_pool.runInteraction(
+            "_sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update",
+            _txn,
+        )
+
+        # Background update is done.
+        await self.db_pool.updates._end_background_update(
+            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+        )
+        return 0
 
     async def _sliding_sync_joined_rooms_bg_update(
         self, progress: JsonDict, batch_size: int

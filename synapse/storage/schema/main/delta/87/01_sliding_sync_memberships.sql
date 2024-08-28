@@ -11,6 +11,18 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
+-- This table is a list/queue used to keep track of which rooms need to be inserted into
+-- `sliding_sync_joined_rooms`. We do this to avoid reading from `current_state_events`
+-- during the background update to populate `sliding_sync_joined_rooms` which works but
+-- it takes a lot of work for the database to grab `DISTINCT` room_ids given how many
+-- state events there are for each room.
+--
+-- This table doesn't have any indexes at this point. We add the indexes in a separate
+-- step to avoid the extra calculations during the bulk one-shot prefill insert.
+CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms_to_recalculate(
+    room_id TEXT NOT NULL REFERENCES rooms(room_id)
+);
+
 -- A table for storing room meta data (current state relevant to sliding sync) that the
 -- local server is still participating in (someone local is joined to the room).
 --
@@ -127,8 +139,23 @@ CREATE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_user_id ON sliding_
 CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream_ordering ON sliding_sync_membership_snapshots(event_stream_ordering);
 
 
--- Add some background updates to populate the new tables
+-- Add a series of background updates to populate the new `sliding_sync_joined_rooms` table:
+--
+--   1. Add a background update to prefill `sliding_sync_joined_rooms_to_recalculate`.
+--      We do a one-shot bulk insert from the `rooms` table to prefill.
+--   2. Add a background update to add indexes to the
+--      `sliding_sync_joined_rooms_to_recalculate` table after the one-shot bulk insert.
+--      We add the index in a separate step after to avoid the extra calculations during
+--      the one-shot bulk insert.
+--   3. Add a background update to populate the new `sliding_sync_joined_rooms` table
+--
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8701, 'sliding_sync_joined_rooms_bg_update', '{}');
+  (8701, 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update', '{}');
+INSERT INTO background_updates (ordering, update_name, progress_json, depends_on) VALUES
+  (8701, 'sliding_sync_index_joined_rooms_to_recalculate_table_bg_update', '{}', 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update');
+INSERT INTO background_updates (ordering, update_name, progress_json, depends_on) VALUES
+  (8701, 'sliding_sync_joined_rooms_bg_update', '{}', 'sliding_sync_index_joined_rooms_to_calculate_table_bg_update');
+
+-- Add a background updates to populate the new `sliding_sync_membership_snapshots` table
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
   (8701, 'sliding_sync_membership_snapshots_bg_update', '{}');
