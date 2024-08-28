@@ -677,3 +677,108 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
             set(),
             exact=True,
         )
+
+    def test_receipts_incremental_sync_out_of_range(self) -> None:
+        """Tests that we don't return read receipts for rooms that fall out of
+        range, but then do send all read receipts once they're back in range.
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id2, user1_id, tok=user1_tok)
+
+        # Send a message and read receipt into room2
+        event_response = self.helper.send(room_id2, body="new event", tok=user2_tok)
+        room2_event_id = event_response["event_id"]
+
+        self.helper.send_read_receipt(room_id2, room2_event_id, tok=user1_tok)
+
+        # Now send a message into room1 so that it is at the top of the list
+        self.helper.send(room_id1, body="new event", tok=user2_tok)
+
+        # Make a SS request for only the top room.
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            },
+            "extensions": {
+                "receipts": {
+                    "enabled": True,
+                }
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # The receipt is in room2, but only room1 is returned, so we don't
+        # expect to get the receipt.
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+        # Move room2 into range.
+        self.helper.send(room_id2, body="new event", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # We expect to see the read receipt of room2, as that has the most
+        # recent update.
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id2},
+            exact=True,
+        )
+        receipt = response_body["extensions"]["receipts"]["rooms"][room_id2]
+        self.assertIncludes(
+            receipt["content"][room2_event_id][ReceiptTypes.READ].keys(),
+            {user1_id},
+            exact=True,
+        )
+
+        # Send a message into room1 to bump it to the top, but also send a
+        # receipt in room2
+        self.helper.send(room_id1, body="new event", tok=user2_tok)
+        self.helper.send_read_receipt(room_id2, room2_event_id, tok=user2_tok)
+
+        # We don't expect to see the new read receipt.
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            set(),
+            exact=True,
+        )
+
+        # But if we send a new message into room2, we expect to get the missing receipts
+        self.helper.send(room_id2, body="new event", tok=user2_tok)
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+        self.assertIncludes(
+            response_body["extensions"]["receipts"].get("rooms").keys(),
+            {room_id2},
+            exact=True,
+        )
+
+        # We should only see the new receipt
+        receipt = response_body["extensions"]["receipts"]["rooms"][room_id2]
+        self.assertIncludes(
+            receipt["content"][room2_event_id][ReceiptTypes.READ].keys(),
+            {user2_id},
+            exact=True,
+        )

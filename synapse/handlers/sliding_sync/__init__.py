@@ -1,7 +1,7 @@
 #
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
-# Copyright (C) 2024 New Vector, Ltd
+# Copyright (C) 2023 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -11,27 +11,18 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
-# Originally licensed under the Apache License, Version 2.0:
-# <http://www.apache.org/licenses/LICENSE-2.0>.
-#
-# [This file includes modifications made by New Vector Limited]
-#
-#
+
 import enum
 import logging
-from enum import Enum
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     Dict,
-    Final,
     List,
     Literal,
     Mapping,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Union,
@@ -39,6 +30,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
+from prometheus_client import Histogram
 from typing_extensions import assert_never
 
 from synapse.api.constants import (
@@ -48,10 +40,18 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
-from synapse.api.errors import SlidingSyncUnknownPosition
 from synapse.events import EventBase, StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event, strip_event
 from synapse.handlers.relations import BundledAggregations
+from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
+from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
+from synapse.handlers.sliding_sync.types import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    PerConnectionState,
+    RoomSyncConfig,
+    StateValues,
+)
 from synapse.logging.opentracing import (
     SynapseTags,
     log_kv,
@@ -71,10 +71,7 @@ from synapse.storage.databases.main.stream import (
 )
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
-    DeviceListUpdates,
     JsonDict,
-    JsonMapping,
-    MultiWriterStreamToken,
     MutableStateMap,
     PersistedEventPosition,
     Requester,
@@ -95,6 +92,13 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+sync_processing_time = Histogram(
+    "synapse_sliding_sync_processing_time",
+    "Time taken to generate a sliding sync response, ignoring wait times.",
+    ["initial"],
+)
 
 
 class Sentinel(enum.Enum):
@@ -190,267 +194,6 @@ def filter_membership_for_sync(
     )
 
 
-# We can't freeze this class because we want to update it in place with the
-# de-duplicated data.
-@attr.s(slots=True, auto_attribs=True)
-class RoomSyncConfig:
-    """
-    Holds the config for what data we should fetch for a room in the sync response.
-
-    Attributes:
-        timeline_limit: The maximum number of events to return in the timeline.
-
-        required_state_map: Map from state event type to state_keys requested for the
-            room. The values are close to `StateKey` but actually use a syntax where you
-            can provide `*` wildcard and `$LAZY` for lazy-loading room members.
-    """
-
-    timeline_limit: int
-    required_state_map: Dict[str, Set[str]]
-
-    @classmethod
-    def from_room_config(
-        cls,
-        room_params: SlidingSyncConfig.CommonRoomParameters,
-    ) -> "RoomSyncConfig":
-        """
-        Create a `RoomSyncConfig` from a `SlidingSyncList`/`RoomSubscription` config.
-
-        Args:
-            room_params: `SlidingSyncConfig.SlidingSyncList` or `SlidingSyncConfig.RoomSubscription`
-        """
-        required_state_map: Dict[str, Set[str]] = {}
-        for (
-            state_type,
-            state_key,
-        ) in room_params.required_state:
-            # If we already have a wildcard for this specific `state_key`, we don't need
-            # to add it since the wildcard already covers it.
-            if state_key in required_state_map.get(StateValues.WILDCARD, set()):
-                continue
-
-            # If we already have a wildcard `state_key` for this `state_type`, we don't need
-            # to add anything else
-            if StateValues.WILDCARD in required_state_map.get(state_type, set()):
-                continue
-
-            # If we're getting wildcards for the `state_type` and `state_key`, that's
-            # all that matters so get rid of any other entries
-            if state_type == StateValues.WILDCARD and state_key == StateValues.WILDCARD:
-                required_state_map = {StateValues.WILDCARD: {StateValues.WILDCARD}}
-                # We can break, since we don't need to add anything else
-                break
-
-            # If we're getting a wildcard for the `state_type`, get rid of any other
-            # entries with the same `state_key`, since the wildcard will cover it already.
-            elif state_type == StateValues.WILDCARD:
-                # Get rid of any entries that match the `state_key`
-                #
-                # Make a copy so we don't run into an error: `dictionary changed size
-                # during iteration`, when we remove items
-                for (
-                    existing_state_type,
-                    existing_state_key_set,
-                ) in list(required_state_map.items()):
-                    # Make a copy so we don't run into an error: `Set changed size during
-                    # iteration`, when we filter out and remove items
-                    for existing_state_key in existing_state_key_set.copy():
-                        if existing_state_key == state_key:
-                            existing_state_key_set.remove(state_key)
-
-                    # If we've the left the `set()` empty, remove it from the map
-                    if existing_state_key_set == set():
-                        required_state_map.pop(existing_state_type, None)
-
-            # If we're getting a wildcard `state_key`, get rid of any other state_keys
-            # for this `state_type` since the wildcard will cover it already.
-            if state_key == StateValues.WILDCARD:
-                required_state_map[state_type] = {state_key}
-            # Otherwise, just add it to the set
-            else:
-                if required_state_map.get(state_type) is None:
-                    required_state_map[state_type] = {state_key}
-                else:
-                    required_state_map[state_type].add(state_key)
-
-        return cls(
-            timeline_limit=room_params.timeline_limit,
-            required_state_map=required_state_map,
-        )
-
-    def deep_copy(self) -> "RoomSyncConfig":
-        required_state_map: Dict[str, Set[str]] = {
-            state_type: state_key_set.copy()
-            for state_type, state_key_set in self.required_state_map.items()
-        }
-
-        return RoomSyncConfig(
-            timeline_limit=self.timeline_limit,
-            required_state_map=required_state_map,
-        )
-
-    def combine_room_sync_config(
-        self, other_room_sync_config: "RoomSyncConfig"
-    ) -> None:
-        """
-        Combine this `RoomSyncConfig` with another `RoomSyncConfig` and take the
-        superset union of the two.
-        """
-        # Take the highest timeline limit
-        if self.timeline_limit < other_room_sync_config.timeline_limit:
-            self.timeline_limit = other_room_sync_config.timeline_limit
-
-        # Union the required state
-        for (
-            state_type,
-            state_key_set,
-        ) in other_room_sync_config.required_state_map.items():
-            # If we already have a wildcard for everything, we don't need to add
-            # anything else
-            if StateValues.WILDCARD in self.required_state_map.get(
-                StateValues.WILDCARD, set()
-            ):
-                break
-
-            # If we already have a wildcard `state_key` for this `state_type`, we don't need
-            # to add anything else
-            if StateValues.WILDCARD in self.required_state_map.get(state_type, set()):
-                continue
-
-            # If we're getting wildcards for the `state_type` and `state_key`, that's
-            # all that matters so get rid of any other entries
-            if (
-                state_type == StateValues.WILDCARD
-                and StateValues.WILDCARD in state_key_set
-            ):
-                self.required_state_map = {state_type: {StateValues.WILDCARD}}
-                # We can break, since we don't need to add anything else
-                break
-
-            for state_key in state_key_set:
-                # If we already have a wildcard for this specific `state_key`, we don't need
-                # to add it since the wildcard already covers it.
-                if state_key in self.required_state_map.get(
-                    StateValues.WILDCARD, set()
-                ):
-                    continue
-
-                # If we're getting a wildcard for the `state_type`, get rid of any other
-                # entries with the same `state_key`, since the wildcard will cover it already.
-                if state_type == StateValues.WILDCARD:
-                    # Get rid of any entries that match the `state_key`
-                    #
-                    # Make a copy so we don't run into an error: `dictionary changed size
-                    # during iteration`, when we remove items
-                    for existing_state_type, existing_state_key_set in list(
-                        self.required_state_map.items()
-                    ):
-                        # Make a copy so we don't run into an error: `Set changed size during
-                        # iteration`, when we filter out and remove items
-                        for existing_state_key in existing_state_key_set.copy():
-                            if existing_state_key == state_key:
-                                existing_state_key_set.remove(state_key)
-
-                        # If we've the left the `set()` empty, remove it from the map
-                        if existing_state_key_set == set():
-                            self.required_state_map.pop(existing_state_type, None)
-
-                # If we're getting a wildcard `state_key`, get rid of any other state_keys
-                # for this `state_type` since the wildcard will cover it already.
-                if state_key == StateValues.WILDCARD:
-                    self.required_state_map[state_type] = {state_key}
-                    break
-                # Otherwise, just add it to the set
-                else:
-                    if self.required_state_map.get(state_type) is None:
-                        self.required_state_map[state_type] = {state_key}
-                    else:
-                        self.required_state_map[state_type].add(state_key)
-
-    def must_await_full_state(
-        self,
-        is_mine_id: Callable[[str], bool],
-    ) -> bool:
-        """
-        Check if we have a we're only requesting `required_state` which is completely
-        satisfied even with partial state, then we don't need to `await_full_state` before
-        we can return it.
-
-        Also see `StateFilter.must_await_full_state(...)` for comparison
-
-        Partially-stated rooms should have all state events except for remote membership
-        events so if we require a remote membership event anywhere, then we need to
-        return `True` (requires full state).
-
-        Args:
-            is_mine_id: a callable which confirms if a given state_key matches a mxid
-               of a local user
-        """
-        wildcard_state_keys = self.required_state_map.get(StateValues.WILDCARD)
-        # Requesting *all* state in the room so we have to wait
-        if (
-            wildcard_state_keys is not None
-            and StateValues.WILDCARD in wildcard_state_keys
-        ):
-            return True
-
-        # If the wildcards don't refer to remote user IDs, then we don't need to wait
-        # for full state.
-        if wildcard_state_keys is not None:
-            for possible_user_id in wildcard_state_keys:
-                if not possible_user_id[0].startswith(UserID.SIGIL):
-                    # Not a user ID
-                    continue
-
-                localpart_hostname = possible_user_id.split(":", 1)
-                if len(localpart_hostname) < 2:
-                    # Not a user ID
-                    continue
-
-                if not is_mine_id(possible_user_id):
-                    return True
-
-        membership_state_keys = self.required_state_map.get(EventTypes.Member)
-        # We aren't requesting any membership events at all so the partial state will
-        # cover us.
-        if membership_state_keys is None:
-            return False
-
-        # If we're requesting entirely local users, the partial state will cover us.
-        for user_id in membership_state_keys:
-            if user_id == StateValues.ME:
-                continue
-            # We're lazy-loading membership so we can just return the state we have.
-            # Lazy-loading means we include membership for any event `sender` in the
-            # timeline but since we had to auth those timeline events, we will have the
-            # membership state for them (including from remote senders).
-            elif user_id == StateValues.LAZY:
-                continue
-            elif user_id == StateValues.WILDCARD:
-                return False
-            elif not is_mine_id(user_id):
-                return True
-
-        # Local users only so the partial state will cover us.
-        return False
-
-
-class StateValues:
-    """
-    Understood values of the (type, state_key) tuple in `required_state`.
-    """
-
-    # Include all state events of the given type
-    WILDCARD: Final = "*"
-    # Lazy-load room membership events (include room membership events for any event
-    # `sender` in the timeline). We only give special meaning to this value when it's a
-    # `state_key`.
-    LAZY: Final = "$LAZY"
-    # Subsitute with the requester's user ID. Typically used by clients to get
-    # the user's membership.
-    ME: Final = "$ME"
-
-
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
@@ -460,12 +203,11 @@ class SlidingSyncHandler:
         self.notifier = hs.get_notifier()
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
-        self.device_handler = hs.get_device_handler()
-        self.push_rules_handler = hs.get_push_rules_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
         self.connection_store = SlidingSyncConnectionStore()
+        self.extensions = SlidingSyncExtensionHandler(hs)
 
     async def wait_for_sync_for_user(
         self,
@@ -564,6 +306,8 @@ class SlidingSyncHandler:
             from_token: The point in the stream to sync from. Token of the end of the
                 previous batch. May be `None` if this is the initial sync request.
         """
+        start_time_s = self.clock.time()
+
         user_id = sync_config.user.to_string()
         app_service = self.store.get_app_service_by_user_id(user_id)
         if app_service:
@@ -571,21 +315,21 @@ class SlidingSyncHandler:
             # See https://github.com/matrix-org/matrix-doc/issues/1144
             raise NotImplementedError()
 
-        if from_token:
-            # Check that we recognize the connection position, if not tell the
-            # clients that they need to start again.
-            #
-            # If we don't do this and the client asks for the full range of
-            # rooms, we end up sending down all rooms and their state from
-            # scratch (which can be very slow). By expiring the connection we
-            # allow the client a chance to do an initial request with a smaller
-            # range of rooms to get them some results sooner but will end up
-            # taking the same amount of time (more with round-trips and
-            # re-processing) in the end to get everything again.
-            if not await self.connection_store.is_valid_token(
-                sync_config, from_token.connection_position
-            ):
-                raise SlidingSyncUnknownPosition()
+        # Get the per-connection state (if any).
+        #
+        # Raises an exception if there is a `connection_position` that we don't
+        # recognize. If we don't do this and the client asks for the full range
+        # of rooms, we end up sending down all rooms and their state from
+        # scratch (which can be very slow). By expiring the connection we allow
+        # the client a chance to do an initial request with a smaller range of
+        # rooms to get them some results sooner but will end up taking the same
+        # amount of time (more with round-trips and re-processing) in the end to
+        # get everything again.
+        previous_connection_state = (
+            await self.connection_store.get_per_connection_state(
+                sync_config, from_token
+            )
+        )
 
         await self.connection_store.mark_token_seen(
             sync_config=sync_config,
@@ -780,12 +524,21 @@ class SlidingSyncHandler:
                 # subscription and have updates we need to send (i.e. either because
                 # we haven't sent the room down, or we have but there are missing
                 # updates).
-                for room_id in relevant_room_map:
-                    status = await self.connection_store.have_sent_room(
-                        sync_config,
-                        from_token.connection_position,
-                        room_id,
+                for room_id, room_config in relevant_room_map.items():
+                    prev_room_sync_config = previous_connection_state.room_configs.get(
+                        room_id
                     )
+                    if prev_room_sync_config is not None:
+                        # Always include rooms whose timeline limit has increased.
+                        # (see the "XXX: Odd behavior" described below)
+                        if (
+                            prev_room_sync_config.timeline_limit
+                            < room_config.timeline_limit
+                        ):
+                            rooms_should_send.add(room_id)
+                            continue
+
+                    status = previous_connection_state.rooms.have_sent_room(room_id)
                     if (
                         # The room was never sent down before so the client needs to know
                         # about it regardless of any updates.
@@ -816,11 +569,15 @@ class SlidingSyncHandler:
                     if room_id in rooms_should_send
                 }
 
+        new_connection_state = previous_connection_state.get_mutable()
+
         @trace
         @tag_args
         async def handle_room(room_id: str) -> None:
             room_sync_result = await self.get_room_sync_data(
                 sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
                 room_id=room_id,
                 room_sync_config=relevant_rooms_to_send_map[room_id],
                 room_membership_for_user_at_to_token=room_membership_for_user_map[
@@ -838,9 +595,11 @@ class SlidingSyncHandler:
             with start_active_span("sliding_sync.generate_room_entries"):
                 await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
 
-        extensions = await self.get_extensions_response(
+        extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
             actual_lists=lists,
+            previous_connection_state=previous_connection_state,
+            new_connection_state=new_connection_state,
             # We're purposely using `relevant_room_map` instead of
             # `relevant_rooms_to_send_map` here. This needs to be all room_ids we could
             # send regardless of whether they have an event update or not. The
@@ -882,11 +641,18 @@ class SlidingSyncHandler:
                 )
                 unsent_room_ids = list(missing_event_map_by_room)
 
-            connection_position = await self.connection_store.record_rooms(
+                new_connection_state.rooms.record_unsent_rooms(
+                    unsent_room_ids, from_token.stream_token.room_key
+                )
+
+            new_connection_state.rooms.record_sent_rooms(
+                relevant_rooms_to_send_map.keys()
+            )
+
+            connection_position = await self.connection_store.record_new_state(
                 sync_config=sync_config,
                 from_token=from_token,
-                sent_room_ids=relevant_rooms_to_send_map.keys(),
-                unsent_room_ids=unsent_room_ids,
+                new_connection_state=new_connection_state,
             )
         elif from_token:
             connection_position = from_token.connection_position
@@ -904,6 +670,11 @@ class SlidingSyncHandler:
         # Make it easy to find traces for syncs that aren't empty
         set_tag(SynapseTags.RESULT_PREFIX + "result", bool(sliding_sync_result))
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
+
+        end_time_s = self.clock.time()
+        sync_processing_time.labels(from_token is not None).observe(
+            end_time_s - start_time_s
+        )
 
         return sliding_sync_result
 
@@ -1939,6 +1710,8 @@ class SlidingSyncHandler:
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
         room_id: str,
         room_sync_config: RoomSyncConfig,
         room_membership_for_user_at_to_token: _RoomMembershipForUser,
@@ -1982,15 +1755,29 @@ class SlidingSyncHandler:
         #  - For an incremental sync where we haven't sent it down this
         #    connection before
         #
-        # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+        # Relevant spec issue:
+        # https://github.com/matrix-org/matrix-spec/issues/1917
+        #
+        # XXX: Odd behavior - We also check if the `timeline_limit` has increased, if so
+        # we ignore the from bound for the timeline to send down a larger chunk of
+        # history and set `unstable_expanded_timeline` to true. This is only being added
+        # to match the behavior of the Sliding Sync proxy as we expect the ElementX
+        # client to feel a certain way and be able to trickle in a full page of timeline
+        # messages to fill up the screen. This is a bit different to the behavior of the
+        # Sliding Sync proxy (which sets initial=true, but then doesn't send down the
+        # full state again), but existing apps, e.g. ElementX, just need `limited` set.
+        # We don't explicitly set `limited` but this will be the case for any room that
+        # has more history than we're trying to pull out. Using
+        # `unstable_expanded_timeline` allows us to avoid contaminating what `initial`
+        # or `limited` mean for clients that interpret them correctly. In future this
+        # behavior is almost certainly going to change.
+        #
+        # TODO: Also handle changes to `required_state`
         from_bound = None
         initial = True
+        ignore_timeline_bound = False
         if from_token and not room_membership_for_user_at_to_token.newly_joined:
-            room_status = await self.connection_store.have_sent_room(
-                sync_config=sync_config,
-                connection_token=from_token.connection_position,
-                room_id=room_id,
-            )
+            room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
                 initial = False
@@ -2006,7 +1793,26 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-        log_kv({"sliding_sync.from_bound": from_bound, "sliding_sync.initial": initial})
+            prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+            if prev_room_sync_config is not None:
+                # Check if the timeline limit has increased, if so ignore the
+                # timeline bound and record the change (see "XXX: Odd behavior"
+                # above).
+                if (
+                    prev_room_sync_config.timeline_limit
+                    < room_sync_config.timeline_limit
+                ):
+                    ignore_timeline_bound = True
+
+                # TODO: Check for changes in `required_state``
+
+        log_kv(
+            {
+                "sliding_sync.from_bound": from_bound,
+                "sliding_sync.initial": initial,
+                "sliding_sync.ignore_timeline_bound": ignore_timeline_bound,
+            }
+        )
 
         # Assemble the list of timeline events
         #
@@ -2043,6 +1849,10 @@ class SlidingSyncHandler:
                     room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
                 )
 
+            timeline_from_bound = from_bound
+            if ignore_timeline_bound:
+                timeline_from_bound = None
+
             # For initial `/sync` (and other historical scenarios mentioned above), we
             # want to view a historical section of the timeline; to fetch events by
             # `topological_ordering` (best representation of the room DAG as others were
@@ -2068,7 +1878,7 @@ class SlidingSyncHandler:
             pagination_method: PaginateFunction = (
                 # Use `topographical_ordering` for historical events
                 paginate_room_events_by_topological_ordering
-                if from_bound is None
+                if timeline_from_bound is None
                 # Use `stream_ordering` for updates
                 else paginate_room_events_by_stream_ordering
             )
@@ -2078,7 +1888,7 @@ class SlidingSyncHandler:
                 # (from newer to older events) starting at to_bound.
                 # This ensures we fill the `limit` with the newest events first,
                 from_key=to_bound,
-                to_key=from_bound,
+                to_key=timeline_from_bound,
                 direction=Direction.BACKWARDS,
                 # We add one so we can determine if there are enough events to saturate
                 # the limit or not (see `limited`)
@@ -2436,6 +2246,55 @@ class SlidingSyncHandler:
             if new_bump_event_pos.stream > 0:
                 bump_stamp = new_bump_event_pos.stream
 
+        unstable_expanded_timeline = False
+        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+        # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
+        # that the `timeline_limit` has increased)
+        if ignore_timeline_bound:
+            # FIXME: We signal the fact that we're sending down more events to
+            # the client by setting `unstable_expanded_timeline` to true (see
+            # "XXX: Odd behavior" above).
+            unstable_expanded_timeline = True
+
+            new_connection_state.room_configs[room_id] = RoomSyncConfig(
+                timeline_limit=room_sync_config.timeline_limit,
+                required_state_map=room_sync_config.required_state_map,
+            )
+        elif prev_room_sync_config is not None:
+            # If the result is `limited` then we need to record that the
+            # `timeline_limit` has been reduced, as when/if the client later requests
+            # more timeline then we have more data to send.
+            #
+            # Otherwise (when not `limited`) we don't need to record that the
+            # `timeline_limit` has been reduced, as the *effective* `timeline_limit`
+            # (i.e. the amount of timeline we have previously sent to the client) is at
+            # least the previous `timeline_limit`.
+            #
+            # This is to handle the case where the `timeline_limit` e.g. goes from 10 to
+            # 5 to 10 again (without any timeline gaps), where there's no point sending
+            # down the initial historical chunk events when the `timeline_limit` is
+            # increased as the client already has the 10 previous events. However, if
+            # client has a gap in the timeline (i.e. `limited` is True), then we *do*
+            # need to record the reduced timeline.
+            #
+            # TODO: Handle timeline gaps (`get_timeline_gaps()`) - This is separate from
+            # the gaps we might see on the client because a response was `limited` we're
+            # talking about above.
+            if (
+                limited
+                and prev_room_sync_config.timeline_limit
+                > room_sync_config.timeline_limit
+            ):
+                new_connection_state.room_configs[room_id] = RoomSyncConfig(
+                    timeline_limit=room_sync_config.timeline_limit,
+                    required_state_map=room_sync_config.required_state_map,
+                )
+
+            # TODO: Record changes in required_state.
+
+        else:
+            new_connection_state.room_configs[room_id] = room_sync_config
+
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
 
         return SlidingSyncResult.RoomResult(
@@ -2450,6 +2309,7 @@ class SlidingSyncHandler:
             stripped_state=stripped_state,
             prev_batch=prev_batch_token,
             limited=limited,
+            unstable_expanded_timeline=unstable_expanded_timeline,
             num_live=num_live,
             bump_stamp=bump_stamp,
             joined_count=room_membership_summary.get(
@@ -2464,769 +2324,3 @@ class SlidingSyncHandler:
             notification_count=0,
             highlight_count=0,
         )
-
-    @trace
-    async def get_extensions_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
-        to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> SlidingSyncResult.Extensions:
-        """Handle extension requests.
-
-        Args:
-            sync_config: Sync configuration
-            actual_lists: Sliding window API. A map of list key to list results in the
-                Sliding Sync response.
-            actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
-            to_token: The point in the stream to sync up to.
-            from_token: The point in the stream to sync from.
-        """
-
-        if sync_config.extensions is None:
-            return SlidingSyncResult.Extensions()
-
-        to_device_response = None
-        if sync_config.extensions.to_device is not None:
-            to_device_response = await self.get_to_device_extension_response(
-                sync_config=sync_config,
-                to_device_request=sync_config.extensions.to_device,
-                to_token=to_token,
-            )
-
-        e2ee_response = None
-        if sync_config.extensions.e2ee is not None:
-            e2ee_response = await self.get_e2ee_extension_response(
-                sync_config=sync_config,
-                e2ee_request=sync_config.extensions.e2ee,
-                to_token=to_token,
-                from_token=from_token,
-            )
-
-        account_data_response = None
-        if sync_config.extensions.account_data is not None:
-            account_data_response = await self.get_account_data_extension_response(
-                sync_config=sync_config,
-                actual_lists=actual_lists,
-                actual_room_ids=actual_room_ids,
-                account_data_request=sync_config.extensions.account_data,
-                to_token=to_token,
-                from_token=from_token,
-            )
-
-        receipts_response = None
-        if sync_config.extensions.receipts is not None:
-            receipts_response = await self.get_receipts_extension_response(
-                sync_config=sync_config,
-                actual_lists=actual_lists,
-                actual_room_ids=actual_room_ids,
-                actual_room_response_map=actual_room_response_map,
-                receipts_request=sync_config.extensions.receipts,
-                to_token=to_token,
-                from_token=from_token,
-            )
-
-        typing_response = None
-        if sync_config.extensions.typing is not None:
-            typing_response = await self.get_typing_extension_response(
-                sync_config=sync_config,
-                actual_lists=actual_lists,
-                actual_room_ids=actual_room_ids,
-                actual_room_response_map=actual_room_response_map,
-                typing_request=sync_config.extensions.typing,
-                to_token=to_token,
-                from_token=from_token,
-            )
-
-        return SlidingSyncResult.Extensions(
-            to_device=to_device_response,
-            e2ee=e2ee_response,
-            account_data=account_data_response,
-            receipts=receipts_response,
-            typing=typing_response,
-        )
-
-    def find_relevant_room_ids_for_extension(
-        self,
-        requested_lists: Optional[List[str]],
-        requested_room_ids: Optional[List[str]],
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
-    ) -> Set[str]:
-        """
-        Handle the reserved `lists`/`rooms` keys for extensions. Extensions should only
-        return results for rooms in the Sliding Sync response. This matches up the
-        requested rooms/lists with the actual lists/rooms in the Sliding Sync response.
-
-        {"lists": []}                    // Do not process any lists.
-        {"lists": ["rooms", "dms"]}      // Process only a subset of lists.
-        {"lists": ["*"]}                 // Process all lists defined in the Sliding Window API. (This is the default.)
-
-        {"rooms": []}                    // Do not process any specific rooms.
-        {"rooms": ["!a:b", "!c:d"]}      // Process only a subset of room subscriptions.
-        {"rooms": ["*"]}                 // Process all room subscriptions defined in the Room Subscription API. (This is the default.)
-
-        Args:
-            requested_lists: The `lists` from the extension request.
-            requested_room_ids: The `rooms` from the extension request.
-            actual_lists: The actual lists from the Sliding Sync response.
-            actual_room_ids: The actual room subscriptions from the Sliding Sync request.
-        """
-
-        # We only want to include account data for rooms that are already in the sliding
-        # sync response AND that were requested in the account data request.
-        relevant_room_ids: Set[str] = set()
-
-        # See what rooms from the room subscriptions we should get account data for
-        if requested_room_ids is not None:
-            for room_id in requested_room_ids:
-                # A wildcard means we process all rooms from the room subscriptions
-                if room_id == "*":
-                    relevant_room_ids.update(actual_room_ids)
-                    break
-
-                if room_id in actual_room_ids:
-                    relevant_room_ids.add(room_id)
-
-        # See what rooms from the sliding window lists we should get account data for
-        if requested_lists is not None:
-            for list_key in requested_lists:
-                # Just some typing because we share the variable name in multiple places
-                actual_list: Optional[SlidingSyncResult.SlidingWindowList] = None
-
-                # A wildcard means we process rooms from all lists
-                if list_key == "*":
-                    for actual_list in actual_lists.values():
-                        # We only expect a single SYNC operation for any list
-                        assert len(actual_list.ops) == 1
-                        sync_op = actual_list.ops[0]
-                        assert sync_op.op == OperationType.SYNC
-
-                        relevant_room_ids.update(sync_op.room_ids)
-
-                    break
-
-                actual_list = actual_lists.get(list_key)
-                if actual_list is not None:
-                    # We only expect a single SYNC operation for any list
-                    assert len(actual_list.ops) == 1
-                    sync_op = actual_list.ops[0]
-                    assert sync_op.op == OperationType.SYNC
-
-                    relevant_room_ids.update(sync_op.room_ids)
-
-        return relevant_room_ids
-
-    @trace
-    async def get_to_device_extension_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        to_device_request: SlidingSyncConfig.Extensions.ToDeviceExtension,
-        to_token: StreamToken,
-    ) -> Optional[SlidingSyncResult.Extensions.ToDeviceExtension]:
-        """Handle to-device extension (MSC3885)
-
-        Args:
-            sync_config: Sync configuration
-            to_device_request: The to-device extension from the request
-            to_token: The point in the stream to sync up to.
-        """
-        user_id = sync_config.user.to_string()
-        device_id = sync_config.requester.device_id
-
-        # Skip if the extension is not enabled
-        if not to_device_request.enabled:
-            return None
-
-        # Check that this request has a valid device ID (not all requests have
-        # to belong to a device, and so device_id is None)
-        if device_id is None:
-            return SlidingSyncResult.Extensions.ToDeviceExtension(
-                next_batch=f"{to_token.to_device_key}",
-                events=[],
-            )
-
-        since_stream_id = 0
-        if to_device_request.since is not None:
-            # We've already validated this is an int.
-            since_stream_id = int(to_device_request.since)
-
-            if to_token.to_device_key < since_stream_id:
-                # The since token is ahead of our current token, so we return an
-                # empty response.
-                logger.warning(
-                    "Got to-device.since from the future. since token: %r is ahead of our current to_device stream position: %r",
-                    since_stream_id,
-                    to_token.to_device_key,
-                )
-                return SlidingSyncResult.Extensions.ToDeviceExtension(
-                    next_batch=to_device_request.since,
-                    events=[],
-                )
-
-            # Delete everything before the given since token, as we know the
-            # device must have received them.
-            deleted = await self.store.delete_messages_for_device(
-                user_id=user_id,
-                device_id=device_id,
-                up_to_stream_id=since_stream_id,
-            )
-
-            logger.debug(
-                "Deleted %d to-device messages up to %d for %s",
-                deleted,
-                since_stream_id,
-                user_id,
-            )
-
-        messages, stream_id = await self.store.get_messages_for_device(
-            user_id=user_id,
-            device_id=device_id,
-            from_stream_id=since_stream_id,
-            to_stream_id=to_token.to_device_key,
-            limit=min(to_device_request.limit, 100),  # Limit to at most 100 events
-        )
-
-        return SlidingSyncResult.Extensions.ToDeviceExtension(
-            next_batch=f"{stream_id}",
-            events=messages,
-        )
-
-    @trace
-    async def get_e2ee_extension_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        e2ee_request: SlidingSyncConfig.Extensions.E2eeExtension,
-        to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.E2eeExtension]:
-        """Handle E2EE device extension (MSC3884)
-
-        Args:
-            sync_config: Sync configuration
-            e2ee_request: The e2ee extension from the request
-            to_token: The point in the stream to sync up to.
-            from_token: The point in the stream to sync from.
-        """
-        user_id = sync_config.user.to_string()
-        device_id = sync_config.requester.device_id
-
-        # Skip if the extension is not enabled
-        if not e2ee_request.enabled:
-            return None
-
-        device_list_updates: Optional[DeviceListUpdates] = None
-        if from_token is not None:
-            # TODO: This should take into account the `from_token` and `to_token`
-            device_list_updates = await self.device_handler.get_user_ids_changed(
-                user_id=user_id,
-                from_token=from_token.stream_token,
-            )
-
-        device_one_time_keys_count: Mapping[str, int] = {}
-        device_unused_fallback_key_types: Sequence[str] = []
-        if device_id:
-            # TODO: We should have a way to let clients differentiate between the states of:
-            #   * no change in OTK count since the provided since token
-            #   * the server has zero OTKs left for this device
-            #  Spec issue: https://github.com/matrix-org/matrix-doc/issues/3298
-            device_one_time_keys_count = await self.store.count_e2e_one_time_keys(
-                user_id, device_id
-            )
-            device_unused_fallback_key_types = (
-                await self.store.get_e2e_unused_fallback_key_types(user_id, device_id)
-            )
-
-        return SlidingSyncResult.Extensions.E2eeExtension(
-            device_list_updates=device_list_updates,
-            device_one_time_keys_count=device_one_time_keys_count,
-            device_unused_fallback_key_types=device_unused_fallback_key_types,
-        )
-
-    @trace
-    async def get_account_data_extension_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
-        account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
-        to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.AccountDataExtension]:
-        """Handle Account Data extension (MSC3959)
-
-        Args:
-            sync_config: Sync configuration
-            actual_lists: Sliding window API. A map of list key to list results in the
-                Sliding Sync response.
-            actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            account_data_request: The account_data extension from the request
-            to_token: The point in the stream to sync up to.
-            from_token: The point in the stream to sync from.
-        """
-        user_id = sync_config.user.to_string()
-
-        # Skip if the extension is not enabled
-        if not account_data_request.enabled:
-            return None
-
-        global_account_data_map: Mapping[str, JsonMapping] = {}
-        if from_token is not None:
-            # TODO: This should take into account the `from_token` and `to_token`
-            global_account_data_map = (
-                await self.store.get_updated_global_account_data_for_user(
-                    user_id, from_token.stream_token.account_data_key
-                )
-            )
-
-            have_push_rules_changed = await self.store.have_push_rules_changed_for_user(
-                user_id, from_token.stream_token.push_rules_key
-            )
-            if have_push_rules_changed:
-                global_account_data_map = dict(global_account_data_map)
-                # TODO: This should take into account the `from_token` and `to_token`
-                global_account_data_map[AccountDataTypes.PUSH_RULES] = (
-                    await self.push_rules_handler.push_rules_for_user(sync_config.user)
-                )
-        else:
-            # TODO: This should take into account the `to_token`
-            all_global_account_data = await self.store.get_global_account_data_for_user(
-                user_id
-            )
-
-            global_account_data_map = dict(all_global_account_data)
-            # TODO: This should take into account the  `to_token`
-            global_account_data_map[AccountDataTypes.PUSH_RULES] = (
-                await self.push_rules_handler.push_rules_for_user(sync_config.user)
-            )
-
-        # Fetch room account data
-        account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {}
-        relevant_room_ids = self.find_relevant_room_ids_for_extension(
-            requested_lists=account_data_request.lists,
-            requested_room_ids=account_data_request.rooms,
-            actual_lists=actual_lists,
-            actual_room_ids=actual_room_ids,
-        )
-        if len(relevant_room_ids) > 0:
-            if from_token is not None:
-                # TODO: This should take into account the `from_token` and `to_token`
-                account_data_by_room_map = (
-                    await self.store.get_updated_room_account_data_for_user(
-                        user_id, from_token.stream_token.account_data_key
-                    )
-                )
-            else:
-                # TODO: This should take into account the `to_token`
-                account_data_by_room_map = (
-                    await self.store.get_room_account_data_for_user(user_id)
-                )
-
-        # Filter down to the relevant rooms
-        account_data_by_room_map = {
-            room_id: account_data_map
-            for room_id, account_data_map in account_data_by_room_map.items()
-            if room_id in relevant_room_ids
-        }
-
-        return SlidingSyncResult.Extensions.AccountDataExtension(
-            global_account_data_map=global_account_data_map,
-            account_data_by_room_map=account_data_by_room_map,
-        )
-
-    async def get_receipts_extension_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
-        receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
-        to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.ReceiptsExtension]:
-        """Handle Receipts extension (MSC3960)
-
-        Args:
-            sync_config: Sync configuration
-            actual_lists: Sliding window API. A map of list key to list results in the
-                Sliding Sync response.
-            actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
-            account_data_request: The account_data extension from the request
-            to_token: The point in the stream to sync up to.
-            from_token: The point in the stream to sync from.
-        """
-        # Skip if the extension is not enabled
-        if not receipts_request.enabled:
-            return None
-
-        relevant_room_ids = self.find_relevant_room_ids_for_extension(
-            requested_lists=receipts_request.lists,
-            requested_room_ids=receipts_request.rooms,
-            actual_lists=actual_lists,
-            actual_room_ids=actual_room_ids,
-        )
-
-        room_id_to_receipt_map: Dict[str, JsonMapping] = {}
-        if len(relevant_room_ids) > 0:
-            # TODO: Take connection tracking into account so that when a room comes back
-            # into range we can send the receipts that were missed.
-            receipt_source = self.event_sources.sources.receipt
-            receipts, _ = await receipt_source.get_new_events(
-                user=sync_config.user,
-                from_key=(
-                    from_token.stream_token.receipt_key
-                    if from_token
-                    else MultiWriterStreamToken(stream=0)
-                ),
-                to_key=to_token.receipt_key,
-                # This is a dummy value and isn't used in the function
-                limit=0,
-                room_ids=relevant_room_ids,
-                is_guest=False,
-            )
-
-            for receipt in receipts:
-                # These fields should exist for every receipt
-                room_id = receipt["room_id"]
-                type = receipt["type"]
-                content = receipt["content"]
-
-                # For `inital: True` rooms, we only want to include receipts for events
-                # in the timeline.
-                room_result = actual_room_response_map.get(room_id)
-                if room_result is not None:
-                    if room_result.initial:
-                        # TODO: In the future, it would be good to fetch less receipts
-                        # out of the database in the first place but we would need to
-                        # add a new `event_id` index to `receipts_linearized`.
-                        relevant_event_ids = [
-                            event.event_id for event in room_result.timeline_events
-                        ]
-
-                        assert isinstance(content, dict)
-                        content = {
-                            event_id: content_value
-                            for event_id, content_value in content.items()
-                            if event_id in relevant_event_ids
-                        }
-
-                room_id_to_receipt_map[room_id] = {"type": type, "content": content}
-
-        return SlidingSyncResult.Extensions.ReceiptsExtension(
-            room_id_to_receipt_map=room_id_to_receipt_map,
-        )
-
-    async def get_typing_extension_response(
-        self,
-        sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
-        typing_request: SlidingSyncConfig.Extensions.TypingExtension,
-        to_token: StreamToken,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> Optional[SlidingSyncResult.Extensions.TypingExtension]:
-        """Handle Typing Notification extension (MSC3961)
-
-        Args:
-            sync_config: Sync configuration
-            actual_lists: Sliding window API. A map of list key to list results in the
-                Sliding Sync response.
-            actual_room_ids: The actual room IDs in the the Sliding Sync response.
-            actual_room_response_map: A map of room ID to room results in the the
-                Sliding Sync response.
-            account_data_request: The account_data extension from the request
-            to_token: The point in the stream to sync up to.
-            from_token: The point in the stream to sync from.
-        """
-        # Skip if the extension is not enabled
-        if not typing_request.enabled:
-            return None
-
-        relevant_room_ids = self.find_relevant_room_ids_for_extension(
-            requested_lists=typing_request.lists,
-            requested_room_ids=typing_request.rooms,
-            actual_lists=actual_lists,
-            actual_room_ids=actual_room_ids,
-        )
-
-        room_id_to_typing_map: Dict[str, JsonMapping] = {}
-        if len(relevant_room_ids) > 0:
-            # Note: We don't need to take connection tracking into account for typing
-            # notifications because they'll get anything still relevant and hasn't timed
-            # out when the room comes into range. We consider the gap where the room
-            # fell out of range, as long enough for any typing notifications to have
-            # timed out (it's not worth the 30 seconds of data we may have missed).
-            typing_source = self.event_sources.sources.typing
-            typing_notifications, _ = await typing_source.get_new_events(
-                user=sync_config.user,
-                from_key=(from_token.stream_token.typing_key if from_token else 0),
-                to_key=to_token.typing_key,
-                # This is a dummy value and isn't used in the function
-                limit=0,
-                room_ids=relevant_room_ids,
-                is_guest=False,
-            )
-
-            for typing_notification in typing_notifications:
-                # These fields should exist for every typing notification
-                room_id = typing_notification["room_id"]
-                type = typing_notification["type"]
-                content = typing_notification["content"]
-
-                room_id_to_typing_map[room_id] = {"type": type, "content": content}
-
-        return SlidingSyncResult.Extensions.TypingExtension(
-            room_id_to_typing_map=room_id_to_typing_map,
-        )
-
-
-class HaveSentRoomFlag(Enum):
-    """Flag for whether we have sent the room down a sliding sync connection.
-
-    The valid state changes here are:
-        NEVER -> LIVE
-        LIVE -> PREVIOUSLY
-        PREVIOUSLY -> LIVE
-    """
-
-    # The room has never been sent down (or we have forgotten we have sent it
-    # down).
-    NEVER = 1
-
-    # We have previously sent the room down, but there are updates that we
-    # haven't sent down.
-    PREVIOUSLY = 2
-
-    # We have sent the room down and the client has received all updates.
-    LIVE = 3
-
-
-@attr.s(auto_attribs=True, slots=True, frozen=True)
-class HaveSentRoom:
-    """Whether we have sent the room down a sliding sync connection.
-
-    Attributes:
-        status: Flag of if we have or haven't sent down the room
-        last_token: If the flag is `PREVIOUSLY` then this is non-null and
-            contains the last stream token of the last updates we sent down
-            the room, i.e. we still need to send everything since then to the
-            client.
-    """
-
-    status: HaveSentRoomFlag
-    last_token: Optional[RoomStreamToken]
-
-    @staticmethod
-    def previously(last_token: RoomStreamToken) -> "HaveSentRoom":
-        """Constructor for `PREVIOUSLY` flag."""
-        return HaveSentRoom(HaveSentRoomFlag.PREVIOUSLY, last_token)
-
-
-HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
-HAVE_SENT_ROOM_LIVE = HaveSentRoom(HaveSentRoomFlag.LIVE, None)
-
-
-@attr.s(auto_attribs=True)
-class SlidingSyncConnectionStore:
-    """In-memory store of per-connection state, including what rooms we have
-    previously sent down a sliding sync connection.
-
-    Note: This is NOT safe to run in a worker setup because connection positions will
-    point to different sets of rooms on different workers. e.g. for the same connection,
-    a connection position of 5 might have totally different states on worker A and
-    worker B.
-
-    One complication that we need to deal with here is needing to handle requests being
-    resent, i.e. if we sent down a room in a response that the client received, we must
-    consider the room *not* sent when we get the request again.
-
-    This is handled by using an integer "token", which is returned to the client
-    as part of the sync token. For each connection we store a mapping from
-    tokens to the room states, and create a new entry when we send down new
-    rooms.
-
-    Note that for any given sliding sync connection we will only store a maximum
-    of two different tokens: the previous token from the request and a new token
-    sent in the response. When we receive a request with a given token, we then
-    clear out all other entries with a different token.
-
-    Attributes:
-        _connections: Mapping from `(user_id, conn_id)` to mapping of `token`
-            to mapping of room ID to `HaveSentRoom`.
-    """
-
-    # `(user_id, conn_id)` -> `token` -> `room_id` -> `HaveSentRoom`
-    _connections: Dict[Tuple[str, str], Dict[int, Dict[str, HaveSentRoom]]] = (
-        attr.Factory(dict)
-    )
-
-    async def is_valid_token(
-        self, sync_config: SlidingSyncConfig, connection_token: int
-    ) -> bool:
-        """Return whether the connection token is valid/recognized"""
-        if connection_token == 0:
-            return True
-
-        conn_key = self._get_connection_key(sync_config)
-        return connection_token in self._connections.get(conn_key, {})
-
-    async def have_sent_room(
-        self, sync_config: SlidingSyncConfig, connection_token: int, room_id: str
-    ) -> HaveSentRoom:
-        """For the given user_id/conn_id/token, return whether we have
-        previously sent the room down
-        """
-
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.setdefault(conn_key, {})
-        room_status = sync_statuses.get(connection_token, {}).get(
-            room_id, HAVE_SENT_ROOM_NEVER
-        )
-
-        return room_status
-
-    @trace
-    async def record_rooms(
-        self,
-        sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
-        *,
-        sent_room_ids: StrCollection,
-        unsent_room_ids: StrCollection,
-    ) -> int:
-        """Record which rooms we have/haven't sent down in a new response
-
-        Attributes:
-            sync_config
-            from_token: The since token from the request, if any
-            sent_room_ids: The set of room IDs that we have sent down as
-                part of this request (only needs to be ones we didn't
-                previously sent down).
-            unsent_room_ids: The set of room IDs that have had updates
-                since the `from_token`, but which were not included in
-                this request
-        """
-        prev_connection_token = 0
-        if from_token is not None:
-            prev_connection_token = from_token.connection_position
-
-        # If there are no changes then this is a noop.
-        if not sent_room_ids and not unsent_room_ids:
-            return prev_connection_token
-
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.setdefault(conn_key, {})
-
-        # Generate a new token, removing any existing entries in that token
-        # (which can happen if requests get resent).
-        new_store_token = prev_connection_token + 1
-        sync_statuses.pop(new_store_token, None)
-
-        # Copy over and update the room mappings.
-        new_room_statuses = dict(sync_statuses.get(prev_connection_token, {}))
-
-        # Whether we have updated the `new_room_statuses`, if we don't by the
-        # end we can treat this as a noop.
-        have_updated = False
-        for room_id in sent_room_ids:
-            new_room_statuses[room_id] = HAVE_SENT_ROOM_LIVE
-            have_updated = True
-
-        # Whether we add/update the entries for unsent rooms depends on the
-        # existing entry:
-        #   - LIVE: We have previously sent down everything up to
-        #     `last_room_token, so we update the entry to be `PREVIOUSLY` with
-        #     `last_room_token`.
-        #   - PREVIOUSLY: We have previously sent down everything up to *a*
-        #     given token, so we don't need to update the entry.
-        #   - NEVER: We have never previously sent down the room, and we haven't
-        #     sent anything down this time either so we leave it as NEVER.
-
-        # Work out the new state for unsent rooms that were `LIVE`.
-        if from_token:
-            new_unsent_state = HaveSentRoom.previously(from_token.stream_token.room_key)
-        else:
-            new_unsent_state = HAVE_SENT_ROOM_NEVER
-
-        for room_id in unsent_room_ids:
-            prev_state = new_room_statuses.get(room_id)
-            if prev_state is not None and prev_state.status == HaveSentRoomFlag.LIVE:
-                new_room_statuses[room_id] = new_unsent_state
-                have_updated = True
-
-        if not have_updated:
-            return prev_connection_token
-
-        sync_statuses[new_store_token] = new_room_statuses
-
-        return new_store_token
-
-    @trace
-    async def mark_token_seen(
-        self,
-        sync_config: SlidingSyncConfig,
-        from_token: Optional[SlidingSyncStreamToken],
-    ) -> None:
-        """We have received a request with the given token, so we can clear out
-        any other tokens associated with the connection.
-
-        If there is no from token then we have started afresh, and so we delete
-        all tokens associated with the device.
-        """
-        # Clear out any tokens for the connection that doesn't match the one
-        # from the request.
-
-        conn_key = self._get_connection_key(sync_config)
-        sync_statuses = self._connections.pop(conn_key, {})
-        if from_token is None:
-            return
-
-        sync_statuses = {
-            connection_token: room_statuses
-            for connection_token, room_statuses in sync_statuses.items()
-            if connection_token == from_token.connection_position
-        }
-        if sync_statuses:
-            self._connections[conn_key] = sync_statuses
-
-    @staticmethod
-    def _get_connection_key(sync_config: SlidingSyncConfig) -> Tuple[str, str]:
-        """Return a unique identifier for this connection.
-
-        The first part is simply the user ID.
-
-        The second part is generally a combination of device ID and conn_id.
-        However, both these two are optional (e.g. puppet access tokens don't
-        have device IDs), so this handles those edge cases.
-
-        We use this over the raw `conn_id` to avoid clashes between different
-        clients that use the same `conn_id`. Imagine a user uses a web client
-        that uses `conn_id: main_sync_loop` and an Android client that also has
-        a `conn_id: main_sync_loop`.
-        """
-
-        user_id = sync_config.user.to_string()
-
-        # Only one sliding sync connection is allowed per given conn_id (empty
-        # or not).
-        conn_id = sync_config.conn_id or ""
-
-        if sync_config.requester.device_id:
-            return (user_id, f"D/{sync_config.requester.device_id}/{conn_id}")
-
-        if sync_config.requester.access_token_id:
-            # If we don't have a device, then the access token ID should be a
-            # stable ID.
-            return (user_id, f"A/{sync_config.requester.access_token_id}/{conn_id}")
-
-        # If we have neither then its likely an AS or some weird token. Either
-        # way we can just fail here.
-        raise Exception("Cannot use sliding sync with access token type")

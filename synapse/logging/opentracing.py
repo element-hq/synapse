@@ -1032,13 +1032,13 @@ def tag_args(func: Callable[P, R]) -> Callable[P, R]:
     def _wrapping_logic(
         _func: Callable[P, R], *args: P.args, **kwargs: P.kwargs
     ) -> Generator[None, None, None]:
-        # We use `[1:]` to skip the `self` object reference and `start=1` to
-        # make the index line up with `argspec.args`.
-        #
-        # FIXME: We could update this to handle any type of function by ignoring the
-        #   first argument only if it's named `self` or `cls`. This isn't fool-proof
-        #   but handles the idiomatic cases.
-        for i, arg in enumerate(args[1:], start=1):
+        for i, arg in enumerate(args, start=0):
+            if argspec.args[i] in ("self", "cls"):
+                # Ignore `self` and `cls` values. Ideally we'd properly detect
+                # if we were wrapping a method, but that is really non-trivial
+                # and this is good enough.
+                continue
+
             set_tag(SynapseTags.FUNC_ARG_PREFIX + argspec.args[i], str(arg))
         set_tag(SynapseTags.FUNC_ARGS, str(args[len(argspec.args) :]))
         set_tag(SynapseTags.FUNC_KWARGS, str(kwargs))
