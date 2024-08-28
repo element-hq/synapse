@@ -123,10 +123,6 @@ class _JoinedRoomStreamOrderingUpdate:
     most_recent_event_stream_ordering: int
     # The most recent event `bump_stamp` for the room
     most_recent_bump_stamp: Optional[int]
-    # The `stream_ordering` in the `current_state_delta_stream` that we got the state
-    # values from. We can use this to check if the current state has been updated since
-    # we last checked.
-    last_current_state_delta_stream_id: int
 
 
 class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
@@ -1622,7 +1618,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
         joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
-        # Map from room_id to stream_ordering/bump_stamp/last_current_state_delta_stream_id values
+        # Map from room_id to stream_ordering/bump_stamp, etc values
         joined_room_stream_ordering_updates: Dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
@@ -1632,15 +1628,18 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # `event_stream_ordering` order *ascending* to save our progress position
         # correctly if we need to exit early.
         room_id_to_progress_marker_map: OrderedDict[str, int] = OrderedDict()
+        # As long as we get this value before we fetch the current state, we can use it
+        # to check if something has changed since that point.
+        most_recent_current_state_delta_stream_id = (
+            await self.get_max_stream_id_in_current_state_deltas()
+        )
         for room_id, progress_event_stream_ordering in rooms_to_update:
             room_id_to_progress_marker_map[room_id] = progress_event_stream_ordering
 
-            current_state_ids_map, last_current_state_delta_stream_id = (
-                await self.db_pool.runInteraction(
-                    "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
-                    PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
-                    room_id,
-                )
+            current_state_ids_map = await self.db_pool.runInteraction(
+                "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
+                PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
+                room_id,
             )
             # We're iterating over rooms pulled from the current_state_events table
             # so we should have some current state for each room
@@ -1694,7 +1693,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 _JoinedRoomStreamOrderingUpdate(
                     most_recent_event_stream_ordering=most_recent_event_stream_ordering,
                     most_recent_bump_stamp=most_recent_bump_stamp,
-                    last_current_state_delta_stream_id=last_current_state_delta_stream_id,
                 )
             )
 
@@ -1718,9 +1716,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     joined_room_update.most_recent_event_stream_ordering
                 )
                 bump_stamp = joined_room_update.most_recent_bump_stamp
-                last_current_state_delta_stream_id = (
-                    joined_room_update.last_current_state_delta_stream_id
-                )
 
                 # Check if the current state has been updated since we gathered it
                 state_deltas_since_we_gathered_current_state = (
@@ -1728,7 +1723,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         txn,
                         room_id,
                         from_token=RoomStreamToken(
-                            stream=last_current_state_delta_stream_id
+                            stream=most_recent_current_state_delta_stream_id
                         ),
                         to_token=None,
                     )
@@ -1763,7 +1758,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # Since we partially update the `sliding_sync_joined_rooms` as new state
                 # is sent, we need to update the state fields `ON CONFLICT`. We just
                 # have to be careful we're not overwriting it with stale data (see
-                # `last_current_state_delta_stream_id` check above).
+                # `most_recent_current_state_delta_stream_id` check above).
                 #
                 self.db_pool.simple_upsert_txn(
                     txn,
