@@ -327,6 +327,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             self._sliding_sync_membership_snapshots_bg_update,
         )
 
+        # We want this to run on the main database at startup before we start processing
+        # events.
+        #
         # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
         # foreground update for
         # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
