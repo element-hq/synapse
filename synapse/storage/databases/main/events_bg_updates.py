@@ -1881,9 +1881,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         c.membership,
                         e.stream_ordering,
                         e.outlier
-                    FROM local_current_membership as c
+                    FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
-                    LEFT JOIN rooms AS r USING (room_id)
+                    LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE c.room_id > ?
                     ORDER BY c.room_id ASC
                     LIMIT ?
@@ -1911,7 +1911,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         c.membership,
                         c.event_stream_ordering,
                         e.outlier
-                    FROM local_current_membership as c
+                    FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
                     WHERE event_stream_ordering > ?
                     ORDER BY event_stream_ordering ASC
