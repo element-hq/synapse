@@ -14,6 +14,7 @@
 CREATE TABLE delayed_events (
     delay_id TEXT NOT NULL,
     user_localpart TEXT NOT NULL,
+    device_id TEXT,
     delay BIGINT NOT NULL,
     send_ts BIGINT NOT NULL,
     room_id TEXT NOT NULL,

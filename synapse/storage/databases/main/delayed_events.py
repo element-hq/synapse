@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 DelayID = NewType("DelayID", str)
 UserLocalpart = NewType("UserLocalpart", str)
+DeviceID = NewType("DeviceID", str)
 EventType = NewType("EventType", str)
 StateKey = NewType("StateKey", str)
 
@@ -45,6 +46,7 @@ DelayedEventDetails = Tuple[
     Optional[StateKey],
     Timestamp,
     JsonDict,
+    Optional[DeviceID],
 ]
 
 
@@ -53,6 +55,7 @@ class DelayedEventsStore(SQLBaseStore):
         self,
         *,
         user_localpart: str,
+        device_id: Optional[str],
         creation_ts: Timestamp,
         room_id: str,
         event_type: str,
@@ -79,6 +82,7 @@ class DelayedEventsStore(SQLBaseStore):
                 values={
                     "delay_id": delay_id,
                     "user_localpart": user_localpart,
+                    "device_id": device_id,
                     "delay": delay,
                     "send_ts": send_ts,
                     "room_id": room_id,
@@ -242,6 +246,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "origin_server_ts",
                     "send_ts",
                     "content",
+                    "device_id",
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
@@ -276,6 +281,7 @@ class DelayedEventsStore(SQLBaseStore):
                     StateKey(row[4]) if row[4] is not None else None,
                     Timestamp(row[5] if row[5] is not None else row[6]),
                     db_to_json(row[7]),
+                    DeviceID(row[8]) if row[8] is not None else None,
                 )
                 for row in rows
             ]
@@ -298,6 +304,7 @@ class DelayedEventsStore(SQLBaseStore):
             Optional[StateKey],
             Timestamp,
             JsonDict,
+            Optional[DeviceID],
         ],
         bool,
         Optional[Timestamp],
@@ -325,6 +332,7 @@ class DelayedEventsStore(SQLBaseStore):
                 Optional[StateKey],
                 Timestamp,
                 JsonDict,
+                Optional[DeviceID],
             ],
             bool,
             Optional[Timestamp],
@@ -337,6 +345,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "origin_server_ts",
                     "send_ts",
                     "content",
+                    "device_id",
                 )
             )
             sql_update = "UPDATE delayed_events SET is_processed = TRUE"
@@ -364,6 +373,7 @@ class DelayedEventsStore(SQLBaseStore):
                 StateKey(row[2]) if row[2] is not None else None,
                 Timestamp(row[3]) if row[3] is not None else send_ts,
                 db_to_json(row[5]),
+                DeviceID(row[6]) if row[6] is not None else None,
             )
 
             next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)

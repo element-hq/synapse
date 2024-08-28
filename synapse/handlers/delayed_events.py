@@ -30,6 +30,7 @@ from synapse.storage.databases.main.delayed_events import (
     Delay,
     DelayedEventDetails,
     DelayID,
+    DeviceID,
     EventType,
     StateKey,
     Timestamp,
@@ -167,6 +168,7 @@ class DelayedEventsHandler:
 
         delay_id, changed = await self._store.add_delayed_event(
             user_localpart=requester.user.localpart,
+            device_id=requester.device_id,
             creation_ts=creation_ts,
             room_id=room_id,
             event_type=event_type,
@@ -276,6 +278,7 @@ class DelayedEventsHandler:
             state_key,
             origin_server_ts,
             content,
+            device_id,
         ) in events:
             if state_key is not None:
                 state_info = (room_id, event_type, state_key)
@@ -293,6 +296,7 @@ class DelayedEventsHandler:
                     state_key,
                     origin_server_ts,
                     content,
+                    device_id,
                 )
                 if state_info is not None:
                     # Note that removal from the DB is done by self.on_new_event
@@ -340,13 +344,17 @@ class DelayedEventsHandler:
         state_key: Optional[StateKey],
         origin_server_ts: Timestamp,
         content: JsonDict,
+        device_id: Optional[DeviceID],
         txn_id: Optional[str] = None,
     ) -> None:
         user_id = UserID(user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
+        # Create a new requester from what data is currently available
+        # TODO: Consider storing the requester in the DB at add time and deserialize it here
         requester = create_requester(
             user_id,
             is_guest=await self._store.is_guest(user_id_str),
+            device_id=device_id,
         )
 
         try:
