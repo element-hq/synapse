@@ -1792,12 +1792,18 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     },
                 )
 
-                # Now that we've processed the room, we can remove it from the queue
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    table="sliding_sync_joined_rooms_to_recalculate",
-                    keyvalues={"room_id": room_id},
-                )
+            # Now that we've processed all the room, we can remove them from the
+            # queue.
+            #
+            # Note: we need to remove all the rooms from the queue we pulled out
+            # from the DB, not just the ones we've processed above. Otherwise
+            # we'll simply keep pulling out the same rooms over and over again.
+            self.db_pool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_joined_rooms_to_recalculate",
+                keys=("room_id",),
+                values=rooms_to_update,
+            )
 
         await self.db_pool.runInteraction(
             "sliding_sync_joined_rooms_bg_update", _fill_table_txn
