@@ -33,8 +33,8 @@ from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState
-from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
-from synapse.storage.prepare_database import (
+from synapse.storage.databases.main.events_bg_updates import (
+    _BackgroundUpdates,
     _resolve_stale_data_in_sliding_sync_joined_rooms_table,
     _resolve_stale_data_in_sliding_sync_membership_snapshots_table,
 )
