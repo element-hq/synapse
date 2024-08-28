@@ -203,13 +203,7 @@ class RoomSummaryHandler:
                 False,
             )
             root_room_entry = room_hierarchy[0]
-            if not root_room_entry:
-                raise SynapseError(
-                    500,
-                    "Failed to get room preview for %s" % (requested_room_id),
-                    errcode=Codes.UNKNOWN,
-                )
-            if not await self._is_remote_room_accessible(
+            if not root_room_entry or not await self._is_remote_room_accessible(
                 requester, requested_room_id, root_room_entry.room
             ):
                 raise UnstableSpecAuthError(
