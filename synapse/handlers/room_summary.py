@@ -183,8 +183,7 @@ class RoomSummaryHandler:
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
-        # First of all, check that the room is accessible locally.
-        # OR accessible through federation.
+        # If the room is available locally, quickly check that the user can access it.
         local_room = await self._store.is_host_joined(
             requested_room_id, self._server_name
         )
@@ -205,7 +204,7 @@ class RoomSummaryHandler:
             )
             root_room_entry = room_hierarchy[0]
             if not root_room_entry:
-                raise UnstableSpecAuthError(
+                raise SynapseError(
                     500,
                     "Failed to get room preview for %s" % (requested_room_id),
                     errcode=Codes.UNKNOWN,
