@@ -16,6 +16,11 @@
 -- during the background update to populate `sliding_sync_joined_rooms` which works but
 -- it takes a lot of work for the database to grab `DISTINCT` room_ids given how many
 -- state events there are for each room.
+--
+-- FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+--  foreground update for
+-- `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+--  https://github.com/element-hq/synapse/issues/17623)
 CREATE TABLE IF NOT EXISTS sliding_sync_joined_rooms_to_recalculate(
     room_id TEXT NOT NULL REFERENCES rooms(room_id),
     PRIMARY KEY (room_id)

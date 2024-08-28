@@ -4214,7 +4214,7 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
     FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
     foreground update for
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
-    https://github.com/element-hq/synapse/issues/TODO)
+    https://github.com/element-hq/synapse/issues/17623)
     """
 
     def test_joined_background_update_catch_up_new_room(self) -> None:

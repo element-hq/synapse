@@ -333,7 +333,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
         # foreground update for
         # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
-        # https://github.com/element-hq/synapse/issues/TODO)
+        # https://github.com/element-hq/synapse/issues/17623)
         with db_conn.cursor(txn_name="resolve_sliding_sync") as txn:
             _resolve_stale_data_in_sliding_sync_tables(
                 txn=txn,
@@ -2280,7 +2280,7 @@ def _resolve_stale_data_in_sliding_sync_tables(
     FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
     foreground update for
     `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
-    https://github.com/element-hq/synapse/issues/TODO)
+    https://github.com/element-hq/synapse/issues/17623)
     """
 
     _resolve_stale_data_in_sliding_sync_joined_rooms_table(txn)
