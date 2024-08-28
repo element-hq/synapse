@@ -2673,19 +2673,9 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                    "progress_json": "{}",
-                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                },
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
                     "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                     "progress_json": "{}",
-                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
                 },
             )
         )
@@ -2840,19 +2830,9 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
             self.store.db_pool.simple_insert(
                 "background_updates",
                 {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                    "progress_json": "{}",
-                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                },
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
                     "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                     "progress_json": "{}",
-                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
                 },
             )
         )

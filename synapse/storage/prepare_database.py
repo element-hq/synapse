@@ -679,10 +679,6 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
 
             # Update the `sliding_sync_joined_rooms_to_recalculate` table with the rooms
             # that went stale and now need to be recalculated.
-            #
-            # FIXME: There is potentially a race where the unique index (added via
-            # `_BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE`)
-            # hasn't been added at this point so we won't be able to upsert
             DatabasePool.simple_upsert_many_txn_native_upsert(
                 txn,
                 table="sliding_sync_joined_rooms_to_recalculate",
@@ -707,8 +703,6 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
             # we're already working on it
             insertion_values={
                 "progress_json": "{}",
-                # Since we're going to upsert, we need to make sure the unique index is in place
-                "depends_on": _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
             },
         )
         depends_on = (

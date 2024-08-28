@@ -91,9 +91,6 @@ class _BackgroundUpdates:
     SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
         "sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update"
     )
-    SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
-        "sliding_sync_index_joined_rooms_to_recalculate_table_bg_update"
-    )
     SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE = "sliding_sync_joined_rooms_bg_update"
     SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE = (
         "sliding_sync_membership_snapshots_bg_update"
@@ -317,13 +314,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
             self._sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update,
-        )
-        self.db_pool.updates.register_background_index_update(
-            _BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-            index_name="sliding_sync_joined_rooms_to_recalculate_room_id_idx",
-            table="sliding_sync_joined_rooms_to_recalculate",
-            columns=["room_id"],
-            unique=True,
         )
         # Add some background updates to populate the sliding sync tables
         self.db_pool.updates.register_background_update_handler(
@@ -1579,38 +1569,25 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         """
         Prefill `sliding_sync_joined_rooms_to_recalculate` table with all rooms we know about already.
         """
-        initial_insert = progress.get("initial_insert", False)
 
         def _txn(txn: LoggingTransaction) -> None:
             # We do this as one big bulk insert. This has been tested on a bigger
             # homeserver with ~10M rooms and took 11s. There is potential for this to
             # starve disk usage while this goes on.
-            if initial_insert:
-                txn.execute(
-                    """
-                    INSERT INTO sliding_sync_joined_rooms_to_recalculate
-                        (room_id)
-                    SELECT room_id FROM rooms;
-                    """,
-                )
-            else:
-                # We can only upsert once the unique index has been added to the table
-                # (see
-                # `_BackgroundUpdates.SLIDING_SYNC_INDEX_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE`)
-                #
-                # We upsert in case we have to run this multiple times.
-                #
-                # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
-                txn.execute(
-                    """
-                    INSERT INTO sliding_sync_joined_rooms_to_recalculate
-                        (room_id)
-                    SELECT room_id FROM rooms WHERE ?
-                    ON CONFLICT (room_id)
-                    DO NOTHING;
-                    """,
-                    (True,),
-                )
+            #
+            # We upsert in case we have to run this multiple times.
+            #
+            # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
+            txn.execute(
+                """
+                INSERT INTO sliding_sync_joined_rooms_to_recalculate
+                    (room_id)
+                SELECT room_id FROM rooms WHERE ?
+                ON CONFLICT (room_id)
+                DO NOTHING;
+                """,
+                (True,),
+            )
 
         await self.db_pool.runInteraction(
             "_sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update",
