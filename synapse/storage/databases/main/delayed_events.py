@@ -43,7 +43,7 @@ DelayedEventDetails = Tuple[
     RoomID,
     EventType,
     Optional[StateKey],
-    Optional[Timestamp],
+    Timestamp,
     JsonDict,
 ]
 
@@ -240,6 +240,7 @@ class DelayedEventsStore(SQLBaseStore):
                     "event_type",
                     "state_key",
                     "origin_server_ts",
+                    "send_ts",
                     "content",
                 )
             )
@@ -273,8 +274,8 @@ class DelayedEventsStore(SQLBaseStore):
                     RoomID.from_string(row[2]),
                     EventType(row[3]),
                     StateKey(row[4]) if row[4] is not None else None,
-                    Timestamp(row[5]) if row[5] is not None else None,
-                    db_to_json(row[6]),
+                    Timestamp(row[5] if row[5] is not None else row[6]),
+                    db_to_json(row[7]),
                 )
                 for row in rows
             ]
@@ -295,7 +296,7 @@ class DelayedEventsStore(SQLBaseStore):
             RoomID,
             EventType,
             Optional[StateKey],
-            Optional[Timestamp],
+            Timestamp,
             JsonDict,
         ],
         bool,
@@ -322,7 +323,7 @@ class DelayedEventsStore(SQLBaseStore):
                 RoomID,
                 EventType,
                 Optional[StateKey],
-                Optional[Timestamp],
+                Timestamp,
                 JsonDict,
             ],
             bool,
@@ -361,7 +362,7 @@ class DelayedEventsStore(SQLBaseStore):
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,
-                Timestamp(row[3]) if row[3] is not None else None,
+                Timestamp(row[3]) if row[3] is not None else send_ts,
                 db_to_json(row[5]),
             )
 

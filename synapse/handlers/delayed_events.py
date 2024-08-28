@@ -338,7 +338,7 @@ class DelayedEventsHandler:
         room_id: RoomID,
         event_type: EventType,
         state_key: Optional[StateKey],
-        origin_server_ts: Optional[Timestamp],
+        origin_server_ts: Timestamp,
         content: JsonDict,
         txn_id: Optional[str] = None,
     ) -> None:
@@ -367,13 +367,11 @@ class DelayedEventsHandler:
                     "content": content,
                     "room_id": room_id.to_string(),
                     "sender": user_id_str,
+                    "origin_server_ts": origin_server_ts,
                 }
 
                 if state_key is not None:
                     event_dict["state_key"] = state_key
-
-                if origin_server_ts is not None:
-                    event_dict["origin_server_ts"] = origin_server_ts
 
                 (
                     event,
