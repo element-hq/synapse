@@ -2441,36 +2441,52 @@ class EventsWorkerStore(SQLBaseStore):
         self.invalidate_get_event_cache_after_txn(txn, event_id)
 
     async def get_events_sent_by_user_in_room(
-        self, user_id: str, room_id: str, limit: Optional[int], filter: str = "none"
+        self, user_id: str, room_id: str, limit: int, filter: Optional[List[str]] = None
     ) -> Optional[List[str]]:
         """
-        Get a list of event ids and event info of events sent by the user in the specified room
+        Get a list of event ids of events sent by the user in the specified room
 
         Args:
             user_id: user ID to search against
             room_id: room ID of the room to search for events in
-            filter: type of event to filter out
+            filter: type of events to filter for
             limit: maximum number of event ids to return
         """
 
-        def _get_events_by_user_txn(
+        def _get_events_by_user_in_room_txn(
             txn: LoggingTransaction,
             user_id: str,
             room_id: str,
-            filter: Optional[str],
+            filter: Optional[List[str]],
             batch_size: int,
             offset: int,
         ) -> Tuple[Optional[List[str]], int]:
+            if filter:
+                filter_sql = " AND type in ("
+                for i, _ in enumerate(filter):
+                    if i < len(filter) - 1:
+                        filter_sql += "?, "
+                    else:
+                        filter_sql += "?)"
 
-            sql = """
-                    SELECT event_id FROM events
-                    WHERE sender = ? AND room_id = ?
-                    AND type != ?
-                    ORDER BY received_ts DESC
-                    LIMIT ?
-                    OFFSET ?
-                  """
-            txn.execute(sql, (user_id, room_id, filter, batch_size, offset))
+                sql = f"""
+                        SELECT event_id FROM events
+                        WHERE sender = ? AND room_id = ?
+                        {filter_sql}
+                        ORDER BY received_ts DESC
+                        LIMIT ?
+                        OFFSET ?
+                      """
+                txn.execute(sql, (user_id, room_id, *filter, batch_size, offset))
+            else:
+                sql = """
+                        SELECT event_id FROM events
+                        WHERE sender = ? AND room_id = ?
+                        ORDER BY received_ts DESC
+                        LIMIT ?
+                        OFFSET ?
+                      """
+                txn.execute(sql, (user_id, room_id, batch_size, offset))
             res = txn.fetchall()
             if res:
                 events = [row[0] for row in res]
@@ -2478,9 +2494,6 @@ class EventsWorkerStore(SQLBaseStore):
                 events = None
 
             return events, offset + batch_size
-
-        if not limit:
-            limit = 1000
 
         offset = 0
         batch_size = 100
@@ -2491,7 +2504,7 @@ class EventsWorkerStore(SQLBaseStore):
         while offset < limit:
             res, offset = await self.db_pool.runInteraction(
                 "get_events_by_user",
-                _get_events_by_user_txn,
+                _get_events_by_user_in_room_txn,
                 user_id,
                 room_id,
                 filter,
@@ -2501,5 +2514,5 @@ class EventsWorkerStore(SQLBaseStore):
             if res:
                 selected_ids = selected_ids + res
             else:
-                return selected_ids
+                break
         return selected_ids

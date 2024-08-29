@@ -47,6 +47,7 @@ from synapse.types import (
     TaskStatus,
     UserID,
     UserInfo,
+    create_requester,
 )
 from synapse.visibility import filter_events_for_client
 
@@ -406,32 +407,61 @@ class AdminHandler:
 
         r = task.params.get("requester")
         assert r is not None
-        requester = Requester.deserialize(self._store, r)
+        admin = Requester.deserialize(self._store, r)
 
         user_id = task.params.get("user_id")
         assert user_id is not None
 
+        requester = create_requester(
+            user_id, authenticated_entity=admin.user.to_string()
+        )
+
         reason = task.params.get("reason")
         limit = task.params.get("limit")
 
+        if not limit:
+            limit = 1000
+
         result: Mapping[str, Any] = (
-            task.result
-            if task.result
-            else {"failed_redactions": {}, "successful_redactions": []}
+            task.result if task.result else {"failed_redactions": {}}
         )
         for room in rooms:
             room_version = await self._store.get_room_version(room)
-            events = await self._store.get_events_sent_by_user_in_room(
-                user_id, room, limit, "m.room.redaction"
+            event_ids = await self._store.get_events_sent_by_user_in_room(
+                user_id,
+                room,
+                limit,
+                [
+                    "m.room.member",
+                    "m.text",
+                    "m.emote",
+                    "m.image",
+                    "m.file",
+                    "m.audio",
+                    "m.video",
+                ],
             )
-
-            if not events:
+            if not event_ids:
                 # there's nothing to redact
                 return TaskStatus.COMPLETE, result, None
 
+            events = await self._store.get_events_as_list(set(event_ids))
             for event in events:
+                # we care about join events but not other membership events
+                if event.type == "m.room.member":
+                    dict = event.get_dict()
+                    content = dict.get("content")
+                    if content:
+                        if content.get("membership") == "join":
+                            pass
+                        else:
+                            continue
+                relations = await self._store.get_relations_for_event(
+                    room, event.event_id, event, event_type=EventTypes.Redaction
+                )
+
                 # if we've already successfully redacted this event then skip processing it
-                if event in result["successful_redactions"]:
+                if relations[0]:
                     continue
 
                 event_dict = {
@@ -441,9 +471,9 @@ class AdminHandler:
                     "sender": user_id,
                 }
                 if room_version.updated_redaction_rules:
-                    event_dict["content"]["redacts"] = event
+                    event_dict["content"]["redacts"] = event.event_id
                 else:
-                    event_dict["redacts"] = event
+                    event_dict["redacts"] = event.event_id
 
                 try:
                     # set the prev event to the offending message to allow for redactions
@@ -453,14 +483,15 @@ class AdminHandler:
                         await self.event_creation_handler.create_and_send_nonmember_event(
                             requester,
                             event_dict,
-                            prev_event_ids=[event],
+                            prev_event_ids=[event.event_id],
                             ratelimit=False,
                         )
                     )
-                    result["successful_redactions"].append(event)
                 except Exception as ex:
-                    logger.info(f"Redaction of event {event} failed due to: {ex}")
-                    result["failed_redactions"][event] = str(ex)
+                    logger.info(
+                        f"Redaction of event {event.event_id} failed due to: {ex}"
+                    )
+                    result["failed_redactions"][event.event_id] = str(ex)
                     await self._task_scheduler.update_task(task.id, result=result)
 
         return TaskStatus.COMPLETE, result, None

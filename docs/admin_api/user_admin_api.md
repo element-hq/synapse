@@ -1439,6 +1439,5 @@ The following fields are returned in the JSON response body:
 - status: one of scheduled/active/completed/failed, indicating the status of the redaction job
 - failed_redactions: a dict where the keys are event ids the process was unable to redact, if any, and the values are 
   the corresponding error that caused the redaction to fail
-- successful_redactions: a list of event ids that were successfully redacted
 
 _Added in Synapse 1.114.0._

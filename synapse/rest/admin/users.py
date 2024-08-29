@@ -1475,13 +1475,9 @@ class RedactUserStatus(RestServlet):
             elif task.status == TaskStatus.COMPLETE:
                 assert task.result is not None
                 failed_redactions = task.result.get("failed_redactions")
-                successful_redactions = task.result.get("successful_redactions")
                 return HTTPStatus.OK, {
                     "status": TaskStatus.COMPLETE,
                     "failed_redactions": failed_redactions if failed_redactions else {},
-                    "successful_redactions": (
-                        successful_redactions if successful_redactions else []
-                    ),
                 }
             elif task.status == TaskStatus.SCHEDULED:
                 return HTTPStatus.OK, {"status": TaskStatus.SCHEDULED}
