@@ -537,11 +537,17 @@ class IdentityHandler:
         except HttpResponseException as e:
             synapse_error = e.to_synapse_error()
             if synapse_error.errcode == Codes.TOKEN_INCORRECT:
-                raise SynapseError(400, "Token incorrect", errcode=Codes.TOKEN_INCORRECT)
+                raise SynapseError(
+                    400, "Token incorrect", errcode=Codes.TOKEN_INCORRECT
+                )
             elif synapse_error.errcode == Codes.SESSION_EXPIRED:
-                raise SynapseError(400, "Session expired", errcode=Codes.SESSION_EXPIRED)
+                raise SynapseError(
+                    400, "Session expired", errcode=Codes.SESSION_EXPIRED
+                )
             else:
-                logger.warning("Error contacting msisdn account_threepid_delegate: %s", e)
+                logger.warning(
+                    "Error contacting msisdn account_threepid_delegate: %s", e
+                )
                 raise SynapseError(400, "Error contacting the identity server")
 
     async def lookup_3pid(
