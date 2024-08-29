@@ -1400,15 +1400,16 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ) -> Dict[str, RoomsForUserSlidingSync]:
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
-                    m.event_stream_ordering,
+                    r.room_version,
+                    m.event_instance_name, m.event_stream_ordering,
                     COALESCE(j.room_type, m.room_type),
                     COALESCE(j.is_encrypted, m.is_encrypted),
                     COALESCE(j.tombstone_successor_room_id, m.tombstone_successor_room_id)
                 FROM sliding_sync_membership_snapshots AS m
+                INNER JOIN rooms AS r USING (room_id)
                 LEFT JOIN sliding_sync_joined_rooms AS j USING (room_id)
                 WHERE user_id = ?
                     AND m.forgotten = 0
-                    AND (membership != 'leave' OR m.sender != m.user_id)
             """
             txn.execute(sql, (user_id,))
             return {
@@ -1417,10 +1418,11 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     sender=row[1],
                     membership=row[2],
                     event_id=row[3],
-                    membership_event_stream_ordering=row[4],
-                    room_type=row[5],
-                    is_encrypted=row[6],
-                    tombstone_successor_room_id=row[7],
+                    room_version_id=row[4],
+                    event_pos=PersistedEventPosition(row[5], row[6]),
+                    room_type=row[7],
+                    is_encrypted=row[8],
+                    tombstone_successor_room_id=row[9],
                 )
                 for row in txn
             }

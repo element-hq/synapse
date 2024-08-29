@@ -40,12 +40,7 @@ class RoomsForUser:
 
 
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
-class RoomsForUserSlidingSync:
-    room_id: str
-    sender: str
-    membership: str
-    event_id: str
-    membership_event_stream_ordering: int
+class RoomsForUserSlidingSync(RoomsForUser):
     room_type: Optional[str]
     is_encrypted: bool
     tombstone_successor_room_id: Optional[str]

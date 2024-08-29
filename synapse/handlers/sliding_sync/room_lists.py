@@ -234,15 +234,56 @@ class SlidingSyncRoomLists:
         room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
             user_id
         )
-        # TODO: Roll back memberships that are after the `to_token`.
 
-        # TODO: Fill these out by getting membership changes in rooms.
-        newly_joined_room_ids: Set[str] = set()
-        newly_left_room_ids: Set[str] = set()
-        dm_room_ids: Set[str] = set()
+        changes = await self._get_rewind_changes_to_current_membership_to_token(
+            sync_config.user, room_membership_for_user_map, to_token=to_token
+        )
+        if changes:
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            for room_id, change in changes.items():
+                if change is None:
+                    room_membership_for_user_map.pop(room_id)
+                    continue
+
+                existing_room = room_membership_for_user_map.get(room_id)
+                if existing_room is not None:
+                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_id=room_id,
+                        sender=change.sender,
+                        membership=change.membership,
+                        event_id=change.event_id,
+                        event_pos=change.event_pos,
+                        room_version_id=change.room_version_id,
+                        # We keep the current state of the room though
+                        room_type=existing_room.room_type,
+                        is_encrypted=existing_room.is_encrypted,
+                        tombstone_successor_room_id=existing_room.tombstone_successor_room_id,
+                    )
+                else:
+                    # This is the state reset case.
+                    raise NotImplementedError()
+
+        newly_joined_room_ids, newly_left_room_map = (
+            await self._get_newly_joined_and_left_rooms(
+                user_id, from_token=from_token, to_token=to_token
+            )
+        )
+
+        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
         if sync_config.lists:
-            sync_room_map = room_membership_for_user_map
+            sync_room_map = {
+                room_id: room_membership_for_user
+                for room_id, room_membership_for_user in room_membership_for_user_map.items()
+                if room_membership_for_user.membership != Membership.LEAVE
+                # Unless...
+                or room_id in newly_left_room_map
+                # Allow kicks
+                or (
+                    room_membership_for_user.membership == Membership.LEAVE
+                    and room_membership_for_user.sender not in (user_id, None)
+                )
+            }
             with start_active_span("assemble_sliding_window_lists"):
                 for list_key, list_config in sync_config.lists.items():
                     # Apply filters
@@ -433,6 +474,11 @@ class SlidingSyncRoomLists:
                         if room_id in rooms_should_send
                     }
 
+        # TODO: Handle state reset rooms with newly_left_room_map
+
+        if newly_left_room_map.keys() - room_membership_for_user_map.keys():
+            raise NotImplementedError()
+
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
@@ -444,14 +490,11 @@ class SlidingSyncRoomLists:
                 room_id: _RoomMembershipForUser(
                     room_id=room_id,
                     event_id=membership_info.event_id,
-                    event_pos=PersistedEventPosition(
-                        "master",  # FIXME
-                        membership_info.membership_event_stream_ordering,
-                    ),
+                    event_pos=membership_info.event_pos,
                     sender=membership_info.sender,
                     membership=membership_info.membership,
                     newly_joined=room_id in newly_joined_room_ids,
-                    newly_left=room_id in newly_left_room_ids,
+                    newly_left=room_id in newly_left_room_map,
                     is_dm=room_id in dm_room_ids,
                 )
                 for room_id, membership_info in room_membership_for_user_map.items()
@@ -1795,9 +1838,7 @@ class SlidingSyncRoomLists:
                 # in invited/knocked cases if for example the room has
                 # `invite`/`world_readable` history visibility, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-                last_activity_in_room_map[room_id] = (
-                    room_for_user.membership_event_stream_ordering
-                )
+                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
 
         # For fully-joined rooms, we find the latest activity at/before the
         # `to_token`.
