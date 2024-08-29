@@ -96,6 +96,7 @@ MAIN_PROCESS_HTTP_LISTENER_PORT = 8080
 MAIN_PROCESS_INSTANCE_NAME = "main"
 MAIN_PROCESS_LOCALHOST_ADDRESS = "127.0.0.1"
 MAIN_PROCESS_REPLICATION_PORT = 9093
+MAIN_PROCESS_METRICS_PORT = 9094
 # Obviously, these would only be used with the UNIX socket option
 MAIN_PROCESS_UNIX_SOCKET_PUBLIC_PATH = "/run/main_public.sock"
 MAIN_PROCESS_UNIX_SOCKET_PRIVATE_PATH = "/run/main_private.sock"
@@ -767,7 +768,11 @@ def generate_metrics_scrape_config(
 
     for worker_name, worker_metrics_port in metrics_ports.items():
         job = worker_name.rstrip("0123456789")
-        index = int(worker_name[len(job):])
+        if len(job) < len(worker_name):
+            index = int(worker_name[len(job):])
+        else:
+            # worker name without a number: assume index=1
+            index = 1
 
         out_scrape_configs.append({
             "targets": [f"127.0.0.1:{worker_metrics_port}"],
@@ -832,6 +837,13 @@ def generate_worker_files(
                 "resources": [{"names": ["replication"]}],
             }
         ]
+
+    listeners.append({
+        "port": MAIN_PROCESS_METRICS_PORT,
+        "type": "metrics",
+        "bind_address": "::",
+    })
+
     with open(config_path) as file_stream:
         original_config = yaml.safe_load(file_stream)
         original_listeners = original_config.get("listeners")
@@ -865,7 +877,9 @@ def generate_worker_files(
     nginx_locations: Dict[str, str] = {}
 
     # A map from worker name to which HTTP port is in use for its metrics.
-    metrics_ports: Dict[str, int] = {}
+    metrics_ports: Dict[str, int] = {
+        MAIN_PROCESS_INSTANCE_NAME: MAIN_PROCESS_METRICS_PORT,
+    }
 
     # Create the worker configuration directory if it doesn't already exist
     workers_config_dir = os.path.join(config_dir, "workers")
