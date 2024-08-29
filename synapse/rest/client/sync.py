@@ -21,7 +21,7 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
@@ -975,7 +975,7 @@ class SlidingSyncRestServlet(RestServlet):
         return response
 
     def encode_lists(
-        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+        self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
         def encode_operation(
             operation: SlidingSyncResult.SlidingWindowList.Operation,
