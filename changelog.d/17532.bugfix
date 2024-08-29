@@ -1,0 +1,1 @@
+Fix content-length on federation /thumbnail responses.
