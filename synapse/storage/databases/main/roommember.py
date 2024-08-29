@@ -1407,7 +1407,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     COALESCE(j.tombstone_successor_room_id, m.tombstone_successor_room_id)
                 FROM sliding_sync_membership_snapshots AS m
                 INNER JOIN rooms AS r USING (room_id)
-                LEFT JOIN sliding_sync_joined_rooms AS j USING (room_id)
+                LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
                 WHERE user_id = ?
                     AND m.forgotten = 0
             """
