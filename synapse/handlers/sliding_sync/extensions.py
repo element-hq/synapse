@@ -13,7 +13,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Sequence, Set
+from typing import TYPE_CHECKING, AbstractSet, Dict, Mapping, Optional, Sequence, Set
 
 from typing_extensions import assert_never
 
@@ -30,6 +30,7 @@ from synapse.types import (
     JsonMapping,
     MultiWriterStreamToken,
     SlidingSyncStreamToken,
+    StrCollection,
     StreamToken,
 )
 from synapse.types.handlers import OperationType, SlidingSyncConfig, SlidingSyncResult
@@ -55,9 +56,9 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
     ) -> SlidingSyncResult.Extensions:
@@ -144,10 +145,10 @@ class SlidingSyncExtensionHandler:
 
     def find_relevant_room_ids_for_extension(
         self,
-        requested_lists: Optional[List[str]],
-        requested_room_ids: Optional[List[str]],
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
-        actual_room_ids: Set[str],
+        requested_lists: Optional[StrCollection],
+        requested_room_ids: Optional[StrCollection],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_room_ids: AbstractSet[str],
     ) -> Set[str]:
         """
         Handle the reserved `lists`/`rooms` keys for extensions. Extensions should only
@@ -343,7 +344,7 @@ class SlidingSyncExtensionHandler:
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
@@ -436,9 +437,9 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
@@ -598,9 +599,9 @@ class SlidingSyncExtensionHandler:
     async def get_typing_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Dict[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
-        actual_room_response_map: Dict[str, SlidingSyncResult.RoomResult],
+        actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
         to_token: StreamToken,
         from_token: Optional[SlidingSyncStreamToken],
