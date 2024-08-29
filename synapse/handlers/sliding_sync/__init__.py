@@ -89,7 +89,7 @@ class SlidingSyncHandler:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
-        self.connection_store = SlidingSyncConnectionStore()
+        self.connection_store = SlidingSyncConnectionStore(self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
 
@@ -210,14 +210,9 @@ class SlidingSyncHandler:
         # amount of time (more with round-trips and re-processing) in the end to
         # get everything again.
         previous_connection_state = (
-            await self.connection_store.get_per_connection_state(
+            await self.connection_store.get_and_clear_connection_positions(
                 sync_config, from_token
             )
-        )
-
-        await self.connection_store.mark_token_seen(
-            sync_config=sync_config,
-            from_token=from_token,
         )
 
         # Get all of the room IDs that the user should be able to see in the sync

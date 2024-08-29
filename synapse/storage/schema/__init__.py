@@ -146,6 +146,9 @@ Changes in SCHEMA_VERSION = 86
 Changes in SCHEMA_VERSION = 87
     - Add tables to store Sliding Sync data for quick filtering/sorting
       (`sliding_sync_joined_rooms`, `sliding_sync_membership_snapshots`)
+    - Add tables for storing the per-connection state for sliding sync requests:
+      sliding_sync_connections, sliding_sync_connection_positions, sliding_sync_connection_required_state,
+      sliding_sync_connection_room_configs, sliding_sync_connection_streams
 """
 
 
