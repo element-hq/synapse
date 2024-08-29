@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING, Dict, Optional, Tuple
 import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
-from synapse.handlers.sliding_sync.types import (
-    MutablePerConnectionState,
-    PerConnectionState,
-)
 from synapse.logging.opentracing import trace
 from synapse.types import SlidingSyncStreamToken
-from synapse.types.handlers import SlidingSyncConfig
+from synapse.types.handlers.sliding_sync import (
+    MutablePerConnectionState,
+    PerConnectionState,
+    SlidingSyncConfig,
+)
 
 if TYPE_CHECKING:
     pass

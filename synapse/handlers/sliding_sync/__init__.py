@@ -29,13 +29,6 @@ from synapse.handlers.sliding_sync.room_lists import (
     _RoomMembershipForUser,
 )
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-    RoomSyncConfig,
-    StateValues,
-)
 from synapse.logging.opentracing import (
     SynapseTags,
     log_kv,
@@ -57,10 +50,15 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
 )
-from synapse.types.handlers import (
-    SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    PerConnectionState,
+    RoomSyncConfig,
     SlidingSyncConfig,
     SlidingSyncResult,
+    StateValues,
 )
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute

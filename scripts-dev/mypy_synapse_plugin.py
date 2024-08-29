@@ -38,6 +38,7 @@ from mypy.types import (
     NoneType,
     TupleType,
     TypeAliasType,
+    TypeVarType,
     UninhabitedType,
     UnionType,
 )
@@ -233,6 +234,7 @@ IMMUTABLE_CUSTOM_TYPES = {
     "synapse.synapse_rust.push.FilteredPushRules",
     # This is technically not immutable, but close enough.
     "signedjson.types.VerifyKey",
+    "synapse.types.StrCollection",
 }
 
 # Immutable containers only if the values are also immutable.
@@ -298,7 +300,7 @@ def is_cacheable(
 
         elif rt.type.fullname in MUTABLE_CONTAINER_TYPES:
             # Mutable containers are mutable regardless of their underlying type.
-            return False, None
+            return False, f"container {rt.type.fullname} is mutable"
 
         elif "attrs" in rt.type.metadata:
             # attrs classes are only cachable iff it is frozen (immutable itself)
@@ -318,6 +320,9 @@ def is_cacheable(
             else:
                 return False, "non-frozen attrs class"
 
+        elif rt.type.is_enum:
+            # We assume Enum values are immutable
+            return True, None
         else:
             # Ensure we fail for unknown types, these generally means that the
             # above code is not complete.
@@ -325,6 +330,18 @@ def is_cacheable(
                 False,
                 f"Don't know how to handle {rt.type.fullname} return type instance",
             )
+
+    elif isinstance(rt, TypeVarType):
+        # We consider TypeVars immutable if they are bound to a set of immutable
+        # types.
+        if rt.values:
+            for value in rt.values:
+                ok, note = is_cacheable(value, signature, verbose)
+                if not ok:
+                    return False, f"TypeVar bound not cacheable {value}"
+            return True, None
+
+        return False, "TypeVar is unbound"
 
     elif isinstance(rt, NoneType):
         # None is cachable.
