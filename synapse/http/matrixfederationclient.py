@@ -464,8 +464,6 @@ class MatrixFederationHttpClient:
         self.max_long_retries = hs.config.federation.max_long_retries
         self.max_short_retries = hs.config.federation.max_short_retries
 
-        self.max_download_size = hs.config.media.max_upload_size
-
         self._cooperator = Cooperator(scheduler=_make_scheduler(self.reactor))
 
         self._sleeper = AwakenableSleeper(self.reactor)
@@ -1759,9 +1757,9 @@ class MatrixFederationHttpClient:
                 str_url,
             )
             # We don't know how large the response will be upfront, so limit it to
-            # the `max_upload_size` config value.
+            # the `max_size` config value.
             length, headers, _, _ = await self._simple_http_client.get_file(
-                str_url, output_stream, self.max_download_size
+                str_url, output_stream, max_size
             )
 
         logger.info(
