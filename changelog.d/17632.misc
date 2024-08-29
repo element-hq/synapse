@@ -1,1 +1,1 @@
-Store sliding sync per-connection state in the database.
+Pre-populate room data used in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint for quick filtering/sorting.
