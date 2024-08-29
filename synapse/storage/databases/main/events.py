@@ -475,8 +475,9 @@ class PersistEventsStore:
                     # can't rely on `stream_ordering`/`instance_name` being correct. We
                     # could be working with events that were previously persisted as an
                     # `outlier` with one `stream_ordering` but are now being persisted
-                    # again and de-outliered and assigned a different `stream_ordering`.
-                    # Since we call `_calculate_sliding_sync_table_changes()` before
+                    # again and de-outliered and assigned a different `stream_ordering`
+                    # that won't end up being used. Since we call
+                    # `_calculate_sliding_sync_table_changes()` before
                     # `_update_outliers_txn()` which fixes this discrepancy (always use
                     # the `stream_ordering` from the first time it was persisted), we're
                     # working with an unreliable `stream_ordering` value that will
@@ -1848,12 +1849,12 @@ class PersistEventsStore:
             # `_calculate_sliding_sync_table_changes()` is ran. We could be working with
             # events that were previously persisted as an `outlier` with one
             # `stream_ordering` but are now being persisted again and de-outliered and
-            # assigned a different `stream_ordering`. Since we call
-            # `_calculate_sliding_sync_table_changes()` before `_update_outliers_txn()`
-            # which fixes this discrepancy (always use the `stream_ordering` from the
-            # first time it was persisted), we're working with an unreliable
-            # `stream_ordering` value that will possibly be unused and not make it into
-            # the `events` table.
+            # assigned a different `stream_ordering` that won't end up being used. Since
+            # we call `_calculate_sliding_sync_table_changes()` before
+            # `_update_outliers_txn()` which fixes this discrepancy (always use the
+            # `stream_ordering` from the first time it was persisted), we're working
+            # with an unreliable `stream_ordering` value that will possibly be unused
+            # and not make it into the `events` table.
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_membership_snapshots
