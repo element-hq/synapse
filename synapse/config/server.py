@@ -389,6 +389,16 @@ class ServerConfig(Config):
             "include_offline_users_on_sync", False
         )
 
+        # Disabling server-side presence tracking
+        self.presence_local_activity_tracking = presence_config.get(
+            "local_activity_tracking", True
+        )
+
+        # Disabling federation presence tracking
+        self.presence_remote_activity_tracking = presence_config.get(
+            "remote_activity_tracking", True
+        )
+
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
         self.presence_router_module_class = None

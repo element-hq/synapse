@@ -247,6 +247,8 @@ Example configuration:
 presence:
   enabled: false
   include_offline_users_on_sync: false
+  local_activity_tracking: true
+  remote_activity_tracking: true
 ```
 
 `enabled` can also be set to a special value of "untracked" which ignores updates
@@ -258,6 +260,21 @@ received via clients and federation, while still accepting updates from the
 When clients perform an initial or `full_state` sync, presence results for offline users are
 not included by default. Setting `include_offline_users_on_sync` to `true` will always include
 offline users in the results. Defaults to false.
+
+Enabling presence tracking can be resource intensive for the presence handler when server-side
+tracking of user activity is enabled. Below are some additional configuration options which may
+help improve the performance of the presence feature without outright disabling it:
+* `local_activity_tracking` (Default enabled): Determines if the server tracks a user's activity
+when syncing or fetching events. If disabled, the server will not automatically update the
+user's presence activity when the /sync or /events endpoints are called. Note that client
+applications can still update their presence by calling the presence /status endpoint.
+* `remote_activity_tracking` (Default enabled): Determines if the server will accept presence
+EDUs from remote servers that are exclusively user activity updates. If disabled, the server
+will reject processing these EDUs. However if a presence EDU contains profile updates to any of
+the `status_msg`, `displayname`, or `avatar_url` fields, then the server will accept the EDU.
+
+If the presence `enabled` field is set to "untracked", then these options will both act as if
+set to false.
 
 ---
 ### `require_auth_for_profile_requests`

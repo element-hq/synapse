@@ -171,6 +171,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                 "last_user_sync_ts",
                 "status_msg",
                 "currently_active",
+                "displayname",
+                "avatar_url",
                 "instance_name",
             ),
             values=[
@@ -183,6 +185,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                     state.last_user_sync_ts,
                     state.status_msg,
                     state.currently_active,
+                    state.displayname,
+                    state.avatar_url,
                     self._instance_name,
                 )
                 for stream_id, state in zip(stream_orderings, presence_states)
@@ -222,7 +226,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             sql = """
                 SELECT stream_id, user_id, state, last_active_ts,
                     last_federation_update_ts, last_user_sync_ts,
-                    status_msg, currently_active
+                    status_msg, currently_active, displayname,
+                    avatar_url
                 FROM presence_stream
                 WHERE ? < stream_id AND stream_id <= ?
                 ORDER BY stream_id ASC
@@ -261,7 +266,19 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         # TODO All these columns are nullable, but we don't expect that:
         #      https://github.com/matrix-org/synapse/issues/16467
         rows = cast(
-            List[Tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+            List[
+                Tuple[
+                    str,
+                    str,
+                    int,
+                    int,
+                    int,
+                    Optional[str],
+                    Union[int, bool],
+                    Optional[str],
+                    Optional[str],
+                ]
+            ],
             await self.db_pool.simple_select_many_batch(
                 table="presence_stream",
                 column="user_id",
@@ -275,6 +292,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                     "last_user_sync_ts",
                     "status_msg",
                     "currently_active",
+                    "displayname",
+                    "avatar_url",
                 ),
                 desc="get_presence_for_users",
             ),
@@ -289,8 +308,10 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                 last_user_sync_ts=last_user_sync_ts,
                 status_msg=status_msg,
                 currently_active=bool(currently_active),
+                displayname=displayname,
+                avatar_url=avatar_url,
             )
-            for user_id, state, last_active_ts, last_federation_update_ts, last_user_sync_ts, status_msg, currently_active in rows
+            for user_id, state, last_active_ts, last_federation_update_ts, last_user_sync_ts, status_msg, currently_active, displayname, avatar_url, in rows
         }
 
     async def should_user_receive_full_presence_with_token(
@@ -400,7 +421,19 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
             # TODO All these columns are nullable, but we don't expect that:
             #      https://github.com/matrix-org/synapse/issues/16467
             rows = cast(
-                List[Tuple[str, str, int, int, int, Optional[str], Union[int, bool]]],
+                List[
+                    Tuple[
+                        str,
+                        str,
+                        int,
+                        int,
+                        int,
+                        Optional[str],
+                        Union[int, bool],
+                        Optional[str],
+                        Optional[str],
+                    ]
+                ],
                 await self.db_pool.runInteraction(
                     "get_presence_for_all_users",
                     self.db_pool.simple_select_list_paginate_txn,
@@ -417,6 +450,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                         "last_user_sync_ts",
                         "status_msg",
                         "currently_active",
+                        "displayname",
+                        "avatar_url",
                     ),
                     order_direction="ASC",
                 ),
@@ -430,6 +465,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                 last_user_sync_ts,
                 status_msg,
                 currently_active,
+                displayname,
+                avatar_url,
             ) in rows:
                 users_to_state[user_id] = UserPresenceState(
                     user_id=user_id,
@@ -439,6 +476,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                     last_user_sync_ts=last_user_sync_ts,
                     status_msg=status_msg,
                     currently_active=bool(currently_active),
+                    displayname=displayname,
+                    avatar_url=avatar_url,
                 )
 
             # We've run out of updates to query
@@ -464,7 +503,8 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         # query.
         sql = (
             "SELECT user_id, state, last_active_ts, last_federation_update_ts,"
-            " last_user_sync_ts, status_msg, currently_active FROM presence_stream"
+            " last_user_sync_ts, status_msg, currently_active, displayname, avatar_url "
+            " FROM presence_stream"
             " WHERE state != ?"
         )
 
@@ -482,8 +522,10 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
                 last_user_sync_ts=last_user_sync_ts,
                 status_msg=status_msg,
                 currently_active=bool(currently_active),
+                displayname=displayname,
+                avatar_url=avatar_url,
             )
-            for user_id, state, last_active_ts, last_federation_update_ts, last_user_sync_ts, status_msg, currently_active in rows
+            for user_id, state, last_active_ts, last_federation_update_ts, last_user_sync_ts, status_msg, currently_active, displayname, avatar_url, in rows
         ]
 
     def take_presence_startup_info(self) -> List[UserPresenceState]:
