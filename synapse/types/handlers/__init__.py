@@ -21,6 +21,20 @@
 
 from typing import List, Optional, TypedDict
 
+from synapse.api.constants import EventTypes
+
+# Sliding Sync: The event types that clients should consider as new activity and affect
+# the `bump_stamp`
+SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES = {
+    EventTypes.Create,
+    EventTypes.Message,
+    EventTypes.Encrypted,
+    EventTypes.Sticker,
+    EventTypes.CallInvite,
+    EventTypes.PollStart,
+    EventTypes.LiveLocationShareStart,
+}
+
 
 class ShutdownRoomParams(TypedDict):
     """

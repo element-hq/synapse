@@ -245,6 +245,8 @@ class EventContentFields:
     # `m.room.encryption`` algorithm field
     ENCRYPTION_ALGORITHM: Final = "algorithm"
 
+    TOMBSTONE_SUCCESSOR_ROOM: Final = "replacement_room"
+
 
 class EventUnsignedContentFields:
     """Fields found inside the 'unsigned' data on events"""
