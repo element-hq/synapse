@@ -386,6 +386,9 @@ class FederationClientTests(HomeserverTestCase):
         # Now send the response returned by the server at `Location`
         conn = Mock()
         clients = self.reactor.tcpClients
+        (host, port, factory, _timeout, _bindAddress) = clients[1]
+        self.assertEqual(host, "testserv")
+        self.assertEqual(port, 8008)
         client = clients[1][2].buildProtocol(None)
         client.makeConnection(conn)
 
@@ -404,6 +407,7 @@ class FederationClientTests(HomeserverTestCase):
         # We should get a successful response
         length, _, _ = self.successResultOf(d)
         self.assertEqual(length, len(data))
+        self.assertEqual(output_stream.getvalue(), data)
 
     @parameterized.expand(["get_json", "post_json", "delete_json", "put_json"])
     def test_timeout_reading_body(self, method_name: str) -> None:
