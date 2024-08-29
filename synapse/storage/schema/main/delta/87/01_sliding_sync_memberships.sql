@@ -17,6 +17,12 @@
 -- it takes a lot of work for the database to grab `DISTINCT` room_ids given how many
 -- state events there are for each room.
 --
+-- This table is prefilled with every room in the `rooms` table (see the
+-- `sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update` background
+-- update). This table is also updated whenever we come across stale data so that we can
+-- catch-up with all of the new data if Synapse was downgraded (see
+-- `_resolve_stale_data_in_sliding_sync_tables`).
+--
 -- FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
 --  foreground update for
 -- `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
@@ -150,6 +156,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS sliding_sync_membership_snapshots_event_stream
 --   1. Add a background update to prefill `sliding_sync_joined_rooms_to_recalculate`.
 --      We do a one-shot bulk insert from the `rooms` table to prefill.
 --   2. Add a background update to populate the new `sliding_sync_joined_rooms` table
+--      based on the rooms listed in the `sliding_sync_joined_rooms_to_recalculate`
+--      table.
 --
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
   (8701, 'sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update', '{}');
