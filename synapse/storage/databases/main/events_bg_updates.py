@@ -2272,6 +2272,22 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         return len(memberships_to_update_rows)
 
+    async def have_finished_sliding_sync_background_jobs(self) -> bool:
+        """Return if its safe to use the sliding sync membership tables."""
+
+        # TODO: Find a more efficient way of checking this. A cache?
+        return (
+            await self.db_pool.updates.has_completed_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+            )
+            or await self.db_pool.updates.has_completed_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
+            )
+            or await self.db_pool.updates.has_completed_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE
+            )
+        )
+
 
 def _resolve_stale_data_in_sliding_sync_tables(
     txn: LoggingTransaction,
