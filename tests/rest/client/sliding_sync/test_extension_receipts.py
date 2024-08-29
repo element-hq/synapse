@@ -840,7 +840,7 @@ class SlidingSyncReceiptsExtensionTestCase(SlidingSyncBase):
         )
 
     def test_read_receipts_expanded_timeline(self) -> None:
-        """Test that we get read receipts when we expand the timeline limit."""
+        """Test that we get read receipts when we expand the timeline limit (`unstable_expanded_timeline`)."""
 
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
