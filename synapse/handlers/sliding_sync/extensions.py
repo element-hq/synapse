@@ -12,12 +12,13 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import itertools
 import logging
 from typing import TYPE_CHECKING, AbstractSet, Dict, Mapping, Optional, Sequence, Set
 
 from typing_extensions import assert_never
 
-from synapse.api.constants import AccountDataTypes
+from synapse.api.constants import AccountDataTypes, EduTypes
 from synapse.handlers.receipts import ReceiptEventSource
 from synapse.handlers.sliding_sync.types import (
     HaveSentRoomFlag,
@@ -25,6 +26,7 @@ from synapse.handlers.sliding_sync.types import (
     PerConnectionState,
 )
 from synapse.logging.opentracing import trace
+from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
     DeviceListUpdates,
     JsonMapping,
@@ -485,15 +487,21 @@ class SlidingSyncExtensionHandler:
                     initial_rooms.add(room_id)
                     continue
 
-                # If we're sending down the room from scratch again for some reason, we
-                # should always resend the receipts as well (regardless of if
-                # we've sent them down before). This is to mimic the behaviour
-                # of what happens on initial sync, where you get a chunk of
-                # timeline with all of the corresponding receipts for the events in the timeline.
+                # If we're sending down the room from scratch again for some
+                # reason, we should always resend the receipts as well
+                # (regardless of if we've sent them down before). This is to
+                # mimic the behaviour of what happens on initial sync, where you
+                # get a chunk of timeline with all of the corresponding receipts
+                # for the events in the timeline.
+                #
+                # We also resend down receipts when we "expand" the timeline,
+                # (see the "XXX: Odd behavior" in
+                # `synapse.handlers.sliding_sync`).
                 room_result = actual_room_response_map.get(room_id)
-                if room_result is not None and room_result.initial:
-                    initial_rooms.add(room_id)
-                    continue
+                if room_result is not None:
+                    if room_result.initial or room_result.unstable_expanded_timeline:
+                        initial_rooms.add(room_id)
+                        continue
 
                 room_status = previous_connection_state.receipts.have_sent_room(room_id)
                 if room_status.status == HaveSentRoomFlag.LIVE:
@@ -536,21 +544,49 @@ class SlidingSyncExtensionHandler:
                     )
                     fetched_receipts.extend(previously_receipts)
 
-            # For rooms we haven't previously sent down, we could send all receipts
-            # from that room but we only want to include receipts for events
-            # in the timeline to avoid bloating and blowing up the sync response
-            # as the number of users in the room increases. (this behavior is part of the spec)
-            initial_rooms_and_event_ids = [
-                (room_id, event.event_id)
-                for room_id in initial_rooms
-                if room_id in actual_room_response_map
-                for event in actual_room_response_map[room_id].timeline_events
-            ]
-            if initial_rooms_and_event_ids:
+            if initial_rooms:
+                # We also always send down receipts for the current user.
+                user_receipts = (
+                    await self.store.get_linearized_receipts_for_user_in_rooms(
+                        user_id=sync_config.user.to_string(),
+                        room_ids=initial_rooms,
+                        to_key=to_token.receipt_key,
+                    )
+                )
+
+                # For rooms we haven't previously sent down, we could send all receipts
+                # from that room but we only want to include receipts for events
+                # in the timeline to avoid bloating and blowing up the sync response
+                # as the number of users in the room increases. (this behavior is part of the spec)
+                initial_rooms_and_event_ids = [
+                    (room_id, event.event_id)
+                    for room_id in initial_rooms
+                    if room_id in actual_room_response_map
+                    for event in actual_room_response_map[room_id].timeline_events
+                ]
                 initial_receipts = await self.store.get_linearized_receipts_for_events(
                     room_and_event_ids=initial_rooms_and_event_ids,
                 )
-                fetched_receipts.extend(initial_receipts)
+
+                # Combine the receipts for a room and add them to
+                # `fetched_receipts`
+                for room_id in initial_receipts.keys() | user_receipts.keys():
+                    receipt_content = ReceiptInRoom.merge_to_content(
+                        list(
+                            itertools.chain(
+                                initial_receipts.get(room_id, []),
+                                user_receipts.get(room_id, []),
+                            )
+                        )
+                    )
+
+                    fetched_receipts.append(
+                        {
+                            "room_id": room_id,
+                            "type": EduTypes.RECEIPT,
+                            "content": receipt_content,
+                        }
+                    )
 
             fetched_receipts = ReceiptEventSource.filter_out_private_receipts(
                 fetched_receipts, sync_config.user.to_string()
