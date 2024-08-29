@@ -631,9 +631,7 @@ class PersistEventsStore:
 
             # Otherwise, we need to find a couple events that we were reset to.
             if missing_event_ids:
-                remaining_events = await self.store.get_events(
-                    current_state_ids_map.values()
-                )
+                remaining_events = await self.store.get_events(missing_event_ids)
                 # There shouldn't be any missing events
                 assert (
                     remaining_events.keys() == missing_event_ids
