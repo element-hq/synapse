@@ -454,6 +454,10 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             # so must be deleted first.
             "local_current_membership",
             "room_memberships",
+            # Note: the sliding_sync_ tables have foreign keys to the `events` table
+            # so must be deleted first.
+            "sliding_sync_joined_rooms",
+            "sliding_sync_membership_snapshots",
             "events",
             "federation_inbound_events_staging",
             "receipts_graph",

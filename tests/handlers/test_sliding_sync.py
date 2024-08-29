@@ -18,7 +18,6 @@
 #
 #
 import logging
-from copy import deepcopy
 from typing import Dict, List, Optional
 from unittest.mock import patch
 
@@ -47,7 +46,7 @@ from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StreamToken, UserID
-from synapse.types.handlers import SlidingSyncConfig
+from synapse.types.handlers.sliding_sync import SlidingSyncConfig
 from synapse.util import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -566,23 +565,11 @@ class RoomSyncConfigTestCase(TestCase):
         """
         Combine A into B and B into A to make sure we get the same result.
         """
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "B into A")
 
-        # Combine B into A
-        room_sync_config_a.combine_room_sync_config(room_sync_config_b)
-
-        self._assert_room_config_equal(room_sync_config_a, expected, "B into A")
-
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
-
-        # Combine A into B
-        room_sync_config_b.combine_room_sync_config(room_sync_config_a)
-
-        self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "A into B")
 
 
 class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
