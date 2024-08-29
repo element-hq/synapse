@@ -510,7 +510,7 @@ Unix socket support (_Added in Synapse 1.89.0_):
 Valid resource names are:
 
 * `client`: the client-server API (/_matrix/client). Also implies `media` and `static`.
-  On the main process is also the synapse admin API (/_synapse/admin) loaded.
+  If configuring the main process, the Synapse Admin API (/_synapse/admin) is also implied.
 
 * `consent`: user consent forms (/_matrix/consent). See [here](../../consent_tracking.md) for more.
 

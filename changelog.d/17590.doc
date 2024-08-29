@@ -1,1 +1,1 @@
-Clarification that the admin api is only loaded on the main process and not the workers.
+Clarify that the admin api resource is only loaded on the main process and not workers.
