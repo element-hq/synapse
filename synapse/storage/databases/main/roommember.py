@@ -1403,8 +1403,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     r.room_version,
                     m.event_instance_name, m.event_stream_ordering,
                     COALESCE(j.room_type, m.room_type),
-                    COALESCE(j.is_encrypted, m.is_encrypted),
-                    COALESCE(j.tombstone_successor_room_id, m.tombstone_successor_room_id)
+                    COALESCE(j.is_encrypted, m.is_encrypted)
                 FROM sliding_sync_membership_snapshots AS m
                 INNER JOIN rooms AS r USING (room_id)
                 LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
@@ -1422,7 +1421,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     event_pos=PersistedEventPosition(row[5], row[6]),
                     room_type=row[7],
                     is_encrypted=row[8],
-                    tombstone_successor_room_id=row[9],
                 )
                 for row in txn
             }

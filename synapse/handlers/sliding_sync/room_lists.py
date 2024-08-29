@@ -258,11 +258,13 @@ class SlidingSyncRoomLists:
                         # We keep the current state of the room though
                         room_type=existing_room.room_type,
                         is_encrypted=existing_room.is_encrypted,
-                        tombstone_successor_room_id=existing_room.tombstone_successor_room_id,
                     )
                 else:
                     # This can happen if we get "state reset" out of the room
                     # after the `to_token`.
+                    room_type = await self.store.get_room_type(room_id)
+                    encryption = await self.store.get_room_encryption(room_id)
+
                     room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=change.sender,
@@ -270,10 +272,8 @@ class SlidingSyncRoomLists:
                         event_id=change.event_id,
                         event_pos=change.event_pos,
                         room_version_id=change.room_version_id,
-                        # We keep the current state of the room though
-                        room_type=existing_room.room_type,
-                        is_encrypted=existing_room.is_encrypted,
-                        tombstone_successor_room_id=existing_room.tombstone_successor_room_id,
+                        room_type=room_type,
+                        is_encrypted=encryption is not None,
                     )
 
         newly_joined_room_ids, newly_left_room_map = (
@@ -281,8 +281,30 @@ class SlidingSyncRoomLists:
                 user_id, from_token=from_token, to_token=to_token
             )
         )
-
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
+
+        # Handle state resets in the from -> to token range.
+        state_reset_rooms = (
+            newly_left_room_map.keys() - room_membership_for_user_map.keys()
+        )
+        if state_reset_rooms:
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            for room_id in (
+                newly_left_room_map.keys() - room_membership_for_user_map.keys()
+            ):
+                room_type = await self.store.get_room_type(room_id)
+                encryption = await self.store.get_room_encryption(room_id)
+
+                room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_id=room_id,
+                    sender=None,
+                    membership=Membership.LEAVE,
+                    event_id=None,
+                    event_pos=newly_left_room_map[room_id],
+                    room_version_id=await self.store.get_room_version_id(room_id),
+                    room_type=room_type,
+                    is_encrypted=encryption is not None,
+                )
 
         if sync_config.lists:
             sync_room_map = {
@@ -484,11 +506,6 @@ class SlidingSyncRoomLists:
                         for room_id, room_sync_config in relevant_room_map.items()
                         if room_id in rooms_should_send
                     }
-
-        # TODO: Handle state reset rooms with newly_left_room_map
-
-        if newly_left_room_map.keys() - room_membership_for_user_map.keys():
-            raise NotImplementedError()
 
         return SlidingSyncInterestedRooms(
             lists=lists,
@@ -753,7 +770,7 @@ class SlidingSyncRoomLists:
     async def _get_rewind_changes_to_current_membership_to_token(
         self,
         user: UserID,
-        rooms_for_user: Mapping[str, RoomsForUser],
+        rooms_for_user: Mapping[str, Union[RoomsForUser, RoomsForUserSlidingSync]],
         to_token: StreamToken,
     ) -> Mapping[str, Optional[RoomsForUser]]:
         """
