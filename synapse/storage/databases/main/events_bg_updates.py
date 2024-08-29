@@ -1967,12 +1967,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             txn.execute(
                 """
                 SELECT event_id, membership
-                FROM room_memberships
+                FROM room_memberships AS m
+                INNER JOIN events AS e USING (room_id, event_id)
                 WHERE
                     room_id = ?
-                    AND user_id = ?
-                    AND event_stream_ordering < ?
-                ORDER BY event_stream_ordering DESC
+                    AND m.user_id = ?
+                    AND e.stream_ordering < ?
+                ORDER BY e.stream_ordering DESC
                 LIMIT 1
                 """,
                 (
