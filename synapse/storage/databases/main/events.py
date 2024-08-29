@@ -1731,16 +1731,16 @@ class PersistEventsStore:
                 ]
                 args.extend(iter(sliding_sync_updates_values))
 
-                # We need some value for `stream_ordering` for an event that exists to
-                # satisfy the `FOREIGN KEY` constraint to the `events` table. We don't
-                # pre-calculate this value because when we
-                # `_calculate_sliding_sync_table_changes()`, we could be working with
-                # events that were previously persisted as `outlier` with one
-                # `stream_ordering` but are now persisted again and de-outliered with a
-                # different `stream_ordering`. Since we end up keeping the old
-                # `stream_ordering` value when the event was first persisted (because
-                # `update_outliers_txn()` is run before we actually
-                # `_store_event_txn()`), the new `stream_ordering` value is unused.
+                # We use a sub-query for `stream_ordering` because it's unreliable to
+                # pre-calculate from `events_and_contexts` at the time when
+                # `_calculate_sliding_sync_table_changes()` is ran. We could be working
+                # with events that were previously persisted as an `outlier` with one
+                # `stream_ordering` but are now being persisted again and de-outliered
+                # and assigned a different `stream_ordering`. Since we call
+                # `_calculate_sliding_sync_table_changes()` before
+                # `_update_outliers_txn()` which fixes this discrepancy, we're working
+                # with an unreliable `stream_ordering` value that will possibly be
+                # unused and not make it into the `events` table.
                 #
                 # We don't update `event_stream_ordering` `ON CONFLICT` because it's
                 # simpler and we can just rely on
@@ -1819,38 +1819,58 @@ class PersistEventsStore:
         if sliding_sync_table_changes.to_insert_membership_snapshots:
             # Update the `sliding_sync_membership_snapshots` table
             #
-            # We need to insert/update regardless of whether we have `sliding_sync_snapshot_keys`
-            # because there are other fields in the `ON CONFLICT` upsert to run (see
-            # inherit case above for more context when this happens).
-            self.db_pool.simple_upsert_many_txn(
-                txn=txn,
-                table="sliding_sync_membership_snapshots",
-                key_names=("room_id", "user_id"),
-                key_values=[
-                    (room_id, membership_info.user_id)
-                    for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
-                ],
-                value_names=[
-                    "sender",
-                    "membership_event_id",
-                    "membership",
-                    "event_stream_ordering",
-                    "event_instance_name",
-                ]
-                + list(
-                    sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
-                ),
-                value_values=[
+            sliding_sync_snapshot_keys = (
+                sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
+            )
+            sliding_sync_snapshot_values = (
+                sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
+            )
+            # We need to insert/update regardless of whether we have
+            # `sliding_sync_snapshot_keys` because there are other fields in the `ON
+            # CONFLICT` upsert to run (see inherit case (explained in
+            # `_calculate_sliding_sync_table_changes()`) for more context when this
+            # happens).
+            #
+            # We use a sub-query for `stream_ordering` because it's unreliable to
+            # pre-calculate from `events_and_contexts` at the time when
+            # `_calculate_sliding_sync_table_changes()` is ran. We could be working
+            # with events that were previously persisted as an `outlier` with one
+            # `stream_ordering` but are now being persisted again and de-outliered
+            # and assigned a different `stream_ordering`. Since we call
+            # `_calculate_sliding_sync_table_changes()` before
+            # `_update_outliers_txn()` which fixes this discrepancy, we're working
+            # with an unreliable `stream_ordering` value that will possibly be
+            # unused and not make it into the `events` table.
+            txn.execute_batch(
+                f"""
+                INSERT INTO sliding_sync_membership_snapshots
+                    (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering, event_instance_name
+                    {("," + ", ".join(sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""})
+                VALUES (
+                    ?, ?, ?, ?, ?,
+                    (SELECT stream_ordering FROM events WHERE event_id = ?),
+                    ?
+                    {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
+                )
+                ON CONFLICT (room_id, user_id)
+                DO UPDATE SET
+                    sender = EXCLUDED.sender,
+                    membership_event_id = EXCLUDED.membership_event_id,
+                    membership = EXCLUDED.membership,
+                    event_stream_ordering = EXCLUDED.event_stream_ordering
+                    {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""}
+                """,
+                [
                     [
+                        room_id,
+                        membership_info.user_id,
                         membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
-                        membership_info.membership_event_stream_ordering,
+                        membership_info.membership_event_id,
                         membership_info.membership_event_instance_name,
                     ]
-                    + list(
-                        sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
-                    )
+                    + list(sliding_sync_snapshot_values)
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
                 ],
             )
@@ -2131,12 +2151,6 @@ class PersistEventsStore:
             max_stream_ordering is not None
         ), "Expected to have a stream_ordering if we have events"
 
-        logger.info(
-            "asdf _update_sliding_sync_tables_with_new_persisted_events_txn %s %s %s",
-            room_id,
-            max_stream_ordering,
-            max_bump_stamp,
-        )
         # Handle updating the `sliding_sync_joined_rooms` table.
         #
         txn.execute(
