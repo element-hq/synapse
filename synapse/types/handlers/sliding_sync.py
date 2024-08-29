@@ -368,7 +368,7 @@ class SlidingSyncResult:
             )
 
     next_pos: SlidingSyncStreamToken
-    lists: Dict[str, SlidingWindowList]
+    lists: Mapping[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
     extensions: Extensions
 
@@ -523,7 +523,7 @@ class RoomSyncConfig:
         }
 
         # Take the highest timeline limit
-        if self.timeline_limit < other_room_sync_config.timeline_limit:
+        if timeline_limit < other_room_sync_config.timeline_limit:
             timeline_limit = other_room_sync_config.timeline_limit
 
         # Union the required state
