@@ -163,6 +163,15 @@ class SlidingSyncMembershipInfo:
     sender: str
     membership_event_id: str
     membership: str
+
+
+@attr.s(slots=True, auto_attribs=True)
+class SlidingSyncMembershipInfoWithEventPos(SlidingSyncMembershipInfo):
+    """
+    SlidingSyncMembershipInfo + `stream_ordering`/`instance_name` of the membership
+    event
+    """
+
     membership_event_stream_ordering: int
     membership_event_instance_name: str
 
@@ -390,6 +399,9 @@ class PersistEventsStore:
                 `stream_ordering`).
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
+
+        Returns:
+            SlidingSyncTableChanges
         """
         to_insert = delta_state.to_insert
         to_delete = delta_state.to_delete
@@ -457,36 +469,23 @@ class PersistEventsStore:
                 membership_event_id,
                 user_id,
             ) in membership_event_id_to_user_id_map.items():
-                # We should only be seeing events with `stream_ordering`/`instance_name`
-                # assigned by this point.
-                #
-                # XXX: Because we're sourcing the event from `events_and_contexts`, we
-                # can't rely on `stream_ordering`/`instance_name` being correct. We
-                # could be working with events that were previously persisted as an
-                # `outlier` with one `stream_ordering` but are now being persisted again
-                # and de-outliered and assigned a different `stream_ordering`. Since we
-                # call `_calculate_sliding_sync_table_changes()` before
-                # `_update_outliers_txn()` which fixes this discrepancy (always use the
-                # `stream_ordering` from the first time it was persisted), we're working
-                # with an unreliable `stream_ordering` value that will possibly be
-                # unused and not make it into the `events` table.
-                membership_event_stream_ordering = membership_event_map[
-                    membership_event_id
-                ].internal_metadata.stream_ordering
-                assert membership_event_stream_ordering is not None
-                membership_event_instance_name = membership_event_map[
-                    membership_event_id
-                ].internal_metadata.instance_name
-                assert membership_event_instance_name is not None
-
                 membership_infos_to_insert_membership_snapshots.append(
+                    # XXX: We don't use `SlidingSyncMembershipInfoWithEventPos` here
+                    # because we're sourcing the event from `events_and_contexts`, we
+                    # can't rely on `stream_ordering`/`instance_name` being correct. We
+                    # could be working with events that were previously persisted as an
+                    # `outlier` with one `stream_ordering` but are now being persisted
+                    # again and de-outliered and assigned a different `stream_ordering`.
+                    # Since we call `_calculate_sliding_sync_table_changes()` before
+                    # `_update_outliers_txn()` which fixes this discrepancy (always use
+                    # the `stream_ordering` from the first time it was persisted), we're
+                    # working with an unreliable `stream_ordering` value that will
+                    # possibly be unused and not make it into the `events` table.
                     SlidingSyncMembershipInfo(
                         user_id=user_id,
                         sender=membership_event_map[membership_event_id].sender,
                         membership_event_id=membership_event_id,
                         membership=membership_event_map[membership_event_id].membership,
-                        membership_event_stream_ordering=membership_event_stream_ordering,
-                        membership_event_instance_name=membership_event_instance_name,
                     )
                 )
 

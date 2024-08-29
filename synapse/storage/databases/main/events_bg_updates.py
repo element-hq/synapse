@@ -37,7 +37,7 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.events import (
     SLIDING_SYNC_RELEVANT_STATE_SET,
     PersistEventsStore,
-    SlidingSyncMembershipInfo,
+    SlidingSyncMembershipInfoWithEventPos,
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
 )
@@ -1993,7 +1993,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         to_insert_membership_snapshots: Dict[
             Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
-        to_insert_membership_infos: Dict[Tuple[str, str], SlidingSyncMembershipInfo] = (
+        to_insert_membership_infos: Dict[Tuple[str, str], SlidingSyncMembershipInfoWithEventPos] = (
             {}
         )
         for (
@@ -2184,7 +2184,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             to_insert_membership_snapshots[(room_id, user_id)] = (
                 sliding_sync_membership_snapshots_insert_map
             )
-            to_insert_membership_infos[(room_id, user_id)] = SlidingSyncMembershipInfo(
+            to_insert_membership_infos[(room_id, user_id)] = SlidingSyncMembershipInfoWithEventPos(
                 user_id=user_id,
                 sender=sender,
                 membership_event_id=membership_event_id,
