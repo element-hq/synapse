@@ -1,1 +1,1 @@
-Return `400 M_BAD_JSON` upon receiving an invalid user_id for various room actions and non-existing room_id, rather than an internal server error.
+Return `400 M_BAD_JSON` upon attempting to complete various room actions with a non-local user ID and unknown room ID, rather than an internal server error.

@@ -384,7 +384,10 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         self.get_failure(self.handler.forget(self.alice_ID, self.room_id), SynapseError)
 
     def test_nonlocal_room_user_action(self) -> None:
-        """Test that nonlocal user ids can not perform room actions."""
+        """
+        Test that non-local user ids cannot perform room actions through
+        this homeserver.
+        """
         alien_user_id = UserID.from_string("@cheeky_monkey:matrix.org")
         bad_room_id = f"{self.room_id}+BAD_ID"
 
