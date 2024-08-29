@@ -1756,8 +1756,10 @@ class MatrixFederationHttpClient:
                 request.destination,
                 str_url,
             )
+            # We don't know how large the response will be upfront, so limit it to
+            # the `max_size` config value.
             length, headers, _, _ = await self._simple_http_client.get_file(
-                str_url, output_stream, expected_size
+                str_url, output_stream, max_size
             )
 
         logger.info(

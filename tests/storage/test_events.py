@@ -19,6 +19,7 @@
 #
 #
 
+import logging
 from typing import List, Optional
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -34,6 +35,8 @@ from synapse.types import StateMap
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
+
+logger = logging.getLogger(__name__)
 
 
 class ExtremPruneTestCase(HomeserverTestCase):
