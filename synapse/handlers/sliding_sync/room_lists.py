@@ -261,8 +261,20 @@ class SlidingSyncRoomLists:
                         tombstone_successor_room_id=existing_room.tombstone_successor_room_id,
                     )
                 else:
-                    # This is the state reset case.
-                    raise NotImplementedError()
+                    # This can happen if we get "state reset" out of the room
+                    # after the `to_token`.
+                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_id=room_id,
+                        sender=change.sender,
+                        membership=change.membership,
+                        event_id=change.event_id,
+                        event_pos=change.event_pos,
+                        room_version_id=change.room_version_id,
+                        # We keep the current state of the room though
+                        room_type=existing_room.room_type,
+                        is_encrypted=existing_room.is_encrypted,
+                        tombstone_successor_room_id=existing_room.tombstone_successor_room_id,
+                    )
 
         newly_joined_room_ids, newly_left_room_map = (
             await self._get_newly_joined_and_left_rooms(
@@ -350,15 +362,11 @@ class SlidingSyncRoomLists:
                                     room_id
                                 )
                                 if existing_room_sync_config is not None:
-                                    existing_room_sync_config.combine_room_sync_config(
+                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
                                         room_sync_config
                                     )
-                                else:
-                                    # Make a copy so if we modify it later, it doesn't
-                                    # affect all references.
-                                    relevant_room_map[room_id] = (
-                                        room_sync_config.deep_copy()
-                                    )
+
+                                relevant_room_map[room_id] = room_sync_config
 
                                 room_ids_in_list.append(room_id)
 
@@ -410,11 +418,13 @@ class SlidingSyncRoomLists:
                     # and need to fetch more info about.
                     existing_room_sync_config = relevant_room_map.get(room_id)
                     if existing_room_sync_config is not None:
-                        existing_room_sync_config.combine_room_sync_config(
-                            room_sync_config
+                        room_sync_config = (
+                            existing_room_sync_config.combine_room_sync_config(
+                                room_sync_config
+                            )
                         )
-                    else:
-                        relevant_room_map[room_id] = room_sync_config
+
+                    relevant_room_map[room_id] = room_sync_config
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
