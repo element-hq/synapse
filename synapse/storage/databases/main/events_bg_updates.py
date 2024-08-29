@@ -1961,7 +1961,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 return 0
 
         def _find_previous_membership_txn(
-            txn: LoggingTransaction, room_id: str, user_id: str, stream_ordering: int
+            txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
         ) -> Tuple[str, str]:
             # Find the previous invite/knock event before the leave event
             txn.execute(
@@ -1972,14 +1972,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE
                     room_id = ?
                     AND m.user_id = ?
-                    AND e.stream_ordering < ?
-                ORDER BY e.stream_ordering DESC
+                    AND e.event_id != ?
+                ORDER BY e.topological_ordering DESC
                 LIMIT 1
                 """,
                 (
                     room_id,
                     user_id,
-                    stream_ordering,
+                    event_id,
                 ),
             )
             row = txn.fetchone()
@@ -2106,7 +2106,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                             _find_previous_membership_txn,
                             room_id,
                             user_id,
-                            membership_event_stream_ordering,
+                            membership_event_id,
                         )
                     )
 
