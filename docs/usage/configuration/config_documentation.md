@@ -3303,8 +3303,8 @@ saml2_config:
     contact_person:
       - given_name: Bob
         sur_name: "the Sysadmin"
-        email_address": ["admin@example.com"]
-        contact_type": technical
+        email_address: ["admin@example.com"]
+        contact_type: technical
 
   saml_session_lifetime: 5m
 
