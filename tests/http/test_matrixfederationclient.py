@@ -362,39 +362,45 @@ class FederationClientTests(HomeserverTestCase):
 
         self.pump()
 
-        conn = Mock()
         clients = self.reactor.tcpClients
-        client = clients[0][2].buildProtocol(None)
-        client.makeConnection(conn)
+        self.assertEqual(len(clients), 1)
+        (host, port, factory, _timeout, _bindAddress) = clients[0]
+        self.assertEqual(host, "1.2.3.4")
+        self.assertEqual(port, 8008)
+
+        # complete the connection and wire it up to a fake transport
+        protocol = factory.buildProtocol(None)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
 
         # Deferred does not have a result
         self.assertNoResult(d)
 
         redirect_data = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nLocation: http://testserv:8008/ab/c1/2345.txt\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
-        client.dataReceived(
+        protocol.dataReceived(
             b"HTTP/1.1 200 OK\r\n"
             b"Server: Fake\r\n"
             b"Content-Length: %i\r\n"
             b"Content-Type: multipart/mixed; boundary=6067d4698f8d40a0a794ea7d7379d53a\r\n\r\n"
             % (len(redirect_data))
         )
-        client.dataReceived(redirect_data)
+        protocol.dataReceived(redirect_data)
 
         # Still no result, not followed the redirect yet
         self.assertNoResult(d)
 
         # Now send the response returned by the server at `Location`
-        conn = Mock()
         clients = self.reactor.tcpClients
         (host, port, factory, _timeout, _bindAddress) = clients[1]
-        self.assertEqual(host, "testserv")
+        self.assertEqual(host, "1.2.3.4")
         self.assertEqual(port, 8008)
-        client = clients[1][2].buildProtocol(None)
-        client.makeConnection(conn)
+        protocol = factory.buildProtocol(None)
+        transport = StringTransport()
+        protocol.makeConnection(transport)
 
         # make sure the length is longer than the initial response
         data = b"Hello world!" * 30
-        client.dataReceived(
+        protocol.dataReceived(
             b"HTTP/1.1 200 OK\r\n"
             b"Server: Fake\r\n"
             b"Content-Length: %i\r\n"
