@@ -57,7 +57,11 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
 )
-from synapse.types.handlers import SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers import (
+    SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+)
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
@@ -73,18 +77,6 @@ sync_processing_time = Histogram(
     "Time taken to generate a sliding sync response, ignoring wait times.",
     ["initial"],
 )
-
-
-# The event types that clients should consider as new activity.
-DEFAULT_BUMP_EVENT_TYPES = {
-    EventTypes.Create,
-    EventTypes.Message,
-    EventTypes.Encrypted,
-    EventTypes.Sticker,
-    EventTypes.CallInvite,
-    EventTypes.PollStart,
-    EventTypes.LiveLocationShareStart,
-}
 
 
 class SlidingSyncHandler:
@@ -986,7 +978,9 @@ class SlidingSyncHandler:
         # Figure out the last bump event in the room
         last_bump_event_result = (
             await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+                room_id,
+                to_token.room_key,
+                event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
             )
         )
 
