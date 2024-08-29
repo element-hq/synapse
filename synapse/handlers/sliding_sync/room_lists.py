@@ -213,6 +213,7 @@ class SlidingSyncRoomLists:
                 from_token=from_token,
             )
 
+    @trace
     async def _compute_interested_rooms_new_tables(
         self,
         sync_config: SlidingSyncConfig,
