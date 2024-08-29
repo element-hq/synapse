@@ -927,6 +927,9 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         )
 
     @parameterized.expand(
+        # Test both an insert an upsert into the
+        # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` to exercise
+        # more possibilities of things going wrong.
         [
             ("insert", True),
             ("upsert", False),
