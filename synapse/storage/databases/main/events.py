@@ -457,7 +457,18 @@ class PersistEventsStore:
                 membership_event_id,
                 user_id,
             ) in membership_event_id_to_user_id_map.items():
-                # We should only be seeing events with `stream_ordering`/`instance_name` assigned by this point
+                # We should only be seeing events with `stream_ordering`/`instance_name`
+                # assigned by this point.
+                #
+                # XXX: Because we're sourcing the event from `events_and_contexts`, we
+                # can't rely on `stream_ordering`/`instance_name` being correct. We
+                # could be working with events that were previously persisted as an
+                # `outlier` with one `stream_ordering` but are now being persisted again
+                # and de-outliered and assigned a different `stream_ordering`. Since we
+                # call `_calculate_sliding_sync_table_changes()` before
+                # `_update_outliers_txn()` which fixes this discrepancy, we're working
+                # with an unreliable `stream_ordering` value that will possibly be
+                # unused and not make it into the `events` table.
                 membership_event_stream_ordering = membership_event_map[
                     membership_event_id
                 ].internal_metadata.stream_ordering
@@ -1831,7 +1842,7 @@ class PersistEventsStore:
             # `_calculate_sliding_sync_table_changes()`) for more context when this
             # happens).
             #
-            # We use a sub-query for `stream_ordering` because it's unreliable to
+            # XXX: We use a sub-query for `stream_ordering` because it's unreliable to
             # pre-calculate from `events_and_contexts` at the time when
             # `_calculate_sliding_sync_table_changes()` is ran. We could be working
             # with events that were previously persisted as an `outlier` with one
@@ -1849,7 +1860,7 @@ class PersistEventsStore:
                 VALUES (
                     ?, ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?),
-                    ?
+                    (SELECT instance_name FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
@@ -1867,8 +1878,12 @@ class PersistEventsStore:
                         membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
+                        # XXX: We do not use `membership_info.membership_event_stream_ordering` here
+                        # because it is an unreliable value. See XXX note above.
                         membership_info.membership_event_id,
-                        membership_info.membership_event_instance_name,
+                        # XXX: We do not use `membership_info.membership_event_instance_name` here
+                        # because it is an unreliable value. See XXX note above.
+                        membership_info.membership_event_id,
                     ]
                     + list(sliding_sync_snapshot_values)
                     for membership_info in sliding_sync_table_changes.to_insert_membership_snapshots
