@@ -1743,7 +1743,7 @@ class PersistEventsStore:
                 ]
                 args.extend(iter(sliding_sync_updates_values))
 
-                # We use a sub-query for `stream_ordering` because it's unreliable to
+                # XXX: We use a sub-query for `stream_ordering` because it's unreliable to
                 # pre-calculate from `events_and_contexts` at the time when
                 # `_calculate_sliding_sync_table_changes()` is ran. We could be working
                 # with events that were previously persisted as an `outlier` with one
