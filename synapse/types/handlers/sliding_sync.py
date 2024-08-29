@@ -498,17 +498,6 @@ class RoomSyncConfig:
             required_state_map=required_state_map,
         )
 
-    def deep_copy(self) -> "RoomSyncConfig":
-        required_state_map: Dict[str, Set[str]] = {
-            state_type: set(state_key_set)
-            for state_type, state_key_set in self.required_state_map.items()
-        }
-
-        return RoomSyncConfig(
-            timeline_limit=self.timeline_limit,
-            required_state_map=required_state_map,
-        )
-
     def combine_room_sync_config(
         self, other_room_sync_config: "RoomSyncConfig"
     ) -> "RoomSyncConfig":
