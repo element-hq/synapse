@@ -63,6 +63,7 @@ class Codes(str, Enum):
     CAPTCHA_INVALID = "M_CAPTCHA_INVALID"
     MISSING_PARAM = "M_MISSING_PARAM"
     INVALID_PARAM = "M_INVALID_PARAM"
+    SESSION_EXPIRED = "M_SESSION_EXPIRED"
     TOO_LARGE = "M_TOO_LARGE"
     EXCLUSIVE = "M_EXCLUSIVE"
     THREEPID_AUTH_FAILED = "M_THREEPID_AUTH_FAILED"
@@ -131,6 +132,9 @@ class Codes(str, Enum):
     # MSC3575 we are telling the client they need to expire their sliding sync
     # connection.
     UNKNOWN_POS = "M_UNKNOWN_POS"
+
+    # MSC4183: The token supplied to validate a 3pid was not correct
+    TOKEN_INCORRECT = "M_TOKEN_INCORRECT"
 
 
 class CodeMessageException(RuntimeError):
