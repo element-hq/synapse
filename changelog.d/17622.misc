@@ -1,0 +1,1 @@
+Refactor sliding sync code to move room list logic out into a separate class.

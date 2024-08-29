@@ -368,7 +368,7 @@ class SlidingSyncResult:
             )
 
     next_pos: SlidingSyncStreamToken
-    lists: Dict[str, SlidingWindowList]
+    lists: Mapping[str, SlidingWindowList]
     rooms: Dict[str, RoomResult]
     extensions: Extensions
 
