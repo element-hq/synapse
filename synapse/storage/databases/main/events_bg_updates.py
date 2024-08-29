@@ -1993,9 +1993,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         to_insert_membership_snapshots: Dict[
             Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
-        to_insert_membership_infos: Dict[Tuple[str, str], SlidingSyncMembershipInfoWithEventPos] = (
-            {}
-        )
+        to_insert_membership_infos: Dict[
+            Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
+        ] = {}
         for (
             room_id,
             room_id_from_rooms_table,
@@ -2184,15 +2184,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             to_insert_membership_snapshots[(room_id, user_id)] = (
                 sliding_sync_membership_snapshots_insert_map
             )
-            to_insert_membership_infos[(room_id, user_id)] = SlidingSyncMembershipInfoWithEventPos(
-                user_id=user_id,
-                sender=sender,
-                membership_event_id=membership_event_id,
-                membership=membership,
-                membership_event_stream_ordering=membership_event_stream_ordering,
-                # If instance_name is null we default to "master"
-                membership_event_instance_name=membership_event_instance_name
-                or "master",
+            to_insert_membership_infos[(room_id, user_id)] = (
+                SlidingSyncMembershipInfoWithEventPos(
+                    user_id=user_id,
+                    sender=sender,
+                    membership_event_id=membership_event_id,
+                    membership=membership,
+                    membership_event_stream_ordering=membership_event_stream_ordering,
+                    # If instance_name is null we default to "master"
+                    membership_event_instance_name=membership_event_instance_name
+                    or "master",
+                )
             )
 
         def _fill_table_txn(txn: LoggingTransaction) -> None:
