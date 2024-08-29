@@ -1758,7 +1758,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
                 bump_stamp = joined_room_stream_ordering_update.most_recent_bump_stamp
 
-                # Check if the current state has been updated since we gathered it
+                # Check if the current state has been updated since we gathered it.
+                # We're being careful not to insert/overwrite with stale data.
                 state_deltas_since_we_gathered_current_state = (
                     self.get_current_state_deltas_for_room_txn(
                         txn,
@@ -1787,17 +1788,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                             + "Raising exception so we can just try again."
                         )
 
-                # Since we partially update the `sliding_sync_joined_rooms` as new state
-                # is sent, we need to update the state fields `ON CONFLICT`. We just
-                # have to be careful we're not overwriting it with stale data (see
-                # `most_recent_current_state_delta_stream_id` check above).
+                # Since we fully insert rows into `sliding_sync_joined_rooms`, we can
+                # just do everything on insert and `ON CONFLICT DO NOTHING`.
                 #
                 self.db_pool.simple_upsert_txn(
                     txn,
                     table="sliding_sync_joined_rooms",
                     keyvalues={"room_id": room_id},
-                    values=update_map,
+                    values={},
                     insertion_values={
+                        **update_map,
                         # The reason we're only *inserting* (not *updating*) `event_stream_ordering`
                         # and `bump_stamp` is because if they are present, that means they are already
                         # up-to-date.

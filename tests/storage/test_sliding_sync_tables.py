@@ -1108,6 +1108,151 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
             user2_snapshot,
         )
 
+    def test_joined_room_fully_insert_on_state_update(self) -> None:
+        """
+        Test that when an existing room updates it's state and we don't have a
+        corresponding row in `sliding_sync_joined_rooms` yet, we fully-insert the row
+        even though only a tiny piece of state changed.
+
+        FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+        foreground update for
+        `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+        https://github.com/element-hq/synapse/issues/17623)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user1_tok,
+        )
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the the room never made
+        # it into the table. This is to simulate an existing room (before we event added
+        # the sliding sync tables) not being in the `sliding_sync_joined_rooms` table
+        # yet.
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                desc="simulate existing room not being in the sliding_sync_joined_rooms table yet",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Encrypt the room
+        self.helper.send_state(
+            room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        # The room should now be in the `sliding_sync_joined_rooms` table
+        # (fully-inserted with all of the state values).
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id},
+            exact=True,
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id,
+                # This should be whatever is the last event in the room
+                event_stream_ordering=state_map[
+                    (EventTypes.RoomEncryption, "")
+                ].internal_metadata.stream_ordering,
+                bump_stamp=state_map[
+                    (EventTypes.Create, "")
+                ].internal_metadata.stream_ordering,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=True,
+                tombstone_successor_room_id=None,
+            ),
+        )
+
+    def test_joined_room_nothing_if_not_in_table_when_bumped(self) -> None:
+        """
+        Test a new message being sent in an existing room when we don't have a
+        corresponding row in `sliding_sync_joined_rooms` yet; either nothing should
+        happen or we should fully-insert the row. We currently do nothing.
+
+        FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+        foreground update for
+        `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+        https://github.com/element-hq/synapse/issues/17623)
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Add a room name
+        self.helper.send_state(
+            room_id,
+            EventTypes.Name,
+            {"name": "my super duper room"},
+            tok=user1_tok,
+        )
+        # Encrypt the room
+        self.helper.send_state(
+            room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        # Clean-up the `sliding_sync_joined_rooms` table as if the the room never made
+        # it into the table. This is to simulate an existing room (before we event added
+        # the sliding sync tables) not being in the `sliding_sync_joined_rooms` table
+        # yet.
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                desc="simulate existing room not being in the sliding_sync_joined_rooms table yet",
+            )
+        )
+
+        # We shouldn't find anything in the table because we just deleted them in
+        # preparation for the test.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
+        # Send a new message to bump the room
+        self.helper.send(room_id, "some message", tok=user1_tok)
+
+        # Either nothing should happen or we should fully-insert the row. We currently
+        # do nothing for non-state events.
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            set(),
+            exact=True,
+        )
+
     def test_non_join_space_room_with_info(self) -> None:
         """
         Test users who was invited shows up in `sliding_sync_membership_snapshots`.
@@ -2746,120 +2891,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
                 room_type=RoomTypes.SPACE,
                 room_name="my super duper space",
                 is_encrypted=False,
-                tombstone_successor_room_id=None,
-            ),
-        )
-
-    def test_joined_background_update_partial(self) -> None:
-        """
-        Test that the background update for `sliding_sync_joined_rooms` populates
-        partially updated rows.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        # Create rooms with various levels of state that should appear in the table
-        #
-        room_id_with_info = self.helper.create_room_as(user1_id, tok=user1_tok)
-        # Add a room name
-        self.helper.send_state(
-            room_id_with_info,
-            EventTypes.Name,
-            {"name": "my super duper room"},
-            tok=user1_tok,
-        )
-        # Encrypt the room
-        self.helper.send_state(
-            room_id_with_info,
-            EventTypes.RoomEncryption,
-            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
-            tok=user1_tok,
-        )
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id_with_info)
-        )
-
-        # Clean-up the `sliding_sync_joined_rooms` table as if the the encryption event
-        # never made it into the table.
-        self.get_success(
-            self.store.db_pool.simple_update(
-                table="sliding_sync_joined_rooms",
-                keyvalues={"room_id": room_id_with_info},
-                updatevalues={"is_encrypted": False},
-                desc="sliding_sync_joined_rooms.test_joined_background_update_partial",
-            )
-        )
-
-        # We should see the partial row that we made in preparation for the test.
-        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
-        self.assertIncludes(
-            set(sliding_sync_joined_rooms_results.keys()),
-            {room_id_with_info},
-            exact=True,
-        )
-        self.assertEqual(
-            sliding_sync_joined_rooms_results[room_id_with_info],
-            _SlidingSyncJoinedRoomResult(
-                room_id=room_id_with_info,
-                # Lastest event sent in the room
-                event_stream_ordering=state_map[
-                    (EventTypes.RoomEncryption, "")
-                ].internal_metadata.stream_ordering,
-                bump_stamp=state_map[
-                    (EventTypes.Create, "")
-                ].internal_metadata.stream_ordering,
-                room_type=None,
-                room_name="my super duper room",
-                is_encrypted=False,
-                tombstone_successor_room_id=None,
-            ),
-        )
-
-        # Insert and run the background update.
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                    "progress_json": "{}",
-                },
-            )
-        )
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
-                    "progress_json": "{}",
-                    "depends_on": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                },
-            )
-        )
-        self.store.db_pool.updates._all_done = False
-        self.wait_for_background_updates()
-
-        # Make sure the table is populated
-        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
-        self.assertIncludes(
-            set(sliding_sync_joined_rooms_results.keys()),
-            {room_id_with_info},
-            exact=True,
-        )
-        self.assertEqual(
-            sliding_sync_joined_rooms_results[room_id_with_info],
-            _SlidingSyncJoinedRoomResult(
-                room_id=room_id_with_info,
-                # Lastest event sent in the room
-                event_stream_ordering=state_map[
-                    (EventTypes.RoomEncryption, "")
-                ].internal_metadata.stream_ordering,
-                bump_stamp=state_map[
-                    (EventTypes.Create, "")
-                ].internal_metadata.stream_ordering,
-                room_type=None,
-                room_name="my super duper room",
-                is_encrypted=True,
                 tombstone_successor_room_id=None,
             ),
         )

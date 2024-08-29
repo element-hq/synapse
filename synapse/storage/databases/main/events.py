@@ -181,6 +181,16 @@ class SlidingSyncTableChanges:
     # This should be *some* value that points to a real event in the room if we are
     # still joined to the room and some state is changing (`to_insert` or `to_delete`).
     joined_room_best_effort_most_recent_stream_ordering: Optional[int]
+    # If the row doesn't exist in the `sliding_sync_joined_rooms` table, we need to
+    # fully-insert it which means we also need to include a `bump_stamp` value to use
+    # for the row. This should only be populated when we're trying to fully-insert a
+    # row.
+    #
+    # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+    # foreground update for
+    # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+    # https://github.com/element-hq/synapse/issues/17623)
+    joined_room_bump_stamp_to_fully_insert: Optional[int]
     # Values to upsert into `sliding_sync_joined_rooms`
     joined_room_updates: SlidingSyncStateInsertValues
 
@@ -401,6 +411,7 @@ class PersistEventsStore:
             return SlidingSyncTableChanges(
                 room_id=room_id,
                 joined_room_best_effort_most_recent_stream_ordering=None,
+                joined_room_bump_stamp_to_fully_insert=None,
                 joined_room_updates={},
                 membership_snapshot_shared_insert_values={},
                 to_insert_membership_snapshots=[],
@@ -558,11 +569,49 @@ class PersistEventsStore:
         #
         joined_room_updates: SlidingSyncStateInsertValues = {}
         best_effort_most_recent_stream_ordering: Optional[int] = None
+        bump_stamp_to_fully_insert: Optional[int] = None
         if not delta_state.no_longer_in_room:
+            current_state_ids_map = {}
+
+            # Always fully-insert rows if they don't already exist in the
+            # `sliding_sync_joined_rooms` table. This way we can rely on a row if it
+            # exists in the table.
+            #
+            # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+            # foreground update for
+            # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+            # https://github.com/element-hq/synapse/issues/17623)
+            existing_row_in_table = await self.store.db_pool.simple_select_one_onecol(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                retcol="room_id",
+                allow_none=True,
+            )
+            if not existing_row_in_table:
+                most_recent_bump_event_pos_results = (
+                    await self.store.get_last_event_pos_in_room(
+                        room_id,
+                        event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+                    )
+                )
+                bump_stamp_to_fully_insert = (
+                    most_recent_bump_event_pos_results[1].stream
+                    if most_recent_bump_event_pos_results is not None
+                    else None
+                )
+
+                current_state_ids_map = dict(
+                    await self.store.get_partial_filtered_current_state_ids(
+                        room_id,
+                        state_filter=StateFilter.from_types(
+                            SLIDING_SYNC_RELEVANT_STATE_SET
+                        ),
+                    )
+                )
+
             # Look through the items we're going to insert into the current state to see
             # if there is anything that we care about and should also update in the
             # `sliding_sync_joined_rooms` table.
-            current_state_ids_map = {}
             for state_key, event_id in to_insert.items():
                 if state_key in SLIDING_SYNC_RELEVANT_STATE_SET:
                     current_state_ids_map[state_key] = event_id
@@ -654,6 +703,7 @@ class PersistEventsStore:
             room_id=room_id,
             # For `sliding_sync_joined_rooms`
             joined_room_best_effort_most_recent_stream_ordering=best_effort_most_recent_stream_ordering,
+            joined_room_bump_stamp_to_fully_insert=bump_stamp_to_fully_insert,
             joined_room_updates=joined_room_updates,
             # For `sliding_sync_membership_snapshots`
             membership_snapshot_shared_insert_values=membership_snapshot_shared_insert_values,
@@ -1743,7 +1793,10 @@ class PersistEventsStore:
                         # better to just rely on
                         # `_update_sliding_sync_tables_with_new_persisted_events_txn()`
                         # to do the right thing (same for `bump_stamp`).
-                        "event_stream_ordering": sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering
+                        "event_stream_ordering": sliding_sync_table_changes.joined_room_best_effort_most_recent_stream_ordering,
+                        # If we're trying to fully-insert a row, we need to provide a
+                        # value for `bump_stamp` if it exists for the room.
+                        "bump_stamp": sliding_sync_table_changes.joined_room_bump_stamp_to_fully_insert,
                     },
                 )
 
