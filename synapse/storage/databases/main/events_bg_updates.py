@@ -1961,27 +1961,33 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 return 0
 
         def _find_previous_membership_txn(
-            txn: LoggingTransaction, event_id: str, user_id: str
+            txn: LoggingTransaction, room_id: str, user_id: str, stream_ordering: int
         ) -> Tuple[str, str]:
-            # Find the previous invite/knock event before the leave event. This
-            # is done by looking at the auth events of the invite/knock and
-            # finding the corresponding membership event.
+            # Find the previous invite/knock event before the leave event
             txn.execute(
                 """
-                SELECT m.event_id, m.membership
-                FROM event_auth AS a
-                INNER JOIN room_memberships AS m ON (a.auth_id = m.event_id)
-                WHERE a.event_id = ? AND m.user_id = ?
+                SELECT event_id, membership
+                FROM room_memberships
+                WHERE
+                    room_id = ?
+                    AND user_id = ?
+                    AND event_stream_ordering < ?
+                ORDER BY event_stream_ordering DESC
+                LIMIT 1
                 """,
-                (event_id, user_id),
+                (
+                    room_id,
+                    user_id,
+                    stream_ordering,
+                ),
             )
             row = txn.fetchone()
 
             # We should see a corresponding previous invite/knock event
             assert row is not None
-            previous_event_id, membership = row
+            event_id, membership = row
 
-            return previous_event_id, membership
+            return event_id, membership
 
         # Map from (room_id, user_id) to ...
         to_insert_membership_snapshots: Dict[
@@ -2097,8 +2103,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         await self.db_pool.runInteraction(
                             "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
                             _find_previous_membership_txn,
-                            membership_event_id,
+                            room_id,
                             user_id,
+                            membership_event_stream_ordering,
                         )
                     )
 
