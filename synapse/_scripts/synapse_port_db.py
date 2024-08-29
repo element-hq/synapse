@@ -129,6 +129,11 @@ BOOLEAN_COLUMNS = {
     "remote_media_cache": ["authenticated"],
     "room_stats_state": ["is_federatable"],
     "rooms": ["is_public", "has_auth_chain_index"],
+    "sliding_sync_joined_rooms": ["is_encrypted"],
+    "sliding_sync_membership_snapshots": [
+        "has_known_state",
+        "is_encrypted",
+    ],
     "users": ["shadow_banned", "approved", "locked", "suspended"],
     "un_partial_stated_event_stream": ["rejection_status_changed"],
     "users_who_share_rooms": ["share_private"],

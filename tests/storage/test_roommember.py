@@ -24,7 +24,7 @@ from typing import List, Optional, Tuple, cast
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import EventTypes, JoinRules, Membership
+from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.admin import register_servlets_for_client_rest_resource
@@ -38,6 +38,7 @@ from synapse.util import Clock
 from tests import unittest
 from tests.server import TestHomeServer
 from tests.test_utils import event_injection
+from tests.test_utils.event_injection import create_event
 from tests.unittest import skip_unless
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,10 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         # We can't test the RoomMemberStore on its own without the other event
         # storage logic
         self.store = hs.get_datastores().main
+        self.state_handler = self.hs.get_state_handler()
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
 
         self.u_alice = self.register_user("alice", "pass")
         self.t_alice = self.login("alice", "pass")
@@ -220,31 +225,166 @@ class RoomMemberStoreTestCase(unittest.HomeserverTestCase):
         )
 
     def test_join_locally_forgotten_room(self) -> None:
-        """Tests if a user joins a forgotten room the room is not forgotten anymore."""
-        self.room = self.helper.create_room_as(self.u_alice, tok=self.t_alice)
-        self.assertFalse(
-            self.get_success(self.store.is_locally_forgotten_room(self.room))
-        )
+        """
+        Tests if a user joins a forgotten room, the room is not forgotten anymore.
 
-        # after leaving and forget the room, it is forgotten
-        self.get_success(
-            event_injection.inject_member_event(
-                self.hs, self.room, self.u_alice, "leave"
+        Since a room can't be re-joined if everyone has left. This can only happen with
+        a room with remote users in it.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote room
+        creator = "@user:other"
+        room_id = "!foo:other"
+        room_version = RoomVersions.V10
+        shared_kwargs = {
+            "room_id": room_id,
+            "room_version": room_version.identifier,
+        }
+
+        create_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[],
+                type=EventTypes.Create,
+                state_key="",
+                content={
+                    # The `ROOM_CREATOR` field could be removed if we used a room
+                    # version > 10 (in favor of relying on `sender`)
+                    EventContentFields.ROOM_CREATOR: creator,
+                    EventContentFields.ROOM_VERSION: room_version.identifier,
+                },
+                sender=creator,
+                **shared_kwargs,
             )
         )
-        self.get_success(self.store.forget(self.u_alice, self.room))
-        self.assertTrue(
-            self.get_success(self.store.is_locally_forgotten_room(self.room))
-        )
-
-        # after rejoin the room is not forgotten anymore
-        self.get_success(
-            event_injection.inject_member_event(
-                self.hs, self.room, self.u_alice, "join"
+        creator_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[create_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=creator,
+                content={"membership": Membership.JOIN},
+                sender=creator,
+                **shared_kwargs,
             )
         )
+
+        remote_events_and_contexts = [
+            create_tuple,
+            creator_tuple,
+        ]
+
+        # Ensure the local HS knows the room version
+        self.get_success(self.store.store_room(room_id, creator, False, room_version))
+
+        # Persist these events as backfilled events.
+        for event, context in remote_events_and_contexts:
+            self.get_success(
+                self.persistence.persist_event(event, context, backfilled=True)
+            )
+
+        # Now we join the local user to the room. We want to make this feel as close to
+        # the real `process_remote_join()` as possible but we'd like to avoid some of
+        # the auth checks that would be done in the real code.
+        #
+        # FIXME: The test was originally written using this less-real
+        # `persist_event(...)` shortcut but it would be nice to use the real remote join
+        # process in a `FederatingHomeserverTestCase`.
+        flawed_join_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[creator_tuple[0].event_id],
+                # This doesn't work correctly to create an `EventContext` that includes
+                # both of these state events. I assume it's because we're working on our
+                # local homeserver which has the remote state set as `outlier`. We have
+                # to create our own EventContext below to get this right.
+                auth_event_ids=[create_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.JOIN},
+                sender=user1_id,
+                **shared_kwargs,
+            )
+        )
+        # We have to create our own context to get the state set correctly. If we use
+        # the `EventContext` from the `flawed_join_tuple`, the `current_state_events`
+        # table will only have the join event in it which should never happen in our
+        # real server.
+        join_event = flawed_join_tuple[0]
+        join_context = self.get_success(
+            self.state_handler.compute_event_context(
+                join_event,
+                state_ids_before_event={
+                    (e.type, e.state_key): e.event_id for e in [create_tuple[0]]
+                },
+                partial_state=False,
+            )
+        )
+        self.get_success(self.persistence.persist_event(join_event, join_context))
+
+        # The room shouldn't be forgotten because the local user just joined
         self.assertFalse(
-            self.get_success(self.store.is_locally_forgotten_room(self.room))
+            self.get_success(self.store.is_locally_forgotten_room(room_id))
+        )
+
+        # After all of the local users (there is only user1) leave and forgetting the
+        # room, it is forgotten
+        user1_leave_response = self.helper.leave(room_id, user1_id, tok=user1_tok)
+        user1_leave_event = self.get_success(
+            self.store.get_event(user1_leave_response["event_id"])
+        )
+        self.get_success(self.store.forget(user1_id, room_id))
+        self.assertTrue(self.get_success(self.store.is_locally_forgotten_room(room_id)))
+
+        # Join the local user to the room (again). We want to make this feel as close to
+        # the real `process_remote_join()` as possible but we'd like to avoid some of
+        # the auth checks that would be done in the real code.
+        #
+        # FIXME: The test was originally written using this less-real
+        # `event_injection.inject_member_event(...)` shortcut but it would be nice to
+        # use the real remote join process in a `FederatingHomeserverTestCase`.
+        flawed_join_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[user1_leave_response["event_id"]],
+                # This doesn't work correctly to create an `EventContext` that includes
+                # both of these state events. I assume it's because we're working on our
+                # local homeserver which has the remote state set as `outlier`. We have
+                # to create our own EventContext below to get this right.
+                auth_event_ids=[
+                    create_tuple[0].event_id,
+                    user1_leave_response["event_id"],
+                ],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.JOIN},
+                sender=user1_id,
+                **shared_kwargs,
+            )
+        )
+        # We have to create our own context to get the state set correctly. If we use
+        # the `EventContext` from the `flawed_join_tuple`, the `current_state_events`
+        # table will only have the join event in it which should never happen in our
+        # real server.
+        join_event = flawed_join_tuple[0]
+        join_context = self.get_success(
+            self.state_handler.compute_event_context(
+                join_event,
+                state_ids_before_event={
+                    (e.type, e.state_key): e.event_id
+                    for e in [create_tuple[0], user1_leave_event]
+                },
+                partial_state=False,
+            )
+        )
+        self.get_success(self.persistence.persist_event(join_event, join_context))
+
+        # After the local user rejoins the remote room, it isn't forgotten anymore
+        self.assertFalse(
+            self.get_success(self.store.is_locally_forgotten_room(room_id))
         )
 
 
