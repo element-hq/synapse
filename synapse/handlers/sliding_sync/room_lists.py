@@ -206,6 +206,10 @@ class SlidingSyncRoomLists:
                 from_token=from_token,
             )
         else:
+            # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+            # foreground update for
+            # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+            # https://github.com/element-hq/synapse/issues/17623)
             return await self._compute_interested_rooms_fallback(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
@@ -243,11 +247,13 @@ class SlidingSyncRoomLists:
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
+                    # Remove rooms that the user joined after the `to_token`
                     room_membership_for_user_map.pop(room_id)
                     continue
 
                 existing_room = room_membership_for_user_map.get(room_id)
                 if existing_room is not None:
+                    # Update room membership events to the point in time of the `to_token`
                     room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=change.sender,
@@ -261,10 +267,13 @@ class SlidingSyncRoomLists:
                     )
                 else:
                     # This can happen if we get "state reset" out of the room
-                    # after the `to_token`.
+                    # after the `to_token`. In other words, there is no membership
+                    # for the room after the `to_token` but we see membership in
+                    # the token range.
                     room_type = await self.store.get_room_type(room_id)
                     encryption = await self.store.get_room_encryption(room_id)
 
+                    # Add back rooms that the user was state-reset out of after `to_token`
                     room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
                         room_id=room_id,
                         sender=change.sender,
