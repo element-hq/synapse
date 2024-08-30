@@ -460,62 +460,9 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map: Dict[str, RoomSyncConfig] = relevant_room_map
-        if relevant_room_map:
-            with start_active_span("filter_relevant_rooms_to_send"):
-                if from_token:
-                    rooms_should_send = set()
-
-                    # First we check if there are rooms that match a list/room
-                    # subscription and have updates we need to send (i.e. either because
-                    # we haven't sent the room down, or we have but there are missing
-                    # updates).
-                    for room_id, room_config in relevant_room_map.items():
-                        prev_room_sync_config = (
-                            previous_connection_state.room_configs.get(room_id)
-                        )
-                        if prev_room_sync_config is not None:
-                            # Always include rooms whose timeline limit has increased.
-                            # (see the "XXX: Odd behavior" described below)
-                            if (
-                                prev_room_sync_config.timeline_limit
-                                < room_config.timeline_limit
-                            ):
-                                rooms_should_send.add(room_id)
-                                continue
-
-                        status = previous_connection_state.rooms.have_sent_room(room_id)
-                        if (
-                            # The room was never sent down before so the client needs to know
-                            # about it regardless of any updates.
-                            status.status == HaveSentRoomFlag.NEVER
-                            # `PREVIOUSLY` literally means the "room was sent down before *AND*
-                            # there are updates we haven't sent down" so we already know this
-                            # room has updates.
-                            or status.status == HaveSentRoomFlag.PREVIOUSLY
-                        ):
-                            rooms_should_send.add(room_id)
-                        elif status.status == HaveSentRoomFlag.LIVE:
-                            # We know that we've sent all updates up until `from_token`,
-                            # so we just need to check if there have been updates since
-                            # then.
-                            pass
-                        else:
-                            assert_never(status.status)
-
-                    # We only need to check for new events since any state changes
-                    # will also come down as new events.
-                    rooms_that_have_updates = (
-                        self.store.get_rooms_that_might_have_updates(
-                            relevant_room_map.keys(), from_token.room_key
-                        )
-                    )
-                    rooms_should_send.update(rooms_that_have_updates)
-                    relevant_rooms_to_send_map = {
-                        room_id: room_sync_config
-                        for room_id, room_sync_config in relevant_room_map.items()
-                        if room_id in rooms_should_send
-                    }
+        relevant_rooms_to_send_map = await self._filter_relevant_room_to_send(
+            previous_connection_state, from_token, relevant_room_map
+        )
 
         return SlidingSyncInterestedRooms(
             lists=lists,
@@ -711,6 +658,29 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
+        relevant_rooms_to_send_map = await self._filter_relevant_room_to_send(
+            previous_connection_state, from_token, relevant_room_map
+        )
+
+        return SlidingSyncInterestedRooms(
+            lists=lists,
+            relevant_room_map=relevant_room_map,
+            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
+            all_rooms=all_rooms,
+            room_membership_for_user_map=room_membership_for_user_map,
+        )
+
+    async def _filter_relevant_room_to_send(
+        self,
+        previous_connection_state: PerConnectionState,
+        from_token: Optional[StreamToken],
+        relevant_room_map: Dict[str, RoomSyncConfig],
+    ) -> Dict[str, RoomSyncConfig]:
+        """Filters the `relevant_room_map` down to those rooms that may have
+        updates we need to fetch and return."""
+
+        # Filtered subset of `relevant_room_map` for rooms that may have updates
+        # (in the event stream)
         relevant_rooms_to_send_map: Dict[str, RoomSyncConfig] = relevant_room_map
         if relevant_room_map:
             with start_active_span("filter_relevant_rooms_to_send"):
@@ -768,13 +738,7 @@ class SlidingSyncRoomLists:
                         if room_id in rooms_should_send
                     }
 
-        return SlidingSyncInterestedRooms(
-            lists=lists,
-            relevant_room_map=relevant_room_map,
-            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            all_rooms=all_rooms,
-            room_membership_for_user_map=room_membership_for_user_map,
-        )
+        return relevant_rooms_to_send_map
 
     @trace
     async def _get_rewind_changes_to_current_membership_to_token(
