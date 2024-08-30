@@ -435,13 +435,13 @@ class SlidingSyncRoomLists:
     ) -> Mapping[str, Optional[RoomsForUser]]:
         """
         Takes the current set of rooms for a user (retrieved after the given
-        token), and returns the changes need to "rewind" it to match the set of
-        memberships *at that token*.
+        token), and returns the changes needed to "rewind" it to match the set of
+        memberships *at that token* (<= `to_token`).
 
         Args:
             user: User to fetch rooms for
             rooms_for_user: The set of rooms for the user after the `to_token`.
-            to_token: The token to rewind
+            to_token: The token to rewind to
 
         Returns:
             The changes to apply to rewind the the current memberships.
