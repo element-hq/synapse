@@ -2137,7 +2137,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         False
                     )
             elif membership in (Membership.INVITE, Membership.KNOCK) or (
-                membership == Membership.LEAVE and is_outlier
+                membership in (Membership.LEAVE, Membership.BAN) and is_outlier
             ):
                 invite_or_knock_event_id = membership_event_id
                 invite_or_knock_membership = membership
@@ -2148,7 +2148,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # us a consistent view of the room state regardless of your
                 # membership (i.e. the room shouldn't disappear if your using the
                 # `is_encrypted` filter and you leave).
-                if membership == Membership.LEAVE and is_outlier:
+                if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
                     invite_or_knock_event_id, invite_or_knock_membership = (
                         await self.db_pool.runInteraction(
                             "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
