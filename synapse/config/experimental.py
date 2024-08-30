@@ -363,11 +363,6 @@ class ExperimentalConfig(Config):
         # MSC3874: Filtering /messages with rel_types / not_rel_types.
         self.msc3874_enabled: bool = experimental.get("msc3874_enabled", False)
 
-        # MSC3886: Simple client rendezvous capability
-        self.msc3886_endpoint: Optional[str] = experimental.get(
-            "msc3886_endpoint", None
-        )
-
         # MSC3890: Remotely silence local notifications
         # Note: This option requires "experimental_features.msc3391_enabled" to be
         # set to "true", in order to communicate account data deletions to clients.
