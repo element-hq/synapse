@@ -41,6 +41,7 @@ from synapse.storage.databases.main.events import (
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
 )
+from synapse.storage.databases.main.events_worker import DatabaseCorruptionError
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.types import Cursor
@@ -2082,9 +2083,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # have `current_state_events` and we should have some current state
                 # for each room
                 if current_state_ids_map:
-                    fetched_events = await self.get_events(
-                        current_state_ids_map.values()
-                    )
+                    try:
+                        fetched_events = await self.get_events(
+                            current_state_ids_map.values()
+                        )
+                    except DatabaseCorruptionError as e:
+                        logger.warning(
+                            "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                            room_id,
+                            e,
+                        )
+                        continue
 
                     current_state_map: StateMap[EventBase] = {
                         state_key: fetched_events[event_id]
@@ -2183,7 +2192,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     await_full_state=False,
                 )
 
-                fetched_events = await self.get_events(state_ids_map.values())
+                try:
+                    fetched_events = await self.get_events(state_ids_map.values())
+                except DatabaseCorruptionError as e:
+                    logger.warning(
+                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                        room_id,
+                        e,
+                    )
+                    continue
 
                 state_map: StateMap[EventBase] = {
                     state_key: fetched_events[event_id]
