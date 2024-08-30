@@ -2,7 +2,7 @@
 
 ### Bugfixes
 
-- Fix authenticated media responses using a wrong limit when following redirects over federation. ([\#17626](https://github.com/element-hq/synapse/issues/17626))
+- Fix regression in v1.114.0rc2 that caused workers to fail to start. ([\#17626](https://github.com/element-hq/synapse/issues/17626))
 
 
 
