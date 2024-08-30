@@ -1382,7 +1382,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             desc="room_forgetter_stream_pos",
         )
 
-    # @cached(iterable=True, max_entries=10000)
+    @cached(iterable=True, max_entries=10000)
     async def get_sliding_sync_rooms_for_user(
         self,
         user_id: str,
