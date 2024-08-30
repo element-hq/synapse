@@ -2090,6 +2090,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         True
                     )
                 else:
+                    # Although we expect every room to have a create event (even
+                    # past unknown room versions since we haven't supported one
+                    # without it), there seem to be some corrupted rooms in
+                    # practice that don't have the create event in the
+                    # `current_state_events` table. The create event does exist
+                    # in the events table though. We'll just say that we don't
+                    # know the state for these rooms and continue on with our
+                    # day.
                     sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
                         False
                     )
