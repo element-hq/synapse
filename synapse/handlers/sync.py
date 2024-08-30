@@ -150,6 +150,12 @@ class TimelineBatch:
     prev_batch: StreamToken
     events: Sequence[EventBase]
     limited: bool
+
+    # All the events that were fetched from the DB while loading the room. This
+    # is a superset of `events`.
+    fetched_events: Sequence[EventBase]
+    fetched_limited: bool  # Whether there is a gap between the previous timeline batch
+
     # A mapping of event ID to the bundled aggregations for the above events.
     # This is only calculated if limited is true.
     bundled_aggregations: Optional[Dict[str, BundledAggregations]] = None
@@ -863,7 +869,11 @@ class SyncHandler:
                     )
 
                 return TimelineBatch(
-                    events=recents, prev_batch=prev_batch_token, limited=False
+                    events=recents,
+                    prev_batch=prev_batch_token,
+                    limited=False,
+                    fetched_events=recents,
+                    fetched_limited=False,
                 )
 
             filtering_factor = 2
@@ -879,6 +889,9 @@ class SyncHandler:
                 since_key = gap_token
             elif since_token and not newly_joined_room:
                 since_key = since_token.room_key
+
+            fetched_events: List[EventBase] = []
+            fetched_limited = True
 
             while limited and len(recents) < timeline_limit and max_repeat:
                 # For initial `/sync`, we want to view a historical section of the
@@ -924,6 +937,10 @@ class SyncHandler:
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
                 events.reverse()
+
+                # We prepend as `fetched_events` is in ascending stream order,
+                # and `events` is from *before* the previously fetched events.
+                fetched_events = events + fetched_events
 
                 log_kv({"loaded_recents": len(events)})
 
@@ -976,6 +993,7 @@ class SyncHandler:
 
                 if len(events) <= load_limit:
                     limited = False
+                    fetched_limited = False
                     break
                 max_repeat -= 1
 
@@ -1006,6 +1024,8 @@ class SyncHandler:
             # (to force client to paginate the gap).
             limited=limited or newly_joined_room or gap_token is not None,
             bundled_aggregations=bundled_aggregations,
+            fetched_events=fetched_events,
+            fetched_limited=fetched_limited,
         )
 
     async def compute_summary(
@@ -1460,8 +1480,12 @@ class SyncHandler:
         #
         # c.f. #16941 for an example of why we can't do this for all non-gappy
         # syncs.
+        #
+        # We can apply a similar optimization for gappy syncs if we know the room
+        # has been linear in the gap, so instead of just looking at the
+        # `timeline.batch` we can look at `timeline.fetched_events`.
         is_linear_timeline = True
-        if batch.events:
+        if batch.fetched_events:
             # We need to make sure the first event in our batch points to the
             # last event in the previous batch.
             last_event_id_prev_batch = (
@@ -1478,8 +1502,19 @@ class SyncHandler:
                     break
                 prev_event_id = e.event_id
 
-        if is_linear_timeline and not batch.limited:
-            state_ids: StateMap[str] = {}
+        if is_linear_timeline and not batch.fetched_limited:
+            batch_state_ids: MutableStateMap[str] = {}
+
+            # If the returned batch is actually limited, we need to add the
+            # state events that happened in the batch.
+            if batch.limited:
+                timeline_events = {e.event_id for e in batch.events}
+                batch_state_ids = {
+                    (e.type, e.state_key): e.event_id
+                    for e in batch.fetched_events
+                    if e.is_state() and e.event_id not in timeline_events
+                }
+
             if lazy_load_members:
                 if members_to_fetch and batch.events:
                     # We're lazy-loading, so the client might need some more
@@ -1488,7 +1523,7 @@ class SyncHandler:
                     # timeline here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
+                    ll_state_ids = await self._state_storage_controller.get_state_ids_for_event(
                         batch.events[0].event_id,
                         # we only want members!
                         state_filter=StateFilter.from_types(
@@ -1496,7 +1531,8 @@ class SyncHandler:
                         ),
                         await_full_state=False,
                     )
-            return state_ids
+                    batch_state_ids.update(ll_state_ids)
+            return batch_state_ids
 
         if batch:
             state_at_timeline_start = (
