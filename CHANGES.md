@@ -8,7 +8,7 @@
 ### Bugfixes
 
 - Fix hierarchy returning 403 when room is accessible through federation. Contributed by Krishan (@kfiven). ([\#17194](https://github.com/element-hq/synapse/issues/17194))
-- Fix content-length on federation /thumbnail responses. ([\#17532](https://github.com/element-hq/synapse/issues/17532))
+- Fix content-length on federation `/thumbnail` responses. ([\#17532](https://github.com/element-hq/synapse/issues/17532))
 - Fix authenticated media responses using a wrong limit when following redirects over federation. ([\#17543](https://github.com/element-hq/synapse/issues/17543))
 
 ### Internal Changes
