@@ -1857,6 +1857,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             initial_phase = True
 
         last_room_id = progress.get("last_room_id", "")
+        last_user_id = progress.get("last_user_id", "")
         last_event_stream_ordering = progress["last_event_stream_ordering"]
 
         def _find_memberships_to_update_txn(
@@ -1887,11 +1888,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
-                    WHERE c.room_id > ?
-                    ORDER BY c.room_id ASC
+                    WHERE (c.room_id, c.user_id) > (?, ?)
+                    ORDER BY c.room_id ASC, c.user_id ASC
                     LIMIT ?
                     """,
-                    (last_room_id, batch_size),
+                    (last_room_id, last_user_id, batch_size),
                 )
             elif last_event_stream_ordering is not None:
                 # It's important to sort by `event_stream_ordering` *ascending* (oldest to
@@ -2296,7 +2297,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         (
             room_id,
             _room_id_from_rooms_table,
-            _user_id,
+            user_id,
             _sender,
             _membership_event_id,
             _membership,
@@ -2308,6 +2309,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         progress = {
             "initial_phase": initial_phase,
             "last_room_id": room_id,
+            "last_user_id": user_id,
             "last_event_stream_ordering": membership_event_stream_ordering,
         }
 
