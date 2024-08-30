@@ -18,6 +18,7 @@ import logging
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
+    AbstractSet,
     Any,
     Dict,
     List,
@@ -338,6 +339,7 @@ class SlidingSyncRoomLists:
                             sync_room_map,
                             list_config.filters,
                             to_token,
+                            dm_room_ids,
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
@@ -1161,7 +1163,7 @@ class SlidingSyncRoomLists:
     async def _get_dm_rooms_for_user(
         self,
         user_id: str,
-    ) -> StrCollection:
+    ) -> AbstractSet[str]:
         """Get the set of DM rooms for the user."""
 
         # We're using global account data (`m.direct`) instead of checking for
@@ -1726,6 +1728,7 @@ class SlidingSyncRoomLists:
         sync_room_map: Mapping[str, RoomsForUserSlidingSync],
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
+        dm_room_ids: AbstractSet[str],
     ) -> Dict[str, RoomsForUserSlidingSync]:
         """
         Filter rooms based on the sync request.
@@ -1736,6 +1739,7 @@ class SlidingSyncRoomLists:
                 information in the room at the time of `to_token`.
             filters: Filters to apply
             to_token: We filter based on the state of the room at this token
+            dm_room_ids: Set of room IDs which are DMs
 
         Returns:
             A filtered dictionary of room IDs along with membership information in the
@@ -1747,27 +1751,12 @@ class SlidingSyncRoomLists:
         # Filter for Direct-Message (DM) rooms
         if filters.is_dm is not None:
             with start_active_span("filters.is_dm"):
-                dm_map = await self.store.get_global_account_data_by_type_for_user(
-                    user_id, AccountDataTypes.DIRECT
-                )
-
-                # Flatten out the map. Account data is set by the client so it needs to be
-                # scrutinized.
-                dm_room_id_set = set()
-                if isinstance(dm_map, dict):
-                    for room_ids in dm_map.values():
-                        # Account data should be a list of room IDs. Ignore anything else
-                        if isinstance(room_ids, list):
-                            for room_id in room_ids:
-                                if isinstance(room_id, str):
-                                    dm_room_id_set.add(room_id)
-
                 if filters.is_dm:
                     # Intersect with the DM room set
-                    filtered_room_id_set &= dm_room_id_set
+                    filtered_room_id_set &= dm_room_ids
                 else:
                     # Remove DMs
-                    filtered_room_id_set -= dm_room_id_set
+                    filtered_room_id_set -= dm_room_ids
 
         if filters.spaces is not None:
             with start_active_span("filters.spaces"):
