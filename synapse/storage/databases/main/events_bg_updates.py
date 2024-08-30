@@ -2080,34 +2080,49 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # We're iterating over rooms that we are joined to so they should
                 # have `current_state_events` and we should have some current state
                 # for each room
-                assert current_state_ids_map
+                if current_state_ids_map:
+                    fetched_events = await self.get_events(
+                        current_state_ids_map.values()
+                    )
 
-                fetched_events = await self.get_events(current_state_ids_map.values())
+                    current_state_map: StateMap[EventBase] = {
+                        state_key: fetched_events[event_id]
+                        for state_key, event_id in current_state_ids_map.items()
+                        # `get_events(...)` will filter out events for unknown room versions
+                        if event_id in fetched_events
+                    }
 
-                current_state_map: StateMap[EventBase] = {
-                    state_key: fetched_events[event_id]
-                    for state_key, event_id in current_state_ids_map.items()
-                    # `get_events(...)` will filter out events for unknown room versions
-                    if event_id in fetched_events
-                }
+                    # Can happen for unknown room versions (old room versions that aren't known
+                    # anymore) since `get_events(...)` will filter out events for unknown room
+                    # versions
+                    if not current_state_map:
+                        continue
 
-                # Can happen for unknown room versions (old room versions that aren't known
-                # anymore) since `get_events(...)` will filter out events for unknown room
-                # versions
-                if not current_state_map:
-                    continue
-
-                state_insert_values = (
-                    PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                    state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
                         current_state_map
                     )
-                )
-                sliding_sync_membership_snapshots_insert_map.update(state_insert_values)
-                # We should have some insert values for each room, even if they are `None`
-                assert sliding_sync_membership_snapshots_insert_map
+                    sliding_sync_membership_snapshots_insert_map.update(
+                        state_insert_values
+                    )
+                    # We should have some insert values for each room, even if they are `None`
+                    assert sliding_sync_membership_snapshots_insert_map
 
-                # We have current state to work from
-                sliding_sync_membership_snapshots_insert_map["has_known_state"] = True
+                    # We have current state to work from
+                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
+                        True
+                    )
+                else:
+                    # Although we expect every room to have a create event (even
+                    # past unknown room versions since we haven't supported one
+                    # without it), there seem to be some corrupted rooms in
+                    # practice that don't have the create event in the
+                    # `current_state_events` table. The create event does exist
+                    # in the events table though. We'll just say that we don't
+                    # know the state for these rooms and continue on with our
+                    # day.
+                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
+                        False
+                    )
             elif membership in (Membership.INVITE, Membership.KNOCK) or (
                 membership == Membership.LEAVE and is_outlier
             ):
