@@ -273,8 +273,13 @@ class SlidingSyncRoomLists:
                     # after the `to_token`. In other words, there is no membership
                     # for the room after the `to_token` but we see membership in
                     # the token range.
+
+                    # Get the state at the time. Note that room type never changes,
+                    # so we can just get current room type
                     room_type = await self.store.get_room_type(room_id)
-                    encryption = await self.store.get_room_encryption(room_id)
+                    is_encrypted = await self.get_is_encrypted_for_room_at_token(
+                        room_id, to_token.room_key
+                    )
 
                     # Add back rooms that the user was state-reset out of after `to_token`
                     room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
@@ -285,7 +290,7 @@ class SlidingSyncRoomLists:
                         event_pos=change.event_pos,
                         room_version_id=change.room_version_id,
                         room_type=room_type,
-                        is_encrypted=encryption is not None,
+                        is_encrypted=is_encrypted,
                     )
 
         newly_joined_room_ids, newly_left_room_map = (
@@ -304,8 +309,12 @@ class SlidingSyncRoomLists:
             for room_id in (
                 newly_left_room_map.keys() - room_membership_for_user_map.keys()
             ):
+                # Get the state at the time. Note that room type never changes,
+                # so we can just get current room type
                 room_type = await self.store.get_room_type(room_id)
-                encryption = await self.store.get_room_encryption(room_id)
+                is_encrypted = await self.get_is_encrypted_for_room_at_token(
+                    room_id, newly_left_room_map[room_id].to_room_stream_token()
+                )
 
                 room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
                     room_id=room_id,
@@ -315,7 +324,7 @@ class SlidingSyncRoomLists:
                     event_pos=newly_left_room_map[room_id],
                     room_version_id=await self.store.get_room_version_id(room_id),
                     room_type=room_type,
-                    is_encrypted=encryption is not None,
+                    is_encrypted=is_encrypted,
                 )
 
         if sync_config.lists:
@@ -1909,3 +1918,46 @@ class SlidingSyncRoomLists:
             # We want descending order
             reverse=True,
         )
+
+    async def get_is_encrypted_for_room_at_token(
+        self, room_id: str, to_token: RoomStreamToken
+    ) -> bool:
+        """Get if the room is encrypted at the time."""
+
+        # Fetch the current encryption state
+        state_ids = await self.store.get_partial_filtered_current_state_ids(
+            room_id, StateFilter.from_types([(EventTypes.RoomEncryption, "")])
+        )
+        encryption_event_id = state_ids.get((EventTypes.RoomEncryption, ""))
+
+        # Now roll back the state by looking at the state deltas between
+        # to_token and now.
+        deltas = await self.store.get_current_state_deltas_for_room(
+            room_id,
+            from_token=to_token,
+            to_token=self.store.get_room_max_token(),
+        )
+
+        for delta in deltas:
+            if delta.event_type != EventTypes.RoomEncryption:
+                continue
+
+            # Found the first change, we look at the previous event ID to get
+            # the state at the to token.
+
+            if delta.prev_event_id is None:
+                # There is no prev event, so no encryption state event, so room is not encrypted
+                return False
+
+            encryption_event_id = delta.prev_event_id
+            break
+
+        # We didn't find an encryption state, room isn't encrypted
+        if encryption_event_id is None:
+            return False
+
+        # We found encryption state, check if content has a non-null algorithm
+        encrypted_event = await self.store.get_event(encryption_event_id)
+        algorithm = encrypted_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
+
+        return algorithm is not None
