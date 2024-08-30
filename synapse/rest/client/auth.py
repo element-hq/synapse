@@ -27,7 +27,7 @@ from twisted.web.server import Request
 from synapse.api.constants import LoginType
 from synapse.api.errors import LoginError, SynapseError
 from synapse.api.urls import CLIENT_API_PREFIX
-from synapse.http.server import HttpServer, respond_with_html
+from synapse.http.server import HttpServer, respond_with_html, respond_with_redirect
 from synapse.http.servlet import RestServlet, parse_string
 from synapse.http.site import SynapseRequest
 
@@ -65,6 +65,17 @@ class AuthRestServlet(RestServlet):
         session = parse_string(request, "session")
         if not session:
             raise SynapseError(400, "No session supplied")
+
+        if (
+            self.hs.config.experimental.msc3861.enabled
+            and stagetype == "org.matrix.cross_signing_reset"
+        ):
+            config = self.hs.config.experimental.msc3861
+            if config.account_management_url is not None:
+                url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
+            else:
+                url = config.issuer
+            respond_with_redirect(request, str.encode(url))
 
         if stagetype == LoginType.RECAPTCHA:
             html = self.recaptcha_template.render(

@@ -23,10 +23,13 @@
 import logging
 import re
 from collections import Counter
-from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
 
-from synapse.api.errors import Codes, InvalidAPICallError, SynapseError
+from synapse.api.errors import (
+    InteractiveAuthIncompleteError,
+    InvalidAPICallError,
+    SynapseError,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -415,11 +418,24 @@ class SigningKeyUploadServlet(RestServlet):
                     else:
                         url = await auth.issuer()
 
-                    raise SynapseError(
-                        HTTPStatus.NOT_IMPLEMENTED,
-                        "To reset your end-to-end encryption cross-signing identity, "
-                        f"you first need to approve it at {url} and then try again.",
-                        Codes.UNRECOGNIZED,
+                    # We use a dummy session ID as this isn't really a UIA flow, but we
+                    # reuse the same API shape for better client compatibility.
+                    raise InteractiveAuthIncompleteError(
+                        "dummy",
+                        {
+                            "session": "dummy",
+                            "flows": [
+                                {"stages": ["org.matrix.cross_signing_reset"]},
+                            ],
+                            "params": {
+                                "org.matrix.cross_signing_reset": {
+                                    "url": url,
+                                },
+                            },
+                            "msg": "To reset your end-to-end encryption cross-signing "
+                            f"identity, you first need to approve it at {url} and "
+                            "then try again.",
+                        },
                     )
             else:
                 # Without MSC3861, we require UIA.
