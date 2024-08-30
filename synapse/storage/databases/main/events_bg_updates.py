@@ -1961,9 +1961,30 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 return 0
 
         def _find_previous_membership_txn(
-            txn: LoggingTransaction, room_id: str, user_id: str, stream_ordering: int
+            txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
         ) -> Tuple[str, str]:
             # Find the previous invite/knock event before the leave event
+            #
+            # Here are some notes on how we landed on this query:
+            #
+            # We're using `topological_ordering` instead of `stream_ordering` because
+            # somehow it's possible to have your `leave` event backfilled with a
+            # negative `stream_ordering` and your previous `invite` event with a
+            # positive `stream_ordering` so we wouldn't have a chance of finding the
+            # previous membership with a naive `event_stream_ordering < ?` comparison.
+            #
+            # Also be careful because `room_memberships.event_stream_ordering` is
+            # nullable and not always filled in. You would need to join on `events` to
+            # rely on `events.stream_ordering` instead. Even though the
+            # `events.stream_ordering` also doesn't have a `NOT NULL` constraint, it
+            # doesn't have any rows where this is the case (checked on `matrix.org`).
+            # The fact the `events.stream_ordering` is a nullable column is a holdover
+            # from a rename of the column.
+            #
+            # You might also consider using the `event_auth` table to find the previous
+            # membership, but there are cases where somehow a membership event doesn't
+            # point back to the previous membership event in the auth events (unknown
+            # cause).
             txn.execute(
                 """
                 SELECT event_id, membership
@@ -1972,14 +1993,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE
                     room_id = ?
                     AND m.user_id = ?
-                    AND e.stream_ordering < ?
-                ORDER BY e.stream_ordering DESC
+                    AND e.event_id != ?
+                ORDER BY e.topological_ordering DESC
                 LIMIT 1
                 """,
                 (
                     room_id,
                     user_id,
-                    stream_ordering,
+                    event_id,
                 ),
             )
             row = txn.fetchone()
@@ -2106,7 +2127,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                             _find_previous_membership_txn,
                             room_id,
                             user_id,
-                            membership_event_stream_ordering,
+                            membership_event_id,
                         )
                     )
 
