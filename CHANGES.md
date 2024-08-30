@@ -3,7 +3,7 @@
 ### Features
 
 - Improve cross-signing upload when using [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) to use a custom UIA flow stage, with web fallback support. ([\#17509](https://github.com/element-hq/synapse/issues/17509))
-- Make `hash_password` accept password input from stdin. ([\#17608](https://github.com/element-hq/synapse/issues/17608))
+- Make `hash_password` script accept password input from stdin. ([\#17608](https://github.com/element-hq/synapse/issues/17608))
 
 ### Bugfixes
 
