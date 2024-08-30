@@ -14,6 +14,8 @@
 import logging
 from typing import List, Optional
 
+from parameterized import parameterized_class
+
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
@@ -28,6 +30,18 @@ from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 logger = logging.getLogger(__name__)
 
 
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
     """
     Test `rooms.timeline` in the Sliding Sync API.
@@ -43,6 +57,8 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
+
+        super().prepare(reactor, clock, hs)
 
     def _assertListEqual(
         self,

@@ -13,7 +13,7 @@
 #
 import logging
 
-from parameterized import parameterized
+from parameterized import parameterized, parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -28,6 +28,18 @@ from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 logger = logging.getLogger(__name__)
 
 
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
     """
     Test connection tracking in the Sliding Sync API.
@@ -43,6 +55,8 @@ class SlidingSyncConnectionTrackingTestCase(SlidingSyncBase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
+
+        super().prepare(reactor, clock, hs)
 
     def test_rooms_required_state_incremental_sync_LIVE(self) -> None:
         """Test that we only get state updates in incremental sync for rooms
