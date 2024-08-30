@@ -152,19 +152,10 @@ class MSC3861DelegatedAuth(BaseAuth):
         Get the configured issuer
 
         This will use the issuer value set in the metadata,
-        falling back to the one set in the config in case the metadata can't be loaded
+        falling back to the one set in the config if not set in the metadata
         """
-        issuer: Optional[str] = None
-        try:
-            metadata = await self._issuer_metadata.get()
-            issuer = metadata.issuer
-        # We don't want to raise here if we can't load the metadata
-        except Exception:
-            logger.warning("Failed to load metadata:", exc_info=True)
-
-        # Fallback to the config value if the metadata can't be loaded
-        # or if the metadata doesn't have an issuer set
-        return issuer or self._config.issuer
+        metadata = await self._issuer_metadata.get()
+        return metadata.issuer or self._config.issuer
 
     async def account_management_url(self) -> Optional[str]:
         """
