@@ -126,6 +126,9 @@ class SQLBaseStore(metaclass=ABCMeta):
             self._attempt_to_invalidate_cache(
                 "_get_rooms_for_local_user_where_membership_is_inner", (user_id,)
             )
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user", (user_id,)
+            )
 
         # Purge other caches based on room state.
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
@@ -160,6 +163,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
     def _attempt_to_invalidate_cache(
         self, cache_name: str, key: Optional[Collection[Any]]
