@@ -1995,6 +1995,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE
                     room_id = ?
                     AND m.user_id = ?
+                    AND (m.membership = ? OR m.membership = ?)
                     AND e.event_id != ?
                 ORDER BY e.topological_ordering DESC
                 LIMIT 1
@@ -2002,6 +2003,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (
                     room_id,
                     user_id,
+                    Membership.INVITE,
+                    Membership.KNOCK,
                     event_id,
                 ),
             )
