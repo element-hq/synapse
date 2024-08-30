@@ -218,6 +218,8 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
             "^/_matrix/client/(api/v1|r0|v3|unstable)/directory/room/.*$",
             "^/_matrix/client/(r0|v3|unstable)/capabilities$",
             "^/_matrix/client/(r0|v3|unstable)/notifications$",
+            "^/_matrix/client/(r0|v3|unstable)/keys/query$"
+            "^/_matrix/client/(r0|v3|unstable)/keys/changes$"
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
