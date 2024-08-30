@@ -8,9 +8,7 @@ errors in code.
 
 The necessary tools are:
 
-- [black](https://black.readthedocs.io/en/stable/), a source code formatter;
-- [isort](https://pycqa.github.io/isort/), which organises each file's imports;
-- [ruff](https://github.com/charliermarsh/ruff), which can spot common errors; and
+- [ruff](https://github.com/charliermarsh/ruff), which can spot common errors and enforce a consistent style; and
 - [mypy](https://mypy.readthedocs.io/en/stable/), a type checker.
 
 See [the contributing guide](development/contributing_guide.md#run-the-linters) for instructions

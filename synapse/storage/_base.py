@@ -23,8 +23,11 @@ import logging
 from abc import ABCMeta
 from typing import TYPE_CHECKING, Any, Collection, Dict, Iterable, Optional, Union
 
-from synapse.storage.database import make_in_list_sql_clause  # noqa: F401; noqa: F401
-from synapse.storage.database import DatabasePool, LoggingDatabaseConnection
+from synapse.storage.database import (
+    DatabasePool,
+    LoggingDatabaseConnection,
+    make_in_list_sql_clause,  # noqa: F401
+)
 from synapse.types import get_domain_from_id
 from synapse.util import json_decoder
 from synapse.util.caches.descriptors import CachedFunction
