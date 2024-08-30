@@ -27,7 +27,9 @@ from synapse.types import ISynapseReactor
 try:
     from twisted.internet.epollreactor import EPollReactor as Reactor
 except ImportError:
-    from twisted.internet.pollreactor import PollReactor as Reactor  # type: ignore[assignment]
+    from twisted.internet.pollreactor import (  # type: ignore[assignment]
+        PollReactor as Reactor,
+    )
 from twisted.internet.main import installReactor
 
 

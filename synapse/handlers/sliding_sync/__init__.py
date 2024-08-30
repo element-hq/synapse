@@ -29,13 +29,6 @@ from synapse.handlers.sliding_sync.room_lists import (
     _RoomMembershipForUser,
 )
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
-from synapse.handlers.sliding_sync.types import (
-    HaveSentRoomFlag,
-    MutablePerConnectionState,
-    PerConnectionState,
-    RoomSyncConfig,
-    StateValues,
-)
 from synapse.logging.opentracing import (
     SynapseTags,
     log_kv,
@@ -57,7 +50,16 @@ from synapse.types import (
     StreamKeyType,
     StreamToken,
 )
-from synapse.types.handlers import SlidingSyncConfig, SlidingSyncResult
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+from synapse.types.handlers.sliding_sync import (
+    HaveSentRoomFlag,
+    MutablePerConnectionState,
+    PerConnectionState,
+    RoomSyncConfig,
+    SlidingSyncConfig,
+    SlidingSyncResult,
+    StateValues,
+)
 from synapse.types.state import StateFilter
 from synapse.util.async_helpers import concurrently_execute
 from synapse.visibility import filter_events_for_client
@@ -75,18 +77,6 @@ sync_processing_time = Histogram(
 )
 
 
-# The event types that clients should consider as new activity.
-DEFAULT_BUMP_EVENT_TYPES = {
-    EventTypes.Create,
-    EventTypes.Message,
-    EventTypes.Encrypted,
-    EventTypes.Sticker,
-    EventTypes.CallInvite,
-    EventTypes.PollStart,
-    EventTypes.LiveLocationShareStart,
-}
-
-
 class SlidingSyncHandler:
     def __init__(self, hs: "HomeServer"):
         self.clock = hs.get_clock()
@@ -99,7 +89,7 @@ class SlidingSyncHandler:
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
         self.is_mine_id = hs.is_mine_id
 
-        self.connection_store = SlidingSyncConnectionStore()
+        self.connection_store = SlidingSyncConnectionStore(self.store)
         self.extensions = SlidingSyncExtensionHandler(hs)
         self.room_lists = SlidingSyncRoomLists(hs)
 
@@ -220,14 +210,9 @@ class SlidingSyncHandler:
         # amount of time (more with round-trips and re-processing) in the end to
         # get everything again.
         previous_connection_state = (
-            await self.connection_store.get_per_connection_state(
+            await self.connection_store.get_and_clear_connection_positions(
                 sync_config, from_token
             )
-        )
-
-        await self.connection_store.mark_token_seen(
-            sync_config=sync_config,
-            from_token=from_token,
         )
 
         # Get all of the room IDs that the user should be able to see in the sync
@@ -986,7 +971,9 @@ class SlidingSyncHandler:
         # Figure out the last bump event in the room
         last_bump_event_result = (
             await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                room_id, to_token.room_key, event_types=DEFAULT_BUMP_EVENT_TYPES
+                room_id,
+                to_token.room_key,
+                event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
             )
         )
 
