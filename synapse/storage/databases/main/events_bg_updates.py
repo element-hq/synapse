@@ -2330,8 +2330,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             "initial_phase": initial_phase,
             "last_room_id": room_id,
             "last_user_id": user_id,
-            "last_event_stream_ordering": membership_event_stream_ordering,
+            "last_event_stream_ordering": last_event_stream_ordering,
         }
+        if not initial_phase:
+            progress["last_event_stream_ordering"] = membership_event_stream_ordering
 
         await self.db_pool.updates._background_update_progress(
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
