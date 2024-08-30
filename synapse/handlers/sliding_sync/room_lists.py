@@ -144,7 +144,10 @@ class _RoomMembershipForUser:
 
 
 def filter_membership_for_sync(
-    *, user_id: str, room_membership_for_user: _RoomMembershipForUser
+    *,
+    user_id: str,
+    room_membership_for_user: Union[_RoomMembershipForUser, RoomsForUserSlidingSync],
+    newly_left: bool,
 ) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
@@ -157,7 +160,6 @@ def filter_membership_for_sync(
 
     membership = room_membership_for_user.membership
     sender = room_membership_for_user.sender
-    newly_left = room_membership_for_user.newly_left
 
     # We want to allow everything except rooms the user has left unless `newly_left`
     # because we want everything that's *still* relevant to the user. We include
@@ -320,13 +322,10 @@ class SlidingSyncRoomLists:
             sync_room_map = {
                 room_id: room_membership_for_user
                 for room_id, room_membership_for_user in room_membership_for_user_map.items()
-                if room_membership_for_user.membership != Membership.LEAVE
-                # Unless...
-                or room_id in newly_left_room_map
-                # Allow kicks
-                or (
-                    room_membership_for_user.membership == Membership.LEAVE
-                    and room_membership_for_user.sender not in (user_id, None)
+                if filter_membership_for_sync(
+                    user_id=user_id,
+                    room_membership_for_user=room_membership_for_user,
+                    newly_left=room_id in newly_left_room_map,
                 )
             }
             with start_active_span("assemble_sliding_window_lists"):
@@ -1229,6 +1228,7 @@ class SlidingSyncRoomLists:
             if filter_membership_for_sync(
                 user_id=user_id,
                 room_membership_for_user=room_membership_for_user,
+                newly_left=room_membership_for_user.newly_left,
             )
         }
 
