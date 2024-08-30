@@ -1,3 +1,12 @@
+# Synapse 1.114.0rc3 (2024-08-30)
+
+### Bugfixes
+
+- Fix authenticated media responses using a wrong limit when following redirects over federation. ([\#17626](https://github.com/element-hq/synapse/issues/17626))
+
+
+
+
 # Synapse 1.114.0rc2 (2024-08-30)
 
 ### Features
