@@ -293,7 +293,9 @@ class StatsHandler:
                     "history_visibility"
                 )
             elif delta.event_type == EventTypes.RoomEncryption:
-                room_state["encryption"] = event_content.get("algorithm")
+                room_state["encryption"] = event_content.get(
+                    EventContentFields.ENCRYPTION_ALGORITHM
+                )
             elif delta.event_type == EventTypes.Name:
                 room_state["name"] = event_content.get("name")
             elif delta.event_type == EventTypes.Topic:

@@ -256,9 +256,15 @@ class KeyChangesServlet(RestServlet):
 
         user_id = requester.user.to_string()
 
-        results = await self.device_handler.get_user_ids_changed(user_id, from_token)
+        device_list_updates = await self.device_handler.get_user_ids_changed(
+            user_id, from_token
+        )
 
-        return 200, results
+        response: JsonDict = {}
+        response["changed"] = list(device_list_updates.changed)
+        response["left"] = list(device_list_updates.left)
+
+        return 200, response
 
 
 class OneTimeKeyServlet(RestServlet):

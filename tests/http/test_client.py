@@ -49,8 +49,11 @@ from tests.unittest import TestCase
 
 
 class ReadMultipartResponseTests(TestCase):
-    data1 = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: text/plain\r\nContent-Disposition: inline; filename=test_upload\r\n\r\nfile_"
-    data2 = b"to_stream\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
+    multipart_response_data1 = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: text/plain\r\nContent-Disposition: inline; filename=test_upload\r\n\r\nfile_"
+    multipart_response_data2 = (
+        b"to_stream\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
+    )
+    multipart_response_data_cased = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\ncOntEnt-type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-tyPe: text/plain\r\nconTent-dispOsition: inline; filename=test_upload\r\n\r\nfile_"
 
     redirect_data = b"\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nContent-Type: application/json\r\n\r\n{}\r\n--6067d4698f8d40a0a794ea7d7379d53a\r\nLocation: https://cdn.example.org/ab/c1/2345.txt\r\n\r\n--6067d4698f8d40a0a794ea7d7379d53a--\r\n\r\n"
 
@@ -103,8 +106,31 @@ class ReadMultipartResponseTests(TestCase):
         result, deferred, protocol = self._build_multipart_response(249, 250)
 
         # Start sending data.
-        protocol.dataReceived(self.data1)
-        protocol.dataReceived(self.data2)
+        protocol.dataReceived(self.multipart_response_data1)
+        protocol.dataReceived(self.multipart_response_data2)
+        # Close the connection.
+        protocol.connectionLost(Failure(ResponseDone()))
+
+        multipart_response: MultipartResponse = deferred.result  # type: ignore[assignment]
+
+        self.assertEqual(multipart_response.json, b"{}")
+        self.assertEqual(result.getvalue(), b"file_to_stream")
+        self.assertEqual(multipart_response.length, len(b"file_to_stream"))
+        self.assertEqual(multipart_response.content_type, b"text/plain")
+        self.assertEqual(
+            multipart_response.disposition, b"inline; filename=test_upload"
+        )
+
+    def test_parse_file_lowercase_headers(self) -> None:
+        """
+        Check that a multipart response containing a file is properly parsed
+        into the json/file parts, and the json and file are properly captured if the http headers are lowercased
+        """
+        result, deferred, protocol = self._build_multipart_response(249, 250)
+
+        # Start sending data.
+        protocol.dataReceived(self.multipart_response_data_cased)
+        protocol.dataReceived(self.multipart_response_data2)
         # Close the connection.
         protocol.connectionLost(Failure(ResponseDone()))
 
@@ -143,7 +169,7 @@ class ReadMultipartResponseTests(TestCase):
         result, deferred, protocol = self._build_multipart_response(UNKNOWN_LENGTH, 180)
 
         # Start sending data.
-        protocol.dataReceived(self.data1)
+        protocol.dataReceived(self.multipart_response_data1)
 
         self.assertEqual(result.getvalue(), b"file_")
         self._assert_error(deferred, protocol)
@@ -154,11 +180,11 @@ class ReadMultipartResponseTests(TestCase):
         result, deferred, protocol = self._build_multipart_response(UNKNOWN_LENGTH, 180)
 
         # Start sending data.
-        protocol.dataReceived(self.data1)
+        protocol.dataReceived(self.multipart_response_data1)
         self._assert_error(deferred, protocol)
 
         # More data might have come in.
-        protocol.dataReceived(self.data2)
+        protocol.dataReceived(self.multipart_response_data2)
 
         self.assertEqual(result.getvalue(), b"file_")
         self._assert_error(deferred, protocol)
@@ -172,7 +198,7 @@ class ReadMultipartResponseTests(TestCase):
         self.assertFalse(deferred.called)
 
         # Start sending data.
-        protocol.dataReceived(self.data1)
+        protocol.dataReceived(self.multipart_response_data1)
         self._assert_error(deferred, protocol)
         self._cleanup_error(deferred)
 

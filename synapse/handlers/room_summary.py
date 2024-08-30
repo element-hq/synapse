@@ -183,14 +183,35 @@ class RoomSummaryHandler:
     ) -> JsonDict:
         """See docstring for SpaceSummaryHandler.get_room_hierarchy."""
 
-        # First of all, check that the room is accessible.
-        if not await self._is_local_room_accessible(requested_room_id, requester):
+        # If the room is available locally, quickly check that the user can access it.
+        local_room = await self._store.is_host_joined(
+            requested_room_id, self._server_name
+        )
+        if local_room and not await self._is_local_room_accessible(
+            requested_room_id, requester
+        ):
             raise UnstableSpecAuthError(
                 403,
                 "User %s not in room %s, and room previews are disabled"
                 % (requester, requested_room_id),
                 errcode=Codes.NOT_JOINED,
             )
+
+        if not local_room:
+            room_hierarchy = await self._summarize_remote_room_hierarchy(
+                _RoomQueueEntry(requested_room_id, ()),
+                False,
+            )
+            root_room_entry = room_hierarchy[0]
+            if not root_room_entry or not await self._is_remote_room_accessible(
+                requester, requested_room_id, root_room_entry.room
+            ):
+                raise UnstableSpecAuthError(
+                    403,
+                    "User %s not in room %s, and room previews are disabled"
+                    % (requester, requested_room_id),
+                    errcode=Codes.NOT_JOINED,
+                )
 
         # If this is continuing a previous session, pull the persisted data.
         if from_token:

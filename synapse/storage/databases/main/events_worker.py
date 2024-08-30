@@ -457,6 +457,8 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Optional[EventBase]:
         """Get an event from the database by event_id.
 
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_id: The event_id of the event to fetch
 
@@ -511,6 +513,10 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Dict[str, EventBase]:
         """Get events from the database
 
+        Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_ids: The event_ids of the events to fetch
 
@@ -552,6 +558,8 @@ class EventsWorkerStore(SQLBaseStore):
         as given by `event_ids` arg.
 
         Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
 
         Args:
             event_ids: The event_ids of the events to fetch
@@ -1457,7 +1465,8 @@ class EventsWorkerStore(SQLBaseStore):
                 event_dict[event_id] = _EventRow(
                     event_id=event_id,
                     stream_ordering=row[1],
-                    instance_name=row[2],
+                    # If instance_name is null we default to "master"
+                    instance_name=row[2] or "master",
                     internal_metadata=row[3],
                     json=row[4],
                     format_version=row[5],

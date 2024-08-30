@@ -236,9 +236,8 @@ class Ratelimiter:
             requester: The requester that is doing the action, if any.
             key: An arbitrary key used to classify an action. Defaults to the
                 requester's user ID.
-            n_actions: The number of times the user wants to do this action. If the user
-                cannot do all of the actions, the user's action count is not incremented
-                at all.
+            n_actions: The number of times the user performed the action. May be negative
+                to "refund" the rate limit.
             _time_now_s: The current time. Optional, defaults to the current time according
                 to self.clock. Only used by tests.
         """

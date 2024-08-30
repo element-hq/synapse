@@ -1,3 +1,289 @@
+# Synapse 1.114.0rc1 (2024-08-20)
+
+### Features
+
+- Add a flag to `/versions`, `org.matrix.simplified_msc3575`, to indicate whether experimental sliding sync support has been enabled. ([\#17571](https://github.com/element-hq/synapse/issues/17571))
+- Handle changes in `timeline_limit` in experimental sliding sync. ([\#17579](https://github.com/element-hq/synapse/issues/17579))
+- Correctly track read receipts that should be sent down in experimental sliding sync. ([\#17575](https://github.com/element-hq/synapse/issues/17575), [\#17589](https://github.com/element-hq/synapse/issues/17589), [\#17592](https://github.com/element-hq/synapse/issues/17592))
+
+### Bugfixes
+
+- Start handlers for new media endpoints when media resource configured. ([\#17483](https://github.com/element-hq/synapse/issues/17483))
+- Fix timeline ordering (using `stream_ordering` instead of topological ordering) in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17510](https://github.com/element-hq/synapse/issues/17510))
+- Fix experimental sliding sync implementation to remember any updates in rooms that were not sent down immediately. ([\#17535](https://github.com/element-hq/synapse/issues/17535))
+- Better exclude partially stated rooms if we must await full state in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17538](https://github.com/element-hq/synapse/issues/17538))
+- Handle lower-case http headers in `_Mulitpart_Parser_Protocol`. ([\#17545](https://github.com/element-hq/synapse/issues/17545))
+- Fix fetching federation signing keys from servers that omit `old_verify_keys`. Contributed by @tulir @ Beeper. ([\#17568](https://github.com/element-hq/synapse/issues/17568))
+- Fix bug where we would respond with an error when a remote server asked for media that had a length of 0, using the new multipart federation media endpoint. ([\#17570](https://github.com/element-hq/synapse/issues/17570))
+
+### Improved Documentation
+
+- Clarify default behaviour of the
+  [`auto_accept_invites.worker_to_run_on`](https://element-hq.github.io/synapse/develop/usage/configuration/config_documentation.html#auto-accept-invites)
+  option. ([\#17515](https://github.com/element-hq/synapse/issues/17515))
+- Improve docstrings for profile methods. ([\#17559](https://github.com/element-hq/synapse/issues/17559))
+
+### Internal Changes
+
+- Add more tracing to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17514](https://github.com/element-hq/synapse/issues/17514))
+- Fixup comment in sliding sync implementation. ([\#17531](https://github.com/element-hq/synapse/issues/17531))
+- Replace override of deprecated method `HTTPAdapter.get_connection` with `get_connection_with_tls_context`. ([\#17536](https://github.com/element-hq/synapse/issues/17536))
+- Fix performance of device lists in `/key/changes` and sliding sync. ([\#17537](https://github.com/element-hq/synapse/issues/17537), [\#17548](https://github.com/element-hq/synapse/issues/17548))
+- Bump setuptools from 67.6.0 to 72.1.0. ([\#17542](https://github.com/element-hq/synapse/issues/17542))
+- Add a utility function for generating random event IDs. ([\#17557](https://github.com/element-hq/synapse/issues/17557))
+- Speed up responding to media requests. ([\#17558](https://github.com/element-hq/synapse/issues/17558), [\#17561](https://github.com/element-hq/synapse/issues/17561), [\#17564](https://github.com/element-hq/synapse/issues/17564), [\#17566](https://github.com/element-hq/synapse/issues/17566), [\#17567](https://github.com/element-hq/synapse/issues/17567), [\#17569](https://github.com/element-hq/synapse/issues/17569))
+- Test github token before running release script steps. ([\#17562](https://github.com/element-hq/synapse/issues/17562))
+- Reduce log spam of multipart files. ([\#17563](https://github.com/element-hq/synapse/issues/17563))
+- Refactor per-connection state in experimental sliding sync handler. ([\#17574](https://github.com/element-hq/synapse/issues/17574))
+- Add histogram metrics for sliding sync processing time. ([\#17593](https://github.com/element-hq/synapse/issues/17593))
+
+
+
+### Updates to locked dependencies
+
+* Bump bytes from 1.6.1 to 1.7.1. ([\#17526](https://github.com/element-hq/synapse/issues/17526))
+* Bump lxml from 5.2.2 to 5.3.0. ([\#17550](https://github.com/element-hq/synapse/issues/17550))
+* Bump phonenumbers from 8.13.42 to 8.13.43. ([\#17551](https://github.com/element-hq/synapse/issues/17551))
+* Bump regex from 1.10.5 to 1.10.6. ([\#17527](https://github.com/element-hq/synapse/issues/17527))
+* Bump sentry-sdk from 2.10.0 to 2.12.0. ([\#17553](https://github.com/element-hq/synapse/issues/17553))
+* Bump serde from 1.0.204 to 1.0.206. ([\#17556](https://github.com/element-hq/synapse/issues/17556))
+* Bump serde_json from 1.0.122 to 1.0.124. ([\#17555](https://github.com/element-hq/synapse/issues/17555))
+* Bump sigstore/cosign-installer from 3.5.0 to 3.6.0. ([\#17549](https://github.com/element-hq/synapse/issues/17549))
+* Bump types-pyyaml from 6.0.12.20240311 to 6.0.12.20240808. ([\#17552](https://github.com/element-hq/synapse/issues/17552))
+* Bump types-requests from 2.31.0.20240406 to 2.32.0.20240712. ([\#17524](https://github.com/element-hq/synapse/issues/17524))
+
+# Synapse 1.113.0 (2024-08-13)
+
+No significant changes since 1.113.0rc1.
+
+
+
+
+# Synapse 1.113.0rc1 (2024-08-06)
+
+### Features
+
+- Track which rooms have been sent to clients in the experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17447](https://github.com/element-hq/synapse/issues/17447))
+- Add Account Data extension support to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17477](https://github.com/element-hq/synapse/issues/17477))
+- Add receipts extension support to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17489](https://github.com/element-hq/synapse/issues/17489))
+- Add typing notification extension support to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17505](https://github.com/element-hq/synapse/issues/17505))
+
+### Bugfixes
+
+- Update experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint to handle invite/knock rooms when filtering. ([\#17450](https://github.com/element-hq/synapse/issues/17450))
+- Fix a bug introduced in v1.110.0 which caused `/keys/query` to return incomplete results, leading to high network activity and CPU usage on Matrix clients. ([\#17499](https://github.com/element-hq/synapse/issues/17499))
+
+### Improved Documentation
+
+- Update the [`allowed_local_3pids`](https://element-hq.github.io/synapse/v1.112/usage/configuration/config_documentation.html#allowed_local_3pids) config option's msisdn address to a working example. ([\#17476](https://github.com/element-hq/synapse/issues/17476))
+
+### Internal Changes
+
+- Change sliding sync to use their own token format in preparation for storing per-connection state. ([\#17452](https://github.com/element-hq/synapse/issues/17452))
+- Ensure we don't send down negative `bump_stamp` in experimental sliding sync endpoint. ([\#17478](https://github.com/element-hq/synapse/issues/17478))
+- Do not send down empty room entries down experimental sliding sync endpoint. ([\#17479](https://github.com/element-hq/synapse/issues/17479))
+- Refactor Sliding Sync tests to better utilize the `SlidingSyncBase`. ([\#17481](https://github.com/element-hq/synapse/issues/17481), [\#17482](https://github.com/element-hq/synapse/issues/17482))
+- Add some opentracing tags and logging to the experimental sliding sync implementation. ([\#17501](https://github.com/element-hq/synapse/issues/17501))
+- Split and move Sliding Sync tests so we have some more sane test file sizes. ([\#17504](https://github.com/element-hq/synapse/issues/17504))
+- Update the `limited` field description in the Sliding Sync response to accurately describe what it actually represents. ([\#17507](https://github.com/element-hq/synapse/issues/17507))
+- Easier to understand `timeline` assertions in Sliding Sync tests. ([\#17511](https://github.com/element-hq/synapse/issues/17511))
+- Reset the sliding sync connection if we don't recognize the per-connection state position. ([\#17529](https://github.com/element-hq/synapse/issues/17529))
+
+
+
+### Updates to locked dependencies
+
+* Bump bcrypt from 4.1.3 to 4.2.0. ([\#17495](https://github.com/element-hq/synapse/issues/17495))
+* Bump black from 24.4.2 to 24.8.0. ([\#17522](https://github.com/element-hq/synapse/issues/17522))
+* Bump phonenumbers from 8.13.39 to 8.13.42. ([\#17521](https://github.com/element-hq/synapse/issues/17521))
+* Bump ruff from 0.5.4 to 0.5.5. ([\#17494](https://github.com/element-hq/synapse/issues/17494))
+* Bump serde_json from 1.0.120 to 1.0.121. ([\#17493](https://github.com/element-hq/synapse/issues/17493))
+* Bump serde_json from 1.0.121 to 1.0.122. ([\#17525](https://github.com/element-hq/synapse/issues/17525))
+* Bump towncrier from 23.11.0 to 24.7.1. ([\#17523](https://github.com/element-hq/synapse/issues/17523))
+* Bump types-pyopenssl from 24.1.0.20240425 to 24.1.0.20240722. ([\#17496](https://github.com/element-hq/synapse/issues/17496))
+* Bump types-setuptools from 70.1.0.20240627 to 71.1.0.20240726. ([\#17497](https://github.com/element-hq/synapse/issues/17497))
+
+# Synapse 1.112.0 (2024-07-30)
+
+This security release is to update our locked dependency on Twisted to 24.7.0rc1, which includes a security fix for [CVE-2024-41671 / GHSA-c8m8-j448-xjx7: Disordered HTTP pipeline response in twisted.web, again](https://github.com/twisted/twisted/security/advisories/GHSA-c8m8-j448-xjx7).
+
+Note that this security fix is also available as **Synapse 1.111.1**, which does not include the rest of the changes in Synapse 1.112.0.
+
+This issue means that, if multiple HTTP requests are pipelined in the same TCP connection, Synapse can send responses to the wrong HTTP request.
+If a reverse proxy was configured to use HTTP pipelining, this could result in responses being sent to the wrong user, severely harming confidentiality.
+
+With that said, despite being a high severity issue, **we consider it unlikely that Synapse installations will be affected**.
+The use of HTTP pipelining in this fashion would cause worse performance for clients (request-response latencies would be increased as users' responses would be artificially blocked behind other users' slow requests). Further, Nginx and Haproxy, two common reverse proxies, do not appear to support configuring their upstreams to use HTTP pipelining and thus would not be affected. For both of these reasons, we consider it unlikely that a Synapse deployment would be set up in such a configuration.
+
+Despite that, we cannot rule out that some installations may exist with this unusual setup and so we are releasing this security update today.
+
+**pip users:** Note that by default, upgrading Synapse using pip will not automatically upgrade Twisted. **Please manually install the new version of Twisted** using `pip install Twisted==24.7.0rc1`. Note also that even the `--upgrade-strategy=eager` flag to `pip install -U matrix-synapse` will not upgrade Twisted to a patched version because it is only a release candidate at this time.
+
+### Internal Changes
+
+- Upgrade locked dependency on Twisted to 24.7.0rc1. ([\#17502](https://github.com/element-hq/synapse/issues/17502))
+
+
+# Synapse 1.112.0rc1 (2024-07-23)
+
+Please note that this release candidate does not include the security dependency update
+included in version 1.111.1 as this version was released before 1.111.1.
+The same security fix can be found in the full release of 1.112.0.
+
+### Features
+
+- Add to-device extension support to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17416](https://github.com/element-hq/synapse/issues/17416))
+- Populate `name`/`avatar` fields in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17418](https://github.com/element-hq/synapse/issues/17418))
+- Populate `heroes` and room summary fields (`joined_count`, `invited_count`) in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17419](https://github.com/element-hq/synapse/issues/17419))
+- Populate `is_dm` room field in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17429](https://github.com/element-hq/synapse/issues/17429))
+- Add room subscriptions to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17432](https://github.com/element-hq/synapse/issues/17432))
+- Prepare for authenticated media freeze. ([\#17433](https://github.com/element-hq/synapse/issues/17433))
+- Add E2EE extension support to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17454](https://github.com/element-hq/synapse/issues/17454))
+
+### Bugfixes
+
+- Add configurable option to always include offline users in presence sync results. Contributed by @Michael-Hollister. ([\#17231](https://github.com/element-hq/synapse/issues/17231))
+- Fix bug in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint when using room type filters and the user has one or more remote invites. ([\#17434](https://github.com/element-hq/synapse/issues/17434))
+- Order `heroes` by `stream_ordering` as the Matrix specification states (applies to `/sync`). ([\#17435](https://github.com/element-hq/synapse/issues/17435))
+- Fix rare bug where `/sync` would break for a user when using workers with multiple stream writers. ([\#17438](https://github.com/element-hq/synapse/issues/17438))
+
+### Improved Documentation
+
+- Update the readme image to have a white background, so that it is readable in dark mode. ([\#17387](https://github.com/element-hq/synapse/issues/17387))
+- Add Red Hat Enterprise Linux and Rocky Linux 8 and 9 installation instructions. ([\#17423](https://github.com/element-hq/synapse/issues/17423))
+- Improve documentation for the [`default_power_level_content_override`](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#default_power_level_content_override) config option. ([\#17451](https://github.com/element-hq/synapse/issues/17451))
+
+### Internal Changes
+
+- Make sure we always use the right logic for enabling the media repo. ([\#17424](https://github.com/element-hq/synapse/issues/17424))
+- Fix argument documentation for method `RateLimiter.record_action`. ([\#17426](https://github.com/element-hq/synapse/issues/17426))
+- Reduce volume of 'Waiting for current token' logs, which were introduced in v1.109.0. ([\#17428](https://github.com/element-hq/synapse/issues/17428))
+- Limit concurrent remote downloads to 6 per IP address, and decrement remote downloads without a content-length from the ratelimiter after the download is complete. ([\#17439](https://github.com/element-hq/synapse/issues/17439))
+- Remove unnecessary call to resume producing in fake channel. ([\#17449](https://github.com/element-hq/synapse/issues/17449))
+- Update experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint to bump room when it is created. ([\#17453](https://github.com/element-hq/synapse/issues/17453))
+- Speed up generating sliding sync responses. ([\#17458](https://github.com/element-hq/synapse/issues/17458))
+- Add cache to `get_rooms_for_local_user_where_membership_is` to speed up sliding sync. ([\#17460](https://github.com/element-hq/synapse/issues/17460))
+- Speed up fetching room keys from backup. ([\#17461](https://github.com/element-hq/synapse/issues/17461))
+- Speed up sorting of the room list in sliding sync. ([\#17468](https://github.com/element-hq/synapse/issues/17468))
+- Implement handling of `$ME` as a state key in sliding sync. ([\#17469](https://github.com/element-hq/synapse/issues/17469))
+
+
+
+### Updates to locked dependencies
+
+* Bump bytes from 1.6.0 to 1.6.1. ([\#17441](https://github.com/element-hq/synapse/issues/17441))
+* Bump hiredis from 2.3.2 to 3.0.0. ([\#17464](https://github.com/element-hq/synapse/issues/17464))
+* Bump jsonschema from 4.22.0 to 4.23.0. ([\#17444](https://github.com/element-hq/synapse/issues/17444))
+* Bump matrix-org/done-action from 2 to 3. ([\#17440](https://github.com/element-hq/synapse/issues/17440))
+* Bump mypy from 1.9.0 to 1.10.1. ([\#17445](https://github.com/element-hq/synapse/issues/17445))
+* Bump pyopenssl from 24.1.0 to 24.2.1. ([\#17465](https://github.com/element-hq/synapse/issues/17465))
+* Bump ruff from 0.5.0 to 0.5.4. ([\#17466](https://github.com/element-hq/synapse/issues/17466))
+* Bump sentry-sdk from 2.6.0 to 2.8.0. ([\#17456](https://github.com/element-hq/synapse/issues/17456))
+* Bump sentry-sdk from 2.8.0 to 2.10.0. ([\#17467](https://github.com/element-hq/synapse/issues/17467))
+* Bump setuptools from 67.6.0 to 70.0.0. ([\#17448](https://github.com/element-hq/synapse/issues/17448))
+* Bump twine from 5.1.0 to 5.1.1. ([\#17443](https://github.com/element-hq/synapse/issues/17443))
+* Bump types-jsonschema from 4.22.0.20240610 to 4.23.0.20240712. ([\#17446](https://github.com/element-hq/synapse/issues/17446))
+* Bump ulid from 1.1.2 to 1.1.3. ([\#17442](https://github.com/element-hq/synapse/issues/17442))
+* Bump zipp from 3.15.0 to 3.19.1. ([\#17427](https://github.com/element-hq/synapse/issues/17427))
+
+
+# Synapse 1.111.1 (2024-07-30)
+
+This security release is to update our locked dependency on Twisted to 24.7.0rc1, which includes a security fix for [CVE-2024-41671 / GHSA-c8m8-j448-xjx7: Disordered HTTP pipeline response in twisted.web, again](https://github.com/twisted/twisted/security/advisories/GHSA-c8m8-j448-xjx7).
+
+This issue means that, if multiple HTTP requests are pipelined in the same TCP connection, Synapse can send responses to the wrong HTTP request.
+If a reverse proxy was configured to use HTTP pipelining, this could result in responses being sent to the wrong user, severely harming confidentiality.
+
+With that said, despite being a high severity issue, **we consider it unlikely that Synapse installations will be affected**.
+The use of HTTP pipelining in this fashion would cause worse performance for clients (request-response latencies would be increased as users' responses would be artificially blocked behind other users' slow requests). Further, Nginx and Haproxy, two common reverse proxies, do not appear to support configuring their upstreams to use HTTP pipelining and thus would not be affected. For both of these reasons, we consider it unlikely that a Synapse deployment would be set up in such a configuration.
+
+Despite that, we cannot rule out that some installations may exist with this unusual setup and so we are releasing this security update today.
+
+**pip users:** Note that by default, upgrading Synapse using pip will not automatically upgrade Twisted. **Please manually install the new version of Twisted** using `pip install Twisted==24.7.0rc1`. Note also that even the `--upgrade-strategy=eager` flag to `pip install -U matrix-synapse` will not upgrade Twisted to a patched version because it is only a release candidate at this time.
+
+
+### Internal Changes
+
+- Upgrade locked dependency on Twisted to 24.7.0rc1. ([\#17502](https://github.com/element-hq/synapse/issues/17502))
+
+
+# Synapse 1.111.0 (2024-07-16)
+
+No significant changes since 1.111.0rc2.
+
+
+
+
+# Synapse 1.111.0rc2 (2024-07-10)
+
+### Bugfixes
+
+- Fix bug where using `synapse.app.media_repository` worker configuration would break the new media endpoints. ([\#17420](https://github.com/element-hq/synapse/issues/17420))
+
+### Improved Documentation
+
+- Document the new federation media worker endpoints in the [upgrade notes](https://element-hq.github.io/synapse/v1.111/upgrade.html) and [worker docs](https://element-hq.github.io/synapse/v1.111/workers.html). ([\#17421](https://github.com/element-hq/synapse/issues/17421))
+
+### Internal Changes
+
+- Route authenticated federation media requests to media repository workers in Complement tests. ([\#17422](https://github.com/element-hq/synapse/issues/17422))
+
+
+
+
+# Synapse 1.111.0rc1 (2024-07-09)
+
+### Features
+
+- Add `rooms` data to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17320](https://github.com/element-hq/synapse/issues/17320))
+- Add `room_types`/`not_room_types` filtering to experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17337](https://github.com/element-hq/synapse/issues/17337))
+- Return "required state" in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17342](https://github.com/element-hq/synapse/issues/17342))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/main/proposals/3916-authentication-for-media.md) by adding [`_matrix/client/v1/media/download`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediadownloadservernamemediaid) endpoint. ([\#17365](https://github.com/element-hq/synapse/issues/17365))
+- Support [MSC3916](https://github.com/matrix-org/matrix-spec-proposals/blob/rav/authentication-for-media/proposals/3916-authentication-for-media.md)
+  by adding [`_matrix/client/v1/media/thumbnail`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediathumbnailservernamemediaid), [`_matrix/federation/v1/media/thumbnail`](https://spec.matrix.org/v1.11/server-server-api/#get_matrixfederationv1mediathumbnailmediaid) endpoints and stabilizing the
+  remaining [`_matrix/client/v1/media`](https://spec.matrix.org/v1.11/client-server-api/#get_matrixclientv1mediaconfig) endpoints. ([\#17388](https://github.com/element-hq/synapse/issues/17388))
+- Add `rooms.bump_stamp` for easier client-side sorting in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint. ([\#17395](https://github.com/element-hq/synapse/issues/17395))
+- Forget all of a user's rooms upon deactivation, preventing local room purges from being blocked on deactivated users. ([\#17400](https://github.com/element-hq/synapse/issues/17400))
+- Declare support for [Matrix 1.11](https://matrix.org/blog/2024/06/20/matrix-v1.11-release/). ([\#17403](https://github.com/element-hq/synapse/issues/17403))
+- [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861): allow overriding the introspection endpoint. ([\#17406](https://github.com/element-hq/synapse/issues/17406))
+
+### Bugfixes
+
+- Fix rare race which caused no new to-device messages to be received from remote server. ([\#17362](https://github.com/element-hq/synapse/issues/17362))
+- Fix bug in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint when using an old database. ([\#17398](https://github.com/element-hq/synapse/issues/17398))
+
+### Improved Documentation
+
+- Clarify that `url_preview_url_blacklist` is a usability feature. ([\#17356](https://github.com/element-hq/synapse/issues/17356))
+- Fix broken links in README. ([\#17379](https://github.com/element-hq/synapse/issues/17379))
+- Clarify that changelog content *and file extension* need to match in order for entries to merge. ([\#17399](https://github.com/element-hq/synapse/issues/17399))
+
+### Internal Changes
+
+- Make the release script create a release branch for Complement as well. ([\#17318](https://github.com/element-hq/synapse/issues/17318))
+- Fix uploading packages to PyPi. ([\#17363](https://github.com/element-hq/synapse/issues/17363))
+- Add CI check for the README. ([\#17367](https://github.com/element-hq/synapse/issues/17367))
+- Fix linting errors from new `ruff` version. ([\#17381](https://github.com/element-hq/synapse/issues/17381), [\#17411](https://github.com/element-hq/synapse/issues/17411))
+- Fix building debian packages on non-clean checkouts. ([\#17390](https://github.com/element-hq/synapse/issues/17390))
+- Finish up work to allow per-user feature flags. ([\#17392](https://github.com/element-hq/synapse/issues/17392), [\#17410](https://github.com/element-hq/synapse/issues/17410))
+- Allow enabling sliding sync per-user. ([\#17393](https://github.com/element-hq/synapse/issues/17393))
+
+
+
+### Updates to locked dependencies
+
+* Bump certifi from 2023.7.22 to 2024.7.4. ([\#17404](https://github.com/element-hq/synapse/issues/17404))
+* Bump cryptography from 42.0.7 to 42.0.8. ([\#17382](https://github.com/element-hq/synapse/issues/17382))
+* Bump ijson from 3.2.3 to 3.3.0. ([\#17413](https://github.com/element-hq/synapse/issues/17413))
+* Bump log from 0.4.21 to 0.4.22. ([\#17384](https://github.com/element-hq/synapse/issues/17384))
+* Bump mypy-zope from 1.0.4 to 1.0.5. ([\#17414](https://github.com/element-hq/synapse/issues/17414))
+* Bump pillow from 10.3.0 to 10.4.0. ([\#17412](https://github.com/element-hq/synapse/issues/17412))
+* Bump pydantic from 2.7.1 to 2.8.2. ([\#17415](https://github.com/element-hq/synapse/issues/17415))
+* Bump ruff from 0.3.7 to 0.5.0. ([\#17381](https://github.com/element-hq/synapse/issues/17381))
+* Bump serde from 1.0.203 to 1.0.204. ([\#17409](https://github.com/element-hq/synapse/issues/17409))
+* Bump serde_json from 1.0.117 to 1.0.120. ([\#17385](https://github.com/element-hq/synapse/issues/17385), [\#17408](https://github.com/element-hq/synapse/issues/17408))
+* Bump types-setuptools from 69.5.0.20240423 to 70.1.0.20240627. ([\#17380](https://github.com/element-hq/synapse/issues/17380))
+
 # Synapse 1.110.0 (2024-07-03)
 
 No significant changes since 1.110.0rc3.

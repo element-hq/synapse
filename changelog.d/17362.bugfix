@@ -1,1 +1,0 @@
-Fix rare race which causes no new to-device messages to be received from remote server.

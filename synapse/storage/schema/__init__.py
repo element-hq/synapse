@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 85  # remember to update the list below when updating
+SCHEMA_VERSION = 87  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -139,6 +139,16 @@ Changes in SCHEMA_VERSION = 84
 
 Changes in SCHEMA_VERSION = 85
     - Add a column `suspended` to the `users` table
+
+Changes in SCHEMA_VERSION = 86
+    - Add a column `authenticated` to the tables `local_media_repository` and `remote_media_cache`
+
+Changes in SCHEMA_VERSION = 87
+    - Add tables to store Sliding Sync data for quick filtering/sorting
+      (`sliding_sync_joined_rooms`, `sliding_sync_membership_snapshots`)
+    - Add tables for storing the per-connection state for sliding sync requests:
+      sliding_sync_connections, sliding_sync_connection_positions, sliding_sync_connection_required_state,
+      sliding_sync_connection_room_configs, sliding_sync_connection_streams
 """
 
 
