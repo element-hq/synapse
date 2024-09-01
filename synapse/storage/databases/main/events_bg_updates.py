@@ -41,10 +41,7 @@ from synapse.storage.databases.main.events import (
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
 )
-from synapse.storage.databases.main.events_worker import (
-    DatabaseCorruptionError,
-    InvalidEventError,
-)
+from synapse.storage.databases.main.events_worker import DatabaseCorruptionError
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.types import Cursor
@@ -2093,7 +2090,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         fetched_events = await self.get_events(
                             current_state_ids_map.values()
                         )
-                    except (DatabaseCorruptionError, InvalidEventError) as e:
+                    except DatabaseCorruptionError as e:
                         logger.warning(
                             "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
                             room_id,
@@ -2200,7 +2197,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
                 try:
                     fetched_events = await self.get_events(state_ids_map.values())
-                except (DatabaseCorruptionError, InvalidEventError) as e:
+                except DatabaseCorruptionError as e:
                     logger.warning(
                         "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
                         room_id,
