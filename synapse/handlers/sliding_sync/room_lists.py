@@ -359,7 +359,7 @@ class SlidingSyncRoomLists:
                     )
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
-                    # once and make a copy whenever we need it.
+                    # once.
                     room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -545,7 +545,7 @@ class SlidingSyncRoomLists:
                     )
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
-                    # once and make a copy whenever we need it.
+                    # once.
                     room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
                     # Exclude partially-stated rooms if we must wait for the room to be

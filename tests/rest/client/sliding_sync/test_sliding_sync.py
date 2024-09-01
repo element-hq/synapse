@@ -50,11 +50,20 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
     """Base class for sliding sync test cases"""
 
     # Flag as to whether to use the new sliding sync tables or not
+    #
+    # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+    # foreground update for
+    # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+    # https://github.com/element-hq/synapse/issues/17623)
     use_new_tables: bool = True
 
     sync_endpoint = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+        # foreground update for
+        # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+        # https://github.com/element-hq/synapse/issues/17623)
         hs.get_datastores().main.have_finished_sliding_sync_background_jobs = AsyncMock(  # type: ignore[method-assign]
             return_value=self.use_new_tables
         )
