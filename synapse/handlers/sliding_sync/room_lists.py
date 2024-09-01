@@ -758,13 +758,13 @@ class SlidingSyncRoomLists:
     ) -> Mapping[str, Optional[RoomsForUser]]:
         """
         Takes the current set of rooms for a user (retrieved after the given
-        token), and returns the changes need to "rewind" it to match the set of
-        memberships *at that token*.
+        token), and returns the changes needed to "rewind" it to match the set of
+        memberships *at that token* (<= `to_token`).
 
         Args:
             user: User to fetch rooms for
             rooms_for_user: The set of rooms for the user after the `to_token`.
-            to_token: The token to rewind
+            to_token: The token to rewind to
 
         Returns:
             The changes to apply to rewind the the current memberships.
@@ -813,8 +813,7 @@ class SlidingSyncRoomLists:
         # time of the `to_token`. In particular, we need to make these fixups:
         #
         # - a) Remove rooms that the user joined after the `to_token`
-        # - b) Add back rooms that the user left after the `to_token`
-        # - c) Update room membership events to the point in time of the `to_token`
+        # - b) Update room membership events to the point in time of the `to_token`
 
         # Fetch membership changes that fall in the range from `to_token` up to
         # `membership_snapshot_token`
@@ -968,16 +967,12 @@ class SlidingSyncRoomLists:
 
         # Our working list of rooms that can show up in the sync response
         sync_room_id_set = {
-            # Note: The `room_for_user` we're assigning here will need to be fixed up
-            # (below) because they are potentially from the current snapshot time
-            # instead from the time of the `to_token`.
             room_for_user.room_id: _RoomMembershipForUser(
                 room_id=room_for_user.room_id,
                 event_id=room_for_user.event_id,
                 event_pos=room_for_user.event_pos,
                 membership=room_for_user.membership,
                 sender=room_for_user.sender,
-                # We will update these fields below to be accurate
                 newly_joined=room_id in newly_joined_room_ids,
                 newly_left=room_id in newly_left_room_ids,
                 is_dm=room_id in dm_room_ids,
@@ -998,7 +993,6 @@ class SlidingSyncRoomLists:
                 event_pos=left_event_pos,
                 membership=Membership.LEAVE,
                 sender=None,
-                # We will update these fields below to be accurate
                 newly_joined=False,
                 newly_left=True,
                 is_dm=room_id in dm_room_ids,
