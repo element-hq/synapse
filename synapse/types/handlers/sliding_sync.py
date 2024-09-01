@@ -730,6 +730,9 @@ class RoomStatusMap(Generic[T]):
 
         return RoomStatusMap(statuses=dict(self._statuses))
 
+    def __len__(self) -> int:
+        return len(self._statuses)
+
 
 class MutableRoomStatusMap(RoomStatusMap[T]):
     """A mutable version of `RoomStatusMap`"""
@@ -830,6 +833,9 @@ class PerConnectionState:
             receipts=self.receipts.copy(),
             room_configs=dict(self.room_configs),
         )
+
+    def __len__(self) -> int:
+        return len(self.rooms) + len(self.receipts) + len(self.room_configs)
 
 
 @attr.s(auto_attribs=True)

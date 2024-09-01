@@ -25,6 +25,7 @@ import threading
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from synapse.storage.engines import BaseDatabaseEngine
+from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
 from synapse.storage.types import Cursor
 
 if TYPE_CHECKING:
@@ -168,6 +169,11 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor]):
         > first. No other implicit transaction control is performed; any transaction
         > control must be added to sql_script.
         """
+        # Replace auto increment placeholder with the appropriate directive
+        script = script.replace(
+            AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER, "INTEGER PRIMARY KEY AUTOINCREMENT"
+        )
+
         # The implementation of `executescript` can be found at
         # https://github.com/python/cpython/blob/3.11/Modules/_sqlite/cursor.c#L1035.
         cursor.executescript(f"BEGIN TRANSACTION; {script}")

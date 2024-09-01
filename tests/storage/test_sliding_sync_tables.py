@@ -38,6 +38,7 @@ from synapse.storage.databases.main.events_bg_updates import (
     _resolve_stale_data_in_sliding_sync_joined_rooms_table,
     _resolve_stale_data_in_sliding_sync_membership_snapshots_table,
 )
+from synapse.types import create_requester
 from synapse.util import Clock
 
 from tests.test_utils.event_injection import create_event
@@ -270,7 +271,9 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
         return invite_room_id, persisted_event
 
     def _retract_remote_invite_for_user(
-        self, user_id: str, remote_room_id: str, invite_event_id: str
+        self,
+        user_id: str,
+        remote_room_id: str,
     ) -> EventBase:
         """
         Create a fake invite retraction for a remote room and persist it.
@@ -283,7 +286,6 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             user_id: The person who was invited and we're going to retract the
                 invite for.
             remote_room_id: The room ID that the invite was for.
-            invite_event_id: The event ID of the invite
 
         Returns:
             The persisted leave (kick) event.
@@ -297,7 +299,7 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             "origin_server_ts": 1,
             "type": EventTypes.Member,
             "content": {"membership": Membership.LEAVE},
-            "auth_events": [invite_event_id],
+            "auth_events": [],
             "prev_events": [],
         }
 
@@ -923,6 +925,128 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
             sliding_sync_membership_snapshots_results.get((room_id1, user2_id)),
             user2_snapshot,
         )
+
+    @parameterized.expand(
+        # Test both an insert an upsert into the
+        # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` to exercise
+        # more possibilities of things going wrong.
+        [
+            ("insert", True),
+            ("upsert", False),
+        ]
+    )
+    def test_joined_room_outlier_and_deoutlier(
+        self, description: str, should_insert: bool
+    ) -> None:
+        """
+        This is a regression test.
+
+        This is to simulate the case where an event is first persisted as an outlier
+        (like a remote invite) and then later persisted again to de-outlier it. The
+        first the time, the `outlier` is persisted with one `stream_ordering` but when
+        persisted again and de-outliered, it is assigned a different `stream_ordering`
+        that won't end up being used. Since we call
+        `_calculate_sliding_sync_table_changes()` before `_update_outliers_txn()` which
+        fixes this discrepancy (always use the `stream_ordering` from the first time it
+        was persisted), make sure we're not using an unreliable `stream_ordering` values
+        that will cause `FOREIGN KEY constraint failed` in the
+        `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_version = RoomVersions.V10
+        room_id = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=room_version.identifier
+        )
+
+        if should_insert:
+            # Clear these out so we always insert
+            self.get_success(
+                self.store.db_pool.simple_delete(
+                    table="sliding_sync_joined_rooms",
+                    keyvalues={"room_id": room_id},
+                    desc="TODO",
+                )
+            )
+            self.get_success(
+                self.store.db_pool.simple_delete(
+                    table="sliding_sync_membership_snapshots",
+                    keyvalues={"room_id": room_id},
+                    desc="TODO",
+                )
+            )
+
+        # Create a membership event (which triggers an insert into
+        # `sliding_sync_membership_snapshots`)
+        membership_event_dict = {
+            "type": EventTypes.Member,
+            "state_key": user1_id,
+            "sender": user1_id,
+            "room_id": room_id,
+            "content": {EventContentFields.MEMBERSHIP: Membership.JOIN},
+        }
+        # Create a relevant state event (which triggers an insert into
+        # `sliding_sync_joined_rooms`)
+        state_event_dict = {
+            "type": EventTypes.Name,
+            "state_key": "",
+            "sender": user2_id,
+            "room_id": room_id,
+            "content": {EventContentFields.ROOM_NAME: "my super room"},
+        }
+        event_dicts_to_persist = [
+            membership_event_dict,
+            state_event_dict,
+        ]
+
+        for event_dict in event_dicts_to_persist:
+            events_to_persist = []
+
+            # Create the events as an outliers
+            (
+                event,
+                unpersisted_context,
+            ) = self.get_success(
+                self.hs.get_event_creation_handler().create_event(
+                    requester=create_requester(user1_id),
+                    event_dict=event_dict,
+                    outlier=True,
+                )
+            )
+            # FIXME: Should we use an `EventContext.for_outlier(...)` here?
+            # Doesn't seem to matter for this test.
+            context = self.get_success(unpersisted_context.persist(event))
+            events_to_persist.append((event, context))
+
+            # Create the event again but as an non-outlier. This will de-outlier the event
+            # when we persist it.
+            (
+                event,
+                unpersisted_context,
+            ) = self.get_success(
+                self.hs.get_event_creation_handler().create_event(
+                    requester=create_requester(user1_id),
+                    event_dict=event_dict,
+                    outlier=False,
+                )
+            )
+            context = self.get_success(unpersisted_context.persist(event))
+            events_to_persist.append((event, context))
+
+            persist_controller = self.hs.get_storage_controllers().persistence
+            assert persist_controller is not None
+            for event, context in events_to_persist:
+                self.get_success(
+                    persist_controller.persist_event(
+                        event,
+                        context,
+                    )
+                )
+
+        # We're just testing that it does not explode
 
     def test_joined_room_meta_state_reset(self) -> None:
         """
@@ -2346,7 +2470,6 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         remote_invite_retraction_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=remote_invite_room_id,
-            invite_event_id=remote_invite_event.event_id,
         )
 
         # No one local is joined to the remote room
@@ -3580,7 +3703,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
         room_id_no_info_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=room_id_no_info,
-            invite_event_id=room_id_no_info_invite_event.event_id,
         )
         room_id_with_info_leave_event_response = self.helper.leave(
             room_id_with_info, user1_id, tok=user1_tok
@@ -3588,7 +3710,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
         space_room_id_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=space_room_id,
-            invite_event_id=space_room_id_invite_event.event_id,
         )
 
         # Clean-up the `sliding_sync_membership_snapshots` table as if the inserts did not

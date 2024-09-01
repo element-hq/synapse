@@ -205,8 +205,14 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         }
         _, from_token = self.do_sync(sync_body, tok=user1_tok)
 
-        # Reset the in-memory cache
-        self.hs.get_sliding_sync_handler().connection_store._connections.clear()
+        # Reset the positions
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="sliding_sync_connections",
+                keyvalues={"user_id": user1_id},
+                desc="clear_sliding_sync_connections_cache",
+            )
+        )
 
         # Make the Sliding Sync request
         channel = self.make_request(
