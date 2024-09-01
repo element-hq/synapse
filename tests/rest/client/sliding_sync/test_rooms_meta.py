@@ -13,6 +13,8 @@
 #
 import logging
 
+from parameterized import parameterized_class
+
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
@@ -28,6 +30,18 @@ from tests.test_utils.event_injection import create_event
 logger = logging.getLogger(__name__)
 
 
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls, num, params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
     """
     Test rooms meta info like name, avatar, joined_count, invited_count, is_dm,
@@ -48,6 +62,8 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         persistence = self.hs.get_storage_controllers().persistence
         assert persistence is not None
         self.persistence = persistence
+
+        super().prepare(reactor, clock, hs)
 
     def test_rooms_meta_when_joined(self) -> None:
         """
