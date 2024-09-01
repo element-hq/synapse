@@ -1861,7 +1861,7 @@ class PersistEventsStore:
                 VALUES (
                     ?, ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?),
-                    (SELECT instance_name FROM events WHERE event_id = ?)
+                    (SELECT COALESCE(instance_name, 'master') FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
