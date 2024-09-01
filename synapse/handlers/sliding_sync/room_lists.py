@@ -479,8 +479,9 @@ class SlidingSyncRoomLists:
             relevant_rooms_to_send_map=relevant_rooms_to_send_map,
             all_rooms=all_rooms,
             room_membership_for_user_map={
-                # FIXME: Ideally we wouldn't have to do these copies and instead
-                # just return `newly_joined_room_ids` directly.
+                # FIXME: Ideally we wouldn't have to create a new
+                # `_RoomMembershipForUser` here and instead just return
+                # `newly_joined_room_ids` directly, to save CPU time.
                 room_id: _RoomMembershipForUser(
                     room_id=room_id,
                     event_id=membership_info.event_id,
