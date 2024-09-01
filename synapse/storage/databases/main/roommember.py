@@ -53,7 +53,12 @@ from synapse.storage.database import (
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.engines import Sqlite3Engine
-from synapse.storage.roommember import MemberSummary, ProfileInfo, RoomsForUser
+from synapse.storage.roommember import (
+    MemberSummary,
+    ProfileInfo,
+    RoomsForUser,
+    RoomsForUserSlidingSync,
+)
 from synapse.types import (
     JsonDict,
     PersistedEventPosition,
@@ -1375,6 +1380,54 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             keyvalues={},
             updatevalues={"stream_id": stream_id},
             desc="room_forgetter_stream_pos",
+        )
+
+    @cached(iterable=True, max_entries=10000)
+    async def get_sliding_sync_rooms_for_user(
+        self,
+        user_id: str,
+    ) -> Mapping[str, RoomsForUserSlidingSync]:
+        """Get all the rooms for a user to handle a sliding sync request.
+
+        Ignores forgotten rooms and rooms that the user has been kicked from.
+
+        Returns:
+            Map from room ID to membership info
+        """
+
+        def get_sliding_sync_rooms_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> Dict[str, RoomsForUserSlidingSync]:
+            sql = """
+                SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
+                    r.room_version,
+                    m.event_instance_name, m.event_stream_ordering,
+                    COALESCE(j.room_type, m.room_type),
+                    COALESCE(j.is_encrypted, m.is_encrypted)
+                FROM sliding_sync_membership_snapshots AS m
+                INNER JOIN rooms AS r USING (room_id)
+                LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
+                WHERE user_id = ?
+                    AND m.forgotten = 0
+            """
+            txn.execute(sql, (user_id,))
+            return {
+                row[0]: RoomsForUserSlidingSync(
+                    room_id=row[0],
+                    sender=row[1],
+                    membership=row[2],
+                    event_id=row[3],
+                    room_version_id=row[4],
+                    event_pos=PersistedEventPosition(row[5], row[6]),
+                    room_type=row[7],
+                    is_encrypted=row[8],
+                )
+                for row in txn
+            }
+
+        return await self.db_pool.runInteraction(
+            "get_sliding_sync_rooms_for_user",
+            get_sliding_sync_rooms_for_user_txn,
         )
 
 

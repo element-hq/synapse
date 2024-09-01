@@ -98,6 +98,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DatabaseCorruptionError(RuntimeError):
+    """We found an event in the DB that has a persisted event ID that doesn't
+    match its computed event ID."""
+
+    def __init__(
+        self, room_id: str, persisted_event_id: str, computed_event_id: str
+    ) -> None:
+        self.room_id = room_id
+        self.persisted_event_id = persisted_event_id
+        self.computed_event_id = computed_event_id
+
+        message = (
+            f"Database corruption: Event {persisted_event_id} in room {room_id} "
+            f"from the database appears to have been modified (calculated "
+            f"event id {computed_event_id})"
+        )
+
+        super().__init__(message)
+
+
 # These values are used in the `enqueue_event` and `_fetch_loop` methods to
 # control how we batch/bulk fetch events from the database.
 # The values are plucked out of thing air to make initial sync run faster
@@ -1364,10 +1384,8 @@ class EventsWorkerStore(SQLBaseStore):
             if original_ev.event_id != event_id:
                 # it's difficult to see what to do here. Pretty much all bets are off
                 # if Synapse cannot rely on the consistency of its database.
-                raise RuntimeError(
-                    f"Database corruption: Event {event_id} in room {d['room_id']} "
-                    f"from the database appears to have been modified (calculated "
-                    f"event id {original_ev.event_id})"
+                raise DatabaseCorruptionError(
+                    d["room_id"], event_id, original_ev.event_id
                 )
 
             event_map[event_id] = original_ev
