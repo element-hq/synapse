@@ -3312,10 +3312,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
                 (room_id_no_info, user1_id),
                 (room_id_with_info, user1_id),
                 (space_room_id, user1_id),
-                # The leave memberships for user2
-                (room_id_no_info, user2_id),
-                (room_id_with_info, user2_id),
-                (space_room_id, user2_id),
             },
             exact=True,
         )
@@ -3697,16 +3693,12 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
 
         # Reject the remote invites.
         # Also try retracting a remote invite.
-        room_id_unknown_state_leave_event_response = self.helper.leave(
-            room_id_unknown_state, user1_id, tok=user1_tok
-        )
+        self.helper.leave(room_id_unknown_state, user1_id, tok=user1_tok)
         room_id_no_info_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=room_id_no_info,
         )
-        room_id_with_info_leave_event_response = self.helper.leave(
-            room_id_with_info, user1_id, tok=user1_tok
-        )
+        self.helper.leave(room_id_with_info, user1_id, tok=user1_tok)
         space_room_id_leave_event = self._retract_remote_invite_for_user(
             user_id=user1_id,
             remote_room_id=space_room_id,
@@ -3761,36 +3753,10 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
             set(sliding_sync_membership_snapshots_results.keys()),
             {
                 # The invite memberships for user1
-                (room_id_unknown_state, user1_id),
                 (room_id_no_info, user1_id),
-                (room_id_with_info, user1_id),
                 (space_room_id, user1_id),
             },
             exact=True,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get(
-                (room_id_unknown_state, user1_id)
-            ),
-            _SlidingSyncMembershipSnapshotResult(
-                room_id=room_id_unknown_state,
-                user_id=user1_id,
-                sender=user1_id,
-                membership_event_id=room_id_unknown_state_leave_event_response[
-                    "event_id"
-                ],
-                membership=Membership.LEAVE,
-                event_stream_ordering=self.get_success(
-                    self.store.get_position_for_event(
-                        room_id_unknown_state_leave_event_response["event_id"]
-                    )
-                ).stream,
-                has_known_state=False,
-                room_type=None,
-                room_name=None,
-                is_encrypted=False,
-                tombstone_successor_room_id=None,
-            ),
         )
         self.assertEqual(
             sliding_sync_membership_snapshots_results.get((room_id_no_info, user1_id)),
@@ -3805,28 +3771,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
                 room_type=None,
                 room_name=None,
                 is_encrypted=False,
-                tombstone_successor_room_id=None,
-            ),
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get(
-                (room_id_with_info, user1_id)
-            ),
-            _SlidingSyncMembershipSnapshotResult(
-                room_id=room_id_with_info,
-                user_id=user1_id,
-                sender=user1_id,
-                membership_event_id=room_id_with_info_leave_event_response["event_id"],
-                membership=Membership.LEAVE,
-                event_stream_ordering=self.get_success(
-                    self.store.get_position_for_event(
-                        room_id_with_info_leave_event_response["event_id"]
-                    )
-                ).stream,
-                has_known_state=True,
-                room_type=None,
-                room_name="my super duper room",
-                is_encrypted=True,
                 tombstone_successor_room_id=None,
             ),
         )
@@ -4025,10 +3969,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
                 (room_id_no_info, user1_id),
                 (room_id_with_info, user1_id),
                 (space_room_id, user1_id),
-                # The leave memberships for user2
-                (room_id_no_info, user2_id),
-                (room_id_with_info, user2_id),
-                (space_room_id, user2_id),
             },
             exact=True,
         )
@@ -4117,7 +4057,7 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
         # User1 joins the room
         self.helper.join(room_id, user1_id, tok=user1_tok)
         # User1 leaves the room (we have to leave in order to forget the room)
-        self.helper.leave(room_id, user1_id, tok=user1_tok)
+        self.helper.leave(room_id, user1_id, tok=user2_tok)
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id)
@@ -4186,7 +4126,7 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
             _SlidingSyncMembershipSnapshotResult(
                 room_id=room_id,
                 user_id=user1_id,
-                sender=user1_id,
+                sender=user2_id,
                 membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
                 membership=Membership.LEAVE,
                 event_stream_ordering=state_map[
@@ -4625,7 +4565,7 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
         )
 
         # User2 leaves the room
-        self.helper.leave(room_id, user2_id, tok=user2_tok)
+        self.helper.leave(room_id, user2_id, tok=user1_tok)
 
         # Make sure all of the background updates have finished before we start the
         # catch-up. Even though it should work fine if the other background update is
@@ -4646,6 +4586,9 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
                 keyvalues={"room_id": room_id, "user_id": user2_id},
                 updatevalues={
                     # Reset everything back to the value before user2 left the room
+                    "sender": sliding_sync_membership_snapshots_results_before_membership_changes[
+                        (room_id, user2_id)
+                    ].sender,
                     "membership": sliding_sync_membership_snapshots_results_before_membership_changes[
                         (room_id, user2_id)
                     ].membership,
