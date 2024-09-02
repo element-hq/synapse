@@ -419,7 +419,6 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         super().__init__(hs)
         super(ResolveRoomIdMixin, self).__init__(hs)  # ensure the Mixin is set up
         self.auth = hs.get_auth()
-        self._support_via = hs.config.experimental.msc4156_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /join/$room_identifier[/$txn_id]
@@ -437,13 +436,13 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-        remote_room_hosts = parse_strings_from_args(args, "server_name", required=False)
-        if self._support_via:
+        # Prefer via over server_name (deprecated with MSC4156)
+        remote_room_hosts = parse_strings_from_args(
+            args, "via", required=False
+        )
+        if remote_room_hosts == None:
             remote_room_hosts = parse_strings_from_args(
-                args,
-                "org.matrix.msc4156.via",
-                default=remote_room_hosts,
-                required=False,
+                args, "server_name", required=False
             )
         room_id, remote_room_hosts = await self.resolve_room_id(
             room_identifier,

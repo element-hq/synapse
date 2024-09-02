@@ -53,7 +53,6 @@ class KnockRoomAliasServlet(RestServlet):
         super().__init__()
         self.room_member_handler = hs.get_room_member_handler()
         self.auth = hs.get_auth()
-        self._support_via = hs.config.experimental.msc4156_enabled
 
     async def on_POST(
         self,
@@ -72,15 +71,13 @@ class KnockRoomAliasServlet(RestServlet):
 
             # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
             args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+            # Prefer via over server_name (deprecated with MSC4156)
             remote_room_hosts = parse_strings_from_args(
-                args, "server_name", required=False
+                args, "via", required=False
             )
-            if self._support_via:
+            if remote_room_hosts == None:
                 remote_room_hosts = parse_strings_from_args(
-                    args,
-                    "org.matrix.msc4156.via",
-                    default=remote_room_hosts,
-                    required=False,
+                    args, "server_name", required=False
                 )
         elif RoomAlias.is_valid(room_identifier):
             handler = self.room_member_handler
