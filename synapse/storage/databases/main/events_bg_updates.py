@@ -1967,7 +1967,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
         def _find_previous_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
-        ) -> Tuple[str, str]:
+        ) -> Optional[Tuple[str, str]]:
             # Find the previous invite/knock event before the leave event
             #
             # Here are some notes on how we landed on this query:
@@ -2013,8 +2013,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
             row = txn.fetchone()
 
-            # We should see a corresponding previous invite/knock event
-            assert row is not None
+            if row is None:
+                # Generally we should have an invite or knock event for leaves
+                # that are outliers, however this may not always be the case
+                # (e.g. a local user got kicked but the kick event got pulled in
+                # as an outlier).
+                return None
+
             event_id, membership = row
 
             return event_id, membership
@@ -2140,8 +2145,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             elif membership in (Membership.INVITE, Membership.KNOCK) or (
                 membership in (Membership.LEAVE, Membership.BAN) and is_outlier
             ):
-                invite_or_knock_event_id = membership_event_id
-                invite_or_knock_membership = membership
+                invite_or_knock_event_id = None
+                invite_or_knock_membership = None
 
                 # If the event is an `out_of_band_membership` (special case of
                 # `outlier`), we never had historical state so we have to pull from
@@ -2150,35 +2155,52 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # membership (i.e. the room shouldn't disappear if your using the
                 # `is_encrypted` filter and you leave).
                 if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
-                    (
-                        invite_or_knock_event_id,
-                        invite_or_knock_membership,
-                    ) = await self.db_pool.runInteraction(
+                    previous_membership = await self.db_pool.runInteraction(
                         "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
                         _find_previous_membership_txn,
                         room_id,
                         user_id,
                         membership_event_id,
                     )
+                    if previous_membership is not None:
+                        (
+                            invite_or_knock_event_id,
+                            invite_or_knock_membership,
+                        ) = previous_membership
+                else:
+                    invite_or_knock_event_id = membership_event_id
+                    invite_or_knock_membership = membership
 
-                # Pull from the stripped state on the invite/knock event
-                invite_or_knock_event = await self.get_event(invite_or_knock_event_id)
-
-                raw_stripped_state_events = None
-                if invite_or_knock_membership == Membership.INVITE:
-                    invite_room_state = invite_or_knock_event.unsigned.get(
-                        "invite_room_state"
+                if (
+                    invite_or_knock_event_id is not None
+                    and invite_or_knock_membership is not None
+                ):
+                    # Pull from the stripped state on the invite/knock event
+                    invite_or_knock_event = await self.get_event(
+                        invite_or_knock_event_id
                     )
-                    raw_stripped_state_events = invite_room_state
-                elif invite_or_knock_membership == Membership.KNOCK:
-                    knock_room_state = invite_or_knock_event.unsigned.get(
-                        "knock_room_state"
-                    )
-                    raw_stripped_state_events = knock_room_state
 
-                sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
-                    raw_stripped_state_events
-                )
+                    raw_stripped_state_events = None
+                    if invite_or_knock_membership == Membership.INVITE:
+                        invite_room_state = invite_or_knock_event.unsigned.get(
+                            "invite_room_state"
+                        )
+                        raw_stripped_state_events = invite_room_state
+                    elif invite_or_knock_membership == Membership.KNOCK:
+                        knock_room_state = invite_or_knock_event.unsigned.get(
+                            "knock_room_state"
+                        )
+                        raw_stripped_state_events = knock_room_state
+
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
+                        raw_stripped_state_events
+                    )
+                else:
+                    # We couldn't find any state for the membership, so we just have to
+                    # leave it as empty.
+                    sliding_sync_membership_snapshots_insert_map = {
+                        "has_known_state": False
+                    }
 
                 # We should have some insert values for each room, even if no
                 # stripped state is on the event because we still want to record
