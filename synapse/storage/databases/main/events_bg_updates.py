@@ -1865,7 +1865,18 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
         ) -> List[
-            Tuple[str, Optional[str], str, str, str, str, int, Optional[str], bool]
+            Tuple[
+                str,
+                Optional[str],
+                Optional[str],
+                str,
+                str,
+                str,
+                str,
+                int,
+                Optional[str],
+                bool,
+            ]
         ]:
             # Fetch the set of event IDs that we want to update
 
@@ -1880,6 +1891,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     SELECT
                         c.room_id,
                         r.room_id,
+                        r.room_version,
                         c.user_id,
                         e.sender,
                         c.event_id,
@@ -1912,7 +1924,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     """
                     SELECT
                         c.room_id,
-                        c.room_id,
+                        r.room_id,
+                        r.room_version,
                         c.user_id,
                         e.sender,
                         c.event_id,
@@ -1923,6 +1936,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     FROM local_current_membership AS c
                     LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
                     INNER JOIN events AS e USING (event_id)
+                    LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE c.event_stream_ordering > ? AND m.user_id IS NULL
                         AND (c.membership != ? OR c.user_id != e.sender)
                     ORDER BY c.event_stream_ordering ASC
@@ -1936,7 +1950,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             memberships_to_update_rows = cast(
                 List[
                     Tuple[
-                        str, Optional[str], str, str, str, str, int, Optional[str], bool
+                        str,
+                        Optional[str],
+                        Optional[str],
+                        str,
+                        str,
+                        str,
+                        str,
+                        int,
+                        Optional[str],
+                        bool,
                     ]
                 ],
                 txn.fetchall(),
@@ -2036,6 +2059,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         for (
             room_id,
             room_id_from_rooms_table,
+            room_version_id,
             user_id,
             sender,
             membership_event_id,
@@ -2053,6 +2077,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 Membership.LEAVE,
                 Membership.BAN,
             )
+
+            if (
+                room_version_id is not None
+                and room_version_id not in KNOWN_ROOM_VERSIONS
+            ):
+                # Ignore rooms with unknown room versions (these were experimental rooms).
+                continue
 
             # There are some old out-of-band memberships (before
             # https://github.com/matrix-org/synapse/issues/6983) where we don't have the
@@ -2344,6 +2375,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         (
             room_id,
             _room_id_from_rooms_table,
+            _room_version_id,
             user_id,
             _sender,
             _membership_event_id,
