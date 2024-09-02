@@ -340,7 +340,7 @@ class ExperimentalConfig(Config):
 
         # MSC3575 (Sliding Sync) alternate endpoints, c.f. MSC4186.
         #
-        # This is enabled by default as a replacement for sliding sync proxy.
+        # This is enabled by default as a replacement for the sliding sync proxy.
         self.msc3575_enabled: bool = experimental.get("msc3575_enabled", True)
 
         # MSC3773: Thread notifications
