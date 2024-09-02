@@ -186,6 +186,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
+        "nginx_upstream_extra_conf": "hash $http_authorization consistent;",
     },
     "client_reader": {
         "app": "synapse.app.generic_worker",
@@ -996,6 +997,11 @@ def generate_worker_files(
             for port in upstream_worker_ports:
                 body += f"    server localhost:{port};\n"
 
+        # Append extra lines required for the specialised type of worker
+        extra_upstream_conf: Optional[str] = WORKERS_CONFIG[upstream_worker_base_name].get("nginx_upstream_extra_conf")
+        if extra_upstream_conf:
+            body += "".join(f"\n    {line}" for line in extra_upstream_conf.split("\n"))
+
         # Add to the list of configured upstreams
         nginx_upstream_config += NGINX_UPSTREAM_CONFIG_BLOCK.format(
             upstream_worker_base_name=upstream_worker_base_name,
@@ -1219,3 +1225,4 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
 
 if __name__ == "__main__":
     main(sys.argv[1:], os.environ)
+
