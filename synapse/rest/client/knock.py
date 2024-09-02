@@ -75,7 +75,7 @@ class KnockRoomAliasServlet(RestServlet):
             remote_room_hosts = parse_strings_from_args(
                 args, "via", required=False
             )
-            if remote_room_hosts == None:
+            if remote_room_hosts is None:
                 remote_room_hosts = parse_strings_from_args(
                     args, "server_name", required=False
                 )
