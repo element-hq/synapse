@@ -1892,10 +1892,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE (c.room_id, c.user_id) > (?, ?) AND m.user_id IS NULL
+                        AND (c.membership != ? OR c.user_id != e.sender)
                     ORDER BY c.room_id ASC, c.user_id ASC
                     LIMIT ?
                     """,
-                    (last_room_id, last_user_id, batch_size),
+                    (last_room_id, last_user_id, Membership.LEAVE, batch_size),
                 )
             elif last_event_stream_ordering is not None:
                 # It's important to sort by `event_stream_ordering` *ascending* (oldest to
@@ -1923,10 +1924,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
                     INNER JOIN events AS e USING (event_id)
                     WHERE c.event_stream_ordering > ? AND m.user_id IS NULL
+                        AND (c.membership != ? OR c.user_id != e.sender)
                     ORDER BY c.event_stream_ordering ASC
                     LIMIT ?
                     """,
-                    (last_event_stream_ordering, batch_size),
+                    (last_event_stream_ordering, Membership.LEAVE, batch_size),
                 )
             else:
                 raise Exception("last_event_stream_ordering should not be None")
