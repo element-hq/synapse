@@ -1874,7 +1874,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.113.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.114.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -7827,7 +7827,9 @@ This setting has the following sub-options:</p>
 <li><code>only_for_direct_messages</code>: Whether invites should be automatically accepted for all room types, or only
 for direct messages. Defaults to false.</li>
 <li><code>only_from_local_users</code>: Whether to only automatically accept invites from users on this homeserver. Defaults to false.</li>
-<li><code>worker_to_run_on</code>: Which worker to run this module on. This must match the &quot;worker_name&quot;.</li>
+<li><code>worker_to_run_on</code>: Which worker to run this module on. This must match 
+the &quot;worker_name&quot;. If not set or <code>null</code>, invites will be accepted on the
+main process.</li>
 </ul>
 <p>NOTE: Care should be taken not to enable this setting if the <code>synapse_auto_accept_invite</code> module is enabled and installed.
 The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join
@@ -17103,9 +17105,7 @@ quickly and automatically check for formatting (and sometimes logical)
 errors in code.</p>
 <p>The necessary tools are:</p>
 <ul>
-<li><a href="https://black.readthedocs.io/en/stable/">black</a>, a source code formatter;</li>
-<li><a href="https://pycqa.github.io/isort/">isort</a>, which organises each file's imports;</li>
-<li><a href="https://github.com/charliermarsh/ruff">ruff</a>, which can spot common errors; and</li>
+<li><a href="https://github.com/charliermarsh/ruff">ruff</a>, which can spot common errors and enforce a consistent style; and</li>
 <li><a href="https://mypy.readthedocs.io/en/stable/">mypy</a>, a type checker.</li>
 </ul>
 <p>See <a href="development/contributing_guide.html#run-the-linters">the contributing guide</a> for instructions
@@ -19559,8 +19559,10 @@ messages are added to the DAG. Normally, <code>stream_ordering</code> is an auto
 incrementing integer, but backfilled events start with <code>stream_ordering=-1</code> and decrement.</p>
 <hr />
 <ul>
-<li><code>/sync</code> returns things in the order they arrive at the server (<code>stream_ordering</code>).</li>
-<li><code>/messages</code> (and <code>/backfill</code> in the federation API) return them in the order determined by the event graph <code>(topological_ordering, stream_ordering)</code>.</li>
+<li>Incremental <code>/sync?since=xxx</code> returns things in the order they arrive at the server
+(<code>stream_ordering</code>).</li>
+<li>Initial <code>/sync</code>, <code>/messages</code> (and <code>/backfill</code> in the federation API) return them in
+the order determined by the event graph <code>(topological_ordering, stream_ordering)</code>.</li>
 </ul>
 <p>The general idea is that, if you're following a room in real-time (i.e.
 <code>/sync</code>), you probably want to see the messages as they arrive at your server,
