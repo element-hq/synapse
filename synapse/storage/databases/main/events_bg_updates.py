@@ -1888,9 +1888,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
+                    LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
-                    WHERE (c.room_id, c.user_id) > (?, ?)
+                    WHERE (c.room_id, c.user_id) > (?, ?) AND m.user_id IS NULL
                     ORDER BY c.room_id ASC, c.user_id ASC
                     LIMIT ?
                     """,
@@ -1919,9 +1920,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
+                    LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
                     INNER JOIN events AS e USING (event_id)
-                    WHERE event_stream_ordering > ?
-                    ORDER BY event_stream_ordering ASC
+                    WHERE c.event_stream_ordering > ? AND m.user_id IS NULL
+                    ORDER BY c.event_stream_ordering ASC
                     LIMIT ?
                     """,
                     (last_event_stream_ordering, batch_size),
