@@ -293,10 +293,11 @@ class SlidingSyncRoomLists:
                         is_encrypted=is_encrypted,
                     )
 
-        newly_joined_room_ids, newly_left_room_map = (
-            await self._get_newly_joined_and_left_rooms(
-                user_id, from_token=from_token, to_token=to_token
-            )
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, from_token=from_token, to_token=to_token
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
@@ -958,10 +959,11 @@ class SlidingSyncRoomLists:
             else:
                 rooms_for_user[room_id] = change_room_for_user
 
-        newly_joined_room_ids, newly_left_room_ids = (
-            await self._get_newly_joined_and_left_rooms(
-                user_id, to_token=to_token, from_token=from_token
-            )
+        (
+            newly_joined_room_ids,
+            newly_left_room_ids,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, to_token=to_token, from_token=from_token
         )
 
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)

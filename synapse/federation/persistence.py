@@ -20,7 +20,7 @@
 #
 #
 
-""" This module contains all the persistence actions done by the federation
+"""This module contains all the persistence actions done by the federation
 package.
 
 These actions are mostly only used by the :py:mod:`.replication` module.

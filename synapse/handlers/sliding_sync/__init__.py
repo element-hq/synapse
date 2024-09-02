@@ -587,9 +587,7 @@ class SlidingSyncHandler:
                 Membership.LEAVE,
                 Membership.BAN,
             ):
-                to_bound = (
-                    room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
-                )
+                to_bound = room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
 
             timeline_from_bound = from_bound
             if ignore_timeline_bound:

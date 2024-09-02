@@ -124,7 +124,12 @@ class WellKnownTests(unittest.HomeserverTestCase):
     )
     def test_client_well_known_msc3861_oauth_delegation(self) -> None:
         # Patch the HTTP client to return the issuer metadata
-        req_mock = AsyncMock(return_value={"issuer": "https://issuer", "account_management_uri": "https://my-account.issuer"})
+        req_mock = AsyncMock(
+            return_value={
+                "issuer": "https://issuer",
+                "account_management_uri": "https://my-account.issuer",
+            }
+        )
         self.hs.get_proxied_http_client().get_json = req_mock  # type: ignore[method-assign]
 
         for _ in range(2):
@@ -145,4 +150,6 @@ class WellKnownTests(unittest.HomeserverTestCase):
             )
 
         # It should have been called exactly once, because it gets cached
-        req_mock.assert_called_once_with("https://issuer/.well-known/openid-configuration")
+        req_mock.assert_called_once_with(
+            "https://issuer/.well-known/openid-configuration"
+        )
