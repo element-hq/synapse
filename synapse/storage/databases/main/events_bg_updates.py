@@ -647,8 +647,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 room_ids = {row[0] for row in rows}
                 for room_id in room_ids:
                     txn.call_after(
-                        self.get_latest_event_ids_in_room.invalidate,
-                        (room_id,),  # type: ignore[attr-defined]
+                        self.get_latest_event_ids_in_room.invalidate,  # type: ignore[attr-defined]
+                        (room_id,),
                     )
 
             self.db_pool.simple_delete_many_txn(

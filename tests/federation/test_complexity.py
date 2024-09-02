@@ -158,8 +158,8 @@ class RoomComplexityTests(unittest.FederatingHomeserverTestCase):
         async def get_current_state_event_counts(room_id: str) -> int:
             return 600
 
-        self.hs.get_datastores().main.get_current_state_event_counts = (
-            get_current_state_event_counts  # type: ignore[method-assign]
+        self.hs.get_datastores().main.get_current_state_event_counts = (  # type: ignore[method-assign]
+            get_current_state_event_counts
         )
 
         d = handler._remote_join(

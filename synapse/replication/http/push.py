@@ -98,9 +98,9 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         self._store = hs.get_datastores().main
 
     @staticmethod
-    async def _serialize_payload(
+    async def _serialize_payload(  # type: ignore[override]
         user_id: str, old_room_id: str, new_room_id: str
-    ) -> JsonDict:  # type: ignore[override]
+    ) -> JsonDict:
         return {}
 
     async def _handle_request(  # type: ignore[override]

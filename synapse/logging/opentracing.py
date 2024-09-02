@@ -1094,9 +1094,10 @@ def trace_servlet(
 
             # Mypy seems to think that start_context.tag below can be Optional[str], but
             # that doesn't appear to be correct and works in practice.
+
             request_tags[SynapseTags.REQUEST_TAG] = (
-                request.request_metrics.start_context.tag
-            )  # type: ignore[assignment]
+                request.request_metrics.start_context.tag  # type: ignore[assignment]
+            )
 
             # set the tags *after* the servlet completes, in case it decided to
             # prioritise the span (tags will get dropped on unprioritised spans)
