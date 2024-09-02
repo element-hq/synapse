@@ -2070,6 +2070,12 @@ class PersistEventsStore:
                     else None
                 )
 
+                if (
+                    sliding_sync_insert_map["room_name"] is not None
+                    and "\0" in sliding_sync_insert_map["room_name"]
+                ):
+                    sliding_sync_insert_map.pop("room_name")
+
                 # Find the tombstone_successor_room_id
                 # Note: This isn't one of the stripped state events according to the spec
                 # but seems like there is no reason not to support this kind of thing.
