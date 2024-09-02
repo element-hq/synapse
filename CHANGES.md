@@ -1,5 +1,11 @@
 # Synapse 1.114.0 (2024-09-02)
 
+This release enables support for
+[MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) —
+Simplified Sliding Sync. This allows using the upcoming releases of the Element
+X mobile apps without having to run a Sliding Sync Proxy.
+
+
 ### Features
 
 - Enable native sliding sync support ([MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) and [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186)) by default. ([\#17648](https://github.com/element-hq/synapse/issues/17648))
