@@ -72,9 +72,7 @@ class KnockRoomAliasServlet(RestServlet):
             # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
             args: Dict[bytes, List[bytes]] = request.args  # type: ignore
             # Prefer via over server_name (deprecated with MSC4156)
-            remote_room_hosts = parse_strings_from_args(
-                args, "via", required=False
-            )
+            remote_room_hosts = parse_strings_from_args(args, "via", required=False)
             if remote_room_hosts is None:
                 remote_room_hosts = parse_strings_from_args(
                     args, "server_name", required=False
