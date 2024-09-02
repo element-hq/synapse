@@ -2324,12 +2324,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     UPDATE sliding_sync_membership_snapshots
                     SET
                         forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
-                    WHERE room_id = ? and user_id = ?
+                    WHERE room_id = ? and user_id = ? AND membership_event_id = ?
                     """,
                     (
                         membership_event_id,
                         room_id,
                         user_id,
+                        membership_event_id,
                     ),
                 )
 
