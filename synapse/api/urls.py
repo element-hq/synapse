@@ -19,7 +19,8 @@
 #
 #
 
-"""Contains the URL paths to prefix various aspects of the server with. """
+"""Contains the URL paths to prefix various aspects of the server with."""
+
 import hmac
 from hashlib import sha256
 from urllib.parse import urlencode

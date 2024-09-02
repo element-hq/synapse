@@ -21,6 +21,7 @@
 
 """This module contains logic for storing HTTP PUT transactions. This is used
 to ensure idempotency when performing PUTs using the REST API."""
+
 import logging
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Hashable, Tuple
 

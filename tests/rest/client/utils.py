@@ -330,22 +330,24 @@ class RestHelper:
             data,
         )
 
-        assert (
-            channel.code == expect_code
-        ), "Expected: %d, got: %d, PUT %s -> resp: %r" % (
-            expect_code,
-            channel.code,
-            path,
-            channel.result["body"],
+        assert channel.code == expect_code, (
+            "Expected: %d, got: %d, PUT %s -> resp: %r"
+            % (
+                expect_code,
+                channel.code,
+                path,
+                channel.result["body"],
+            )
         )
 
         if expect_errcode:
-            assert (
-                str(channel.json_body["errcode"]) == expect_errcode
-            ), "Expected: %r, got: %r, resp: %r" % (
-                expect_errcode,
-                channel.json_body["errcode"],
-                channel.result["body"],
+            assert str(channel.json_body["errcode"]) == expect_errcode, (
+                "Expected: %r, got: %r, resp: %r"
+                % (
+                    expect_errcode,
+                    channel.json_body["errcode"],
+                    channel.result["body"],
+                )
             )
 
         if expect_additional_fields is not None:
@@ -354,13 +356,14 @@ class RestHelper:
                     expect_key,
                     channel.json_body,
                 )
-                assert (
-                    channel.json_body[expect_key] == expect_value
-                ), "Expected: %s at %s, got: %s, resp: %s" % (
-                    expect_value,
-                    expect_key,
-                    channel.json_body[expect_key],
-                    channel.json_body,
+                assert channel.json_body[expect_key] == expect_value, (
+                    "Expected: %s at %s, got: %s, resp: %s"
+                    % (
+                        expect_value,
+                        expect_key,
+                        channel.json_body[expect_key],
+                        channel.json_body,
+                    )
                 )
 
         self.auth_user_id = temp_id

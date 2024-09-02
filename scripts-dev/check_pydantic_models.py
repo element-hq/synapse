@@ -31,6 +31,7 @@ Pydantic does not yet offer a strict mode, but it is planned for pydantic v2. Se
 until then, this script is a best effort to stop us from introducing type coersion bugs
 (like the infamous stringy power levels fixed in room version 10).
 """
+
 import argparse
 import contextlib
 import functools

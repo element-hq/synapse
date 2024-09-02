@@ -1308,7 +1308,7 @@ class DeviceListUpdates:
 
 
 def get_verify_key_from_cross_signing_key(
-    key_info: Mapping[str, Any]
+    key_info: Mapping[str, Any],
 ) -> Tuple[str, VerifyKey]:
     """Get the key ID and signedjson verify key from a cross-signing key dict
 

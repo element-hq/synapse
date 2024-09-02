@@ -647,7 +647,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 room_ids = {row[0] for row in rows}
                 for room_id in room_ids:
                     txn.call_after(
-                        self.get_latest_event_ids_in_room.invalidate, (room_id,)  # type: ignore[attr-defined]
+                        self.get_latest_event_ids_in_room.invalidate,
+                        (room_id,),  # type: ignore[attr-defined]
                     )
 
             self.db_pool.simple_delete_many_txn(
@@ -2065,9 +2066,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
             # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-            sliding_sync_membership_snapshots_insert_map: (
-                SlidingSyncMembershipSnapshotSharedInsertValues
-            ) = {}
+            sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
             if membership == Membership.JOIN:
                 # If we're still joined, we can pull from current state.
                 current_state_ids_map: StateMap[
@@ -2149,14 +2148,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # membership (i.e. the room shouldn't disappear if your using the
                 # `is_encrypted` filter and you leave).
                 if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
-                    invite_or_knock_event_id, invite_or_knock_membership = (
-                        await self.db_pool.runInteraction(
-                            "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
-                            _find_previous_membership_txn,
-                            room_id,
-                            user_id,
-                            membership_event_id,
-                        )
+                    (
+                        invite_or_knock_event_id,
+                        invite_or_knock_membership,
+                    ) = await self.db_pool.runInteraction(
+                        "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
+                        _find_previous_membership_txn,
+                        room_id,
+                        user_id,
+                        membership_event_id,
                     )
 
                 # Pull from the stripped state on the invite/knock event
@@ -2484,9 +2484,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 "progress_json": "{}",
             },
         )
-        depends_on = (
-            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
-        )
+        depends_on = _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.

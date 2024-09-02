@@ -183,7 +183,7 @@ class WorkerLocksHandler:
             return
 
         def _wake_all_locks(
-            locks: Collection[Union[WaitingLock, WaitingMultiLock]]
+            locks: Collection[Union[WaitingLock, WaitingMultiLock]],
         ) -> None:
             for lock in locks:
                 deferred = lock.deferred

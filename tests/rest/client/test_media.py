@@ -1957,7 +1957,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             """A mock for MatrixFederationHttpClient.federation_get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]],
             ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
                 data, response = r
                 output_stream.write(data)
@@ -1991,7 +1991,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
             ) -> Tuple[int, Dict[bytes, List[bytes]]]:
                 data, response = r
                 output_stream.write(data)

@@ -63,7 +63,9 @@ class AuthIssuerTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(channel.json_body, {"issuer": ISSUER})
 
-        req_mock.assert_called_with("https://account.example.com/.well-known/openid-configuration")
+        req_mock.assert_called_with(
+            "https://account.example.com/.well-known/openid-configuration"
+        )
         req_mock.reset_mock()
 
         # Second call it should use the cached value
