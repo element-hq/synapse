@@ -1978,7 +1978,9 @@ class PersistEventsStore:
             elif state_key == (EventTypes.Name, ""):
                 room_name = event.content.get(EventContentFields.ROOM_NAME)
                 # Scrutinize JSON values
-                if room_name is None or isinstance(room_name, str):
+                if room_name is None or (
+                    isinstance(room_name, str) and "\0" not in room_name
+                ):
                     sliding_sync_insert_map["room_name"] = room_name
             elif state_key == (EventTypes.Tombstone, ""):
                 successor_room_id = event.content.get(
