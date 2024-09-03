@@ -979,19 +979,26 @@ class SlidingSyncHandler:
                 room_id
             )
 
+            min_to_token_position = to_token.room_key.stream
+
+            # If we can rely on the new sliding sync tables and the `bump_stamp` is
+            # `None`, just fallback to the membership event position. This can happen
+            # when we've just joined a remote room and all the events are backfilled.
+            if (
+                # FIXME: The background job check can be removed once we bump
+                # `SCHEMA_COMPAT_VERSION` and run the foreground update for
+                # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
+                # (tracked by https://github.com/element-hq/synapse/issues/17623)
+                await self.store.have_finished_sliding_sync_background_jobs()
+                and latest_room_bump_stamp is None
+            ):
+                pass
             # The `bump_stamp` stored in the database might be ahead of our token. Since
             # `bump_stamp` is only a `stream_ordering` position, we can't be 100% sure
             # that's before the `to_token` in all scenarios. The only scenario we can be
             # sure of is if the `bump_stamp` is totally before the minimum position from
             # the token.
-            min_to_token_position = to_token.room_key.stream
-            if (
-                # FIXME: In the future, if we see that `latest_room_bump_stamp` is
-                # `None`, we can just fallback to the membership event position. We can
-                # do this once we bump `SCHEMA_COMPAT_VERSION` and run the foreground
-                # update for
-                # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
-                # (tracked by https://github.com/element-hq/synapse/issues/17623)
+            elif (
                 latest_room_bump_stamp is not None
                 and latest_room_bump_stamp < min_to_token_position
             ):
