@@ -178,7 +178,6 @@ class ClientRestResource(JsonResource):
                     tokenrefresh.register_servlets,
                     reporting.register_servlets,
                     openid.register_servlets,
-                    thirdparty.register_servlets,
                     room_upgrade_rest_servlet.register_servlets,
                     account_validity.register_servlets,
                     admin.register_servlets_for_client_rest_resource,
