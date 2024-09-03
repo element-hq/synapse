@@ -934,7 +934,7 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
         negative stream ordering.
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        _user1_tok = self.login(user1_id, "pass")
 
         # Create a remote room
         creator = "@user:other"

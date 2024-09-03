@@ -993,6 +993,7 @@ class SlidingSyncHandler:
                 and latest_room_bump_stamp is None
             ):
                 pass
+
             # The `bump_stamp` stored in the database might be ahead of our token. Since
             # `bump_stamp` is only a `stream_ordering` position, we can't be 100% sure
             # that's before the `to_token` in all scenarios. The only scenario we can be
@@ -1003,9 +1004,10 @@ class SlidingSyncHandler:
                 and latest_room_bump_stamp < min_to_token_position
             ):
                 bump_stamp = latest_room_bump_stamp
+
+            # Otherwise, if it's within or after the `to_token`, we need to find the
+            # last bump event before the `to_token`.
             else:
-                # If it's within or after the `to_token`, we need to find the last bump
-                # event before the `to_token`.
                 last_bump_event_result = (
                     await self.store.get_last_event_pos_in_room_before_stream_ordering(
                         room_id,
