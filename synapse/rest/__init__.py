@@ -172,7 +172,6 @@ class ClientRestResource(JsonResource):
 
             for servletfunc in SERVLET_GROUPS[servlet_group]:
                 if not is_main_process and servletfunc in [
-                    pusher.register_servlets,
                     logout.register_servlets,
                     auth.register_servlets,
                     tokenrefresh.register_servlets,

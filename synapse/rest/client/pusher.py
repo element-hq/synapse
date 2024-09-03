@@ -177,5 +177,7 @@ class LegacyPushersRemoveRestServlet(UnsubscribeResource, RestServlet):
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     PushersRestServlet(hs).register(http_server)
-    PushersSetRestServlet(hs).register(http_server)
-    LegacyPushersRemoveRestServlet(hs).register(http_server)
+
+    if hs.config.worker.worker_app is None:
+        PushersSetRestServlet(hs).register(http_server)
+        LegacyPushersRemoveRestServlet(hs).register(http_server)
