@@ -2356,11 +2356,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     """
                     UPDATE sliding_sync_membership_snapshots
                     SET
-                        forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
-                    WHERE room_id = ? and user_id = ? AND membership_event_id = ?
+                        forgotten = m.forgotten
+                    FROM room_memberships AS m
+                    WHERE sliding_sync_membership_snapshots.room_id = ?
+                        AND sliding_sync_membership_snapshots.user_id = ?
+                        AND membership_event_id = ?
+                        AND membership_event_id = m.event_id
+                        AND m.event_id IS NOT NULL
                     """,
                     (
-                        membership_event_id,
                         room_id,
                         user_id,
                         membership_event_id,
