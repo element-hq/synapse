@@ -2622,13 +2622,13 @@ urllib3 = ">=1.26.0"
 
 [[package]]
 name = "twisted"
-version = "24.7.0rc1"
+version = "24.7.0"
 description = "An asynchronous networking framework written in Python"
 optional = false
 python-versions = ">=3.8.0"
 files = [
-    {file = "twisted-24.7.0rc1-py3-none-any.whl", hash = "sha256:f37d6656fe4e2871fab29d8952ae90bd6ca8b48a9e4dfa1b348f4cd62e6ba0bb"},
-    {file = "twisted-24.7.0rc1.tar.gz", hash = "sha256:bbc4a2193ca34cfa32f626300746698a6d70fcd77d9c0b79a664c347e39634fc"},
+    {file = "twisted-24.7.0-py3-none-any.whl", hash = "sha256:734832ef98108136e222b5230075b1079dad8a3fc5637319615619a7725b0c81"},
+    {file = "twisted-24.7.0.tar.gz", hash = "sha256:5a60147f044187a127ec7da96d170d49bcce50c6fd36f594e60f4587eff4d394"},
 ]
 
 [package.dependencies]
