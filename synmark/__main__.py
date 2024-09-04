@@ -40,7 +40,7 @@ T = TypeVar("T")
 
 
 def make_test(
-    main: Callable[[ISynapseReactor, int], Coroutine[Any, Any, float]]
+    main: Callable[[ISynapseReactor, int], Coroutine[Any, Any, float]],
 ) -> Callable[[int], float]:
     """
     Take a benchmark function and wrap it in a reactor start and stop.

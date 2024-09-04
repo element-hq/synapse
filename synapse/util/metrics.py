@@ -110,7 +110,7 @@ def measure_func(
     """
 
     def wrapper(
-        func: Callable[Concatenate[HasClock, P], Awaitable[R]]
+        func: Callable[Concatenate[HasClock, P], Awaitable[R]],
     ) -> Callable[P, Awaitable[R]]:
         block_name = func.__name__ if name is None else name
 

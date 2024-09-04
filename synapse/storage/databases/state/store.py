@@ -767,7 +767,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         remaining_state_groups = {
             state_group
-            for state_group, in rows
+            for (state_group,) in rows
             if state_group not in state_groups_to_delete
         }
 

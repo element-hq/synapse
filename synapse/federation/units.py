@@ -19,7 +19,7 @@
 #
 #
 
-""" Defines the JSON structure of the protocol units used by the server to
+"""Defines the JSON structure of the protocol units used by the server to
 server protocol.
 """
 

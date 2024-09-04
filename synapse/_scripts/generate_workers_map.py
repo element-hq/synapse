@@ -171,7 +171,7 @@ def elide_http_methods_if_unconflicting(
     """
 
     def paths_to_methods_dict(
-        methods_and_paths: Iterable[Tuple[str, str]]
+        methods_and_paths: Iterable[Tuple[str, str]],
     ) -> Dict[str, Set[str]]:
         """
         Given (method, path) pairs, produces a dict from path to set of methods
@@ -201,7 +201,7 @@ def elide_http_methods_if_unconflicting(
 
 
 def simplify_path_regexes(
-    registrations: Dict[Tuple[str, str], EndpointDescription]
+    registrations: Dict[Tuple[str, str], EndpointDescription],
 ) -> Dict[Tuple[str, str], EndpointDescription]:
     """
     Simplify all the path regexes for the dict of endpoint descriptions,

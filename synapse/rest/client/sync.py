@@ -1045,9 +1045,9 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
             if room_result.unstable_expanded_timeline:
-                serialized_rooms[room_id][
-                    "unstable_expanded_timeline"
-                ] = room_result.unstable_expanded_timeline
+                serialized_rooms[room_id]["unstable_expanded_timeline"] = (
+                    room_result.unstable_expanded_timeline
+                )
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if (
@@ -1082,9 +1082,9 @@ class SlidingSyncRestServlet(RestServlet):
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
-                serialized_rooms[room_id]["prev_batch"] = (
-                    await room_result.prev_batch.to_string(self.store)
-                )
+                serialized_rooms[room_id][
+                    "prev_batch"
+                ] = await room_result.prev_batch.to_string(self.store)
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:

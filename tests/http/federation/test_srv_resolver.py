@@ -93,9 +93,7 @@ class SrvResolverTestCase(unittest.TestCase):
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         servers: List[Server]
-        servers = yield defer.ensureDeferred(
-            resolver.resolve_service(service_name)
-        )  # type: ignore[assignment]
+        servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         dns_client_mock.lookupService.assert_called_once_with(service_name)
 
@@ -122,9 +120,7 @@ class SrvResolverTestCase(unittest.TestCase):
         )
 
         servers: List[Server]
-        servers = yield defer.ensureDeferred(
-            resolver.resolve_service(service_name)
-        )  # type: ignore[assignment]
+        servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         self.assertFalse(dns_client_mock.lookupService.called)
 
@@ -157,9 +153,7 @@ class SrvResolverTestCase(unittest.TestCase):
         resolver = SrvResolver(dns_client=dns_client_mock, cache=cache)
 
         servers: List[Server]
-        servers = yield defer.ensureDeferred(
-            resolver.resolve_service(service_name)
-        )  # type: ignore[assignment]
+        servers = yield defer.ensureDeferred(resolver.resolve_service(service_name))  # type: ignore[assignment]
 
         self.assertEqual(len(servers), 0)
         self.assertEqual(len(cache), 0)

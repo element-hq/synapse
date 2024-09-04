@@ -230,6 +230,8 @@ class EventContentFields:
 
     ROOM_NAME: Final = "name"
 
+    MEMBERSHIP: Final = "membership"
+
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
 

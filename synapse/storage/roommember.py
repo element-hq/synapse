@@ -40,6 +40,19 @@ class RoomsForUser:
 
 
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
+class RoomsForUserSlidingSync:
+    room_id: str
+    sender: Optional[str]
+    membership: str
+    event_id: Optional[str]
+    event_pos: PersistedEventPosition
+    room_version_id: str
+
+    room_type: Optional[str]
+    is_encrypted: bool
+
+
+@attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
 class GetRoomsForUserWithStreamOrdering:
     room_id: str
     event_pos: PersistedEventPosition

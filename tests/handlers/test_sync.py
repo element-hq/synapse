@@ -843,7 +843,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         ) -> List[EventBase]:
             return list(pdus)
 
-        self.client._check_sigs_and_hash_for_pulled_events_and_fetch = _check_sigs_and_hash_for_pulled_events_and_fetch  # type: ignore[assignment]
+        self.client._check_sigs_and_hash_for_pulled_events_and_fetch = (  # type: ignore[method-assign]
+            _check_sigs_and_hash_for_pulled_events_and_fetch  # type: ignore[assignment]
+        )
 
         prev_events = self.get_success(self.store.get_prev_events_for_room(room_id))
 

@@ -26,6 +26,7 @@ for its completion can be removed.
 
 Note the background job must still remain defined in the database class.
 """
+
 from synapse.config.homeserver import HomeServerConfig
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import BaseDatabaseEngine
