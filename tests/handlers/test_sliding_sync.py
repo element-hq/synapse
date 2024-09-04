@@ -3232,9 +3232,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Get the rooms the user should be syncing with
         room_membership_for_user_map = self.get_success(
-            self.store.get_sliding_sync_rooms_for_user(
-                user1_id
-            )
+            self.store.get_sliding_sync_rooms_for_user(user1_id)
         )
 
         # Try with `tags=foo`
@@ -3297,9 +3295,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # )
 
         room_membership_for_user_map = self.get_success(
-            self.store.get_sliding_sync_rooms_for_user(
-                user1_id
-            )
+            self.store.get_sliding_sync_rooms_for_user(user1_id)
         )
 
         # Try with `not_tags=foo`
