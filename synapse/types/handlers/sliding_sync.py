@@ -196,8 +196,8 @@ class SlidingSyncResult:
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         num_live: Optional[int]
         bump_stamp: int
-        joined_count: int
-        invited_count: int
+        joined_count: Optional[int]
+        invited_count: Optional[int]
         notification_count: int
         highlight_count: int
 

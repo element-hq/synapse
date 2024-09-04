@@ -13,7 +13,7 @@
 #
 import logging
 
-from parameterized import parameterized_class
+from parameterized import parameterized, parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -192,20 +192,27 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "avatar",
             response_body["rooms"][room_id1],
         )
-        # TODO: These should also be excluded if they haven't changed
-        # self.assertNotIn(
-        #     "joined_count",
-        #     response_body["rooms"][room_id1],
-        # )
-        # self.assertNotIn(
-        #     "invited_count",
-        #     response_body["rooms"][room_id1],
-        # )
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
+        )
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
+        )
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
         )
 
-    def test_rooms_meta_when_joined_incremental_with_state_change(self) -> None:
+    @parameterized.expand(
+        [
+            ("in_required_state", "true"),
+            ("not_in_required_state", "false"),
+        ]
+    )
+    def test_rooms_meta_when_joined_incremental_with_state_change(
+        self, test_description: str, include_state_in_required_state: bool
+    ) -> None:
         """
         Test that the `rooms` `name` and `avatar` are included in an incremental sync
         response if they changed.
@@ -239,7 +246,11 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
                     "ranges": [[0, 1]],
                     # Include some state so when we change the room name, the room comes
                     # down in the incremental sync.
-                    "required_state": [[EventTypes.Name, ""]],
+                    "required_state": (
+                        [[EventTypes.Name, ""]]
+                        if include_state_in_required_state
+                        else []
+                    ),
                     "timeline_limit": 0,
                 }
             }
@@ -271,15 +282,14 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "avatar",
             response_body["rooms"][room_id1],
         )
-        # TODO: These should also be excluded if they haven't changed
-        # self.assertNotIn(
-        #     "joined_count",
-        #     response_body["rooms"][room_id1],
-        # )
-        # self.assertNotIn(
-        #     "invited_count",
-        #     response_body["rooms"][room_id1],
-        # )
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
+        )
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
+        )
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
         )
