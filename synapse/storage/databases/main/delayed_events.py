@@ -202,7 +202,9 @@ class DelayedEventsStore(SQLBaseStore):
             for row in rows
         ]
 
-    async def process_timeout_delayed_events(self, current_ts: Timestamp) -> Tuple[
+    async def process_timeout_delayed_events(
+        self, current_ts: Timestamp
+    ) -> Tuple[
         List[DelayedEventDetails],
         Optional[Timestamp],
     ]:
@@ -214,7 +216,9 @@ class DelayedEventsStore(SQLBaseStore):
             and the send time of the next delayed event to be sent, if any.
         """
 
-        def process_timeout_delayed_events_txn(txn: LoggingTransaction) -> Tuple[
+        def process_timeout_delayed_events_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[
             List[DelayedEventDetails],
             Optional[Timestamp],
         ]:
@@ -307,7 +311,9 @@ class DelayedEventsStore(SQLBaseStore):
             NotFoundError: if there is no matching delayed event.
         """
 
-        def process_target_delayed_event_txn(txn: LoggingTransaction) -> Tuple[
+        def process_target_delayed_event_txn(
+            txn: LoggingTransaction,
+        ) -> Tuple[
             Tuple[
                 RoomID,
                 EventType,
