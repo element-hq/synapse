@@ -319,12 +319,14 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
     ],
 )
 class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
+    _STATE_EVENT_TYPE = "org.matrix.msc3757.test"
+
     allows_owned_state: bool
 
     def test_can_set_own_state(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc3757.test",
+            self._STATE_EVENT_TYPE,
             {},
             state_key=f"{self.mod_user_id}_suffix",
             tok=self.mod_access_token,
@@ -336,7 +338,7 @@ class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
     def test_admins_can_set_others_state(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc3757.test",
+            self._STATE_EVENT_TYPE,
             {},
             state_key=f"{self.mod_user_id}_suffix",
             tok=self.admin_access_token,
@@ -348,7 +350,7 @@ class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
     def test_non_admins_cannot_set_others_state(self) -> None:
         self.helper.send_state(
             self.room_id,
-            "org.matrix.msc3757.test",
+            self._STATE_EVENT_TYPE,
             {},
             state_key=f"{self.admin_user_id}_suffix",
             tok=self.mod_access_token,
@@ -365,7 +367,7 @@ class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
 
         body = self.helper.send_state(
             self.room_id,
-            "org.matrix.msc3757.test",
+            self._STATE_EVENT_TYPE,
             {},
             state_key=f"{self.admin_user_id}@suffix",
             tok=self.admin_access_token,
