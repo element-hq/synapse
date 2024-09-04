@@ -3006,6 +3006,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         self.sliding_sync_handler = self.hs.get_sliding_sync_handler()
         self.store = self.hs.get_datastores().main
         self.event_sources = hs.get_event_sources()
+        self.account_data_handler = hs.get_account_data_handler()
 
     def _get_sync_room_ids_for_user(
         self,
@@ -3208,6 +3209,124 @@ class FilterRoomsTestCase(HomeserverTestCase):
         )
 
         self.assertEqual(falsy_filtered_room_map.keys(), {room_id})
+
+    def test_filter_rooms_by_tags(self) -> None:
+        """
+        Test `filter.tags` for rooms with given tags
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room with no tags
+        self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        tag_data = {
+            footag_room_id: {"foo": {}},
+            bartag_room_id: {"bar": {}},
+        }
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try with `tags=foo`
+        foo_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    tags={"foo"},
+                ),
+                after_rooms_token,
+                {},
+                tag_data,
+            )
+        )
+
+        self.assertEqual(foo_filtered_room_map.keys(), {footag_room_id})
+
+        # Try with a random tag we didn't add
+        foobar_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    tags={"flomp"},
+                ),
+                after_rooms_token,
+                {},
+                tag_data,
+            )
+        )
+
+        self.assertEqual(len(foobar_filtered_room_map), 0)
+
+    def test_filter_rooms_by_not_tags(self) -> None:
+        """
+        Test `filter.not_tags` for excluding rooms with given tags
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room with no tags
+        untagged_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        tag_data = {
+            footag_room_id: {"foo": {}},
+            bartag_room_id: {"bar": {}},
+        }
+
+        after_rooms_token = self.event_sources.get_current_token()
+
+        # Get the rooms the user should be syncing with
+        sync_room_map = self._get_sync_room_ids_for_user(
+            UserID.from_string(user1_id),
+            from_token=None,
+            to_token=after_rooms_token,
+        )
+
+        # Try with `not_tags=foo`
+        foo_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    not_tags={"foo"},
+                ),
+                after_rooms_token,
+                {},
+                tag_data,
+            )
+        )
+
+        self.assertEqual(foo_filtered_room_map.keys(), {untagged_room_id, bartag_room_id})
+
+        # Try with not_tags=[foo,bar]
+        foobar_filtered_room_map = self.get_success(
+            self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
+                UserID.from_string(user1_id),
+                sync_room_map,
+                SlidingSyncConfig.SlidingSyncList.Filters(
+                    not_tags={"foo", "bar"},
+                ),
+                after_rooms_token,
+                {},
+                tag_data,
+            )
+        )
+
+        self.assertEqual(foobar_filtered_room_map.keys(), {untagged_room_id})
 
     def test_filter_encrypted_rooms(self) -> None:
         """
