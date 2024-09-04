@@ -1106,7 +1106,6 @@ class SlidingSyncHandler:
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
-            # TODO: Add test to make sure these should also be excluded if they haven't changed
             heroes=heroes,
             is_dm=room_membership_for_user_at_to_token.is_dm,
             initial=initial,
