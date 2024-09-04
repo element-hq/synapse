@@ -805,15 +805,18 @@ class SlidingSyncHandler:
         # summary whenever the room name changes instead of only when it changes to
         # `None`.
         if initial or name_changed or membership_changed:
-            if room_membership_for_user_at_to_token.membership in (
-                Membership.LEAVE,
-                Membership.BAN,
-            ):
-                # TODO: Figure out how to get the membership summary for left/banned rooms
-                room_membership_summary = {}
-            else:
-                room_membership_summary = await self.store.get_room_summary(room_id)
-                # TODO: Reverse/rewind back to the `to_token`
+            # We can't trace the function directly because it's cached and the `@cached`
+            # decorator doesn't mix with `@trace` yet.
+            with start_active_span("get_room_summary"):
+                if room_membership_for_user_at_to_token.membership in (
+                    Membership.LEAVE,
+                    Membership.BAN,
+                ):
+                    # TODO: Figure out how to get the membership summary for left/banned rooms
+                    room_membership_summary = {}
+                else:
+                    room_membership_summary = await self.store.get_room_summary(room_id)
+                    # TODO: Reverse/rewind back to the `to_token`
 
         # `heroes` are required if the room name is not set.
         #
