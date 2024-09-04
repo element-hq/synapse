@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -45,7 +45,7 @@ from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, StreamToken, UserID
+from synapse.types import JsonDict, JsonMapping, StreamToken, UserID
 from synapse.types.handlers.sliding_sync import SlidingSyncConfig
 from synapse.util import Clock
 
@@ -3223,7 +3223,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        tag_data = {
+        tag_data: Mapping[str, Mapping[str, JsonMapping]] = {
             footag_room_id: {"foo": {}},
             bartag_room_id: {"bar": {}},
         }
@@ -3231,22 +3231,22 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self._get_sync_room_ids_for_user(
-            UserID.from_string(user1_id),
-            from_token=None,
-            to_token=after_rooms_token,
+        room_membership_for_user_map = self.get_success(
+            self.store.get_sliding_sync_rooms_for_user(
+                user1_id
+            )
         )
 
         # Try with `tags=foo`
         foo_filtered_room_map = self.get_success(
             self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
-                UserID.from_string(user1_id),
-                sync_room_map,
+                user1_id,
+                room_membership_for_user_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
-                    tags={"foo"},
+                    tags=["foo"],
                 ),
                 after_rooms_token,
-                {},
+                set(),
                 tag_data,
             )
         )
@@ -3256,13 +3256,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Try with a random tag we didn't add
         foobar_filtered_room_map = self.get_success(
             self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
-                UserID.from_string(user1_id),
-                sync_room_map,
+                user1_id,
+                room_membership_for_user_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
-                    tags={"flomp"},
+                    tags=["flomp"],
                 ),
                 after_rooms_token,
-                {},
+                set(),
                 tag_data,
             )
         )
@@ -3282,7 +3282,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        tag_data = {
+        tag_data: Mapping[str, Mapping[str, JsonMapping]] = {
             footag_room_id: {"foo": {}},
             bartag_room_id: {"bar": {}},
         }
@@ -3290,22 +3290,28 @@ class FilterRoomsTestCase(HomeserverTestCase):
         after_rooms_token = self.event_sources.get_current_token()
 
         # Get the rooms the user should be syncing with
-        sync_room_map = self._get_sync_room_ids_for_user(
-            UserID.from_string(user1_id),
-            from_token=None,
-            to_token=after_rooms_token,
+        # sync_room_map = self._get_sync_room_ids_for_user(
+        #     UserID.from_string(user1_id),
+        #     from_token=None,
+        #     to_token=after_rooms_token,
+        # )
+
+        room_membership_for_user_map = self.get_success(
+            self.store.get_sliding_sync_rooms_for_user(
+                user1_id
+            )
         )
 
         # Try with `not_tags=foo`
         foo_filtered_room_map = self.get_success(
             self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
-                UserID.from_string(user1_id),
-                sync_room_map,
+                user1_id,
+                room_membership_for_user_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
-                    not_tags={"foo"},
+                    not_tags=["foo"],
                 ),
                 after_rooms_token,
-                {},
+                set(),
                 tag_data,
             )
         )
@@ -3317,13 +3323,13 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Try with not_tags=[foo,bar]
         foobar_filtered_room_map = self.get_success(
             self.sliding_sync_handler.room_lists.filter_rooms_using_tables(
-                UserID.from_string(user1_id),
-                sync_room_map,
+                user1_id,
+                room_membership_for_user_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
-                    not_tags={"foo", "bar"},
+                    not_tags=["foo", "bar"],
                 ),
                 after_rooms_token,
-                {},
+                set(),
                 tag_data,
             )
         )
