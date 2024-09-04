@@ -950,9 +950,10 @@ class SlidingSyncHandler:
 
         # We need this base set of info for the response so let's just fetch it along
         # with the `required_state` for the room
-        meta_room_state = [
+        hero_room_state = [
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
+        meta_room_state = hero_room_state
         if initial or name_changed:
             meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
@@ -984,6 +985,17 @@ class SlidingSyncHandler:
                 state_filter.filter_state(room_state_delta_id_map).values()
             )
             room_state = {(s.type, s.state_key): s for s in events.values()}
+
+            # If the membership changed and we have to get heroes, get the remaining
+            # heroes from the state
+            if hero_user_ids:
+                hero_membership_state = await self.get_current_state_at(
+                    room_id=room_id,
+                    room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+                    state_filter=StateFilter.from_types(hero_room_state),
+                    to_token=to_token,
+                )
+                room_state.update(hero_membership_state)
 
         required_room_state: StateMap[EventBase] = {}
         if required_state_filter != StateFilter.none():

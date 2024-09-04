@@ -754,7 +754,8 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         # Incremental sync
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # Incremental sync and the second time we have seen this room is it isn't `initial`
+        # This is an incremental sync and the second time we have seen this room so it
+        # isn't `initial`
         self.assertNotIn(
             "initial",
             response_body["rooms"][room_id],
@@ -778,6 +779,86 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         self.assertNotIn(
             "invited_count",
             response_body["rooms"][room_id],
+        )
+        # We didn't request any state so we shouldn't see any `required_state`
+        self.assertNotIn(
+            "required_state",
+            response_body["rooms"][room_id],
+        )
+
+    def test_rooms_meta_heroes_incremental_sync_with_membership_change(self) -> None:
+        """
+        Test that the `rooms` `heroes` are included in an incremental sync response if
+        the membership has changed.
+
+        (when the room doesn't have a room name set)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                # No room name set so that `heroes` is populated
+                #
+                # "name": "my super room2",
+            },
+        )
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+        # User3 is invited
+        self.helper.invite(room_id, src=user2_id, targ=user3_id, tok=user2_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # User3 joins (membership change)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        # Incremental sync
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # This is an incremental sync and the second time we have seen this room so it
+        # isn't `initial`
+        self.assertNotIn(
+            "initial",
+            response_body["rooms"][room_id],
+        )
+        # Room shouldn't have a room name because we're testing the `heroes` field which
+        # will only has a chance to appear if the room doesn't have a name.
+        self.assertNotIn(
+            "name",
+            response_body["rooms"][room_id],
+        )
+        # Membership change so we should see heroes and membership counts
+        self.assertCountEqual(
+            [
+                hero["user_id"]
+                for hero in response_body["rooms"][room_id].get("heroes", [])
+            ],
+            # Heroes shouldn't include the user themselves (we shouldn't see user1)
+            [user2_id, user3_id],
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["joined_count"],
+            3,
+        )
+        self.assertEqual(
+            response_body["rooms"][room_id]["invited_count"],
+            0,
         )
         # We didn't request any state so we shouldn't see any `required_state`
         self.assertNotIn(
