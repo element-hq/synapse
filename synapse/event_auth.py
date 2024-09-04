@@ -812,23 +812,24 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
         and state_key != event.user_id
     ):
         if event.room_version.msc3757_enabled:
+            state_key_user_id: Union[str, None] = None
             colon_idx = state_key.find(":", 1)
             if colon_idx != -1:
                 suffix_idx = state_key.find("_", colon_idx + 1)
                 state_key_user_id = (
                     state_key[:suffix_idx] if suffix_idx != -1 else state_key
                 )
-                if not UserID.is_valid(state_key_user_id):
-                    raise UnstableSpecAuthError(
-                        403,
-                        "State key is not a valid user ID",
-                        errcode=Codes.BAD_JSON,
-                    )
-                if (
-                    state_key_user_id == event.user_id
-                    or user_level > get_user_power_level(state_key_user_id, auth_events)
-                ):
-                    return True
+            if state_key_user_id is None or not UserID.is_valid(state_key_user_id):
+                raise SynapseError(
+                    400,
+                    "State key neither equals a valid user ID, nor starts with one plus an underscore",
+                    errcode=Codes.BAD_JSON,
+                )
+            if (
+                state_key_user_id == event.user_id
+                or user_level > get_user_power_level(state_key_user_id, auth_events)
+            ):
+                return True
         raise AuthError(403, "You are not allowed to set others state")
 
     return True

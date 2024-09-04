@@ -356,11 +356,24 @@ class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
         )
 
     def test_cannot_set_state_with_non_user_id_key(self) -> None:
-        self.helper.send_state(
+        if self.allows_owned_state:
+            expect_code = HTTPStatus.BAD_REQUEST
+            errcode = Codes.BAD_JSON
+        else:
+            expect_code = HTTPStatus.FORBIDDEN
+            errcode = Codes.FORBIDDEN
+
+        body = self.helper.send_state(
             self.room_id,
             "org.matrix.msc3757.test",
             {},
             state_key=f"{self.admin_user_id}@suffix",
             tok=self.admin_access_token,
-            expect_code=HTTPStatus.FORBIDDEN,
+            expect_code=expect_code,
+        )
+
+        self.assertEqual(
+            body["errcode"],
+            errcode,
+            body,
         )
