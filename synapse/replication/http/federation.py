@@ -119,7 +119,9 @@ class ReplicationFederationSendEventsRestServlet(ReplicationEndpoint):
 
         return payload
 
-    async def _handle_request(self, request: Request, content: JsonDict) -> Tuple[int, JsonDict]:  # type: ignore[override]
+    async def _handle_request(  # type: ignore[override]
+        self, request: Request, content: JsonDict
+    ) -> Tuple[int, JsonDict]:
         with Measure(self.clock, "repl_fed_send_events_parse"):
             room_id = content["room_id"]
             backfilled = content["backfilled"]

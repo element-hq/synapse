@@ -859,7 +859,6 @@ class FederationMediaThumbnailServlet(BaseFederationServerServlet):
         request: SynapseRequest,
         media_id: str,
     ) -> None:
-
         width = parse_integer(request, "width", required=True)
         height = parse_integer(request, "height", required=True)
         method = parse_string(request, "method", "scale")

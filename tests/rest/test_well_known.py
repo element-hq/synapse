@@ -17,6 +17,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from unittest.mock import AsyncMock
+
 from twisted.web.resource import Resource
 
 from synapse.rest.well_known import well_known_resource
@@ -112,7 +114,6 @@ class WellKnownTests(unittest.HomeserverTestCase):
                 "msc3861": {
                     "enabled": True,
                     "issuer": "https://issuer",
-                    "account_management_url": "https://my-account.issuer",
                     "client_id": "id",
                     "client_auth_method": "client_secret_post",
                     "client_secret": "secret",
@@ -122,18 +123,33 @@ class WellKnownTests(unittest.HomeserverTestCase):
         }
     )
     def test_client_well_known_msc3861_oauth_delegation(self) -> None:
-        channel = self.make_request(
-            "GET", "/.well-known/matrix/client", shorthand=False
+        # Patch the HTTP client to return the issuer metadata
+        req_mock = AsyncMock(
+            return_value={
+                "issuer": "https://issuer",
+                "account_management_uri": "https://my-account.issuer",
+            }
         )
+        self.hs.get_proxied_http_client().get_json = req_mock  # type: ignore[method-assign]
 
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(
-            channel.json_body,
-            {
-                "m.homeserver": {"base_url": "https://homeserver/"},
-                "org.matrix.msc2965.authentication": {
-                    "issuer": "https://issuer",
-                    "account": "https://my-account.issuer",
+        for _ in range(2):
+            channel = self.make_request(
+                "GET", "/.well-known/matrix/client", shorthand=False
+            )
+
+            self.assertEqual(channel.code, 200)
+            self.assertEqual(
+                channel.json_body,
+                {
+                    "m.homeserver": {"base_url": "https://homeserver/"},
+                    "org.matrix.msc2965.authentication": {
+                        "issuer": "https://issuer",
+                        "account": "https://my-account.issuer",
+                    },
                 },
-            },
+            )
+
+        # It should have been called exactly once, because it gets cached
+        req_mock.assert_called_once_with(
+            "https://issuer/.well-known/openid-configuration"
         )

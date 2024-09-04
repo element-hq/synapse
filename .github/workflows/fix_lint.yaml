@@ -29,9 +29,13 @@ jobs:
         with:
           install-project: "false"
 
-      - name: Run ruff
+      - name: Run ruff check
         continue-on-error: true
         run: poetry run ruff check --fix .
+
+      - name: Run ruff format
+        continue-on-error: true
+        run: poetry run ruff format --quiet .
 
       - run: cargo clippy --all-features --fix -- -D warnings
         continue-on-error: true

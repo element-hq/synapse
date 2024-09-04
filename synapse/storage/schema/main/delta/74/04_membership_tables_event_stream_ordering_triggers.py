@@ -24,6 +24,7 @@
 This migration adds triggers to the room membership tables to enforce consistency.
 Triggers cannot be expressed in .sql files, so we have to use a separate file.
 """
+
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine, Sqlite3Engine
 

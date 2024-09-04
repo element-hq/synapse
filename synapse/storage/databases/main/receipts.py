@@ -762,7 +762,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
 
             txn.execute(sql, args)
 
-            return [room_id for room_id, in txn]
+            return [room_id for (room_id,) in txn]
 
         results: List[str] = []
         for batch in batch_iter(room_ids, 1000):
@@ -1030,9 +1030,7 @@ class ReceiptsWorkerStore(SQLBaseStore):
             SELECT event_id WHERE room_id = ? AND stream_ordering IN (
                 SELECT max(stream_ordering) WHERE %s
             )
-        """ % (
-            clause,
-        )
+        """ % (clause,)
 
         txn.execute(sql, [room_id] + list(args))
         rows = txn.fetchall()

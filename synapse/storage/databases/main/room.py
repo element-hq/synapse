@@ -1608,9 +1608,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 FROM event_reports AS er
                 JOIN room_stats_state ON room_stats_state.room_id = er.room_id
                 {}
-                """.format(
-                where_clause
-            )
+                """.format(where_clause)
             txn.execute(sql, args)
             count = cast(Tuple[int], txn.fetchone())[0]
 

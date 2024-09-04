@@ -21,7 +21,7 @@
 #
 #
 
-""" This module is responsible for getting events from the DB for pagination
+"""This module is responsible for getting events from the DB for pagination
 and event streaming.
 
 The order it returns events in depend on whether we are streaming forwards or
@@ -1122,9 +1122,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                     AND e.stream_ordering > ? AND e.stream_ordering <= ?
                     %s
                 ORDER BY e.stream_ordering ASC
-            """ % (
-                ignore_room_clause,
-            )
+            """ % (ignore_room_clause,)
 
             txn.execute(sql, args)
 

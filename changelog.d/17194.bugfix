@@ -1,1 +1,0 @@
-Fix hierarchy returning 403 when room is accessible through federation. Contributed by Krishan (@kfiven).

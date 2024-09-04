@@ -183,10 +183,7 @@ class JoinedSyncResult:
         to tell if room needs to be part of the sync result.
         """
         return bool(
-            self.timeline
-            or self.state
-            or self.ephemeral
-            or self.account_data
+            self.timeline or self.state or self.ephemeral or self.account_data
             # nb the notification count does not, er, count: if there's nothing
             # else in the result, we don't need to send it.
         )
@@ -575,10 +572,10 @@ class SyncHandler:
         if timeout == 0 or since_token is None or full_state:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
-            result: Union[SyncResult, E2eeSyncResult] = (
-                await self.current_sync_for_user(
-                    sync_config, sync_version, since_token, full_state=full_state
-                )
+            result: Union[
+                SyncResult, E2eeSyncResult
+            ] = await self.current_sync_for_user(
+                sync_config, sync_version, since_token, full_state=full_state
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
@@ -673,10 +670,10 @@ class SyncHandler:
 
             # Go through the `/sync` v2 path
             if sync_version == SyncVersion.SYNC_V2:
-                sync_result: Union[SyncResult, E2eeSyncResult] = (
-                    await self.generate_sync_result(
-                        sync_config, since_token, full_state
-                    )
+                sync_result: Union[
+                    SyncResult, E2eeSyncResult
+                ] = await self.generate_sync_result(
+                    sync_config, since_token, full_state
                 )
             # Go through the MSC3575 Sliding Sync `/sync/e2ee` path
             elif sync_version == SyncVersion.E2EE_SYNC:
@@ -1488,13 +1485,16 @@ class SyncHandler:
                     # timeline here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[0].event_id,
-                        # we only want members!
-                        state_filter=StateFilter.from_types(
-                            (EventTypes.Member, member) for member in members_to_fetch
-                        ),
-                        await_full_state=False,
+                    state_ids = (
+                        await self._state_storage_controller.get_state_ids_for_event(
+                            batch.events[0].event_id,
+                            # we only want members!
+                            state_filter=StateFilter.from_types(
+                                (EventTypes.Member, member)
+                                for member in members_to_fetch
+                            ),
+                            await_full_state=False,
+                        )
                     )
             return state_ids
 
@@ -2166,18 +2166,18 @@ class SyncHandler:
 
             if push_rules_changed:
                 global_account_data = dict(global_account_data)
-                global_account_data[AccountDataTypes.PUSH_RULES] = (
-                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
-                )
+                global_account_data[
+                    AccountDataTypes.PUSH_RULES
+                ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
             global_account_data = dict(all_global_account_data)
-            global_account_data[AccountDataTypes.PUSH_RULES] = (
-                await self._push_rules_handler.push_rules_for_user(sync_config.user)
-            )
+            global_account_data[
+                AccountDataTypes.PUSH_RULES
+            ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(

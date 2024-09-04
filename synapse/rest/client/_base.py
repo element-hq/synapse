@@ -19,8 +19,8 @@
 #
 #
 
-"""This module contains base REST classes for constructing client v1 servlets.
-"""
+"""This module contains base REST classes for constructing client v1 servlets."""
+
 import logging
 import re
 from typing import Any, Awaitable, Callable, Iterable, Pattern, Tuple, TypeVar, cast

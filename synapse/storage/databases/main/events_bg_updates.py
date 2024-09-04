@@ -41,6 +41,7 @@ from synapse.storage.databases.main.events import (
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
 )
+from synapse.storage.databases.main.events_worker import DatabaseCorruptionError
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.types import Cursor
@@ -646,7 +647,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 room_ids = {row[0] for row in rows}
                 for room_id in room_ids:
                     txn.call_after(
-                        self.get_latest_event_ids_in_room.invalidate, (room_id,)  # type: ignore[attr-defined]
+                        self.get_latest_event_ids_in_room.invalidate,  # type: ignore[attr-defined]
+                        (room_id,),
                     )
 
             self.db_pool.simple_delete_many_txn(
@@ -1857,6 +1859,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             initial_phase = True
 
         last_room_id = progress.get("last_room_id", "")
+        last_user_id = progress.get("last_user_id", "")
         last_event_stream_ordering = progress["last_event_stream_ordering"]
 
         def _find_memberships_to_update_txn(
@@ -1887,11 +1890,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
-                    WHERE c.room_id > ?
-                    ORDER BY c.room_id ASC
+                    WHERE (c.room_id, c.user_id) > (?, ?)
+                    ORDER BY c.room_id ASC, c.user_id ASC
                     LIMIT ?
                     """,
-                    (last_room_id, batch_size),
+                    (last_room_id, last_user_id, batch_size),
                 )
             elif last_event_stream_ordering is not None:
                 # It's important to sort by `event_stream_ordering` *ascending* (oldest to
@@ -1993,6 +1996,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 WHERE
                     room_id = ?
                     AND m.user_id = ?
+                    AND (m.membership = ? OR m.membership = ?)
                     AND e.event_id != ?
                 ORDER BY e.topological_ordering DESC
                 LIMIT 1
@@ -2000,6 +2004,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (
                     room_id,
                     user_id,
+                    Membership.INVITE,
+                    Membership.KNOCK,
                     event_id,
                 ),
             )
@@ -2060,9 +2066,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
 
             # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-            sliding_sync_membership_snapshots_insert_map: (
-                SlidingSyncMembershipSnapshotSharedInsertValues
-            ) = {}
+            sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
             if membership == Membership.JOIN:
                 # If we're still joined, we can pull from current state.
                 current_state_ids_map: StateMap[
@@ -2081,9 +2085,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # have `current_state_events` and we should have some current state
                 # for each room
                 if current_state_ids_map:
-                    fetched_events = await self.get_events(
-                        current_state_ids_map.values()
-                    )
+                    try:
+                        fetched_events = await self.get_events(
+                            current_state_ids_map.values()
+                        )
+                    except DatabaseCorruptionError as e:
+                        logger.warning(
+                            "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                            room_id,
+                            e,
+                        )
+                        continue
 
                     current_state_map: StateMap[EventBase] = {
                         state_key: fetched_events[event_id]
@@ -2124,7 +2136,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         False
                     )
             elif membership in (Membership.INVITE, Membership.KNOCK) or (
-                membership == Membership.LEAVE and is_outlier
+                membership in (Membership.LEAVE, Membership.BAN) and is_outlier
             ):
                 invite_or_knock_event_id = membership_event_id
                 invite_or_knock_membership = membership
@@ -2135,15 +2147,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # us a consistent view of the room state regardless of your
                 # membership (i.e. the room shouldn't disappear if your using the
                 # `is_encrypted` filter and you leave).
-                if membership == Membership.LEAVE and is_outlier:
-                    invite_or_knock_event_id, invite_or_knock_membership = (
-                        await self.db_pool.runInteraction(
-                            "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
-                            _find_previous_membership_txn,
-                            room_id,
-                            user_id,
-                            membership_event_id,
-                        )
+                if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
+                    (
+                        invite_or_knock_event_id,
+                        invite_or_knock_membership,
+                    ) = await self.db_pool.runInteraction(
+                        "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
+                        _find_previous_membership_txn,
+                        room_id,
+                        user_id,
+                        membership_event_id,
                     )
 
                 # Pull from the stripped state on the invite/knock event
@@ -2182,7 +2195,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     await_full_state=False,
                 )
 
-                fetched_events = await self.get_events(state_ids_map.values())
+                try:
+                    fetched_events = await self.get_events(state_ids_map.values())
+                except DatabaseCorruptionError as e:
+                    logger.warning(
+                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                        room_id,
+                        e,
+                    )
+                    continue
 
                 state_map: StateMap[EventBase] = {
                     state_key: fetched_events[event_id]
@@ -2296,7 +2317,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         (
             room_id,
             _room_id_from_rooms_table,
-            _user_id,
+            user_id,
             _sender,
             _membership_event_id,
             _membership,
@@ -2308,8 +2329,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         progress = {
             "initial_phase": initial_phase,
             "last_room_id": room_id,
-            "last_event_stream_ordering": membership_event_stream_ordering,
+            "last_user_id": user_id,
+            "last_event_stream_ordering": last_event_stream_ordering,
         }
+        if not initial_phase:
+            progress["last_event_stream_ordering"] = membership_event_stream_ordering
 
         await self.db_pool.updates._background_update_progress(
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
@@ -2449,9 +2473,7 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 "progress_json": "{}",
             },
         )
-        depends_on = (
-            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
-        )
+        depends_on = _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
 
     # Now kick-off the background update to catch-up with what we missed while Synapse
     # was downgraded.

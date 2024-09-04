@@ -2557,13 +2557,13 @@ files = [
 
 [[package]]
 name = "towncrier"
-version = "24.7.1"
+version = "24.8.0"
 description = "Building newsfiles for your project."
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "towncrier-24.7.1-py3-none-any.whl", hash = "sha256:685e2a94335b5dc47537b4d3b449a25b18571ea85b07dcf6e8df31ba40f692dd"},
-    {file = "towncrier-24.7.1.tar.gz", hash = "sha256:57a057faedabcadf1a62f6f9bad726ae566c1f31a411338ddb8316993f583b3d"},
+    {file = "towncrier-24.8.0-py3-none-any.whl", hash = "sha256:9343209592b839209cdf28c339ba45792fbfe9775b5f9c177462fd693e127d8d"},
+    {file = "towncrier-24.8.0.tar.gz", hash = "sha256:013423ee7eed102b2f393c287d22d95f66f1a3ea10a4baa82d298001a7f18af3"},
 ]
 
 [package.dependencies]
@@ -2622,13 +2622,13 @@ urllib3 = ">=1.26.0"
 
 [[package]]
 name = "twisted"
-version = "24.7.0rc1"
+version = "24.7.0"
 description = "An asynchronous networking framework written in Python"
 optional = false
 python-versions = ">=3.8.0"
 files = [
-    {file = "twisted-24.7.0rc1-py3-none-any.whl", hash = "sha256:f37d6656fe4e2871fab29d8952ae90bd6ca8b48a9e4dfa1b348f4cd62e6ba0bb"},
-    {file = "twisted-24.7.0rc1.tar.gz", hash = "sha256:bbc4a2193ca34cfa32f626300746698a6d70fcd77d9c0b79a664c347e39634fc"},
+    {file = "twisted-24.7.0-py3-none-any.whl", hash = "sha256:734832ef98108136e222b5230075b1079dad8a3fc5637319615619a7725b0c81"},
+    {file = "twisted-24.7.0.tar.gz", hash = "sha256:5a60147f044187a127ec7da96d170d49bcce50c6fd36f594e60f4587eff4d394"},
 ]
 
 [package.dependencies]
@@ -2761,24 +2761,24 @@ files = [
 
 [[package]]
 name = "types-pillow"
-version = "10.2.0.20240520"
+version = "10.2.0.20240822"
 description = "Typing stubs for Pillow"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "types-Pillow-10.2.0.20240520.tar.gz", hash = "sha256:130b979195465fa1e1676d8e81c9c7c30319e8e95b12fae945e8f0d525213107"},
-    {file = "types_Pillow-10.2.0.20240520-py3-none-any.whl", hash = "sha256:33c36494b380e2a269bb742181bea5d9b00820367822dbd3760f07210a1da23d"},
+    {file = "types-Pillow-10.2.0.20240822.tar.gz", hash = "sha256:559fb52a2ef991c326e4a0d20accb3bb63a7ba8d40eb493e0ecb0310ba52f0d3"},
+    {file = "types_Pillow-10.2.0.20240822-py3-none-any.whl", hash = "sha256:d9dab025aba07aeb12fd50a6799d4eac52a9603488eca09d7662543983f16c5d"},
 ]
 
 [[package]]
 name = "types-psycopg2"
-version = "2.9.21.20240417"
+version = "2.9.21.20240819"
 description = "Typing stubs for psycopg2"
 optional = false
 python-versions = ">=3.8"
 files = [
-    {file = "types-psycopg2-2.9.21.20240417.tar.gz", hash = "sha256:05db256f4a459fb21a426b8e7fca0656c3539105ff0208eaf6bdaf406a387087"},
-    {file = "types_psycopg2-2.9.21.20240417-py3-none-any.whl", hash = "sha256:644d6644d64ebbe37203229b00771012fb3b3bddd507a129a2e136485990e4f8"},
+    {file = "types-psycopg2-2.9.21.20240819.tar.gz", hash = "sha256:4ed6b47464d6374fa64e5e3b234cea0f710e72123a4596d67ab50b7415a84666"},
+    {file = "types_psycopg2-2.9.21.20240819-py3-none-any.whl", hash = "sha256:c9192311c27d7ad561eef705f1b2df1074f2cdcf445a98a6a2fcaaaad43278cf"},
 ]
 
 [[package]]

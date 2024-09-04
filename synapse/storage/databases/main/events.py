@@ -429,9 +429,7 @@ class PersistEventsStore:
             if event_type == EventTypes.Member and self.is_mine_id(state_key)
         ]
 
-        membership_snapshot_shared_insert_values: (
-            SlidingSyncMembershipSnapshotSharedInsertValues
-        ) = {}
+        membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues = {}
         membership_infos_to_insert_membership_snapshots: List[
             SlidingSyncMembershipInfo
         ] = []
@@ -719,7 +717,7 @@ class PersistEventsStore:
             keyvalues={},
             retcols=("event_id",),
         )
-        already_persisted_events = {event_id for event_id, in rows}
+        already_persisted_events = {event_id for (event_id,) in rows}
         state_events = [
             event
             for event in state_events
@@ -1830,12 +1828,8 @@ class PersistEventsStore:
         if sliding_sync_table_changes.to_insert_membership_snapshots:
             # Update the `sliding_sync_membership_snapshots` table
             #
-            sliding_sync_snapshot_keys = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
-            )
-            sliding_sync_snapshot_values = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
-            )
+            sliding_sync_snapshot_keys = sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
+            sliding_sync_snapshot_values = sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
             # We need to insert/update regardless of whether we have
             # `sliding_sync_snapshot_keys` because there are other fields in the `ON
             # CONFLICT` upsert to run (see inherit case (explained in
@@ -1861,7 +1855,7 @@ class PersistEventsStore:
                 VALUES (
                     ?, ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?),
-                    (SELECT instance_name FROM events WHERE event_id = ?)
+                    (SELECT COALESCE(instance_name, 'master') FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
                 )
                 ON CONFLICT (room_id, user_id)
@@ -3361,7 +3355,7 @@ class PersistEventsStore:
         )
 
         potential_backwards_extremities.difference_update(
-            e for e, in existing_events_outliers
+            e for (e,) in existing_events_outliers
         )
 
         if potential_backwards_extremities:

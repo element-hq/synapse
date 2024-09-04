@@ -19,7 +19,8 @@
 #
 #
 
-""" This module contains REST servlets to do with rooms: /rooms/<paths> """
+"""This module contains REST servlets to do with rooms: /rooms/<paths>"""
+
 import logging
 import re
 from enum import Enum
