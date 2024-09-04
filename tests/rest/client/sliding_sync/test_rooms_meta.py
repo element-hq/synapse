@@ -211,7 +211,7 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         ]
     )
     def test_rooms_meta_when_joined_incremental_with_state_change(
-        self, test_description: str, include_state_in_required_state: bool
+        self, test_description: str, include_changed_state_in_required_state: bool
     ) -> None:
         """
         Test that the `rooms` `name` and `avatar` are included in an incremental sync
@@ -244,11 +244,12 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 1]],
-                    # Include some state so when we change the room name, the room comes
-                    # down in the incremental sync.
                     "required_state": (
-                        [[EventTypes.Name, ""]]
-                        if include_state_in_required_state
+                        [[EventTypes.Name, ""], [EventTypes.RoomAvatar, ""]]
+                        # Conditionally include the changed state in the
+                        # `required_state` to make sure whether we request it or not,
+                        # the new room name still flows down to the client.
+                        if include_changed_state_in_required_state
                         else []
                     ),
                     "timeline_limit": 0,
@@ -262,6 +263,13 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             room_id1,
             EventTypes.Name,
             {EventContentFields.ROOM_NAME: "my super duper room"},
+            tok=user2_tok,
+        )
+        # Update the room avatar URL
+        self.helper.send_state(
+            room_id1,
+            EventTypes.RoomAvatar,
+            {"url": "mxc://DUMMY_MEDIA_ID_UPDATED"},
             tok=user2_tok,
         )
 
@@ -278,8 +286,9 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "my super duper room",
             response_body["rooms"][room_id1],
         )
-        self.assertNotIn(
-            "avatar",
+        self.assertEqual(
+            response_body["rooms"][room_id1]["avatar"],
+            "mxc://DUMMY_MEDIA_ID_UPDATED",
             response_body["rooms"][room_id1],
         )
         self.assertNotIn(
