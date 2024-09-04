@@ -953,7 +953,7 @@ class SlidingSyncHandler:
         hero_room_state = [
             (EventTypes.Member, hero_user_id) for hero_user_id in hero_user_ids
         ]
-        meta_room_state = hero_room_state
+        meta_room_state = list(hero_room_state)
         if initial or name_changed:
             meta_room_state.append((EventTypes.Name, ""))
         if initial or avatar_changed:
