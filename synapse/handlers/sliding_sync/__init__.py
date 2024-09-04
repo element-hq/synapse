@@ -1042,6 +1042,7 @@ class SlidingSyncHandler:
         return SlidingSyncResult.RoomResult(
             name=room_name,
             avatar=room_avatar,
+            # TODO: These should also be excluded if they haven't changed
             heroes=heroes,
             is_dm=room_membership_for_user_at_to_token.is_dm,
             initial=initial,
@@ -1054,6 +1055,7 @@ class SlidingSyncHandler:
             unstable_expanded_timeline=unstable_expanded_timeline,
             num_live=num_live,
             bump_stamp=bump_stamp,
+            # TODO: These should also be excluded if they haven't changed
             joined_count=room_membership_summary.get(
                 Membership.JOIN, empty_membership_summary
             ).count,
