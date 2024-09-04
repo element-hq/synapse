@@ -1426,7 +1426,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
-        """Return if its safe to use the sliding sync membership tables."""
+        """Return if it's safe to use the sliding sync membership tables."""
 
         return await self.db_pool.updates.have_completed_background_updates(
             (
