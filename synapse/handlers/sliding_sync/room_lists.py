@@ -50,6 +50,7 @@ from synapse.storage.databases.main.state import (
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
 from synapse.storage.roommember import RoomsForUser, RoomsForUserSlidingSync
 from synapse.types import (
+    JsonMapping,
     MutableStateMap,
     PersistedEventPosition,
     RoomStreamToken,
@@ -301,6 +302,9 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
+        # Fetch the user tags for their rooms
+        room_tags = await self.store.get_tags_for_user(user_id)
+
         # Handle state resets in the from -> to token range.
         state_reset_rooms = (
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
@@ -349,6 +353,7 @@ class SlidingSyncRoomLists:
                             list_config.filters,
                             to_token,
                             dm_room_ids,
+                            room_tags,
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
@@ -1699,6 +1704,7 @@ class SlidingSyncRoomLists:
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
         dm_room_ids: AbstractSet[str],
+        room_tags: Mapping[str, Mapping[str, JsonMapping]],
     ) -> Dict[str, RoomsForUserSlidingSync]:
         """
         Filter rooms based on the sync request.
@@ -1710,6 +1716,7 @@ class SlidingSyncRoomLists:
             filters: Filters to apply
             to_token: We filter based on the state of the room at this token
             dm_room_ids: Set of room IDs which are DMs
+            room_tags: Mapping of room ID to tags
 
         Returns:
             A filtered dictionary of room IDs along with membership information in the
@@ -1795,9 +1802,21 @@ class SlidingSyncRoomLists:
                 # )
                 raise NotImplementedError()
 
-        if filters.tags is not None or filters.not_tags is not None:
+        if filters.tags is not None:
             with start_active_span("filters.tags"):
-                raise NotImplementedError()
+                filtered_room_id_set = {
+                    room_id
+                    for room_id in filtered_room_id_set
+                    if set(room_tags.get(room_id, [])) & set(filters.tags)
+                }
+
+        if filters.not_tags is not None:
+            with start_active_span("filters.not_tags"):
+                filtered_room_id_set = {
+                    room_id
+                    for room_id in filtered_room_id_set
+                    if not set(room_tags.get(room_id, [])) & set(filters.not_tags)
+                }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
