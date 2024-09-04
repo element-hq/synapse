@@ -3310,7 +3310,9 @@ class FilterRoomsTestCase(HomeserverTestCase):
             )
         )
 
-        self.assertEqual(foo_filtered_room_map.keys(), {untagged_room_id, bartag_room_id})
+        self.assertEqual(
+            foo_filtered_room_map.keys(), {untagged_room_id, bartag_room_id}
+        )
 
         # Try with not_tags=[foo,bar]
         foobar_filtered_room_map = self.get_success(
