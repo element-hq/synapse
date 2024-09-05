@@ -19,14 +19,10 @@
 #
 #
 from http import HTTPStatus
-from typing import Optional
-
-from parameterized import parameterized_class
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
-from synapse.api.room_versions import RoomVersions
 from synapse.events.utils import CANONICALJSON_MAX_INT, CANONICALJSON_MIN_INT
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
@@ -36,10 +32,9 @@ from synapse.util import Clock
 from tests.unittest import HomeserverTestCase
 
 
-class BasePowerLevelsTestCase(HomeserverTestCase):
+class PowerLevelsTestCase(HomeserverTestCase):
     """Tests that power levels are enforced in various situations"""
 
-    room_version: Optional[str] = None
     servlets = [
         admin.register_servlets,
         room.register_servlets,
@@ -63,9 +58,7 @@ class BasePowerLevelsTestCase(HomeserverTestCase):
 
         # Create a room
         self.room_id = self.helper.create_room_as(
-            self.admin_user_id,
-            tok=self.admin_access_token,
-            room_version=self.room_version,
+            self.admin_user_id, tok=self.admin_access_token
         )
 
         # Invite the other users
@@ -107,8 +100,6 @@ class BasePowerLevelsTestCase(HomeserverTestCase):
             tok=self.admin_access_token,
         )
 
-
-class PowerLevelsTestCase(BasePowerLevelsTestCase):
     def test_non_admins_cannot_enable_room_encryption(self) -> None:
         # have the mod try to enable room encryption
         self.helper.send_state(
@@ -158,9 +149,7 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
     def test_non_admins_cannot_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id,
-            tok=self.admin_access_token,
-            room_version=self.room_version,
+            self.admin_user_id, tok=self.admin_access_token
         )
 
         # have the mod try to send a tombstone event
@@ -214,9 +203,7 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
     def test_admins_can_tombstone_room(self) -> None:
         # Create another room that will serve as our "upgraded room"
         self.upgraded_room_id = self.helper.create_room_as(
-            self.admin_user_id,
-            tok=self.admin_access_token,
-            room_version=self.room_version,
+            self.admin_user_id, tok=self.admin_access_token
         )
 
         # have the admin try to send a tombstone event
@@ -304,78 +291,5 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
         self.assertEqual(
             body["errcode"],
             Codes.BAD_JSON,
-            body,
-        )
-
-
-@parameterized_class(
-    ("room_version", "allows_owned_state"),
-    [
-        (rv.identifier, rv.msc3757_enabled)
-        for rv in [
-            RoomVersions.V11,
-            RoomVersions.MSC3757v11,
-        ]
-    ],
-)
-class MSC3757PowerLevelsTestCase(BasePowerLevelsTestCase):
-    _STATE_EVENT_TYPE = "org.matrix.msc3757.test"
-
-    allows_owned_state: bool
-
-    def test_can_set_own_state(self) -> None:
-        self.helper.send_state(
-            self.room_id,
-            self._STATE_EVENT_TYPE,
-            {},
-            state_key=f"{self.mod_user_id}_suffix",
-            tok=self.mod_access_token,
-            expect_code=(
-                HTTPStatus.OK if self.allows_owned_state else HTTPStatus.FORBIDDEN
-            ),
-        )
-
-    def test_admins_can_set_others_state(self) -> None:
-        self.helper.send_state(
-            self.room_id,
-            self._STATE_EVENT_TYPE,
-            {},
-            state_key=f"{self.mod_user_id}_suffix",
-            tok=self.admin_access_token,
-            expect_code=(
-                HTTPStatus.OK if self.allows_owned_state else HTTPStatus.FORBIDDEN
-            ),
-        )
-
-    def test_non_admins_cannot_set_others_state(self) -> None:
-        self.helper.send_state(
-            self.room_id,
-            self._STATE_EVENT_TYPE,
-            {},
-            state_key=f"{self.admin_user_id}_suffix",
-            tok=self.mod_access_token,
-            expect_code=HTTPStatus.FORBIDDEN,
-        )
-
-    def test_cannot_set_state_with_non_user_id_key(self) -> None:
-        if self.allows_owned_state:
-            expect_code = HTTPStatus.BAD_REQUEST
-            errcode = Codes.BAD_JSON
-        else:
-            expect_code = HTTPStatus.FORBIDDEN
-            errcode = Codes.FORBIDDEN
-
-        body = self.helper.send_state(
-            self.room_id,
-            self._STATE_EVENT_TYPE,
-            {},
-            state_key=f"{self.admin_user_id}@suffix",
-            tok=self.admin_access_token,
-            expect_code=expect_code,
-        )
-
-        self.assertEqual(
-            body["errcode"],
-            errcode,
             body,
         )
