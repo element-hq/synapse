@@ -6,6 +6,6 @@ worker_listeners:
     port: 8085
     x_forwarded: true
     resources:
-      - names: [media]
+      - names: [media, client]
 
 worker_log_config: /etc/matrix-synapse/media-worker-log.yaml
