@@ -703,7 +703,12 @@ class HaveSentRoom(Generic[T]):
 
     @staticmethod
     def never() -> "HaveSentRoom[T]":
-        return HaveSentRoom(HaveSentRoomFlag.NEVER, None)
+        # We use a singleton to avoid repeatedly instantiating new `never`
+        # values. The cast is redundant depending on `T`, hence the ignore.
+        return cast("HaveSentRoom[T]", _HAVE_SENT_ROOM_NEVER)  # type: ignore[redundant-cast]
+
+
+_HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
