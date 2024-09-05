@@ -1879,6 +1879,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             ]
         ]:
             # Fetch the set of event IDs that we want to update
+            #
+            # We skip over rows which we've already handled, i.e. have a
+            # matching row in `sliding_sync_membership_snapshots` with the same
+            # room, user and event ID.
+            #
+            # We also ignore rooms that the user has left themselves (i.e. not
+            # kicked). This is to avoid having to port lots of old rooms that we
+            # will never send down sliding sync (as we exclude such rooms from
+            # initial syncs).
 
             if initial_phase:
                 # There are some old out-of-band memberships (before
@@ -1886,10 +1895,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # the corresponding room stored in the `rooms` table`. We use `LEFT JOIN
                 # rooms AS r USING (room_id)` to find the rooms missing from `rooms` and
                 # insert a row for them below.
-                #
-                # We skip over rows which we've already handled, i.e. have a matching row
-                # in `sliding_sync_membership_snapshots` with the same room, user and
-                # event ID.
                 txn.execute(
                     """
                     SELECT
@@ -1925,10 +1930,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # `c.room_id` is duplicated to make it match what we're doing in the
                 # `initial_phase`. But we can avoid doing the extra `rooms` table join
                 # because we can assume all of these new events won't have this problem.
-                #
-                # We skip over rows which we've already handled, i.e. have a matching row
-                # in `sliding_sync_membership_snapshots` with the same room, user and
-                # event ID.
                 txn.execute(
                     """
                     SELECT
