@@ -22,12 +22,12 @@ from typing import TYPE_CHECKING, Any, Dict, Type, TypeVar
 
 import jsonschema
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import HAS_PYDANTIC_V2, BaseModel
 
 if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import BaseModel, ValidationError, parse_obj_as
+    from pydantic.v1 import ValidationError, parse_obj_as
 else:
-    from pydantic import BaseModel, ValidationError, parse_obj_as
+    from pydantic import ValidationError, parse_obj_as
 
 from synapse.config._base import ConfigError
 from synapse.types import JsonDict, StrSequence

@@ -20,7 +20,7 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import HAS_PYDANTIC_V2, conint, constr
 
 if TYPE_CHECKING or HAS_PYDANTIC_V2:
     from pydantic.v1 import (
@@ -28,8 +28,6 @@ if TYPE_CHECKING or HAS_PYDANTIC_V2:
         StrictBool,
         StrictInt,
         StrictStr,
-        conint,
-        constr,
         validator,
     )
 else:
@@ -38,8 +36,6 @@ else:
         StrictBool,
         StrictInt,
         StrictStr,
-        conint,
-        constr,
         validator,
     )
 
@@ -384,7 +380,7 @@ class SlidingSyncBody(RequestBodyModel):
         receipts: Optional[ReceiptsExtension] = None
         typing: Optional[TypingExtension] = None
 
-    conn_id: Optional[str]
+    conn_id: Optional[StrictStr]
 
     # mypy workaround via https://github.com/pydantic/pydantic/issues/156#issuecomment-1130883884
     if TYPE_CHECKING:

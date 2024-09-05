@@ -19,6 +19,8 @@
 #
 #
 
+from typing import TYPE_CHECKING
+
 from packaging.version import Version
 
 try:
@@ -30,4 +32,9 @@ except ImportError:
 
 HAS_PYDANTIC_V2: bool = Version(pydantic_version).major == 2
 
-__all__ = ("HAS_PYDANTIC_V2",)
+if TYPE_CHECKING or HAS_PYDANTIC_V2:
+    from pydantic.v1 import BaseModel, conbytes, confloat, conint, constr
+else:
+    from pydantic import BaseModel, conbytes, confloat, conint, constr
+
+__all__ = ("HAS_PYDANTIC_V2", "BaseModel", "constr", "conbytes", "conint", "confloat")

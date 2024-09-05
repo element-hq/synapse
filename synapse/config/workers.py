@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import HAS_PYDANTIC_V2, BaseModel
 
 if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import BaseModel, Extra, StrictBool, StrictInt, StrictStr
+    from pydantic.v1 import Extra, StrictBool, StrictInt, StrictStr
 else:
-    from pydantic import BaseModel, Extra, StrictBool, StrictInt, StrictStr
+    from pydantic import Extra, StrictBool, StrictInt, StrictStr
 
 from synapse.config._base import (
     Config,

@@ -24,12 +24,12 @@ import random
 from typing import TYPE_CHECKING, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import HAS_PYDANTIC_V2, constr
 
 if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import StrictBool, StrictStr, constr
+    from pydantic.v1 import StrictBool, StrictStr
 else:
-    from pydantic import StrictBool, StrictStr, constr
+    from pydantic import StrictBool, StrictStr
 
 import attr
 from typing_extensions import Literal
