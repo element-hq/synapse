@@ -353,10 +353,8 @@ class SlidingSyncRoomLists:
 
                     # Find which rooms are partially stated and may need to be filtered out
                     # depending on the `required_state` requested (see below).
-                    partial_state_room_map = (
-                        await self.store.is_partial_state_room_batched(
-                            filtered_sync_room_map.keys()
-                        )
+                    partial_state_rooms = await self.store.get_partial_rooms_for_user(
+                        user_id
                     )
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
@@ -369,7 +367,7 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
-                            if not partial_state_room_map.get(room_id)
+                            if room_id not in partial_state_rooms
                         }
 
                     all_rooms.update(filtered_sync_room_map)
@@ -429,8 +427,8 @@ class SlidingSyncRoomLists:
             with start_active_span("assemble_room_subscriptions"):
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
-                partial_state_room_map = await self.store.is_partial_state_room_batched(
-                    sync_config.room_subscriptions.keys()
+                partial_state_rooms = await self.store.get_partial_rooms_for_user(
+                    user_id
                 )
 
                 for (
@@ -451,7 +449,7 @@ class SlidingSyncRoomLists:
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
                     if room_sync_config.must_await_full_state(self.is_mine_id):
-                        if partial_state_room_map.get(room_id):
+                        if room_id in partial_state_rooms:
                             continue
 
                     all_rooms.add(room_id)

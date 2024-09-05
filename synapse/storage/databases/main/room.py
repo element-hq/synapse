@@ -1382,6 +1382,25 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         partial_state_rooms = {row[0] for row in rows}
         return {room_id: room_id in partial_state_rooms for room_id in room_ids}
 
+    @cached(max_entries=10000, iterable=True)
+    async def get_partial_rooms_for_user(self, user_id: str) -> AbstractSet[str]:
+        """Get any "partial-state" rooms which the user is in."""
+
+        def _get_partial_rooms_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> AbstractSet[str]:
+            sql = """
+                SELECT room_id FROM partial_state_rooms
+                INNER JOIN local_current_membership USING (room_id)
+                WHERE user_id = ?
+            """
+            txn.execute(sql, (user_id,))
+            return {room_id for (room_id,) in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_partial_rooms_for_user", _get_partial_rooms_for_user_txn
+        )
+
     async def get_join_event_id_and_device_lists_stream_id_for_partial_state(
         self, room_id: str
     ) -> Tuple[str, int]:
@@ -2341,6 +2360,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms_for_user)
 
     async def write_partial_state_rooms_join_event_id(
         self,
@@ -2562,6 +2582,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms_for_user)
 
         DatabasePool.simple_insert_txn(
             txn,
