@@ -2092,7 +2092,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 room_version_id is not None
                 and room_version_id not in KNOWN_ROOM_VERSIONS
             ):
-                # Ignore rooms with unknown room versions (these were experimental rooms).
+                # Ignore rooms with unknown room versions (these were
+                # experimental rooms, that we no longer support).
                 continue
 
             # There are some old out-of-band memberships (before
