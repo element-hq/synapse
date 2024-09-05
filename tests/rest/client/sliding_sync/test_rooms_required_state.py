@@ -735,14 +735,13 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # The list should include both rooms now because we don't need full state
-        for list_key in response_body["lists"].keys():
-            self.assertIncludes(
-                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
-                {room_id2, room_id1},
-                exact=True,
-                message=f"Expected all rooms to show up for list_key={list_key}. Response "
-                + str(response_body["lists"][list_key]),
-            )
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id2, room_id1},
+            exact=True,
+            message="Expected all rooms to show up. Response "
+            + str(response_body["rooms"]),
+        )
 
         # Take each of the list variants and apply them to room subscriptions to make
         # sure the same rules apply
@@ -826,14 +825,13 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
         # Make sure the list includes room1 but room2 is excluded because it's still
         # partially-stated
-        for list_key in response_body["lists"].keys():
-            self.assertIncludes(
-                set(response_body["lists"][list_key]["ops"][0]["room_ids"]),
-                {room_id1},
-                exact=True,
-                message=f"Expected only fully-stated rooms to show up for list_key={list_key}. Response "
-                + str(response_body["lists"][list_key]),
-            )
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id1},
+            exact=True,
+            message="Expected only fully-stated rooms to show up. Response "
+            + str(response_body["rooms"]),
+        )
 
         # Take each of the list variants and apply them to room subscriptions to make
         # sure the same rules apply

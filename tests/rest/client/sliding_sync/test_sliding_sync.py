@@ -348,47 +348,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         return room_id
 
-    def test_sync_list(self) -> None:
-        """
-        Test that room IDs show up in the Sliding Sync `lists`
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-
-        room_id = self.helper.create_room_as(user1_id, tok=user1_tok, is_public=True)
-
-        # Make the Sliding Sync request
-        sync_body = {
-            "lists": {
-                "foo-list": {
-                    "ranges": [[0, 99]],
-                    "required_state": [],
-                    "timeline_limit": 1,
-                }
-            }
-        }
-        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-
-        # Make sure it has the foo-list we requested
-        self.assertListEqual(
-            list(response_body["lists"].keys()),
-            ["foo-list"],
-            response_body["lists"].keys(),
-        )
-
-        # Make sure the list includes the room we are joined to
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [room_id],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
-
     def test_wait_for_sync_token(self) -> None:
         """
         Test that worker will wait until it catches up to the given token
@@ -622,57 +581,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["lists"].keys(),
         )
 
-        # Make sure the lists have the correct rooms
-        self.assertListEqual(
-            list(response_body["lists"]["all"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [
-                        invite_room_id,
-                        room_id,
-                        invited_dm_room_id,
-                        joined_dm_room_id,
-                    ],
-                }
-            ],
-            list(response_body["lists"]["all"]),
-        )
-        self.assertListEqual(
-            list(response_body["lists"]["dms"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [invited_dm_room_id, joined_dm_room_id],
-                }
-            ],
-            list(response_body["lists"]["dms"]),
-        )
-        self.assertListEqual(
-            list(response_body["lists"]["non-dms"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [invite_room_id, room_id],
-                }
-            ],
-            list(response_body["lists"]["non-dms"]),
-        )
-        self.assertListEqual(
-            list(response_body["lists"]["room-invites"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [invite_room_id],
-                }
-            ],
-            list(response_body["lists"]["room-invites"]),
-        )
-
         # Ensure DM's are correctly marked
         self.assertDictEqual(
             {
@@ -756,28 +664,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             channel.json_body["lists"].keys(),
         )
 
-        # Make sure the lists have the correct rooms
-        self.assertListEqual(
-            list(channel.json_body["lists"]["all-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id, room_id],
-                }
-            ],
-        )
-        self.assertListEqual(
-            list(channel.json_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id],
-                }
-            ],
-        )
-
         # Everyone leaves the encrypted space room
         self.helper.leave(space_room_id, user1_id, tok=user1_tok)
         self.helper.leave(space_room_id, user2_id, tok=user2_tok)
@@ -808,28 +694,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
-
-        # Make sure the lists have the correct rooms even though we `newly_left`
-        self.assertListEqual(
-            list(channel.json_body["lists"]["all-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id, room_id],
-                }
-            ],
-        )
-        self.assertListEqual(
-            list(channel.json_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id],
-                }
-            ],
-        )
 
     def test_sort_list(self) -> None:
         """
@@ -866,19 +730,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["lists"].keys(),
         )
 
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [room_id2, room_id1, room_id3],
-                }
-            ],
-            response_body["lists"]["foo-list"],
-        )
-
     def test_sliced_windows(self) -> None:
         """
         Test that the `lists` `ranges` are sliced correctly. Both sides of each range
@@ -909,17 +760,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ["foo-list"],
             response_body["lists"].keys(),
         )
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 0],
-                    "room_ids": [room_id3],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        # Make sure the rooms are as we expect
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id3},
+            exact=True,
         )
 
         # Make the Sliding Sync request for the first two rooms
@@ -940,17 +785,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ["foo-list"],
             response_body["lists"].keys(),
         )
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    "room_ids": [room_id3, room_id2],
-                }
-            ],
-            response_body["lists"]["foo-list"],
+        # Make sure the rooms are as we expect
+        self.assertIncludes(
+            set(response_body["rooms"].keys()),
+            {room_id3, room_id2},
+            exact=True,
         )
 
     def test_rooms_with_no_updates_do_not_come_down_incremental_sync(self) -> None:
