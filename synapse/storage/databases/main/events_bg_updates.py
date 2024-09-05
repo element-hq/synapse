@@ -1595,17 +1595,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # starve disk usage while this goes on.
             #
             # We upsert in case we have to run this multiple times.
-            #
-            # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
             txn.execute(
                 """
                 INSERT INTO sliding_sync_joined_rooms_to_recalculate
                     (room_id)
-                SELECT room_id FROM rooms WHERE ?
+                SELECT DISTINCT room_id FROM local_current_membership
+                WHERE membership = 'join'
                 ON CONFLICT (room_id)
                 DO NOTHING;
                 """,
-                (True,),
             )
 
         await self.db_pool.runInteraction(
