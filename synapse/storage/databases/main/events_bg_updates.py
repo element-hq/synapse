@@ -1687,7 +1687,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if not current_state_ids_map:
                 continue
 
-            fetched_events = await self.get_events(current_state_ids_map.values())
+            try:
+                fetched_events = await self.get_events(current_state_ids_map.values())
+            except (DatabaseCorruptionError, InvalidEventError) as e:
+                logger.warning(
+                    "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                    room_id,
+                    e,
+                )
+                continue
 
             current_state_map: StateMap[EventBase] = {
                 state_key: fetched_events[event_id]
