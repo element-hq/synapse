@@ -2183,9 +2183,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     # in the events table though. We'll just say that we don't
                     # know the state for these rooms and continue on with our
                     # day.
-                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
-                        False
-                    )
+                    sliding_sync_membership_snapshots_insert_map = {
+                        "has_known_state": False,
+                        "room_type": None,
+                        "room_name": None,
+                        "is_encrypted": False,
+                    }
             elif membership in (Membership.INVITE, Membership.KNOCK) or (
                 membership in (Membership.LEAVE, Membership.BAN) and is_outlier
             ):
@@ -2243,7 +2246,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     # We couldn't find any state for the membership, so we just have to
                     # leave it as empty.
                     sliding_sync_membership_snapshots_insert_map = {
-                        "has_known_state": False
+                        "has_known_state": False,
+                        "room_type": None,
+                        "room_name": None,
+                        "is_encrypted": False,
                     }
 
                 # We should have some insert values for each room, even if no
