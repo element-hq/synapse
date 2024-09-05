@@ -449,6 +449,7 @@ class SlidingSyncHandler:
 
         return state_map
 
+    @trace
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
@@ -839,13 +840,13 @@ class SlidingSyncHandler:
                 required_state_filter = StateFilter.all()
             else:
                 required_state_types: List[Tuple[str, Optional[str]]] = []
+                num_wild_state_keys = 0
+                lazy_load_room_members = False
+                num_others = 0
                 for (
                     state_type,
                     state_key_set,
                 ) in room_sync_config.required_state_map.items():
-                    num_wild_state_keys = 0
-                    lazy_load_room_members = False
-                    num_others = 0
                     for state_key in state_key_set:
                         if state_key == StateValues.WILDCARD:
                             num_wild_state_keys += 1
@@ -877,19 +878,19 @@ class SlidingSyncHandler:
                             num_others += 1
                             required_state_types.append((state_type, state_key))
 
-                    set_tag(
-                        SynapseTags.FUNC_ARG_PREFIX
-                        + "required_state_wildcard_state_key_count",
-                        num_wild_state_keys,
-                    )
-                    set_tag(
-                        SynapseTags.FUNC_ARG_PREFIX + "required_state_lazy",
-                        lazy_load_room_members,
-                    )
-                    set_tag(
-                        SynapseTags.FUNC_ARG_PREFIX + "required_state_other_count",
-                        num_others,
-                    )
+                set_tag(
+                    SynapseTags.FUNC_ARG_PREFIX
+                    + "required_state_wildcard_state_key_count",
+                    num_wild_state_keys,
+                )
+                set_tag(
+                    SynapseTags.FUNC_ARG_PREFIX + "required_state_lazy",
+                    lazy_load_room_members,
+                )
+                set_tag(
+                    SynapseTags.FUNC_ARG_PREFIX + "required_state_other_count",
+                    num_others,
+                )
 
                 required_state_filter = StateFilter.from_types(required_state_types)
 
