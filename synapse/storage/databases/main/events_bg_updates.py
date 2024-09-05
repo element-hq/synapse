@@ -1728,10 +1728,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 + "given we pulled the room out of `current_state_events`"
             )
             most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
-            assert most_recent_event_stream_ordering > 0, (
-                "We should have at-least one event in the room (our own join membership event for example) "
-                + "that isn't backfilled (negative `stream_ordering`)  if we are joined to the room."
-            )
+
             # Figure out the latest `bump_stamp` in the room. This could be `None` for a
             # federated room you just joined where all of events are still `outliers` or
             # backfilled history. In the Sliding Sync API, we default to the user's
