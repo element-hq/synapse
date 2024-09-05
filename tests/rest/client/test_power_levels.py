@@ -313,8 +313,8 @@ class PowerLevelsTestCase(BasePowerLevelsTestCase):
     [
         (rv.identifier, rv.msc3757_enabled)
         for rv in [
-            RoomVersions.V10,
-            RoomVersions.MSC3757v10,
+            RoomVersions.V11,
+            RoomVersions.MSC3757v11,
         ]
     ],
 )
