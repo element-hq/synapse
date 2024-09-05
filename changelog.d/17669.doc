@@ -1,0 +1,1 @@
+Fix media worker documentation, since it only serves the new authenticated media endpoints if it is configured for it. Contributed by Johannes Krude (@johannes-krude).
