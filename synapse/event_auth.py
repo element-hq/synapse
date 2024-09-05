@@ -825,11 +825,12 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
                     "State key neither equals a valid user ID, nor starts with one plus an underscore",
                     errcode=Codes.BAD_JSON,
                 )
-            if state_key_user_id == event.user_id:
-                # sender is owner of the state key, allow
-                return True
-            if user_level > get_user_power_level(state_key_user_id, auth_events):
-                # sender has higher PL than the owner of the state key, allow
+            if (
+                # sender is owner of the state key
+                state_key_user_id == event.user_id
+                # sender has higher PL than the owner of the state key
+                or user_level > get_user_power_level(state_key_user_id, auth_events)
+            ):
                 return True
         raise AuthError(403, "You are not allowed to set others state")
 
