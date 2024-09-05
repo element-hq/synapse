@@ -44,6 +44,7 @@ from synapse.storage.databases.main.events import (
 from synapse.storage.databases.main.events_worker import DatabaseCorruptionError
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
@@ -2370,24 +2371,42 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
                 # We need to find the `forgotten` value during the transaction because
                 # we can't risk inserting stale data.
-                txn.execute(
-                    """
-                    UPDATE sliding_sync_membership_snapshots
-                    SET
-                        forgotten = m.forgotten
-                    FROM room_memberships AS m
-                    WHERE sliding_sync_membership_snapshots.room_id = ?
-                        AND sliding_sync_membership_snapshots.user_id = ?
-                        AND membership_event_id = ?
-                        AND membership_event_id = m.event_id
-                        AND m.event_id IS NOT NULL
-                    """,
-                    (
-                        room_id,
-                        user_id,
-                        membership_event_id,
-                    ),
-                )
+                if isinstance(txn.database_engine, PostgresEngine):
+                    txn.execute(
+                        """
+                        UPDATE sliding_sync_membership_snapshots
+                        SET
+                            forgotten = m.forgotten
+                        FROM room_memberships AS m
+                        WHERE sliding_sync_membership_snapshots.room_id = ?
+                            AND sliding_sync_membership_snapshots.user_id = ?
+                            AND membership_event_id = ?
+                            AND membership_event_id = m.event_id
+                            AND m.event_id IS NOT NULL
+                        """,
+                        (
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                        ),
+                    )
+                else:
+                    # SQLite doesn't support UPDATE FROM before 3.33.0, so we do
+                    # this via sub-selects.
+                    txn.execute(
+                        """
+                        UPDATE sliding_sync_membership_snapshots
+                        SET
+                            forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
+                        WHERE room_id = ? and user_id = ? AND membership_event_id = ?
+                        """,
+                        (
+                            membership_event_id,
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                        ),
+                    )
 
         await self.db_pool.runInteraction(
             "sliding_sync_membership_snapshots_bg_update", _fill_table_txn
