@@ -967,29 +967,27 @@ class SlidingSyncHandler:
                     )
                 )
 
+        # Figure out the last bump event in the room
+        last_bump_event_result = (
+            await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                room_id,
+                to_token.room_key,
+                event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+            )
+        )
+
         # By default, just choose the membership event position
         bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+        # But if we found a bump event, use that instead
+        if last_bump_event_result is not None:
+            _, new_bump_event_pos = last_bump_event_result
 
-        # Figure out the last bump event in the room if we're in the room.
-        if room_membership_for_user_at_to_token.membership == Membership.JOIN:
-            last_bump_event_result = (
-                await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                    room_id,
-                    to_token.room_key,
-                    event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
-                )
-            )
-
-            # But if we found a bump event, use that instead
-            if last_bump_event_result is not None:
-                _, new_bump_event_pos = last_bump_event_result
-
-                # If we've just joined a remote room, then the last bump event may
-                # have been backfilled (and so have a negative stream ordering).
-                # These negative stream orderings can't sensibly be compared, so
-                # instead we use the membership event position.
-                if new_bump_event_pos.stream > 0:
-                    bump_stamp = new_bump_event_pos.stream
+            # If we've just joined a remote room, then the last bump event may
+            # have been backfilled (and so have a negative stream ordering).
+            # These negative stream orderings can't sensibly be compared, so
+            # instead we use the membership event position.
+            if new_bump_event_pos.stream > 0:
+                bump_stamp = new_bump_event_pos.stream
 
         unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
