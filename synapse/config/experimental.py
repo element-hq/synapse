@@ -447,6 +447,3 @@ class ExperimentalConfig(Config):
 
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
-
-        # MSC4156: Migrate server_name to via
-        self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)
