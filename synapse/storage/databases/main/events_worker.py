@@ -98,6 +98,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class DatabaseCorruptionError(RuntimeError):
+    """We found an event in the DB that has a persisted event ID that doesn't
+    match its computed event ID."""
+
+    def __init__(
+        self, room_id: str, persisted_event_id: str, computed_event_id: str
+    ) -> None:
+        self.room_id = room_id
+        self.persisted_event_id = persisted_event_id
+        self.computed_event_id = computed_event_id
+
+        message = (
+            f"Database corruption: Event {persisted_event_id} in room {room_id} "
+            f"from the database appears to have been modified (calculated "
+            f"event id {computed_event_id})"
+        )
+
+        super().__init__(message)
+
+
 # These values are used in the `enqueue_event` and `_fetch_loop` methods to
 # control how we batch/bulk fetch events from the database.
 # The values are plucked out of thing air to make initial sync run faster
@@ -457,6 +477,8 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Optional[EventBase]:
         """Get an event from the database by event_id.
 
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_id: The event_id of the event to fetch
 
@@ -511,6 +533,10 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Dict[str, EventBase]:
         """Get events from the database
 
+        Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_ids: The event_ids of the events to fetch
 
@@ -552,6 +578,8 @@ class EventsWorkerStore(SQLBaseStore):
         as given by `event_ids` arg.
 
         Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
 
         Args:
             event_ids: The event_ids of the events to fetch
@@ -1356,10 +1384,8 @@ class EventsWorkerStore(SQLBaseStore):
             if original_ev.event_id != event_id:
                 # it's difficult to see what to do here. Pretty much all bets are off
                 # if Synapse cannot rely on the consistency of its database.
-                raise RuntimeError(
-                    f"Database corruption: Event {event_id} in room {d['room_id']} "
-                    f"from the database appears to have been modified (calculated "
-                    f"event id {original_ev.event_id})"
+                raise DatabaseCorruptionError(
+                    d["room_id"], event_id, original_ev.event_id
                 )
 
             event_map[event_id] = original_ev
@@ -1639,7 +1665,7 @@ class EventsWorkerStore(SQLBaseStore):
                 txn.database_engine, "e.event_id", event_ids
             )
             txn.execute(sql + clause, args)
-            found_events = {eid for eid, in txn}
+            found_events = {eid for (eid,) in txn}
 
             # ... and then we can update the results for each key
             return {eid: (eid in found_events) for eid in event_ids}
@@ -1838,9 +1864,9 @@ class EventsWorkerStore(SQLBaseStore):
                 " LIMIT ?"
             )
             txn.execute(sql, (-last_id, -current_id, instance_name, limit))
-            new_event_updates: List[Tuple[int, Tuple[str, str, str, str, str, str]]] = (
-                []
-            )
+            new_event_updates: List[
+                Tuple[int, Tuple[str, str, str, str, str, str]]
+            ] = []
             row: Tuple[int, str, str, str, str, str, str]
             # Type safety: iterating over `txn` yields `Tuple`, i.e.
             # `Tuple[Any, ...]` of arbitrary length. Mypy detects assigning a

@@ -416,7 +416,7 @@ class EventsPersistenceStorageController:
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "backfilled", str(backfilled))
 
         async def enqueue(
-            item: Tuple[str, List[Tuple[EventBase, EventContext]]]
+            item: Tuple[str, List[Tuple[EventBase, EventContext]]],
         ) -> Dict[str, str]:
             room_id, evs_ctxs = item
             return await self._event_persist_queue.add_to_queue(
@@ -502,8 +502,15 @@ class EventsPersistenceStorageController:
         """
         state = await self._calculate_current_state(room_id)
         delta = await self._calculate_state_delta(room_id, state)
+        sliding_sync_table_changes = (
+            await self.persist_events_store._calculate_sliding_sync_table_changes(
+                room_id, [], delta
+            )
+        )
 
-        await self.persist_events_store.update_current_state(room_id, delta)
+        await self.persist_events_store.update_current_state(
+            room_id, delta, sliding_sync_table_changes
+        )
 
     async def _calculate_current_state(self, room_id: str) -> StateMap[str]:
         """Calculate the current state of a room, based on the forward extremities
@@ -785,9 +792,9 @@ class EventsPersistenceStorageController:
         )
 
         # Remove any events which are prev_events of any existing events.
-        existing_prevs: Collection[str] = (
-            await self.persist_events_store._get_events_which_are_prevs(result)
-        )
+        existing_prevs: Collection[
+            str
+        ] = await self.persist_events_store._get_events_which_are_prevs(result)
         result.difference_update(existing_prevs)
 
         # Finally handle the case where the new events have soft-failed prev

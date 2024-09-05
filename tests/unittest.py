@@ -272,8 +272,8 @@ class TestCase(unittest.TestCase):
 
     def assertIncludes(
         self,
-        actual_items: AbstractSet[str],
-        expected_items: AbstractSet[str],
+        actual_items: AbstractSet[TV],
+        expected_items: AbstractSet[TV],
         exact: bool = False,
         message: Optional[str] = None,
     ) -> None:
@@ -457,7 +457,9 @@ class HomeserverTestCase(TestCase):
                 # Type ignore: mypy doesn't like us assigning to methods.
                 self.hs.get_auth().get_user_by_req = get_requester  # type: ignore[method-assign]
                 self.hs.get_auth().get_user_by_access_token = get_requester  # type: ignore[method-assign]
-                self.hs.get_auth().get_access_token_from_request = Mock(return_value=token)  # type: ignore[method-assign]
+                self.hs.get_auth().get_access_token_from_request = Mock(  # type: ignore[method-assign]
+                    return_value=token
+                )
 
         if self.needs_threadpool:
             self.reactor.threadpool = ThreadPool()  # type: ignore[assignment]

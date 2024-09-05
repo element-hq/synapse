@@ -230,6 +230,8 @@ class EventContentFields:
 
     ROOM_NAME: Final = "name"
 
+    MEMBERSHIP: Final = "membership"
+
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"
 
@@ -244,6 +246,8 @@ class EventContentFields:
 
     # `m.room.encryption`` algorithm field
     ENCRYPTION_ALGORITHM: Final = "algorithm"
+
+    TOMBSTONE_SUCCESSOR_ROOM: Final = "replacement_room"
 
 
 class EventUnsignedContentFields:

@@ -18,7 +18,6 @@
 #
 #
 import logging
-from copy import deepcopy
 from typing import Dict, List, Optional
 from unittest.mock import patch
 
@@ -47,7 +46,7 @@ from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StreamToken, UserID
-from synapse.types.handlers import SlidingSyncConfig
+from synapse.types.handlers.sliding_sync import SlidingSyncConfig
 from synapse.util import Clock
 
 from tests.replication._base import BaseMultiWorkerStreamTestCase
@@ -566,23 +565,11 @@ class RoomSyncConfigTestCase(TestCase):
         """
         Combine A into B and B into A to make sure we get the same result.
         """
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "B into A")
 
-        # Combine B into A
-        room_sync_config_a.combine_room_sync_config(room_sync_config_b)
-
-        self._assert_room_config_equal(room_sync_config_a, expected, "B into A")
-
-        # Since we're mutating these in place, make a copy for each of our trials
-        room_sync_config_a = deepcopy(a)
-        room_sync_config_b = deepcopy(b)
-
-        # Combine A into B
-        room_sync_config_b.combine_room_sync_config(room_sync_config_a)
-
-        self._assert_room_config_equal(room_sync_config_b, expected, "A into B")
+        combined_config = a.combine_room_sync_config(b)
+        self._assert_room_config_equal(combined_config, expected, "A into B")
 
 
 class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
@@ -620,7 +607,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         now_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=now_token,
                 to_token=now_token,
@@ -647,7 +634,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -682,7 +669,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room_token,
                 to_token=after_room_token,
@@ -756,7 +743,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_room_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_token,
                 to_token=after_room_token,
@@ -828,7 +815,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_kick_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -921,7 +908,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.result)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room_forgets,
                 to_token=before_room_forgets,
@@ -951,7 +938,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_room2_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room2_token,
@@ -1001,7 +988,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1041,7 +1028,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1088,7 +1075,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1152,7 +1139,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(kick_room_id, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_kick_token,
                 to_token=after_kick_token,
@@ -1208,7 +1195,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response2 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1263,7 +1250,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         join_response2 = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1322,7 +1309,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.join(room_id2, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=None,
                 to_token=after_room1_token,
@@ -1404,7 +1391,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.join(room_id4, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=from_token,
                 to_token=to_token,
@@ -1477,7 +1464,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1520,7 +1507,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.join(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1570,7 +1557,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1632,7 +1619,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response3 = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1691,7 +1678,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         leave_response = self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1765,7 +1752,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -1830,7 +1817,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_change1_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_change1_token,
@@ -1902,7 +1889,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_room1_token,
@@ -1984,7 +1971,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.leave(room_id1, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -2052,7 +2039,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         )
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -2088,7 +2075,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_more_changes_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=after_room1_token,
                 to_token=after_more_changes_token,
@@ -2153,7 +2140,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         after_room1_token = self.event_sources.get_current_token()
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room1_token,
                 to_token=after_room1_token,
@@ -2229,7 +2216,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
         self.helper.leave(room_id3, user1_id, tok=user1_tok)
 
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_room3_token,
                 to_token=after_room3_token,
@@ -2365,7 +2352,7 @@ class GetRoomMembershipForUserAtToTokenTestCase(HomeserverTestCase):
 
         # The function under test
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_reset_token,
                 to_token=after_reset_token,
@@ -2579,7 +2566,7 @@ class GetRoomMembershipForUserAtToTokenShardTestCase(BaseMultiWorkerStreamTestCa
 
         # The function under test
         room_id_results = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 UserID.from_string(user1_id),
                 from_token=before_stuck_activity_token,
                 to_token=stuck_activity_token,
@@ -2669,14 +2656,14 @@ class FilterRoomsRelevantForSyncTestCase(HomeserverTestCase):
         Get the rooms the user should be syncing with
         """
         room_membership_for_user_map = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 user=user,
                 from_token=from_token,
                 to_token=to_token,
             )
         )
         filtered_sync_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+            self.sliding_sync_handler.room_lists.filter_rooms_relevant_for_sync(
                 user=user,
                 room_membership_for_user_map=room_membership_for_user_map,
             )
@@ -3030,14 +3017,14 @@ class FilterRoomsTestCase(HomeserverTestCase):
         Get the rooms the user should be syncing with
         """
         room_membership_for_user_map = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 user=user,
                 from_token=from_token,
                 to_token=to_token,
             )
         )
         filtered_sync_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+            self.sliding_sync_handler.room_lists.filter_rooms_relevant_for_sync(
                 user=user,
                 room_membership_for_user_map=room_membership_for_user_map,
             )
@@ -3196,7 +3183,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_dm=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3210,7 +3197,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_dm=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3252,7 +3239,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3266,7 +3253,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3316,7 +3303,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3330,7 +3317,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3390,7 +3377,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3404,7 +3391,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3463,7 +3450,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3484,7 +3471,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3533,7 +3520,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3549,7 +3536,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3619,7 +3606,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3637,7 +3624,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3700,7 +3687,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3716,7 +3703,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_encrypted=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3760,7 +3747,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_invite=True`
         truthy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3774,7 +3761,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try with `is_invite=False`
         falsy_filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3827,7 +3814,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -3839,7 +3826,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -3851,7 +3838,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding normal rooms and spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3865,7 +3852,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding an arbitrary room type
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3918,7 +3905,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding *NOT* normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(not_room_types=[None]),
@@ -3930,7 +3917,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding *NOT* spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3944,7 +3931,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding *NOT* normal rooms or spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3959,7 +3946,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Test how it behaves when we have both `room_types` and `not_room_types`.
         # `not_room_types` should win.
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -3975,7 +3962,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
         # Test how it behaves when we have both `room_types` and `not_room_types`.
         # `not_room_types` should win.
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(
@@ -4025,7 +4012,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -4037,7 +4024,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -4094,7 +4081,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -4106,7 +4093,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -4152,7 +4139,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -4166,7 +4153,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -4228,7 +4215,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -4242,7 +4229,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -4305,7 +4292,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only normal rooms
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[None]),
@@ -4319,7 +4306,7 @@ class FilterRoomsTestCase(HomeserverTestCase):
 
         # Try finding only spaces
         filtered_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms(
+            self.sliding_sync_handler.room_lists.filter_rooms(
                 UserID.from_string(user1_id),
                 sync_room_map,
                 SlidingSyncConfig.SlidingSyncList.Filters(room_types=[RoomTypes.SPACE]),
@@ -4366,14 +4353,14 @@ class SortRoomsTestCase(HomeserverTestCase):
         Get the rooms the user should be syncing with
         """
         room_membership_for_user_map = self.get_success(
-            self.sliding_sync_handler.get_room_membership_for_user_at_to_token(
+            self.sliding_sync_handler.room_lists.get_room_membership_for_user_at_to_token(
                 user=user,
                 from_token=from_token,
                 to_token=to_token,
             )
         )
         filtered_sync_room_map = self.get_success(
-            self.sliding_sync_handler.filter_rooms_relevant_for_sync(
+            self.sliding_sync_handler.room_lists.filter_rooms_relevant_for_sync(
                 user=user,
                 room_membership_for_user_map=room_membership_for_user_map,
             )
@@ -4408,7 +4395,7 @@ class SortRoomsTestCase(HomeserverTestCase):
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )
@@ -4489,7 +4476,7 @@ class SortRoomsTestCase(HomeserverTestCase):
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )
@@ -4553,7 +4540,7 @@ class SortRoomsTestCase(HomeserverTestCase):
 
         # Sort the rooms (what we're testing)
         sorted_sync_rooms = self.get_success(
-            self.sliding_sync_handler.sort_rooms(
+            self.sliding_sync_handler.room_lists.sort_rooms(
                 sync_room_map=sync_room_map,
                 to_token=after_rooms_token,
             )

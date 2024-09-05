@@ -98,6 +98,7 @@ from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.databases.main.search import SearchStore
 from synapse.storage.databases.main.session import SessionStore
 from synapse.storage.databases.main.signatures import SignatureWorkerStore
+from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import StateGroupWorkerStore
 from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
@@ -159,6 +160,7 @@ class GenericWorkerStore(
     SessionStore,
     TaskSchedulerWorkerStore,
     ExperimentalFeaturesStore,
+    SlidingSyncStore,
 ):
     # Properties that multiple storage classes define. Tell mypy what the
     # expected type is.

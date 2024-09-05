@@ -19,7 +19,7 @@
 #
 #
 
-""" This module contains REST servlets to do with profile: /profile/<paths> """
+"""This module contains REST servlets to do with profile: /profile/<paths>"""
 
 import re
 from http import HTTPStatus

@@ -28,7 +28,7 @@ from synapse._pydantic_compat import HAS_PYDANTIC_V2
 if TYPE_CHECKING or HAS_PYDANTIC_V2:
     from pydantic.v1 import Extra, StrictInt, StrictStr
 else:
-    from pydantic import StrictInt, StrictStr, Extra
+    from pydantic import Extra, StrictInt, StrictStr
 
 from signedjson.sign import sign_json
 
@@ -191,10 +191,10 @@ class RemoteKey(RestServlet):
         server_keys: Dict[Tuple[str, str], Optional[FetchKeyResultForRemote]] = {}
         for server_name, key_ids in query.items():
             if key_ids:
-                results: Mapping[str, Optional[FetchKeyResultForRemote]] = (
-                    await self.store.get_server_keys_json_for_remote(
-                        server_name, key_ids
-                    )
+                results: Mapping[
+                    str, Optional[FetchKeyResultForRemote]
+                ] = await self.store.get_server_keys_json_for_remote(
+                    server_name, key_ids
                 )
             else:
                 results = await self.store.get_all_server_keys_json_for_remote(

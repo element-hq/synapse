@@ -828,13 +828,10 @@ class ServerConfig(Config):
             ).lstrip()
 
         if not unsecure_listeners:
-            unsecure_http_bindings = (
-                """- port: %(unsecure_port)s
+            unsecure_http_bindings = """- port: %(unsecure_port)s
             tls: false
             type: http
-            x_forwarded: true"""
-                % locals()
-            )
+            x_forwarded: true""" % locals()
 
             if not open_private_ports:
                 unsecure_http_bindings += (
@@ -853,16 +850,13 @@ class ServerConfig(Config):
         if not secure_listeners:
             secure_http_bindings = ""
 
-        return (
-            """\
+        return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
           %(secure_http_bindings)s
           %(unsecure_http_bindings)s
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.manhole is not None:

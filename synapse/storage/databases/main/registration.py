@@ -1250,9 +1250,7 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
                 SELECT address, session_id, medium, client_secret,
                 last_send_attempt, validated_at
                 FROM threepid_validation_session WHERE %s
-                """ % (
-                " AND ".join("%s = ?" % k for k in keyvalues.keys()),
-            )
+                """ % (" AND ".join("%s = ?" % k for k in keyvalues.keys()),)
 
             if validated is not None:
                 sql += " AND validated_at IS " + ("NOT NULL" if validated else "NULL")

@@ -177,9 +177,7 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
             AND (%s)
             ORDER BY stream_ordering DESC
             LIMIT ?
-            """ % (
-                " OR ".join("type = '%s'" % (t,) for t in TYPES),
-            )
+            """ % (" OR ".join("type = '%s'" % (t,) for t in TYPES),)
 
             txn.execute(sql, (target_min_stream_id, max_stream_id, batch_size))
 

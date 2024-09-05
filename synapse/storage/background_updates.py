@@ -44,7 +44,7 @@ from synapse._pydantic_compat import HAS_PYDANTIC_V2
 from synapse.metrics.background_process_metrics import run_as_background_process
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Connection, Cursor
-from synapse.types import JsonDict
+from synapse.types import JsonDict, StrCollection
 from synapse.util import Clock, json_encoder
 
 from . import engines
@@ -486,6 +486,25 @@ class BackgroundUpdater:
         )
 
         return not update_exists
+
+    async def have_completed_background_updates(
+        self, update_names: StrCollection
+    ) -> bool:
+        """Return the name of background updates that have not yet been
+        completed"""
+        if self._all_done:
+            return True
+
+        rows = await self.db_pool.simple_select_many_batch(
+            table="background_updates",
+            column="update_name",
+            iterable=update_names,
+            retcols=("update_name",),
+            desc="get_uncompleted_background_updates",
+        )
+
+        # If we find any rows then we've not completed the update.
+        return not bool(rows)
 
     async def do_next_background_update(self, sleep: bool = True) -> bool:
         """Does some amount of work on the next queued background update

@@ -21,7 +21,8 @@
 #
 #
 
-""" Starts a synapse client console. """
+"""Starts a synapse client console."""
+
 import argparse
 import binascii
 import cmd

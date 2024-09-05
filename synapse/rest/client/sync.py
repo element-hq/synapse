@@ -21,7 +21,7 @@
 import itertools
 import logging
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple, Union
 
 from synapse.api.constants import AccountDataTypes, EduTypes, Membership, PresenceState
 from synapse.api.errors import Codes, StoreError, SynapseError
@@ -975,7 +975,7 @@ class SlidingSyncRestServlet(RestServlet):
         return response
 
     def encode_lists(
-        self, lists: Dict[str, SlidingSyncResult.SlidingWindowList]
+        self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
         def encode_operation(
             operation: SlidingSyncResult.SlidingWindowList.Operation,
@@ -1044,6 +1044,11 @@ class SlidingSyncRestServlet(RestServlet):
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
+            if room_result.unstable_expanded_timeline:
+                serialized_rooms[room_id]["unstable_expanded_timeline"] = (
+                    room_result.unstable_expanded_timeline
+                )
+
             # This will be omitted for invite/knock rooms with `stripped_state`
             if (
                 room_result.required_state is not None
@@ -1077,9 +1082,9 @@ class SlidingSyncRestServlet(RestServlet):
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
-                serialized_rooms[room_id]["prev_batch"] = (
-                    await room_result.prev_batch.to_string(self.store)
-                )
+                serialized_rooms[room_id][
+                    "prev_batch"
+                ] = await room_result.prev_batch.to_string(self.store)
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:

@@ -50,7 +50,7 @@ def do_patch() -> None:
         return
 
     def new_inline_callbacks(
-        f: Callable[P, Generator["Deferred[object]", object, T]]
+        f: Callable[P, Generator["Deferred[object]", object, T]],
     ) -> Callable[P, "Deferred[T]"]:
         @functools.wraps(f)
         def wrapped(*args: P.args, **kwargs: P.kwargs) -> "Deferred[T]":

@@ -535,7 +535,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             desc="check_if_events_in_current_state",
         )
 
-        return frozenset(event_id for event_id, in rows)
+        return frozenset(event_id for (event_id,) in rows)
 
     # FIXME: how should this be cached?
     @cancellable
