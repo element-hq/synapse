@@ -540,9 +540,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_too_long(self) -> None:
-        """Attempts to set a custom_field name or value that is too
-        long should get a 400
         """
+        Attempts to set a custom field name or value that is too long should get a 400 error.
+        """
+        # Single key is too large.
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
@@ -551,10 +552,40 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 400, channel.result)
 
+        # Single value is too large.
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
             content={"custom_field": "test" * 100},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_custom_field_profile_too_long(self) -> None:
+        """
+        Attempts to set a custom field that would push the overall profile too large.
+        """
+        # The maximum key and values size.
+        key = "a" * 255
+        # The first 126 work OK, len("owner") + (255 + 255 + 6) * 126 < 65536.
+        for i in range(126):
+            # Create a unique key.
+            key = f"{i:03}" + "a" * 252
+            channel = self.make_request(
+                "PUT",
+                f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+                content={key: "a" * 255},
+                access_token=self.owner_tok,
+            )
+            self.assertEqual(channel.code, 200, channel.result)
+
+        # The next one should fail.
+        key = "b" * 255
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: "a" * 255},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)

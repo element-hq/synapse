@@ -296,7 +296,6 @@ class UnstableProfileRestServlet(RestServlet):
                     f"Invalid value for field: {field_name}",
                     errcode=Codes.INVALID_PARAM,
                 )
-            # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
             if len(new_value) > MAX_CUSTOM_VALUE_LEN:
                 raise SynapseError(
                     400, "Field value too long", errcode=Codes.INVALID_PARAM
@@ -355,7 +354,6 @@ class UnstableProfileRestServlet(RestServlet):
                     f"Invalid value for field: {field_name}",
                     errcode=Codes.INVALID_PARAM,
                 )
-            # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
             if len(new_value) > MAX_CUSTOM_VALUE_LEN:
                 raise SynapseError(
                     400, "Field value too long", errcode=Codes.INVALID_PARAM
@@ -465,7 +463,6 @@ class UnstableProfileFieldRestServlet(RestServlet):
 
         if not isinstance(new_value, str):
             raise SynapseError(400, "Invalid value", errcode=Codes.INVALID_PARAM)
-        # TODO REJECT IF OVERALL STORAGE IS TOO MUCH.
         if len(new_value) > MAX_CUSTOM_VALUE_LEN:
             raise SynapseError(400, "Field value too long", errcode=Codes.INVALID_PARAM)
 

@@ -20,6 +20,7 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import StoreError
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -33,6 +34,10 @@ from synapse.types import JsonDict, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+
+
+# The number of bytes that the serialized profile can have.
+MAX_PROFILE_SIZE = 65536
 
 
 class ProfileWorkerStore(SQLBaseStore):
@@ -255,6 +260,60 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="create_profile",
         )
 
+    def _check_profile_size(
+        self, txn: LoggingTransaction, user_id: str, new_field_name: str, new_value: str
+    ) -> None:
+        """
+        pass
+        """
+        # Start with 2 bytes for the braces.
+        total_bytes = 2
+        # For each entry there are 4 quotes (2 each for key and value), 1 colon,
+        # and 1 comma.
+        PER_VALUE_EXTRA = 6
+        profile_info = self.db_pool.simple_select_one_txn(
+            txn,
+            table="profiles",
+            keyvalues={"full_user_id": user_id},
+            retcols=("displayname", "avatar_url"),
+            allow_none=True,
+        )
+        if profile_info:
+            display_name, avatar_url = profile_info
+            if display_name:
+                total_bytes += len("displayname") + len(display_name) + PER_VALUE_EXTRA
+            if avatar_url:
+                total_bytes += len("avatar_url") + len(avatar_url) + PER_VALUE_EXTRA
+
+        # Add the size of the current custom profile fields, ignoring the entry
+        # which will be overwritten.
+        if isinstance(txn.database_engine, PostgresEngine):
+            size_sql = """
+            SELECT SUM(CHAR_LENGTH(name)) + SUM(CHAR_LENGTH(value)), COUNT(name) AS total_bytes
+            FROM profile_fields
+            WHERE
+                user_id = ? AND name != ?
+            """
+        else:
+            size_sql = """
+            SELECT SUM(LENGTH(name)) + SUM(LENGTH(value)), COUNT(name) AS total_bytes
+            FROM profile_fields
+            WHERE
+                user_id = ? AND name != ?
+            """
+        txn.execute(size_sql, (user_id, new_field_name))
+        row = cast(Tuple[Optional[int], int], txn.fetchone())
+        total_bytes += (row[0] or 0) + row[1] * PER_VALUE_EXTRA
+
+        # Add the length of the field being added.
+        total_bytes += len(new_field_name) + len(new_value) + PER_VALUE_EXTRA
+
+        # There has been an over count of 1 via an additional comma.
+        total_bytes -= 1
+
+        if total_bytes > MAX_PROFILE_SIZE:
+            raise StoreError(400, "Profile too large")
+
     async def set_profile_displayname(
         self, user_id: UserID, new_displayname: Optional[str]
     ) -> None:
@@ -267,14 +326,25 @@ class ProfileWorkerStore(SQLBaseStore):
                 name is removed.
         """
         user_localpart = user_id.localpart
-        await self.db_pool.simple_upsert(
-            table="profiles",
-            keyvalues={"user_id": user_localpart},
-            values={
-                "displayname": new_displayname,
-                "full_user_id": user_id.to_string(),
-            },
-            desc="set_profile_displayname",
+
+        def set_profile_displayname(txn: LoggingTransaction) -> None:
+            if new_displayname is not None:
+                self._check_profile_size(
+                    txn, user_id.to_string(), ProfileFields.DISPLAYNAME, new_displayname
+                )
+
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="profiles",
+                keyvalues={"user_id": user_localpart},
+                values={
+                    "displayname": new_displayname,
+                    "full_user_id": user_id.to_string(),
+                },
+            )
+
+        await self.db_pool.runInteraction(
+            "set_profile_displayname", set_profile_displayname
         )
 
     async def set_profile_avatar_url(
@@ -289,11 +359,25 @@ class ProfileWorkerStore(SQLBaseStore):
                 removed.
         """
         user_localpart = user_id.localpart
-        await self.db_pool.simple_upsert(
-            table="profiles",
-            keyvalues={"user_id": user_localpart},
-            values={"avatar_url": new_avatar_url, "full_user_id": user_id.to_string()},
-            desc="set_profile_avatar_url",
+
+        def set_profile_avatar_url(txn: LoggingTransaction) -> None:
+            if new_avatar_url is not None:
+                self._check_profile_size(
+                    txn, user_id.to_string(), ProfileFields.AVATAR_URL, new_avatar_url
+                )
+
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="profiles",
+                keyvalues={"user_id": user_localpart},
+                values={
+                    "avatar_url": new_avatar_url,
+                    "full_user_id": user_id.to_string(),
+                },
+            )
+
+        await self.db_pool.runInteraction(
+            "set_profile_avatar_url", set_profile_avatar_url
         )
 
     async def set_profile_field(
@@ -307,12 +391,18 @@ class ProfileWorkerStore(SQLBaseStore):
             field_name: The name of the custom profile field.
             new_value: The value of the custom profile field.
         """
-        await self.db_pool.simple_upsert(
-            table="profile_fields",
-            keyvalues={"user_id": user_id.to_string(), "name": field_name},
-            values={"value": new_value},
-            desc="set_profile_field",
-        )
+
+        def set_profile_field(txn: LoggingTransaction) -> None:
+            self._check_profile_size(txn, user_id.to_string(), field_name, new_value)
+
+            self.db_pool.simple_upsert_txn(
+                txn,
+                table="profile_fields",
+                keyvalues={"user_id": user_id.to_string(), "name": field_name},
+                values={"value": new_value},
+            )
+
+        await self.db_pool.runInteraction("set_profile_field", set_profile_field)
 
     async def delete_profile_field(self, user_id: UserID, field_name: str) -> None:
         """
