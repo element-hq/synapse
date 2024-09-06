@@ -450,6 +450,9 @@ class UnstableProfileFieldRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
 
+        if not field_name:
+            raise SynapseError(400, "Field name too short", errcode=Codes.TOO_LARGE)
+
         if len(field_name) > MAX_CUSTOM_FIELD_LEN:
             raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
 

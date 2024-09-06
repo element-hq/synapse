@@ -539,10 +539,19 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 401, channel.result)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
-    def test_set_custom_field_too_long(self) -> None:
+    def test_set_custom_field_size(self) -> None:
         """
         Attempts to set a custom field name or value that is too long should get a 400 error.
         """
+        # Key is missing.
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/",
+            content={"" * 100: "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
         # Single key is too large.
         channel = self.make_request(
             "PUT",
