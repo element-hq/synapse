@@ -19,6 +19,7 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Any,
     Callable,
     Dict,
     Final,
@@ -704,11 +705,11 @@ class HaveSentRoom(Generic[T]):
     @staticmethod
     def never() -> "HaveSentRoom[T]":
         # We use a singleton to avoid repeatedly instantiating new `never`
-        # values. The cast is redundant depending on `T`, hence the ignore.
-        return cast("HaveSentRoom[T]", _HAVE_SENT_ROOM_NEVER)  # type: ignore[redundant-cast]
+        # values.
+        return _HAVE_SENT_ROOM_NEVER
 
 
-_HAVE_SENT_ROOM_NEVER = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
+_HAVE_SENT_ROOM_NEVER: HaveSentRoom[Any] = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
