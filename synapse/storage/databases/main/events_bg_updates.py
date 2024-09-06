@@ -57,6 +57,7 @@ from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.util import json_encoder
+from synapse.util.async_helpers import concurrently_execute
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -1659,23 +1660,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             return rooms_to_update_rows
 
-        rooms_to_update = await self.db_pool.runInteraction(
+        rooms_to_update_rows = await self.db_pool.runInteraction(
             "_sliding_sync_joined_rooms_bg_update._get_rooms_to_update_txn",
             _get_rooms_to_update_txn,
         )
 
-        if not rooms_to_update:
+        if not rooms_to_update_rows:
             await self.db_pool.updates._end_background_update(
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
             )
             return 0
 
-        # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
-        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
-        # Map from room_id to stream_ordering/bump_stamp, etc values
-        joined_room_stream_ordering_updates: Dict[
-            str, _JoinedRoomStreamOrderingUpdate
-        ] = {}
         # As long as we get this value before we fetch the current state, we can use it
         # to check if something has changed since that point.
         most_recent_current_state_delta_stream_id = (
@@ -1690,7 +1685,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             retcol="stream_id",
             desc="stats_incremental_position",
         )
-        for (room_id,) in rooms_to_update:
+
+        # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
+        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        # Map from room_id to stream_ordering/bump_stamp, etc values
+        joined_room_stream_ordering_updates: Dict[
+            str, _JoinedRoomStreamOrderingUpdate
+        ] = {}
+
+        async def handle_room(room_id: str) -> None:
             current_state_ids_map = await self.db_pool.runInteraction(
                 "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
                 PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
@@ -1701,7 +1704,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # `sliding_sync_joined_rooms` table so we should skip and b) we won't have
             # any `current_state_events` for the room.
             if not current_state_ids_map:
-                continue
+                return
 
             current_state_ids_to_fetch: List[str] = []
 
@@ -1768,7 +1771,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # events for unknown room versions that we no longer support. We don't need
                 # to do anything for these unsupported rooms.
                 if not fetched_events:
-                    continue
+                    return
 
                 current_state_map: StateMap[EventBase] = {
                     state_key: fetched_events[event_id]
@@ -1823,6 +1826,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     most_recent_bump_stamp=most_recent_bump_stamp,
                 )
             )
+
+        await concurrently_execute(
+            handle_room, [row[0] for row in rooms_to_update_rows], 10
+        )
 
         def _fill_table_txn(txn: LoggingTransaction) -> None:
             # Handle updating the `sliding_sync_joined_rooms` table
@@ -1897,14 +1904,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 txn,
                 table="sliding_sync_joined_rooms_to_recalculate",
                 keys=("room_id",),
-                values=rooms_to_update,
+                values=rooms_to_update_rows,
             )
 
         await self.db_pool.runInteraction(
             "sliding_sync_joined_rooms_bg_update", _fill_table_txn
         )
 
-        return len(rooms_to_update)
+        return len(rooms_to_update_rows)
 
     async def _sliding_sync_membership_snapshots_bg_update(
         self, progress: JsonDict, batch_size: int
