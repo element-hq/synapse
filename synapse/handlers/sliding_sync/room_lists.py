@@ -78,7 +78,8 @@ logger = logging.getLogger(__name__)
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
 class _RoomsForUserStateReset:
     """A version of `RoomsForUser` that supports optional sender and event ID
-    fields, to handle state resets."""
+    fields, to handle state resets. State resets can affect room membership
+    without a corresponding event so that information isn't always available."""
 
     room_id: str
     sender: Optional[str]
