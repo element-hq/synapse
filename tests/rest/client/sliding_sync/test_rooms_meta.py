@@ -588,19 +588,16 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         )
 
         # Make sure the list includes the rooms in the right order
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    # room1 sorts before room2 because it has the latest event (the
-                    # reaction)
-                    "room_ids": [room_id1, room_id2],
-                }
-            ],
+        self.assertEqual(
+            len(response_body["lists"]["foo-list"]["ops"]),
+            1,
             response_body["lists"]["foo-list"],
         )
+        op = response_body["lists"]["foo-list"]["ops"][0]
+        self.assertEqual(op["op"], "SYNC")
+        self.assertEqual(op["range"], [0, 1])
+        # Note that we don't order the ops anymore, so we need to compare sets.
+        self.assertIncludes(set(op["room_ids"]), {room_id1, room_id2}, exact=True)
 
         # The `bump_stamp` for room1 should point at the latest message (not the
         # reaction since it's not one of the `DEFAULT_BUMP_EVENT_TYPES`)
