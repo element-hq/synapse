@@ -353,9 +353,7 @@ class SlidingSyncRoomLists:
 
                     # Find which rooms are partially stated and may need to be filtered out
                     # depending on the `required_state` requested (see below).
-                    partial_state_rooms = await self.store.get_partial_rooms_for_user(
-                        user_id
-                    )
+                    partial_state_rooms = await self.store.get_partial_rooms()
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
                     # once.
@@ -427,9 +425,7 @@ class SlidingSyncRoomLists:
             with start_active_span("assemble_room_subscriptions"):
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
-                partial_state_rooms = await self.store.get_partial_rooms_for_user(
-                    user_id
-                )
+                partial_state_rooms = await self.store.get_partial_rooms()
 
                 for (
                     room_id,

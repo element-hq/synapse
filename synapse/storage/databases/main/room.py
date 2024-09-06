@@ -1383,7 +1383,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         return {room_id: room_id in partial_state_rooms for room_id in room_ids}
 
     @cached(max_entries=10000, iterable=True)
-    async def get_partial_rooms_for_user(self, user_id: str) -> AbstractSet[str]:
+    async def get_partial_rooms(self) -> AbstractSet[str]:
         """Get any "partial-state" rooms which the user is in."""
 
         def _get_partial_rooms_for_user_txn(
@@ -1391,10 +1391,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         ) -> AbstractSet[str]:
             sql = """
                 SELECT room_id FROM partial_state_rooms
-                INNER JOIN local_current_membership USING (room_id)
-                WHERE user_id = ?
             """
-            txn.execute(sql, (user_id,))
+            txn.execute(sql)
             return {room_id for (room_id,) in txn}
 
         return await self.db_pool.runInteraction(
@@ -2360,7 +2358,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
-        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms_for_user)
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms)
 
     async def write_partial_state_rooms_join_event_id(
         self,
@@ -2582,7 +2580,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
-        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms_for_user)
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms)
 
         DatabasePool.simple_insert_txn(
             txn,
