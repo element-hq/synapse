@@ -47,7 +47,11 @@ from synapse.storage.databases.main.state import (
     Sentinel as StateSentinel,
 )
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
-from synapse.storage.roommember import RoomsForUser, RoomsForUserSlidingSync
+from synapse.storage.roommember import (
+    RoomsForUser,
+    RoomsForUserSlidingSync,
+    RoomsForUserStateReset,
+)
 from synapse.types import (
     MutableStateMap,
     PersistedEventPosition,
@@ -75,23 +79,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
-class _RoomsForUserStateReset:
-    """A version of `RoomsForUser` that supports optional sender and event ID
-    fields, to handle state resets. State resets can affect room membership
-    without a corresponding event so that information isn't always available."""
-
-    room_id: str
-    sender: Optional[str]
-    membership: str
-    event_id: Optional[str]
-    event_pos: PersistedEventPosition
-    room_version_id: str
-
-
 # Helper definition for the types that we might return. We do this to avoid
 # copying data between types (which can be expensive for many rooms).
-RoomsForUserType = Union[_RoomsForUserStateReset, RoomsForUser, RoomsForUserSlidingSync]
+RoomsForUserType = Union[RoomsForUserStateReset, RoomsForUser, RoomsForUserSlidingSync]
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -965,7 +955,7 @@ class SlidingSyncRoomLists:
             if room_id in rooms_for_user:
                 continue
 
-            rooms_for_user[room_id] = _RoomsForUserStateReset(
+            rooms_for_user[room_id] = RoomsForUserStateReset(
                 room_id=room_id,
                 event_id=None,
                 event_pos=left_event_pos,
