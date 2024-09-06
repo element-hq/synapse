@@ -257,6 +257,7 @@ class SlidingSyncHandler:
                 ],
                 from_token=from_token,
                 to_token=to_token,
+                newly_joined=room_id in interested_rooms.newly_joined_rooms,
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
@@ -463,6 +464,7 @@ class SlidingSyncHandler:
         room_membership_for_user_at_to_token: RoomsForUserType,
         from_token: Optional[SlidingSyncStreamToken],
         to_token: StreamToken,
+        newly_joined: bool,
         is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
@@ -479,6 +481,7 @@ class SlidingSyncHandler:
                 in the room at the time of `to_token`.
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
+            newly_joined: If the user has newly joined the room
             is_dm: Whether the room is a DM room
         """
         user = sync_config.user
@@ -524,7 +527,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         ignore_timeline_bound = False
-        if from_token:
+        if from_token and not newly_joined:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
