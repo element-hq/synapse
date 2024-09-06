@@ -350,13 +350,18 @@ class SlidingSyncRoomLists:
 
                     all_rooms.update(filtered_sync_room_map)
 
-                    # Sort the list
-                    sorted_room_info = await self.sort_rooms_using_tables(
-                        filtered_sync_room_map, to_token
-                    )
-
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+
                     if list_config.ranges:
+                        if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
+                            # If we are asking for the full range, we don't need to sort the list.
+                            sorted_room_info = list(filtered_sync_room_map.values())
+                        else:
+                            # Sort the list
+                            sorted_room_info = await self.sort_rooms_using_tables(
+                                filtered_sync_room_map, to_token
+                            )
+
                         for range in list_config.ranges:
                             room_ids_in_list: List[str] = []
 
