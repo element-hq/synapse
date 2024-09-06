@@ -1384,7 +1384,14 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
 
     @cached(max_entries=10000, iterable=True)
     async def get_partial_rooms(self) -> AbstractSet[str]:
-        """Get any "partial-state" rooms which the user is in."""
+        """Get any "partial-state" rooms which the user is in.
+
+        This is fast as the set of partially stated rooms at any point across
+        the whole server is small, and so such a query is fast. This is also
+        faster than looking up whether a set of room ID's are partially stated
+        via `is_partial_state_room_batched(...)` because of the sheer amount of
+        CPU time looking all the rooms up in the cache.
+        """
 
         def _get_partial_rooms_for_user_txn(
             txn: LoggingTransaction,
