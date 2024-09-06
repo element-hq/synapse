@@ -588,19 +588,16 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         )
 
         # Make sure the list includes the rooms in the right order
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 1],
-                    # room1 sorts before room2 because it has the latest event (the
-                    # reaction)
-                    "room_ids": [room_id1, room_id2],
-                }
-            ],
+        self.assertEqual(
+            len(response_body["lists"]["foo-list"]["ops"]),
+            1,
             response_body["lists"]["foo-list"],
         )
+        op = response_body["lists"]["foo-list"]["ops"][0]
+        self.assertEqual(op["op"], "SYNC")
+        self.assertEqual(op["range"], [0, 1])
+        # Note that we don't order the ops anymore, so we need to compare sets.
+        self.assertIncludes(set(op["room_ids"]), {room_id1, room_id2}, exact=True)
 
         # The `bump_stamp` for room1 should point at the latest message (not the
         # reaction since it's not one of the `DEFAULT_BUMP_EVENT_TYPES`)
@@ -758,3 +755,48 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         self.assertGreater(response_body["rooms"][room_id]["bump_stamp"], 0)
+
+    def test_rooms_bump_stamp_invites(self) -> None:
+        """
+        Test that `bump_stamp` is present and points to the membership event,
+        and not later events, for non-joined rooms
+        """
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+        )
+
+        # Invite user1 to the room
+        invite_response = self.helper.invite(room_id, user2_id, user1_id, tok=user2_tok)
+
+        # More messages happen after the invite
+        self.helper.send(room_id, "message in room1", tok=user2_tok)
+
+        # We expect the bump_stamp to match the invite.
+        invite_pos = self.get_success(
+            self.store.get_position_for_event(invite_response["event_id"])
+        )
+
+        # Doing an SS request should return a `bump_stamp` of the invite event,
+        # rather than the message that was sent after.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        self.assertEqual(
+            response_body["rooms"][room_id]["bump_stamp"], invite_pos.stream
+        )
