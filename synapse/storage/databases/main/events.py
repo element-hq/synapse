@@ -137,7 +137,7 @@ class SlidingSyncStateInsertValues(TypedDict, total=False):
     """
 
     room_type: Optional[str]
-    is_encrypted: Optional[bool]
+    is_encrypted: bool
     room_name: Optional[str]
     tombstone_successor_room_id: Optional[str]
 
@@ -150,7 +150,7 @@ class SlidingSyncMembershipSnapshotSharedInsertValues(
     multiple memberships
     """
 
-    has_known_state: Optional[bool]
+    has_known_state: bool
 
 
 @attr.s(slots=True, auto_attribs=True)
