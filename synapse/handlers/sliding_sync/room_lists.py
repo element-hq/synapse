@@ -110,7 +110,8 @@ class SlidingSyncInterestedRooms:
             extensions may have updates in these rooms).
         newly_joined_rooms: The set of rooms that were joined in the token range
             and the user is still joined to at the end of this range.
-        newly_left_rooms: The set of rooms that we left in the token range.
+        newly_left_rooms: The set of rooms that we left in the token range
+            and are still "leave" at the end of this range.
         dm_room_ids: The set of rooms the user consider as direct-message (DM) rooms
     """
 
