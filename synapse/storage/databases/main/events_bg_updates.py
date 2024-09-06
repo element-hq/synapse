@@ -24,7 +24,12 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
 
 import attr
 
-from synapse.api.constants import EventContentFields, Membership, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -1676,6 +1681,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         most_recent_current_state_delta_stream_id = (
             await self.get_max_stream_id_in_current_state_deltas()
         )
+        # Same as `await self.get_stats_positions()` but get around the method
+        # resolution issues that crop up when we try to mixin `StatsStore` into this
+        # store.
+        stats_stream_position = await self.db_pool.simple_select_one_onecol(
+            table="stats_incremental_position",
+            keyvalues={},
+            retcol="stream_id",
+            desc="stats_incremental_position",
+        )
         for (room_id,) in rooms_to_update:
             current_state_ids_map = await self.db_pool.runInteraction(
                 "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
@@ -1689,26 +1703,88 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if not current_state_ids_map:
                 continue
 
-            fetched_events = await self.get_events(current_state_ids_map.values())
+            current_state_ids_to_fetch: List[str] = []
 
-            current_state_map: StateMap[EventBase] = {
-                state_key: fetched_events[event_id]
-                for state_key, event_id in current_state_ids_map.items()
-                # `get_events(...)` will filter out events for unknown room versions
-                if event_id in fetched_events
-            }
+            state_insert_values: SlidingSyncStateInsertValues = {}
 
-            # Even if we are joined to the room, this can happen for unknown room
-            # versions (old room versions that aren't known anymore) since
-            # `get_events(...)` will filter out events for unknown room versions
-            if not current_state_map:
-                continue
-
-            state_insert_values = (
-                PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
-                    current_state_map
-                )
+            # Check if the current state has been updated since the stats were
+            # generated.
+            state_deltas_since_stats = await self.get_current_state_deltas_for_room(
+                room_id,
+                from_token=RoomStreamToken(stream=stats_stream_position),
+                to_token=None,
             )
+            can_use_room_stats_state_table = True
+            for state_delta in state_deltas_since_stats:
+                # We only need to check for the state is relevant to the
+                # `sliding_sync_joined_rooms` table.
+                if (
+                    state_delta.event_type,
+                    state_delta.state_key,
+                ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                    can_use_room_stats_state_table = False
+                    # Once we find one relevant state event that changed, no need to
+                    # look any further
+                    break
+
+            # Avoid fetching full events out as much as possible. We can look-up all of
+            # the relevant state values except for the `tombstone_successor_room_id`
+            # from the `room_stats_state` table.
+            if can_use_room_stats_state_table:
+                (name, room_type, encryption) = cast(
+                    Tuple[Optional[str], Optional[str], Optional[str]],
+                    await self.db_pool.simple_select_one(
+                        table="room_stats_state",
+                        keyvalues={"room_id": room_id},
+                        retcols=["name", "room_type", "encryption"],
+                    ),
+                )
+
+                state_insert_values["room_name"] = name
+                state_insert_values["room_type"] = room_type
+                state_insert_values["is_encrypted"] = encryption is not None
+
+                # If the room has a tombstone, we still need to fetch it out manually
+                # because this information isn't available in the `room_stats_state`
+                # table.
+                tombstone_event_id = current_state_ids_map.get(
+                    (EventTypes.Tombstone, "")
+                )
+                if tombstone_event_id is not None:
+                    current_state_ids_to_fetch.append(tombstone_event_id)
+
+            else:
+                current_state_ids_to_fetch.extend(current_state_ids_map.values())
+
+            # Fetch any more events that we need to complete the `state_insert_values`.
+            # For the happy-path, this will just be the tombstone event if the room has
+            # one since we got the rest of the values already from the
+            # `room_stats_state` table. In the case, where we can't use
+            # `room_stats_state`, we just fetch all of the events manually.
+            if current_state_ids_to_fetch:
+                fetched_events = await self.get_events(current_state_ids_map.values())
+
+                # Even if we are joined to the room, `get_events(...)` will filter out
+                # events for unknown room versions that we no longer support. We don't need
+                # to do anything for these unsupported rooms.
+                if not fetched_events:
+                    continue
+
+                current_state_map: StateMap[EventBase] = {
+                    state_key: fetched_events[event_id]
+                    for state_key, event_id in current_state_ids_map.items()
+                    # `get_events(...)` will filter out events for unknown room versions
+                    if event_id in fetched_events
+                }
+
+                more_state_insert_values = (
+                    PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                        current_state_map
+                    )
+                )
+                # Update our main insert map
+                state_insert_values.update(more_state_insert_values)
+
             # We should have some insert values for each room, even if they are `None`
             assert state_insert_values
             joined_room_updates[room_id] = state_insert_values
