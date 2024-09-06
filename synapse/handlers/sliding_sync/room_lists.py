@@ -108,7 +108,8 @@ class SlidingSyncInterestedRooms:
             includes the rooms that *may* have relevant updates. Rooms not
             in this map will definitely not have room updates (though
             extensions may have updates in these rooms).
-        newly_joined_rooms: The set of rooms that were joined in the token range.
+        newly_joined_rooms: The set of rooms that were joined in the token range
+            and the user is still joined to at the end of this range.
         newly_left_rooms: The set of rooms that we left in the token range.
         dm_room_ids: The set of rooms the user consider as direct-message (DM) rooms
     """
