@@ -25,8 +25,8 @@ from synapse.events.utils import strip_event
 from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
+    RoomsForUserType,
     SlidingSyncRoomLists,
-    _RoomMembershipForUser,
 )
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
 from synapse.logging.opentracing import (
@@ -39,7 +39,9 @@ from synapse.logging.opentracing import (
 )
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
 from synapse.storage.databases.main.stream import PaginateFunction
-from synapse.storage.roommember import MemberSummary
+from synapse.storage.roommember import (
+    MemberSummary,
+)
 from synapse.types import (
     JsonDict,
     PersistedEventPosition,
@@ -255,6 +257,8 @@ class SlidingSyncHandler:
                 ],
                 from_token=from_token,
                 to_token=to_token,
+                newly_joined=room_id in interested_rooms.newly_joined_rooms,
+                is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
             # Filter out empty room results during incremental sync
@@ -352,7 +356,7 @@ class SlidingSyncHandler:
     async def get_current_state_ids_at(
         self,
         room_id: str,
-        room_membership_for_user_at_to_token: _RoomMembershipForUser,
+        room_membership_for_user_at_to_token: RoomsForUserType,
         state_filter: StateFilter,
         to_token: StreamToken,
     ) -> StateMap[str]:
@@ -417,7 +421,7 @@ class SlidingSyncHandler:
     async def get_current_state_at(
         self,
         room_id: str,
-        room_membership_for_user_at_to_token: _RoomMembershipForUser,
+        room_membership_for_user_at_to_token: RoomsForUserType,
         state_filter: StateFilter,
         to_token: StreamToken,
     ) -> StateMap[EventBase]:
@@ -457,9 +461,11 @@ class SlidingSyncHandler:
         new_connection_state: "MutablePerConnectionState",
         room_id: str,
         room_sync_config: RoomSyncConfig,
-        room_membership_for_user_at_to_token: _RoomMembershipForUser,
+        room_membership_for_user_at_to_token: RoomsForUserType,
         from_token: Optional[SlidingSyncStreamToken],
         to_token: StreamToken,
+        newly_joined: bool,
+        is_dm: bool,
     ) -> SlidingSyncResult.RoomResult:
         """
         Fetch room data for the sync response.
@@ -475,6 +481,8 @@ class SlidingSyncHandler:
                 in the room at the time of `to_token`.
             from_token: The point in the stream to sync from.
             to_token: The point in the stream to sync up to.
+            newly_joined: If the user has newly joined the room
+            is_dm: Whether the room is a DM room
         """
         user = sync_config.user
 
@@ -519,7 +527,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         ignore_timeline_bound = False
-        if from_token and not room_membership_for_user_at_to_token.newly_joined:
+        if from_token and not newly_joined:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
@@ -1044,7 +1052,7 @@ class SlidingSyncHandler:
             name=room_name,
             avatar=room_avatar,
             heroes=heroes,
-            is_dm=room_membership_for_user_at_to_token.is_dm,
+            is_dm=is_dm,
             initial=initial,
             required_state=list(required_room_state.values()),
             timeline_events=timeline_events,
