@@ -2178,6 +2178,14 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 # These should go hand-in-hand
                 assert last_to_insert_membership_info is not None
 
+                # Sanity check that our tokens are in order. We should be iterating in
+                # ascending order.
+                assert (
+                    last_to_insert_membership_info.membership_event_stream_ordering
+                    <= membership_event_stream_ordering
+                )
+
+                # TODO: This only works if someone is from the server is participating in the room.
                 state_deltas_since_last_snapshot = await self.get_current_state_deltas_for_room(
                     room_id,
                     # From the last snapshot we inserted
