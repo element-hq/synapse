@@ -20,25 +20,15 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2, conint, constr
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        validator,
-    )
-else:
-    from pydantic import (
-        Extra,
-        StrictBool,
-        StrictInt,
-        StrictStr,
-        validator,
-    )
-
+from synapse._pydantic_compat import (
+    Extra,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+    conint,
+    constr,
+    validator,
+)
 from synapse.types.rest import RequestBodyModel
 from synapse.util.threepids import validate_email
 

@@ -45,7 +45,6 @@ import traceback
 import unittest.mock
 from contextlib import contextmanager
 from typing import (
-    TYPE_CHECKING,
     Any,
     Callable,
     Dict,
@@ -57,22 +56,16 @@ from typing import (
 )
 
 from parameterized import parameterized
+from typing_extensions import ParamSpec
 
 from synapse._pydantic_compat import (
-    HAS_PYDANTIC_V2,
     BaseModel as PydanticBaseModel,
     conbytes,
     confloat,
     conint,
     constr,
+    get_args,
 )
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1.typing import get_args
-else:
-    from pydantic.typing import get_args
-
-from typing_extensions import ParamSpec
 
 logger = logging.getLogger(__name__)
 

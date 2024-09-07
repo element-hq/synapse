@@ -18,14 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING
-
-from synapse._pydantic_compat import HAS_PYDANTIC_V2, BaseModel
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra
-else:
-    from pydantic import Extra
+from synapse._pydantic_compat import BaseModel, Extra
 
 
 class RequestBodyModel(BaseModel):
