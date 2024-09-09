@@ -764,10 +764,11 @@ email:
 ---
 ### `max_event_delay_duration`
 
-The maximum allowed duration by which sent events can be delayed, as per MSC4140.
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
 Must be a positive value if set.
 
-Defaults to no duration, which disallows sending delayed events.
+Defaults to no duration (`null`), which disallows sending delayed events.
 
 Example configuration:
 ```yaml
