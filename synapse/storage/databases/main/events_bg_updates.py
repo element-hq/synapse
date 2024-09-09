@@ -2007,7 +2007,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (
                     room_id,
                     user_id,
-                    # We look explicitely for `invite` and `knock` events instead of
+                    # We look explicitly for `invite` and `knock` events instead of
                     # just their previous membership as someone could have been `invite`
                     # -> `ban` -> unbanned (`leave`) and we want to find the `invite`
                     # event where the stripped state is.
