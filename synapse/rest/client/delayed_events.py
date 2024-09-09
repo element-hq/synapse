@@ -1,4 +1,4 @@
-"""This module contains REST servlets to do with delayed events: /delayed_events/<paths>"""
+# This module contains REST servlets to do with delayed events: /delayed_events/<paths>
 
 import logging
 from enum import Enum
