@@ -458,8 +458,8 @@ class DelayedEventsStore(SQLBaseStore):
                 assert old_next_send_ts is not None
                 new_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
                 return new_next_send_ts != old_next_send_ts, new_next_send_ts
-            else:
-                return False, None
+
+            return False, None
 
         return await self.db_pool.runInteraction(
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
