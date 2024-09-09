@@ -41,7 +41,10 @@ from synapse.storage.databases.main.events import (
     SlidingSyncMembershipSnapshotSharedInsertValues,
     SlidingSyncStateInsertValues,
 )
-from synapse.storage.databases.main.events_worker import DatabaseCorruptionError
+from synapse.storage.databases.main.events_worker import (
+    DatabaseCorruptionError,
+    InvalidEventError,
+)
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
 from synapse.storage.types import Cursor
@@ -2093,7 +2096,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         fetched_events = await self.get_events(
                             current_state_ids_map.values()
                         )
-                    except DatabaseCorruptionError as e:
+                    except (DatabaseCorruptionError, InvalidEventError) as e:
                         logger.warning(
                             "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
                             room_id,
@@ -2201,7 +2204,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
                 try:
                     fetched_events = await self.get_events(state_ids_map.values())
-                except DatabaseCorruptionError as e:
+                except (DatabaseCorruptionError, InvalidEventError) as e:
                     logger.warning(
                         "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
                         room_id,
@@ -2345,17 +2348,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         )
 
         return len(memberships_to_update_rows)
-
-    async def have_finished_sliding_sync_background_jobs(self) -> bool:
-        """Return if its safe to use the sliding sync membership tables."""
-
-        return await self.db_pool.updates.have_completed_background_updates(
-            (
-                _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
-                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
-            )
-        )
 
 
 def _resolve_stale_data_in_sliding_sync_tables(
