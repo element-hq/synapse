@@ -201,14 +201,14 @@ class DelayedEventsHandler:
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        changed, next_send_ts = await self._store.restart_delayed_event(
+        changed_next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
             current_ts=self._get_current_ts(),
         )
 
-        if changed:
-            self._schedule_next_at(next_send_ts)
+        if changed_next_send_ts is not None:
+            self._schedule_next_at(changed_next_send_ts)
 
     async def send(self, requester: Requester, delay_id: str) -> None:
         """

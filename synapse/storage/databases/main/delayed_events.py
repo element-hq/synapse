@@ -89,7 +89,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
         current_ts: Timestamp,
-    ) -> Tuple[bool, Timestamp]:
+    ) -> Optional[Timestamp]:
         """
         Restarts the send time of the matching delayed event,
         as long as it hasn't already been marked for processing.
@@ -99,8 +99,9 @@ class DelayedEventsStore(SQLBaseStore):
             user_localpart: The localpart of the delayed event's owner.
             current_ts: The current time, which will be used to calculate the new send time.
 
-        Returns: Whether the matching delayed event would have been the next to be sent,
-            and if so, what the next soonest send time is, if any.
+        Returns: None if the matching delayed event would not have been the next to be sent;
+            otherwise, the send time of the next delayed event to be sent (which may be the
+            matching delayed event, or another one sent before it).
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -108,59 +109,84 @@ class DelayedEventsStore(SQLBaseStore):
 
         def restart_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, Timestamp]:
-            old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-            if old_next_send_ts is None:
+        ) -> Optional[Timestamp]:
+            txn.execute(
+                """
+                SELECT delay_id, user_localpart, send_ts
+                FROM delayed_events
+                WHERE NOT is_processed
+                ORDER BY send_ts
+                LIMIT 2
+                """
+            )
+            if txn.rowcount == 0:
                 # Return early if there are no delayed events at all
                 raise NotFoundError("Delayed event not found")
 
-            if self.database_engine.supports_returning:
-                txn.execute(
-                    """
-                    UPDATE delayed_events
-                    SET send_ts = ? + delay
-                    WHERE delay_id = ? AND user_localpart = ?
-                        AND NOT is_processed
-                    RETURNING send_ts
-                    """,
-                    (
-                        current_ts,
-                        delay_id,
-                        user_localpart,
-                    ),
-                )
-                row = txn.fetchone()
-                if row is None:
-                    raise NotFoundError("Delayed event not found")
-
-                restarted_send_ts = row[0]
+            if txn.rowcount == 1:
+                # The restarted event is the only event
+                changed = True
+                second_next_send_ts = None
             else:
-                keyvalues = {
-                    "delay_id": delay_id,
-                    "user_localpart": user_localpart,
-                    "is_processed": False,
-                }
-                delay = self.db_pool.simple_select_one_onecol_txn(
-                    txn,
-                    table="delayed_events",
-                    keyvalues=keyvalues,
-                    retcol="delay",
-                    allow_none=True,
-                )
-                if delay is None:
-                    raise NotFoundError("Delayed event not found")
+                next_event, second_next_event = txn.fetchmany(2)
+                if (
+                    # The restarted event is the next to be sent
+                    delay_id == next_event[0]
+                    and user_localpart == next_event[1]
+                    # The next event to be sent is the only one to be sent at that time
+                    and next_event[2] != second_next_event[2]
+                ):
+                    changed = True
+                    second_next_send_ts = Timestamp(second_next_event[2])
+                else:
+                    changed = False
 
-                restarted_send_ts = current_ts + delay
-                self.db_pool.simple_update_one_txn(
-                    txn,
-                    table="delayed_events",
-                    keyvalues=keyvalues,
-                    updatevalues={"send_ts": restarted_send_ts},
+            sql_base = """
+                UPDATE delayed_events
+                SET send_ts = ? + delay
+                WHERE delay_id = ? AND user_localpart = ?
+                    AND NOT is_processed
+                """
+            if changed and self.database_engine.supports_returning:
+                sql_base += "RETURNING send_ts"
+
+            txn.execute(
+                sql_base,
+                (
+                    current_ts,
+                    delay_id,
+                    user_localpart,
+                ),
+            )
+            if txn.rowcount == 0:
+                raise NotFoundError("Delayed event not found")
+
+            if changed:
+                if self.database_engine.supports_returning:
+                    row = txn.fetchone()
+                    assert row is not None
+                    restarted_send_ts = Timestamp(row[0])
+                else:
+                    restarted_send_ts = Timestamp(
+                        self.db_pool.simple_select_one_onecol_txn(
+                            txn,
+                            table="delayed_events",
+                            keyvalues={
+                                "delay_id": delay_id,
+                                "user_localpart": user_localpart,
+                                "is_processed": False,
+                            },
+                            retcol="send_ts",
+                        )
+                    )
+
+                return (
+                    restarted_send_ts
+                    if second_next_send_ts is None
+                    else min(restarted_send_ts, second_next_send_ts)
                 )
 
-            new_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-            assert new_next_send_ts is not None
-            return new_next_send_ts < old_next_send_ts, new_next_send_ts
+            return None
 
         return await self.db_pool.runInteraction(
             "restart_delayed_event", restart_delayed_event_txn
