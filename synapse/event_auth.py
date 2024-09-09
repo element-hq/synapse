@@ -819,7 +819,7 @@ def _can_send_event(event: "EventBase", auth_events: StateMap["EventBase"]) -> b
                 )
                 if not UserID.is_valid(state_key_user_id):
                     raise ValueError
-            except Exception:
+            except ValueError:
                 raise SynapseError(
                     400,
                     "State key neither equals a valid user ID, nor starts with one plus an underscore",
