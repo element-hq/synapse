@@ -1011,11 +1011,15 @@ class SlidingSyncRestServlet(RestServlet):
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
                 "bump_stamp": room_result.bump_stamp,
-                "joined_count": room_result.joined_count,
-                "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
             }
+
+            if room_result.joined_count is not None:
+                serialized_rooms[room_id]["joined_count"] = room_result.joined_count
+
+            if room_result.invited_count is not None:
+                serialized_rooms[room_id]["invited_count"] = room_result.invited_count
 
             if room_result.name:
                 serialized_rooms[room_id]["name"] = room_result.name
