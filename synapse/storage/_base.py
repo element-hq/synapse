@@ -153,6 +153,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_current_hosts_in_room", (room_id,))
         self._attempt_to_invalidate_cache("get_users_in_room_with_profiles", (room_id,))
         self._attempt_to_invalidate_cache("get_number_joined_users_in_room", (room_id,))
+        self._attempt_to_invalidate_cache("get_member_counts", (room_id,))
         self._attempt_to_invalidate_cache("get_local_users_in_room", (room_id,))
         self._attempt_to_invalidate_cache("does_pair_of_users_share_a_room", None)
         self._attempt_to_invalidate_cache("get_user_in_room_with_profile", None)

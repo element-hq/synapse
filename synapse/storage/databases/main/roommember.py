@@ -370,6 +370,33 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     @cached()
+    async def get_member_counts(self, room_id: str) -> Mapping[str, int]:
+        """Get a mapping of number of users by membership"""
+
+        def _get_room_summary_txn(
+            txn: LoggingTransaction,
+        ) -> Dict[str, int]:
+            # first get counts.
+            # We do this all in one transaction to keep the cache small.
+            # FIXME: get rid of this when we have room_stats
+
+            # Note, rejected events will have a null membership field, so
+            # we we manually filter them out.
+            sql = """
+                SELECT count(*), membership FROM current_state_events
+                WHERE type = 'm.room.member' AND room_id = ?
+                    AND membership IS NOT NULL
+                GROUP BY membership
+            """
+
+            txn.execute(sql, (room_id,))
+            return {membership: count for count, membership in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_member_counts", _get_room_summary_txn
+        )
+
+    @cached()
     async def get_number_joined_users_in_room(self, room_id: str) -> int:
         return await self.db_pool.simple_select_one_onecol(
             table="current_state_events",
