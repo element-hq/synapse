@@ -2500,7 +2500,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 table="sliding_sync_membership_snapshots",
                 key_names=key_names,
                 key_values=key_values,
-                # TODO: Implement these
+                value_names=(),
+                value_values=[],
                 insertion_value_names=insertion_value_names,
                 insertion_value_values=insertion_value_values,
             )

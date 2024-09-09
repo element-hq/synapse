@@ -35,7 +35,12 @@ from tests.utils import USE_POSTGRES_FOR_TESTS, default_config
 
 
 class SQLBaseStoreTestCase(unittest.TestCase):
-    """Test the "simple" SQL generating methods in SQLBaseStore."""
+    """
+    Test the "simple" SQL generating methods in SQLBaseStore.
+
+    Tests that the SQL is generated correctly and that the correct arguments are passed
+    (does not actually run the queries or test the end-result in the database).
+    """
 
     def setUp(self) -> None:
         # This is the Twisted connection pool.
@@ -618,6 +623,74 @@ class SQLBaseStoreTestCase(unittest.TestCase):
             self.mock_txn.executemany.assert_called_once_with(
                 "INSERT INTO tablename (columnname) VALUES (?) ON CONFLICT (columnname) DO NOTHING",
                 [("oldvalue",)],
+            )
+
+    @defer.inlineCallbacks
+    def test_upsert_many_no_values_with_insertion_values(
+        self,
+    ) -> Generator["defer.Deferred[object]", object, None]:
+        yield defer.ensureDeferred(
+            self.datastore.db_pool.simple_upsert_many(
+                table="tablename",
+                key_names=["keycol1"],
+                key_values=[["keyval1.1"], ["keyval1.2"]],
+                value_names=[],
+                value_values=[],
+                insertion_value_names=["insertioncol1"],
+                insertion_value_values=[["insertionvalue1"], ["insertionvalue2"]],
+                desc="",
+            )
+        )
+
+        if USE_POSTGRES_FOR_TESTS:
+            self.mock_execute_values.assert_called_once_with(
+                self.mock_txn,
+                "INSERT INTO tablename (keycol1, insertioncol1) VALUES ? ON CONFLICT (keycol1) DO NOTHING",
+                [("keyval1.1", "insertionvalue1"), ("keyval1.2", "insertionvalue2")],
+                template=None,
+                fetch=False,
+            )
+        else:
+            self.mock_txn.executemany.assert_called_once_with(
+                "INSERT INTO tablename (keycol1, insertioncol1) VALUES (?, ?) ON CONFLICT (keycol1) DO NOTHING",
+                [("keyval1.1", "insertionvalue1"), ("keyval1.2", "insertionvalue2")],
+            )
+
+    @defer.inlineCallbacks
+    def test_upsert_many_values_with_insertion_values(
+        self,
+    ) -> Generator["defer.Deferred[object]", object, None]:
+        yield defer.ensureDeferred(
+            self.datastore.db_pool.simple_upsert_many(
+                table="tablename",
+                key_names=["keycol1"],
+                key_values=[["keyval1.1"], ["keyval1.2"]],
+                value_names=["valuecol1"],
+                value_values=[["value1"], ["value2"]],
+                insertion_value_names=["insertioncol1"],
+                insertion_value_values=[["insertionvalue1"], ["insertionvalue2"]],
+                desc="",
+            )
+        )
+
+        if USE_POSTGRES_FOR_TESTS:
+            self.mock_execute_values.assert_called_once_with(
+                self.mock_txn,
+                "INSERT INTO tablename (keycol1, valuecol1, insertioncol1) VALUES ? ON CONFLICT (keycol1) DO UPDATE SET valuecol1=EXCLUDED.valuecol1",
+                [
+                    ("keyval1.1", "value1", "insertionvalue1"),
+                    ("keyval1.2", "value2", "insertionvalue2"),
+                ],
+                template=None,
+                fetch=False,
+            )
+        else:
+            self.mock_txn.executemany.assert_called_once_with(
+                "INSERT INTO tablename (keycol1, valuecol1, insertioncol1) VALUES (?, ?, ?) ON CONFLICT (keycol1) DO UPDATE SET valuecol1=EXCLUDED.valuecol1",
+                [
+                    ("keyval1.1", "value1", "insertionvalue1"),
+                    ("keyval1.2", "value2", "insertionvalue2"),
+                ],
             )
 
     @defer.inlineCallbacks

@@ -1472,6 +1472,11 @@ class DatabasePool:
         key_values: Collection[Collection[Any]],
         value_names: Collection[str],
         value_values: Collection[Collection[Any]],
+        # Given these are the same type as the normal values, force keyword-only so that
+        # they can't be confused.
+        *,
+        insertion_value_names: Collection[str] = [],
+        insertion_value_values: Collection[Iterable[Any]] = [],
         desc: str,
     ) -> None:
         """
@@ -1497,6 +1502,8 @@ class DatabasePool:
             key_values,
             value_names,
             value_values,
+            insertion_value_names=insertion_value_names,
+            insertion_value_values=insertion_value_values,
             db_autocommit=autocommit,
         )
 
@@ -1508,6 +1515,11 @@ class DatabasePool:
         key_values: Collection[Iterable[Any]],
         value_names: Collection[str],
         value_values: Collection[Iterable[Any]],
+        # Given these are the same type as the normal values, force keyword-only so that
+        # they can't be confused.
+        *,
+        insertion_value_names: Collection[str] = [],
+        insertion_value_values: Collection[Iterable[Any]] = [],
     ) -> None:
         """
         Upsert, many times.
@@ -1519,6 +1531,9 @@ class DatabasePool:
             value_names: The value column names
             value_values: A list of each row's value column values.
                 Ignored if value_names is empty.
+            insertion_value_names: The value column names to use only when inserting
+            insertion_value_values: A list of each row's value column values to use only
+                when inserting. Ignored if `insertion_value_names` is empty.
         """
         # If there's nothing to upsert, then skip executing the query.
         if not key_values:
@@ -1528,14 +1543,30 @@ class DatabasePool:
         # zip() works correctly.
         if not value_names:
             value_values = [() for x in range(len(key_values))]
-        elif len(value_values) != len(key_values):
+        elif len(key_values) != len(value_values):
             raise ValueError(
                 f"{len(key_values)} key rows and {len(value_values)} value rows: should be the same number."
             )
 
+        # No value columns, therefore make a blank list so that the following
+        # zip() works correctly.
+        if not insertion_value_names:
+            insertion_value_values = [() for x in range(len(key_values))]
+        elif len(key_values) != len(insertion_value_values):
+            raise ValueError(
+                f"{len(key_values)} key rows and {len(insertion_value_values)} insertion value rows: should be the same number."
+            )
+
         if table not in self._unsafe_to_upsert_tables:
             return self.simple_upsert_many_txn_native_upsert(
-                txn, table, key_names, key_values, value_names, value_values
+                txn,
+                table,
+                key_names,
+                key_values,
+                value_names,
+                value_values,
+                insertion_value_names=insertion_value_names,
+                insertion_value_values=insertion_value_values,
             )
         else:
             return self.simple_upsert_many_txn_emulated(
@@ -1545,6 +1576,9 @@ class DatabasePool:
                 key_values,
                 value_names,
                 value_values,
+                # TODO
+                # insertion_value_names=insertion_value_names,
+                # insertion_value_values=insertion_value_values,
             )
 
     def simple_upsert_many_txn_emulated(
@@ -1555,6 +1589,11 @@ class DatabasePool:
         key_values: Collection[Iterable[Any]],
         value_names: Collection[str],
         value_values: Iterable[Iterable[Any]],
+        # Given these are the same type as the normal values, force keyword-only so that
+        # they can't be confused.
+        *,
+        insertion_value_names: Collection[str] = [],
+        insertion_value_values: Collection[Iterable[Any]] = [],
     ) -> None:
         """
         Upsert, many times, but without native UPSERT support or batching.
@@ -1566,6 +1605,9 @@ class DatabasePool:
             value_names: The value column names
             value_values: A list of each row's value column values.
                 Ignored if value_names is empty.
+            insertion_value_names: The value column names to use only when inserting
+            insertion_value_values: A list of each row's value column values to use only
+                when inserting. Ignored if `insertion_value_names` is empty.
         """
 
         # Lock the table just once, to prevent it being done once per row.
@@ -1573,11 +1615,16 @@ class DatabasePool:
         # the lock is held for the remainder of the current transaction.
         self.engine.lock_table(txn, table)
 
-        for keyv, valv in zip(key_values, value_values):
+        for keyv, valv, insertionv in zip(
+            key_values, value_values, insertion_value_values
+        ):
             _keys = dict(zip(key_names, keyv))
             _vals = dict(zip(value_names, valv))
+            _insertion_vals = dict(zip(insertion_value_names, insertionv))
 
-            self.simple_upsert_txn_emulated(txn, table, _keys, _vals, lock=False)
+            self.simple_upsert_txn_emulated(
+                txn, table, _keys, _vals, insertion_values=_insertion_vals, lock=False
+            )
 
     @staticmethod
     def simple_upsert_many_txn_native_upsert(
@@ -1587,6 +1634,11 @@ class DatabasePool:
         key_values: Collection[Iterable[Any]],
         value_names: Collection[str],
         value_values: Iterable[Iterable[Any]],
+        # Given these are the same type as the normal values, force keyword-only so that
+        # they can't be confused.
+        *,
+        insertion_value_names: Collection[str] = [],
+        insertion_value_values: Collection[Iterable[Any]] = [],
     ) -> None:
         """
         Upsert, many times, using batching where possible.
@@ -1598,10 +1650,14 @@ class DatabasePool:
             value_names: The value column names
             value_values: A list of each row's value column values.
                 Ignored if value_names is empty.
+            insertion_value_names: The value column names to use only when inserting
+            insertion_value_values: A list of each row's value column values to use only
+                when inserting. Ignored if `insertion_value_names` is empty.
         """
         allnames: List[str] = []
         allnames.extend(key_names)
         allnames.extend(value_names)
+        allnames.extend(insertion_value_names)
 
         if not value_names:
             latter = "NOTHING"
@@ -1612,8 +1668,8 @@ class DatabasePool:
 
         args = []
 
-        for x, y in zip(key_values, value_values):
-            args.append(tuple(x) + tuple(y))
+        for x, y, z in zip(key_values, value_values, insertion_value_values):
+            args.append(tuple(x) + tuple(y) + tuple(z))
 
         if isinstance(txn.database_engine, PostgresEngine):
             # We use `execute_values` as it can be a lot faster than `execute_batch`,
