@@ -1047,60 +1047,11 @@ class SlidingSyncHandler:
         # If we're joined to the room, we need to find the last bump event before the
         # `to_token`
         if room_membership_for_user_at_to_token.membership == Membership.JOIN:
-            # We can quickly query for the latest bump event in the room using the
-            # sliding sync tables.
-            latest_room_bump_stamp = await self.store.get_latest_bump_stamp_for_room(
-                room_id
-            )
-
-            min_to_token_position = to_token.room_key.stream
-
-            # If we can rely on the new sliding sync tables and the `bump_stamp` is
-            # `None`, just fallback to the membership event position. This can happen
-            # when we've just joined a remote room and all the events are backfilled.
-            if (
-                # FIXME: The background job check can be removed once we bump
-                # `SCHEMA_COMPAT_VERSION` and run the foreground update for
-                # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
-                # (tracked by https://github.com/element-hq/synapse/issues/17623)
-                await self.store.have_finished_sliding_sync_background_jobs()
-                and latest_room_bump_stamp is None
-            ):
-                pass
-
-            # The `bump_stamp` stored in the database might be ahead of our token. Since
-            # `bump_stamp` is only a `stream_ordering` position, we can't be 100% sure
-            # that's before the `to_token` in all scenarios. The only scenario we can be
-            # sure of is if the `bump_stamp` is totally before the minimum position from
-            # the token.
-            #
-            # We don't need to check if the background update has finished, as if the
-            # returned bump stamp is not None then it must be up to date.
-            elif (
-                latest_room_bump_stamp is not None
-                and latest_room_bump_stamp < min_to_token_position
-            ):
-                bump_stamp = latest_room_bump_stamp
-
-            # Otherwise, if it's within or after the `to_token`, we need to find the
-            # last bump event before the `to_token`.
-            else:
-                last_bump_event_result = (
-                    await self.store.get_last_event_pos_in_room_before_stream_ordering(
-                        room_id,
-                        to_token.room_key,
-                        event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
-                    )
-                )
-                if last_bump_event_result is not None:
-                    _, new_bump_event_pos = last_bump_event_result
-
-                    # If we've just joined a remote room, then the last bump event may
-                    # have been backfilled (and so have a negative stream ordering).
-                    # These negative stream orderings can't sensibly be compared, so
-                    # instead we use the membership event position.
-                    if new_bump_event_pos.stream > 0:
-                        bump_stamp = new_bump_event_pos.stream
+            # Try and get a bump stamp, if not we just fall back to the
+            # membership token.
+            new_bump_stamp = await self._get_bump_stamp(room_id, to_token)
+            if new_bump_stamp is not None:
+                bump_stamp = new_bump_stamp
 
         unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
@@ -1190,3 +1141,65 @@ class SlidingSyncHandler:
             notification_count=0,
             highlight_count=0,
         )
+
+    async def _get_bump_stamp(
+        self, room_id: str, to_token: StreamToken
+    ) -> Optional[int]:
+        """Get a bump stamp for the room, if we have a bump event"""
+
+        # We can quickly query for the latest bump event in the room using the
+        # sliding sync tables.
+        latest_room_bump_stamp = await self.store.get_latest_bump_stamp_for_room(
+            room_id
+        )
+
+        min_to_token_position = to_token.room_key.stream
+
+        # If we can rely on the new sliding sync tables and the `bump_stamp` is
+        # `None`, just fallback to the membership event position. This can happen
+        # when we've just joined a remote room and all the events are backfilled.
+        if (
+            # FIXME: The background job check can be removed once we bump
+            # `SCHEMA_COMPAT_VERSION` and run the foreground update for
+            # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
+            # (tracked by https://github.com/element-hq/synapse/issues/17623)
+            await self.store.have_finished_sliding_sync_background_jobs()
+            and latest_room_bump_stamp is None
+        ):
+            return None
+
+        # The `bump_stamp` stored in the database might be ahead of our token. Since
+        # `bump_stamp` is only a `stream_ordering` position, we can't be 100% sure
+        # that's before the `to_token` in all scenarios. The only scenario we can be
+        # sure of is if the `bump_stamp` is totally before the minimum position from
+        # the token.
+        #
+        # We don't need to check if the background update has finished, as if the
+        # returned bump stamp is not None then it must be up to date.
+        elif (
+            latest_room_bump_stamp is not None
+            and latest_room_bump_stamp < min_to_token_position
+        ):
+            return latest_room_bump_stamp
+
+        # Otherwise, if it's within or after the `to_token`, we need to find the
+        # last bump event before the `to_token`.
+        else:
+            last_bump_event_result = (
+                await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                    room_id,
+                    to_token.room_key,
+                    event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
+                )
+            )
+            if last_bump_event_result is not None:
+                _, new_bump_event_pos = last_bump_event_result
+
+                # If we've just joined a remote room, then the last bump event may
+                # have been backfilled (and so have a negative stream ordering).
+                # These negative stream orderings can't sensibly be compared, so
+                # instead we use the membership event position.
+                if new_bump_event_pos.stream > 0:
+                    return new_bump_event_pos.stream
+
+            return None
