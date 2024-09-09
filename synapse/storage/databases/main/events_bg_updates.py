@@ -1966,7 +1966,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
                 return 0
 
-        def _find_previous_membership_txn(
+        def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
         ) -> Tuple[str, str]:
             # Find the previous invite/knock event before the leave event
@@ -2007,6 +2007,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (
                     room_id,
                     user_id,
+                    # We look explicitly for `invite` and `knock` events instead of
+                    # just their previous membership as someone could have been `invite`
+                    # -> `ban` -> unbanned (`leave`) and we want to find the `invite`
+                    # event where the stripped state is.
                     Membership.INVITE,
                     Membership.KNOCK,
                     event_id,
@@ -2155,8 +2159,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         invite_or_knock_event_id,
                         invite_or_knock_membership,
                     ) = await self.db_pool.runInteraction(
-                        "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
-                        _find_previous_membership_txn,
+                        "sliding_sync_membership_snapshots_bg_update._find_previous_invite_or_knock_membership_txn",
+                        _find_previous_invite_or_knock_membership_txn,
                         room_id,
                         user_id,
                         membership_event_id,
