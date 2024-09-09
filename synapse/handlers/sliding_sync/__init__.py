@@ -999,6 +999,9 @@ class SlidingSyncHandler:
             # that's before the `to_token` in all scenarios. The only scenario we can be
             # sure of is if the `bump_stamp` is totally before the minimum position from
             # the token.
+            #
+            # We don't need to check if the background update has finished, as if the 
+            # returned bump stamp is not None then it must be up to date.
             elif (
                 latest_room_bump_stamp is not None
                 and latest_room_bump_stamp < min_to_token_position
