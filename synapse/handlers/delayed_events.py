@@ -332,7 +332,6 @@ class DelayedEventsHandler:
         user_id = UserID(user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
         # Create a new requester from what data is currently available
-        # TODO: Consider storing the requester in the DB at add time and deserialize it here
         requester = create_requester(
             user_id,
             is_guest=await self._store.is_guest(user_id_str),
