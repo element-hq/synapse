@@ -823,11 +823,9 @@ class SlidingSyncHandler:
         # membership has changed which may change the heroes.
         if name_event_id is None and (initial or (not initial and membership_changed)):
             # We need the room summary to extract the heroes from
-            if room_membership_for_user_at_to_token.membership in (
-                Membership.LEAVE,
-                Membership.BAN,
-            ):
+            if room_membership_for_user_at_to_token.membership != Membership.JOIN:
                 # TODO: Figure out how to get the membership summary for left/banned rooms
+                # For invite/knock rooms we don't include the information.
                 room_membership_summary = {}
             else:
                 room_membership_summary = await self.store.get_room_summary(room_id)
@@ -837,13 +835,15 @@ class SlidingSyncHandler:
                 room_membership_summary, me=user.to_string()
             )
 
-        # Fetch the membership counts.
+        # Fetch the membership counts for rooms we're joined to.
         #
         # Similarly to other metadata, we only need to calculate the member
         # counts if this is an initial sync or the memberships have changed.
         joined_count: Optional[int] = None
         invited_count: Optional[int] = None
-        if initial or membership_changed:
+        if (
+            initial or membership_changed
+        ) and room_membership_for_user_at_to_token.membership == Membership.JOIN:
             # If we have the room summary (because we calculated heroes above)
             # then we can simply pull the counts from there.
             if room_membership_summary is not None:
@@ -856,13 +856,6 @@ class SlidingSyncHandler:
                 invited_count = room_membership_summary.get(
                     Membership.INVITE, empty_membership_summary
                 ).count
-            elif room_membership_for_user_at_to_token.membership in (
-                Membership.LEAVE,
-                Membership.BAN,
-            ):
-                # TODO: Figure out how to get the membership summary for left/banned rooms
-                joined_count = 0
-                invited_count = 0
             else:
                 member_counts = await self.store.get_member_counts(room_id)
                 joined_count = member_counts.get(Membership.JOIN, 0)
