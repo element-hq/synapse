@@ -197,8 +197,8 @@ class SlidingSyncResult:
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         num_live: Optional[int]
         bump_stamp: int
-        joined_count: int
-        invited_count: int
+        joined_count: Optional[int]
+        invited_count: Optional[int]
         notification_count: int
         highlight_count: int
 
@@ -207,6 +207,12 @@ class SlidingSyncResult:
                 # If this is the first time the client is seeing the room, we should not filter it out
                 # under any circumstance.
                 self.initial
+                # We need to let the client know if any of the info has changed
+                or self.name is not None
+                or self.avatar is not None
+                or bool(self.heroes)
+                or self.joined_count is not None
+                or self.invited_count is not None
                 # We need to let the client know if there are any new events
                 or bool(self.required_state)
                 or bool(self.timeline_events)
