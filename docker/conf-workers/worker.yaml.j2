@@ -27,4 +27,19 @@ worker_listeners:
 
 worker_log_config: {{ worker_log_config_filepath }}
 
+database:
+  name: "psycopg2"
+  args:
+    user: "{{ POSTGRES_USER or "synapse" }}"
+    password: "{{ POSTGRES_PASSWORD }}"
+    database: "{{ POSTGRES_DB or "synapse" }}"
+{% if not SYNAPSE_USE_UNIX_SOCKET %}
+{# Synapse will use a default unix socket for Postgres when host/port is not specified (behavior from `psycopg2`). #}
+    host: "{{ POSTGRES_HOST or "db" }}"
+    port: "{{ POSTGRES_PORT or "5432" }}"
+{% endif %}
+    cp_min: {{ POSTGRES_CP_MIN or 5 }}
+    cp_max: {{ POSTGRES_CP_MAX or 10 }}
+    application_name: "{{ name }}"
+
 {{ worker_extra_conf }}

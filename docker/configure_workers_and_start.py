@@ -962,11 +962,17 @@ def generate_worker_files(
             environ, worker_name, workers_config_dir, template_dir, data_dir
         )
 
+        extra_env: Dict[str, str] = {}
+        for extra_env_var in ("POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_SOCKET", "POSTGRES_DB", "SYNAPSE_USE_UNIX_SOCKET", "POSTGRES_CP_MIN", "POSTGRES_CP_MAX"):
+            if extra_env_var in os.environ:
+                extra_env[extra_env_var] = os.environ[extra_env_var]
+
         # Then a worker config file
         convert(
             os.path.join(template_dir, "worker.yaml.j2"),
             os.path.join(workers_config_dir, f"{worker_name}.yaml"),
             **worker_config,
+            **extra_env,
             worker_log_config_filepath=log_config_filepath,
             using_unix_sockets=using_unix_sockets,
         )
