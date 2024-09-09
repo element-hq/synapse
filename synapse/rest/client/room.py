@@ -453,6 +453,20 @@ def _parse_request_delay(
     request: SynapseRequest,
     max_delay: Optional[int],
 ) -> Optional[int]:
+    """Parses from the request string the delay parameter for
+        delayed event requests, and checks it for correctness.
+
+    Args:
+        request: the twisted HTTP request.
+        max_delay: the maximum allowed value of the delay parameter,
+            or None if no delay parameter is allowed.
+    Returns:
+        The value of the requested delay, or None if it was absent.
+
+    Raises:
+        SynapseError: if the delay parameter is present and forbidden,
+            or if it exceeds the maximum allowed value.
+    """
     delay = parse_integer(request, "org.matrix.msc4140.delay")
     if delay is None:
         return None
