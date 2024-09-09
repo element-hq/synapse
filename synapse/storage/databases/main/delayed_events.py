@@ -33,6 +33,32 @@ DelayedEventDetails = Tuple[
 
 
 class DelayedEventsStore(SQLBaseStore):
+    async def get_delayed_events_stream_pos(self) -> int:
+        """
+        Gets the stream position of the background process to watch for state events
+        that target the same piece of state as any pending delayed events.
+        """
+        return await self.db_pool.simple_select_one_onecol(
+            table="delayed_events_stream_pos",
+            keyvalues={},
+            retcol="stream_id",
+            desc="get_delayed_events_stream_pos",
+        )
+
+    async def update_delayed_events_stream_pos(self, stream_id: Optional[int]) -> None:
+        """
+        Updates the stream position of the background process to watch for state events
+        that target the same piece of state as any pending delayed events.
+
+        Must only be used by the worker running the background process.
+        """
+        await self.db_pool.simple_update_one(
+            table="delayed_events_stream_pos",
+            keyvalues={},
+            updatevalues={"stream_id": stream_id},
+            desc="update_delayed_events_stream_pos",
+        )
+
     async def add_delayed_event(
         self,
         *,
@@ -510,6 +536,27 @@ class DelayedEventsStore(SQLBaseStore):
                 "is_processed": True,
             },
             desc="delete_processed_delayed_event",
+        )
+
+    async def delete_processed_delayed_state_events(
+        self,
+        *,
+        room_id: str,
+        event_type: str,
+        state_key: str,
+    ) -> None:
+        """
+        Delete the matching delayed state events that have been marked as processed.
+        """
+        await self.db_pool.simple_delete(
+            table="delayed_events",
+            keyvalues={
+                "room_id": room_id,
+                "event_type": event_type,
+                "state_key": state_key,
+                "is_processed": True,
+            },
+            desc="delete_processed_delayed_state_events",
         )
 
     async def unprocess_delayed_events(self) -> None:
