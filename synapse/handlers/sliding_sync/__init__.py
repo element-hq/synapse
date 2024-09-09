@@ -1049,7 +1049,9 @@ class SlidingSyncHandler:
         if room_membership_for_user_at_to_token.membership == Membership.JOIN:
             # Try and get a bump stamp, if not we just fall back to the
             # membership token.
-            new_bump_stamp = await self._get_bump_stamp(room_id, to_token)
+            new_bump_stamp = await self._get_bump_stamp(
+                room_id, to_token, timeline_events
+            )
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
@@ -1143,9 +1145,32 @@ class SlidingSyncHandler:
         )
 
     async def _get_bump_stamp(
-        self, room_id: str, to_token: StreamToken
+        self, room_id: str, to_token: StreamToken, timeline: List[EventBase]
     ) -> Optional[int]:
-        """Get a bump stamp for the room, if we have a bump event"""
+        """Get a bump stamp for the room, if we have a bump event
+
+        Args:
+            room_id
+            to_token: The upper bound of token to return
+            timeline: The list of events we have fetched.
+        """
+
+        # First check the timeline events we're returning to see if one of
+        # those matches. We iterate backwards and take the stream ordering
+        # of the first event that matches the bump event types.
+        for timeline_event in reversed(timeline):
+            if timeline_event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
+                new_bump_stamp = timeline_event.internal_metadata.stream_ordering
+
+                # All persisted events have a stream ordering
+                assert new_bump_stamp is not None
+
+                # If we've just joined a remote room, then the last bump event may
+                # have been backfilled (and so have a negative stream ordering).
+                # These negative stream orderings can't sensibly be compared, so
+                # instead we use the membership event position.
+                if new_bump_stamp > 0:
+                    return new_bump_stamp
 
         # We can quickly query for the latest bump event in the room using the
         # sliding sync tables.
