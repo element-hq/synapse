@@ -111,6 +111,7 @@ class DelayedEventsStore(SQLBaseStore):
         ) -> Tuple[bool, Timestamp]:
             old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
             if old_next_send_ts is None:
+                # Return early if there are no delayed events at all
                 raise NotFoundError("Delayed event not found")
 
             if self.database_engine.supports_returning:
@@ -396,6 +397,7 @@ class DelayedEventsStore(SQLBaseStore):
         ) -> Tuple[bool, Optional[Timestamp]]:
             old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
             if old_next_send_ts is None:
+                # Return early if there are no delayed events at all
                 raise NotFoundError("Delayed event not found")
 
             try:
