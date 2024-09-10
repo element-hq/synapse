@@ -1173,8 +1173,8 @@ class SlidingSyncHandler:
             # `SCHEMA_COMPAT_VERSION` and run the foreground update for
             # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
             # (tracked by https://github.com/element-hq/synapse/issues/17623)
-            await self.store.have_finished_sliding_sync_background_jobs()
-            and latest_room_bump_stamp is None
+            latest_room_bump_stamp is None
+            and await self.store.have_finished_sliding_sync_background_jobs()
         ):
             return None
 
