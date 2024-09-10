@@ -1348,6 +1348,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._invalidate_cache_and_stream(
                 txn, self.get_forgotten_rooms_for_user, (user_id,)
             )
+            self._invalidate_cache_and_stream(
+                txn, self.get_sliding_sync_rooms_for_user, (user_id,)
+            )
 
         await self.db_pool.runInteraction("forget_membership", f)
 
@@ -1393,8 +1396,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def get_sliding_sync_rooms_for_user_txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
-            # XXX: If you return any new `COALESCE(...)` fields using
-            # `sliding_sync_joined_rooms`, make sure to bust the
+            # XXX: If you use any new columns that can change (like from
+            # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
             # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
             # tests).
             sql = """

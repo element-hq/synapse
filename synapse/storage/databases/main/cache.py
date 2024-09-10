@@ -482,13 +482,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_current_hosts_in_room_ordered", (room_id,)
         )
+        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
         self._attempt_to_invalidate_cache("did_forget", None)
         self._attempt_to_invalidate_cache("get_forgotten_rooms_for_user", None)
         self._attempt_to_invalidate_cache("_get_membership_from_event_id", None)
         self._attempt_to_invalidate_cache("get_room_version_id", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
-        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
         self._attempt_to_invalidate_cache("_get_max_event_pos", (room_id,))
 
