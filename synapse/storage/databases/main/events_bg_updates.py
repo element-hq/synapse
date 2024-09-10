@@ -1993,7 +1993,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE (c.room_id, c.user_id) > (?, ?)
-                    ORDER BY c.room_id ASC, c.event_stream_ordering ASC, c.user_id ASC
+                    ORDER BY c.room_id ASC, c.stream_ordering ASC, c.user_id ASC
                     LIMIT ?
                     """,
                     (last_room_id, last_user_id, batch_size),
