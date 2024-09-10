@@ -2329,7 +2329,7 @@ Example configuration:
 turn_shared_secret_path: /path/to/secrets/file
 ```
 
-_Added in Synapse 1.115.0._
+_Added in Synapse 1.116.0._
 
 ---
 ### `turn_username` and `turn_password`
