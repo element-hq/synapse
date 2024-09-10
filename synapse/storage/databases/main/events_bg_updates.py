@@ -1955,7 +1955,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             Tuple[str, Optional[str], str, str, str, str, int, Optional[str], bool]
         ]:
             # Fetch the set of event IDs that we want to update
-
+            #
+            # It's important to sort by `event_stream_ordering` *ascending* (oldest to
+            # newest) so that we can re-use the snapshots along the way if nothing has
+            # changed.
+            #
             if initial_phase:
                 # There are some old out-of-band memberships (before
                 # https://github.com/matrix-org/synapse/issues/6983) where we don't have
@@ -1978,7 +1982,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE (c.room_id, c.user_id) > (?, ?)
-                    ORDER BY c.room_id ASC, c.user_id ASC
+                    ORDER BY c.event_stream_ordering ASC, c.room_id ASC, c.user_id ASC
                     LIMIT ?
                     """,
                     (last_room_id, last_user_id, batch_size),
