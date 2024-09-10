@@ -19,16 +19,12 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import attr
 import logging
 from typing import List, Optional, Tuple, cast
-from parameterized import parameterized, parameterized_class
-
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
-from synapse.types import PersistedEventPosition
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.admin import register_servlets_for_client_rest_resource
@@ -38,12 +34,6 @@ from synapse.storage.databases.main.roommember import extract_heroes_from_room_s
 from synapse.storage.roommember import MemberSummary
 from synapse.types import UserID, create_requester
 from synapse.util import Clock
-from synapse.storage.roommember import (
-    MemberSummary,
-    ProfileInfo,
-    RoomsForUser,
-    RoomsForUserSlidingSync,
-)
 
 from tests import unittest
 from tests.server import TestHomeServer
