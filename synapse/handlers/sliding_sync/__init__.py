@@ -1206,7 +1206,10 @@ class SlidingSyncHandler:
             latest_room_bump_stamp is not None
             and latest_room_bump_stamp < min_to_token_position
         ):
-            return latest_room_bump_stamp
+            if latest_room_bump_stamp > 0:
+                return latest_room_bump_stamp
+            else:
+                return None
 
         # Otherwise, if it's within or after the `to_token`, we need to find the
         # last bump event before the `to_token`.
