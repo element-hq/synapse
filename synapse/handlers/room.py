@@ -1753,7 +1753,7 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
             )
 
             events = list(room_events)
-            events.extend(e for evs, _ in room_to_events.values() for e in evs)
+            events.extend(e for evs, _, _ in room_to_events.values() for e in evs)
 
             # We know stream_ordering must be not None here, as its been
             # persisted, but mypy doesn't know that

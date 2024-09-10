@@ -41,6 +41,46 @@ logger = logging.getLogger(__name__)
 
 
 class SlidingSyncStore(SQLBaseStore):
+    async def get_latest_bump_stamp_for_room(
+        self,
+        room_id: str,
+    ) -> Optional[int]:
+        """
+        Get the `bump_stamp` for the room.
+
+        The `bump_stamp` is the `stream_ordering` of the last event according to the
+        `bump_event_types`. This helps clients sort more readily without them needing to
+        pull in a bunch of the timeline to determine the last activity.
+        `bump_event_types` is a thing because for example, we don't want display name
+        changes to mark the room as unread and bump it to the top. For encrypted rooms,
+        we just have to consider any activity as a bump because we can't see the content
+        and the client has to figure it out for themselves.
+
+        This should only be called where the server is participating
+        in the room (someone local is joined).
+
+        Returns:
+            The `bump_stamp` for the room (which can be `None`).
+        """
+
+        return cast(
+            Optional[int],
+            await self.db_pool.simple_select_one_onecol(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                retcol="bump_stamp",
+                # FIXME: This should be `False` once we bump `SCHEMA_COMPAT_VERSION` and run the
+                # foreground update for
+                # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked
+                # by https://github.com/element-hq/synapse/issues/17623)
+                #
+                # The should be `allow_none=False` in the future because event though
+                # `bump_stamp` itself can be `None`, we should have a row in the
+                # `sliding_sync_joined_rooms` table for any joined room.
+                allow_none=True,
+            ),
+        )
+
     async def persist_per_connection_state(
         self,
         user_id: str,
