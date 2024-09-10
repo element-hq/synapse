@@ -1601,17 +1601,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # starve disk usage while this goes on.
             #
             # We upsert in case we have to run this multiple times.
-            #
-            # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
             txn.execute(
                 """
                 INSERT INTO sliding_sync_joined_rooms_to_recalculate
                     (room_id)
-                SELECT room_id FROM rooms WHERE ?
+                SELECT DISTINCT room_id FROM local_current_membership
+                WHERE membership = 'join'
                 ON CONFLICT (room_id)
                 DO NOTHING;
                 """,
-                (True,),
             )
 
         await self.db_pool.runInteraction(
@@ -1765,7 +1763,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # `room_stats_state` table. In the case, where we can't use
             # `room_stats_state`, we just fetch all of the events manually.
             if current_state_ids_to_fetch:
-                fetched_events = await self.get_events(current_state_ids_to_fetch)
+                try:
+                    fetched_events = await self.get_events(
+                        current_state_ids_map.values()
+                    )
+                except (DatabaseCorruptionError, InvalidEventError) as e:
+                    logger.warning(
+                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                        room_id,
+                        e,
+                    )
+                    return
 
                 # Even if we are joined to the room, `get_events(...)` will filter out
                 # events for unknown room versions that we no longer support. We don't need
@@ -1801,10 +1809,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 + "given we pulled the room out of `current_state_events`"
             )
             most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
-            assert most_recent_event_stream_ordering > 0, (
-                "We should have at-least one event in the room (our own join membership event for example) "
-                + "that isn't backfilled (negative `stream_ordering`)  if we are joined to the room."
-            )
+
+            # The `most_recent_event_stream_ordering` should be positive,
+            # however there are (very rare) rooms where that is not the case in
+            # the matrix.org database. It's not clear how they got into that
+            # state, but does mean that we cannot assert that the stream
+            # ordering is indeed positive.
+
             # Figure out the latest `bump_stamp` in the room. This could be `None` for a
             # federated room you just joined where all of events are still `outliers` or
             # backfilled history. In the Sliding Sync API, we default to the user's

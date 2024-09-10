@@ -22,7 +22,7 @@ import synapse.rest.admin
 from synapse.api.constants import EventTypes
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import StreamToken, StrSequence
+from synapse.types import StrSequence
 from synapse.util import Clock
 
 from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
@@ -149,16 +149,10 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         user2_tok = self.login(user2_id, "pass")
 
         room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
-        self.helper.send(room_id1, "activity1", tok=user2_tok)
-        self.helper.send(room_id1, "activity2", tok=user2_tok)
+        event_response1 = self.helper.send(room_id1, "activity1", tok=user2_tok)
+        event_response2 = self.helper.send(room_id1, "activity2", tok=user2_tok)
         event_response3 = self.helper.send(room_id1, "activity3", tok=user2_tok)
-        event_pos3 = self.get_success(
-            self.store.get_position_for_event(event_response3["event_id"])
-        )
         event_response4 = self.helper.send(room_id1, "activity4", tok=user2_tok)
-        event_pos4 = self.get_success(
-            self.store.get_position_for_event(event_response4["event_id"])
-        )
         event_response5 = self.helper.send(room_id1, "activity5", tok=user2_tok)
         user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
 
@@ -196,27 +190,23 @@ class SlidingSyncRoomsTimelineTestCase(SlidingSyncBase):
         )
 
         # Check to make sure the `prev_batch` points at the right place
-        prev_batch_token = self.get_success(
-            StreamToken.from_string(
-                self.store, response_body["rooms"][room_id1]["prev_batch"]
-            )
+        prev_batch_token = response_body["rooms"][room_id1]["prev_batch"]
+
+        # If we use the `prev_batch` token to look backwards we should see
+        # `event3` and older next.
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{room_id1}/messages?from={prev_batch_token}&dir=b&limit=3",
+            access_token=user1_tok,
         )
-        prev_batch_room_stream_token_serialized = self.get_success(
-            prev_batch_token.room_key.to_string(self.store)
-        )
-        # If we use the `prev_batch` token to look backwards, we should see `event3`
-        # next so make sure the token encompasses it
-        self.assertEqual(
-            event_pos3.persisted_after(prev_batch_token.room_key),
-            False,
-            f"`prev_batch` token {prev_batch_room_stream_token_serialized} should be >= event_pos3={self.get_success(event_pos3.to_room_stream_token().to_string(self.store))}",
-        )
-        # If we use the `prev_batch` token to look backwards, we shouldn't see `event4`
-        # anymore since it was just returned in this response.
-        self.assertEqual(
-            event_pos4.persisted_after(prev_batch_token.room_key),
-            True,
-            f"`prev_batch` token {prev_batch_room_stream_token_serialized} should be < event_pos4={self.get_success(event_pos4.to_room_stream_token().to_string(self.store))}",
+        self.assertEqual(channel.code, 200, channel.json_body)
+        self.assertListEqual(
+            [
+                event_response3["event_id"],
+                event_response2["event_id"],
+                event_response1["event_id"],
+            ],
+            [ev["event_id"] for ev in channel.json_body["chunk"]],
         )
 
         # With no `from_token` (initial sync), it's all historical since there is no
