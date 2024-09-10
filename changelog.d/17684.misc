@@ -1,0 +1,1 @@
+Speed up sliding sync by reducing number of database calls.
