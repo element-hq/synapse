@@ -2655,6 +2655,10 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 # No value columns, therefore make a blank list so that the following
                 # zip() works correctly.
                 value_values=[() for x in range(len(chunk))],
+                insertion_value_names=(),
+                # No value columns, therefore make a blank list so that the following
+                # zip() works correctly.
+                insertion_value_values=[() for x in range(len(chunk))],
             )
     else:
         # Avoid adding the background updates when there is no data to run them on (if
