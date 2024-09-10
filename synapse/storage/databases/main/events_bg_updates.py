@@ -2249,8 +2249,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         <= membership_event_stream_ordering
                     ), (
                         f"Expected to be iterating in ascending order as we process membership snapshots for room {room_id}"
-                        + " but our last join membership was at {last_to_insert_join_membership_info.membership_event_stream_ordering}"
-                        + "and our current membership is at {membership_event_stream_ordering}"
+                        + f" but our last join membership was at {last_to_insert_join_membership_info.membership_event_stream_ordering}"
+                        + f" and our current membership is at {membership_event_stream_ordering}"
                     )
 
                     # Check if the current state has been updated since the last snapshot we inserted.
