@@ -312,18 +312,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # We do this all in one transaction to keep the cache small.
             # FIXME: get rid of this when we have room_stats
 
-            # Note, rejected events will have a null membership field, so
-            # we we manually filter them out.
-            sql = """
-                SELECT count(*), membership FROM current_state_events
-                WHERE type = 'm.room.member' AND room_id = ?
-                    AND membership IS NOT NULL
-                GROUP BY membership
-            """
+            counts = self._get_member_counts_txn(txn, room_id)
 
-            txn.execute(sql, (room_id,))
             res: Dict[str, MemberSummary] = {}
-            for count, membership in txn:
+            for membership, count in counts.items():
                 res.setdefault(membership, MemberSummary([], count))
 
             # Order by membership (joins -> invites -> leave (former insiders) ->
@@ -373,28 +365,26 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     async def get_member_counts(self, room_id: str) -> Mapping[str, int]:
         """Get a mapping of number of users by membership"""
 
-        def _get_room_summary_txn(
-            txn: LoggingTransaction,
-        ) -> Dict[str, int]:
-            # first get counts.
-            # We do this all in one transaction to keep the cache small.
-            # FIXME: get rid of this when we have room_stats
-
-            # Note, rejected events will have a null membership field, so
-            # we we manually filter them out.
-            sql = """
-                SELECT count(*), membership FROM current_state_events
-                WHERE type = 'm.room.member' AND room_id = ?
-                    AND membership IS NOT NULL
-                GROUP BY membership
-            """
-
-            txn.execute(sql, (room_id,))
-            return {membership: count for count, membership in txn}
-
         return await self.db_pool.runInteraction(
-            "get_member_counts", _get_room_summary_txn
+            "get_member_counts", self._get_member_counts_txn, room_id
         )
+
+    def _get_member_counts_txn(
+        self, txn: LoggingTransaction, room_id: str
+    ) -> Dict[str, int]:
+        """Get a mapping of number of users by membership"""
+
+        # Note, rejected events will have a null membership field, so
+        # we we manually filter them out.
+        sql = """
+            SELECT count(*), membership FROM current_state_events
+            WHERE type = 'm.room.member' AND room_id = ?
+                AND membership IS NOT NULL
+            GROUP BY membership
+        """
+
+        txn.execute(sql, (room_id,))
+        return {membership: count for count, membership in txn}
 
     @cached()
     async def get_number_joined_users_in_room(self, room_id: str) -> int:
