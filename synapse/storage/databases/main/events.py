@@ -2074,12 +2074,12 @@ class PersistEventsStore:
                     else None
                 )
 
+                # Check for null bytes in the room name. We have to ignore values with
+                # null bytes as Postgres doesn't allow them in text columns.
                 if (
                     sliding_sync_insert_map["room_name"] is not None
                     and "\0" in sliding_sync_insert_map["room_name"]
                 ):
-                    # We ignore values with nulls as
-                    # postgres doesn't allow null bytes in text columns.
                     sliding_sync_insert_map.pop("room_name")
 
                 # Find the tombstone_successor_room_id
