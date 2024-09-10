@@ -2117,6 +2117,16 @@ Defaults to <code>https://www.recaptcha.net/recaptcha/api/siteverify</code>.</p>
 <pre><code class="language-yaml">turn_shared_secret: &quot;YOUR_SHARED_SECRET&quot;
 </code></pre>
 <hr />
+<h3 id="turn_shared_secret_path"><a class="header" href="#turn_shared_secret_path"><code>turn_shared_secret_path</code></a></h3>
+<p>An alternative to <a href="#turn_shared_secret"><code>turn_shared_secret</code></a>:
+allows the shared secret to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">turn_shared_secret_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.116.0.</em></p>
+<hr />
 <h3 id="turn_username-and-turn_password"><a class="header" href="#turn_username-and-turn_password"><code>turn_username</code> and <code>turn_password</code></a></h3>
 <p>The Username and password if the TURN server needs them and does not use a token.</p>
 <p>Example configuration:</p>
