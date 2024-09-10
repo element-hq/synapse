@@ -2134,7 +2134,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
         ] = {}
 
-        # Map from room_id to ...
+        # Map from room_id to the last join membership snapshot/info we inserted.
         # Just some convenience maps for easier lookup by `room_id`.
         last_to_insert_join_membership_snapshots_by_room_id: Dict[
             str, SlidingSyncMembershipSnapshotSharedInsertValues
@@ -2148,8 +2148,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 Tuple[str, Optional[str], str, str, str, str, int, Optional[str], bool]
             ],
         ) -> None:
-            if not memberships_to_update_rows:
-                return
+            # We should have exited earlier if there were no rows to process
+            assert len(memberships_to_update_rows) > 0
 
             room_id_for_all_rows: str = memberships_to_update_rows[0][0]
 
@@ -2164,9 +2164,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 membership_event_instance_name,
                 is_outlier,
             ) in memberships_to_update_rows:
-                # Sanity check that we're working on the same room so the snapshot
-                # re-use logic can work properly (we need to process memberships in a
-                # room sequentially chronologically)
+                # Sanity check that we're working on the same room for all of the rows
+                # so the snapshot re-use logic can work properly (we need to process
+                # memberships in a room sequentially chronologically)
                 assert room_id == room_id_for_all_rows
 
                 # We don't know how to handle `membership` values other than these. The
