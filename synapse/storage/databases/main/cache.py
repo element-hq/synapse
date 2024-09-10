@@ -275,6 +275,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 self._attempt_to_invalidate_cache(
                     "get_room_encryption", (data.room_id,)
                 )
+                self._attempt_to_invalidate_cache(
+                    "get_sliding_sync_rooms_for_user", None
+                )
             elif data.type == EventTypes.Create:
                 self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
         elif row.type == EventsStreamAllStateRow.TypeId:
@@ -285,6 +288,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_rooms_for_user", None)
             self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
             self._attempt_to_invalidate_cache("get_room_encryption", (data.room_id,))
+            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
         else:
             raise Exception("Unknown events stream row type %s" % (row.type,))
 
@@ -364,6 +368,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         elif etype == EventTypes.RoomEncryption:
             self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+            self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
         if relates_to:
             self._attempt_to_invalidate_cache(
@@ -483,6 +488,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache("get_room_version_id", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
         self._attempt_to_invalidate_cache("_get_max_event_pos", (room_id,))
 

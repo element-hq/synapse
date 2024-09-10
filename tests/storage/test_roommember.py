@@ -19,12 +19,14 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import attr
 import logging
 from typing import List, Optional, Tuple, cast
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, JoinRules, Membership
+from synapse.types import PersistedEventPosition
 from synapse.api.room_versions import RoomVersions
 from synapse.rest import admin
 from synapse.rest.admin import register_servlets_for_client_rest_resource
@@ -34,6 +36,12 @@ from synapse.storage.databases.main.roommember import extract_heroes_from_room_s
 from synapse.storage.roommember import MemberSummary
 from synapse.types import UserID, create_requester
 from synapse.util import Clock
+from synapse.storage.roommember import (
+    MemberSummary,
+    ProfileInfo,
+    RoomsForUser,
+    RoomsForUserSlidingSync,
+)
 
 from tests import unittest
 from tests.server import TestHomeServer
@@ -810,3 +818,69 @@ class CurrentStateMembershipUpdateTestCase(unittest.HomeserverTestCase):
 
         # Now let's actually drive the updates to completion
         self.wait_for_background_updates()
+
+
+class GetSlidingSyncRoomsForUserTestCase(unittest.HomeserverTestCase):
+    """
+    Test `get_sliding_sync_rooms_for_user()`
+    """
+
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
+
+    def test_joined_up_to_date_is_encrypted(self) -> None:
+        """
+        Make sure we get up-to-date `is_encrypted` status for a joined room
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_version = RoomVersions.V10
+        room_id = self.helper.create_room_as(
+            user1_id, tok=user1_tok, room_version=room_version.identifier
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        room1_for_user = RoomsForUserSlidingSync(
+            room_id=room_id,
+            sender=user1_id,
+            membership=Membership.JOIN,
+            event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+            room_version_id=room_version.identifier,
+            event_pos=PersistedEventPosition(
+                state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.instance_name,
+                state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+            ),
+            room_type=None,
+            is_encrypted=False,
+        )
+        self.assertDictEqual(
+            self.get_success(self.store.get_sliding_sync_rooms_for_user(user1_id)),
+            {room_id: room1_for_user},
+        )
+
+        # Update the encryption status
+        self.helper.send_state(
+            room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        self.assertDictEqual(
+            self.get_success(self.store.get_sliding_sync_rooms_for_user(user1_id)),
+            {room_id: attr.evolve(room1_for_user, is_encrypted=True)},
+        )

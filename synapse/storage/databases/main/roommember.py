@@ -1393,6 +1393,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def get_sliding_sync_rooms_for_user_txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
+            # XXX: If you return any new `COALESCE(...)` fields using
+            # `sliding_sync_joined_rooms`, make sure to bust the
+            # `get_sliding_sync_rooms_for_user` cache in the appropriate places.
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1415,7 +1418,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     room_version_id=row[4],
                     event_pos=PersistedEventPosition(row[5], row[6]),
                     room_type=row[7],
-                    is_encrypted=row[8],
+                    is_encrypted=bool(row[8]),
                 )
                 for row in txn
             }
