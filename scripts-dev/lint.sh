@@ -109,6 +109,9 @@ set -x
 # --quiet suppresses the update check.
 ruff check --quiet --fix "${files[@]}"
 
+# Reformat Python code.
+ruff format --quiet "${files[@]}"
+
 # Catch any common programming mistakes in Rust code.
 #
 # --bins, --examples, --lib, --tests combined explicitly disable checking

@@ -327,6 +327,13 @@ class PersistEventsStore:
 
         async with stream_ordering_manager as stream_orderings:
             for (event, _), stream in zip(events_and_contexts, stream_orderings):
+                # XXX: We can't rely on `stream_ordering`/`instance_name` being correct
+                # at this point. We could be working with events that were previously
+                # persisted as an `outlier` with one `stream_ordering` but are now being
+                # persisted again and de-outliered and are being assigned a different
+                # `stream_ordering` here that won't end up being used.
+                # `_update_outliers_txn()` will fix this discrepancy (always use the
+                # `stream_ordering` from the first time it was persisted).
                 event.internal_metadata.stream_ordering = stream
                 event.internal_metadata.instance_name = self._instance_name
 
@@ -429,9 +436,7 @@ class PersistEventsStore:
             if event_type == EventTypes.Member and self.is_mine_id(state_key)
         ]
 
-        membership_snapshot_shared_insert_values: (
-            SlidingSyncMembershipSnapshotSharedInsertValues
-        ) = {}
+        membership_snapshot_shared_insert_values: SlidingSyncMembershipSnapshotSharedInsertValues = {}
         membership_infos_to_insert_membership_snapshots: List[
             SlidingSyncMembershipInfo
         ] = []
@@ -472,11 +477,11 @@ class PersistEventsStore:
                 membership_infos_to_insert_membership_snapshots.append(
                     # XXX: We don't use `SlidingSyncMembershipInfoWithEventPos` here
                     # because we're sourcing the event from `events_and_contexts`, we
-                    # can't rely on `stream_ordering`/`instance_name` being correct. We
-                    # could be working with events that were previously persisted as an
-                    # `outlier` with one `stream_ordering` but are now being persisted
-                    # again and de-outliered and assigned a different `stream_ordering`
-                    # that won't end up being used. Since we call
+                    # can't rely on `stream_ordering`/`instance_name` being correct at
+                    # this point. We could be working with events that were previously
+                    # persisted as an `outlier` with one `stream_ordering` but are now
+                    # being persisted again and de-outliered and assigned a different
+                    # `stream_ordering` that won't end up being used. Since we call
                     # `_calculate_sliding_sync_table_changes()` before
                     # `_update_outliers_txn()` which fixes this discrepancy (always use
                     # the `stream_ordering` from the first time it was persisted), we're
@@ -593,11 +598,17 @@ class PersistEventsStore:
                         event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
                     )
                 )
-                bump_stamp_to_fully_insert = (
-                    most_recent_bump_event_pos_results[1].stream
-                    if most_recent_bump_event_pos_results is not None
-                    else None
-                )
+                if most_recent_bump_event_pos_results is not None:
+                    _, new_bump_event_pos = most_recent_bump_event_pos_results
+
+                    # If we've just joined a remote room, then the last bump event may
+                    # have been backfilled (and so have a negative stream ordering).
+                    # These negative stream orderings can't sensibly be compared, so
+                    # instead just leave it as `None` in the table and we will use their
+                    # membership event position as the bump event position in the
+                    # Sliding Sync API.
+                    if new_bump_event_pos.stream > 0:
+                        bump_stamp_to_fully_insert = new_bump_event_pos.stream
 
                 current_state_ids_map = dict(
                     await self.store.get_partial_filtered_current_state_ids(
@@ -719,7 +730,7 @@ class PersistEventsStore:
             keyvalues={},
             retcols=("event_id",),
         )
-        already_persisted_events = {event_id for event_id, in rows}
+        already_persisted_events = {event_id for (event_id,) in rows}
         state_events = [
             event
             for event in state_events
@@ -1830,12 +1841,8 @@ class PersistEventsStore:
         if sliding_sync_table_changes.to_insert_membership_snapshots:
             # Update the `sliding_sync_membership_snapshots` table
             #
-            sliding_sync_snapshot_keys = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
-            )
-            sliding_sync_snapshot_values = (
-                sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
-            )
+            sliding_sync_snapshot_keys = sliding_sync_table_changes.membership_snapshot_shared_insert_values.keys()
+            sliding_sync_snapshot_values = sliding_sync_table_changes.membership_snapshot_shared_insert_values.values()
             # We need to insert/update regardless of whether we have
             # `sliding_sync_snapshot_keys` because there are other fields in the `ON
             # CONFLICT` upsert to run (see inherit case (explained in
@@ -2129,31 +2136,26 @@ class PersistEventsStore:
         if len(events_and_contexts) == 0:
             return
 
-        # We only update the sliding sync tables for non-backfilled events.
-        #
-        # Check if the first event is a backfilled event (with a negative
-        # `stream_ordering`). If one event is backfilled, we assume this whole batch was
-        # backfilled.
-        first_event_stream_ordering = events_and_contexts[0][
-            0
-        ].internal_metadata.stream_ordering
-        # This should exist for persisted events
-        assert first_event_stream_ordering is not None
-        if first_event_stream_ordering < 0:
-            return
-
         # Since the list is sorted ascending by `stream_ordering`, the last event should
         # have the highest `stream_ordering`.
         max_stream_ordering = events_and_contexts[-1][
             0
         ].internal_metadata.stream_ordering
+        # `stream_ordering` should be assigned for persisted events
+        assert max_stream_ordering is not None
+        # Check if the event is a backfilled event (with a negative `stream_ordering`).
+        # If one event is backfilled, we assume this whole batch was backfilled.
+        if max_stream_ordering < 0:
+            # We only update the sliding sync tables for non-backfilled events.
+            return
+
         max_bump_stamp = None
         for event, _ in reversed(events_and_contexts):
             # Sanity check that all events belong to the same room
             assert event.room_id == room_id
 
             if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                # This should exist for persisted events
+                # `stream_ordering` should be assigned for persisted events
                 assert event.internal_metadata.stream_ordering is not None
 
                 max_bump_stamp = event.internal_metadata.stream_ordering
@@ -2161,11 +2163,6 @@ class PersistEventsStore:
                 # Since we're iterating in reverse, we can break as soon as we find a
                 # matching bump event which should have the highest `stream_ordering`.
                 break
-
-        # We should have exited earlier if there were no events
-        assert (
-            max_stream_ordering is not None
-        ), "Expected to have a stream_ordering if we have events"
 
         # Handle updating the `sliding_sync_joined_rooms` table.
         #
@@ -3361,7 +3358,7 @@ class PersistEventsStore:
         )
 
         potential_backwards_extremities.difference_update(
-            e for e, in existing_events_outliers
+            e for (e,) in existing_events_outliers
         )
 
         if potential_backwards_extremities:

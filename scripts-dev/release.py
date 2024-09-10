@@ -20,8 +20,7 @@
 #
 #
 
-"""An interactive script for doing a release. See `cli()` below.
-"""
+"""An interactive script for doing a release. See `cli()` below."""
 
 import glob
 import json

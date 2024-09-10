@@ -65,9 +65,9 @@ class WellKnownBuilder:
             }
             account_management_url = await auth.account_management_url()
             if account_management_url is not None:
-                result["org.matrix.msc2965.authentication"][
-                    "account"
-                ] = account_management_url
+                result["org.matrix.msc2965.authentication"]["account"] = (
+                    account_management_url
+                )
 
         if self._config.server.extra_well_known_client_content:
             for (

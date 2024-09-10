@@ -472,9 +472,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         signature_sql = """
             SELECT user_id, key_id, target_device_id, signature
             FROM e2e_cross_signing_signatures WHERE %s
-            """ % (
-            " OR ".join("(" + q + ")" for q in signature_query_clauses)
-        )
+            """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
 
         txn.execute(signature_sql, signature_query_params)
         return cast(
@@ -917,9 +915,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                         FROM e2e_cross_signing_keys
                         WHERE %(clause)s
                         ORDER BY user_id, keytype, stream_id DESC
-                """ % {
-                    "clause": clause
-                }
+                """ % {"clause": clause}
             else:
                 # SQLite has special handling for bare columns when using
                 # MIN/MAX with a `GROUP BY` clause where it picks the value from
@@ -929,9 +925,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                         FROM e2e_cross_signing_keys
                         WHERE %(clause)s
                         GROUP BY user_id, keytype
-                """ % {
-                    "clause": clause
-                }
+                """ % {"clause": clause}
 
             txn.execute(sql, params)
 

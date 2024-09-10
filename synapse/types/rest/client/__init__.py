@@ -268,7 +268,9 @@ class SlidingSyncBody(RequestBodyModel):
         if TYPE_CHECKING:
             ranges: Optional[List[Tuple[int, int]]] = None
         else:
-            ranges: Optional[List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]] = None  # type: ignore[valid-type]
+            ranges: Optional[
+                List[Tuple[conint(ge=0, strict=True), conint(ge=0, strict=True)]]
+            ] = None  # type: ignore[valid-type]
         slow_get_all_rooms: Optional[StrictBool] = False
         filters: Optional[Filters] = None
 
@@ -388,7 +390,9 @@ class SlidingSyncBody(RequestBodyModel):
     if TYPE_CHECKING:
         lists: Optional[Dict[str, SlidingSyncList]] = None
     else:
-        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = None  # type: ignore[valid-type]
+        lists: Optional[Dict[constr(max_length=64, strict=True), SlidingSyncList]] = (
+            None  # type: ignore[valid-type]
+        )
     room_subscriptions: Optional[Dict[StrictStr, RoomSubscription]] = None
     extensions: Optional[Extensions] = None
 

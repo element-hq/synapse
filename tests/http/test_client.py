@@ -207,7 +207,9 @@ class ReadMultipartResponseTests(TestCase):
 
 
 class ReadBodyWithMaxSizeTests(TestCase):
-    def _build_response(self, length: Union[int, str] = UNKNOWN_LENGTH) -> Tuple[
+    def _build_response(
+        self, length: Union[int, str] = UNKNOWN_LENGTH
+    ) -> Tuple[
         BytesIO,
         "Deferred[int]",
         _DiscardBodyWithMaxSizeProtocol,

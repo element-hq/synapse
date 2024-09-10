@@ -1011,11 +1011,15 @@ class SlidingSyncRestServlet(RestServlet):
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
                 "bump_stamp": room_result.bump_stamp,
-                "joined_count": room_result.joined_count,
-                "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
             }
+
+            if room_result.joined_count is not None:
+                serialized_rooms[room_id]["joined_count"] = room_result.joined_count
+
+            if room_result.invited_count is not None:
+                serialized_rooms[room_id]["invited_count"] = room_result.invited_count
 
             if room_result.name:
                 serialized_rooms[room_id]["name"] = room_result.name
@@ -1045,9 +1049,9 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
             if room_result.unstable_expanded_timeline:
-                serialized_rooms[room_id][
-                    "unstable_expanded_timeline"
-                ] = room_result.unstable_expanded_timeline
+                serialized_rooms[room_id]["unstable_expanded_timeline"] = (
+                    room_result.unstable_expanded_timeline
+                )
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if (
@@ -1082,9 +1086,9 @@ class SlidingSyncRestServlet(RestServlet):
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.prev_batch is not None:
-                serialized_rooms[room_id]["prev_batch"] = (
-                    await room_result.prev_batch.to_string(self.store)
-                )
+                serialized_rooms[room_id][
+                    "prev_batch"
+                ] = await room_result.prev_batch.to_string(self.store)
 
             # This will be omitted for invite/knock rooms with `stripped_state`
             if room_result.num_live is not None:

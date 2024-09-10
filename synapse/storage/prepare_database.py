@@ -607,7 +607,7 @@ def _apply_module_schema_files(
         "SELECT file FROM applied_module_schemas WHERE module_name = ?",
         (modname,),
     )
-    applied_deltas = {d for d, in cur}
+    applied_deltas = {d for (d,) in cur}
     for name, stream in names_and_streams:
         if name in applied_deltas:
             continue
@@ -710,7 +710,7 @@ def _get_or_create_schema_state(
         "SELECT file FROM applied_schema_deltas WHERE version >= ?",
         (current_version,),
     )
-    applied_deltas = tuple(d for d, in txn)
+    applied_deltas = tuple(d for (d,) in txn)
 
     return _SchemaState(
         current_version=current_version,

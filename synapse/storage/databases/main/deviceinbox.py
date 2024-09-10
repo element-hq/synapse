@@ -1120,7 +1120,7 @@ class DeviceInboxBackgroundUpdateStore(SQLBaseStore):
 
             txn.execute(sql, (start, stop))
 
-            destinations = {d for d, in txn}
+            destinations = {d for (d,) in txn}
             to_remove = set()
             for d in destinations:
                 try:

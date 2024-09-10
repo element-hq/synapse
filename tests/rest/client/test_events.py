@@ -19,7 +19,7 @@
 #
 #
 
-""" Tests REST events for /events paths."""
+"""Tests REST events for /events paths."""
 
 from unittest.mock import Mock
 
