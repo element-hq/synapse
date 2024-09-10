@@ -1729,6 +1729,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             )
             most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
 
+            # The `most_recent_event_stream_ordering` should be positive,
+            # however there are (very rare) rooms where that is not the case in
+            # the matrix.org database. It's not clear how they got into that
+            # state, but does mean that we cannot assert that the stream
+            # ordering is indeed positive.
+
             # Figure out the latest `bump_stamp` in the room. This could be `None` for a
             # federated room you just joined where all of events are still `outliers` or
             # backfilled history. In the Sliding Sync API, we default to the user's
