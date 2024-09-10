@@ -1980,7 +1980,10 @@ class PersistEventsStore:
                 # Scrutinize JSON values. We ignore values with nulls as
                 # postgres doesn't allow null bytes in text columns.
                 if room_name is None or (
-                    isinstance(room_name, str) and "\0" not in room_name
+                    isinstance(room_name, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in room_name
                 ):
                     sliding_sync_insert_map["room_name"] = room_name
             elif state_key == (EventTypes.Tombstone, ""):
