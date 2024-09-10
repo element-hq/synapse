@@ -92,7 +92,10 @@ class DelayedEventsHandler:
         )
 
     def notify_new_event(self) -> None:
-        """Called when there may be more event deltas to process"""
+        """
+        Called when there may be more state event deltas to process,
+        which should cancel pending delayed events for the same state.
+        """
         if self._event_processing:
             return
 
@@ -107,7 +110,7 @@ class DelayedEventsHandler:
         run_as_background_process("delayed_events.notify_new_event", process)
 
     async def _unsafe_process_new_event(self) -> None:
-        # If self._event_pos is None then means we haven't fetched it from DB
+        # If self._event_pos is None then means we haven't fetched it from the DB yet
         if self._event_pos is None:
             self._event_pos = await self._store.get_delayed_events_stream_pos()
             room_max_stream_ordering = self._store.get_room_max_stream_ordering()
@@ -141,7 +144,7 @@ class DelayedEventsHandler:
                     self._event_pos, room_max_stream_ordering
                 )
 
-                logger.debug("Handling %d state deltas", len(deltas))
+                logger.debug("Handling %d state deltas for delayed events processing", len(deltas))
                 await self._handle_state_deltas(deltas)
 
                 self._event_pos = max_pos
@@ -154,7 +157,7 @@ class DelayedEventsHandler:
     async def _handle_state_deltas(self, deltas: List[StateDelta]) -> None:
         """
         Process current state deltas to cancel pending delayed events
-        that target the same state as any received state events.
+        that target the same state.
         """
         for delta in deltas:
             logger.debug(

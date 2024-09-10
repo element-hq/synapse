@@ -159,7 +159,7 @@ class DelayedEventsStore(SQLBaseStore):
                     # The restarted event is the next to be sent
                     delay_id == next_event[0]
                     and user_localpart == next_event[1]
-                    # The next event to be sent is the only one to be sent at that time
+                    # The next two events to be sent aren't scheduled at the same time
                     and next_event[2] != second_next_event[2]
                 ):
                     changed = True

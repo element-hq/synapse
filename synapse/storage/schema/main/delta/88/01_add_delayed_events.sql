@@ -23,6 +23,8 @@ CREATE TABLE delayed_events_stream_pos (
     CHECK (Lock='X')
 );
 
+-- Start processing events from the point this migration was run, rather
+-- than the beginning of time.
 INSERT INTO delayed_events_stream_pos (
     stream_id
 ) SELECT COALESCE(MAX(stream_ordering), 0) from events;
