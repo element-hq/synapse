@@ -144,7 +144,10 @@ class DelayedEventsHandler:
                     self._event_pos, room_max_stream_ordering
                 )
 
-                logger.debug("Handling %d state deltas for delayed events processing", len(deltas))
+                logger.debug(
+                    "Handling %d state deltas for delayed events processing",
+                    len(deltas),
+                )
                 await self._handle_state_deltas(deltas)
 
                 self._event_pos = max_pos
