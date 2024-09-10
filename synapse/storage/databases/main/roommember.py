@@ -1395,7 +1395,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         ) -> Dict[str, RoomsForUserSlidingSync]:
             # XXX: If you return any new `COALESCE(...)` fields using
             # `sliding_sync_joined_rooms`, make sure to bust the
-            # `get_sliding_sync_rooms_for_user` cache in the appropriate places.
+            # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
+            # tests).
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,

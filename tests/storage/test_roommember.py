@@ -22,6 +22,8 @@
 import attr
 import logging
 from typing import List, Optional, Tuple, cast
+from parameterized import parameterized, parameterized_class
+
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -834,6 +836,125 @@ class GetSlidingSyncRoomsForUserTestCase(unittest.HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
+
+    @parameterized.expand(
+        [
+            (Membership.JOIN,),
+            (Membership.INVITE,),
+            (Membership.LEAVE,),
+            (Membership.BAN,),
+        ]
+    )
+    def test_updated_membership(self, test_membership: str) -> None:
+        """
+        Make sure we get all new membership
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_version = RoomVersions.V10
+        room_id1 = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=room_version.identifier
+        )
+        room_id2 = self.helper.create_room_as(
+            user2_id, tok=user2_tok, room_version=room_version.identifier
+        )
+
+        # User1 joins room1
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+        room1_for_user = RoomsForUserSlidingSync(
+            room_id=room_id1,
+            sender=user1_id,
+            membership=Membership.JOIN,
+            event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+            room_version_id=room_version.identifier,
+            event_pos=PersistedEventPosition(
+                state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.instance_name,
+                state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+            ),
+            room_type=None,
+            is_encrypted=False,
+        )
+        self.assertDictEqual(
+            self.get_success(self.store.get_sliding_sync_rooms_for_user(user1_id)),
+            {room_id1: room1_for_user},
+        )
+
+        test_sender: str
+        if test_membership == Membership.JOIN:
+            # User1 joins room2
+            self.helper.join(room_id2, user1_id, tok=user1_tok)
+            test_sender = user1_id
+        elif test_membership == Membership.INVITE:
+            # User1 is invited to room2
+            self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+            test_sender = user2_id
+        elif test_membership == Membership.LEAVE:
+            # Kick user1 from the rooms (leave)
+            self.helper.change_membership(
+                room=room_id2,
+                src=user2_id,
+                targ=user1_id,
+                tok=user2_tok,
+                membership=Membership.LEAVE,
+                extra_data={
+                    "reason": "Bad manners",
+                },
+            )
+            test_sender = user2_id
+        elif test_membership == Membership.BAN:
+            # User1 is banned from room2
+            self.helper.ban(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+            test_sender = user2_id
+        else:
+            raise AssertionError("Unknown test_membership")
+
+        # Check for the updated membership
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id2)
+        )
+        self.assertDictEqual(
+            self.get_success(self.store.get_sliding_sync_rooms_for_user(user1_id)),
+            {
+                room_id1: room1_for_user,
+                room_id2: RoomsForUserSlidingSync(
+                    room_id=room_id2,
+                    sender=test_sender,
+                    membership=test_membership,
+                    event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                    room_version_id=room_version.identifier,
+                    event_pos=PersistedEventPosition(
+                        state_map[
+                            (EventTypes.Member, user1_id)
+                        ].internal_metadata.instance_name,
+                        state_map[
+                            (EventTypes.Member, user1_id)
+                        ].internal_metadata.stream_ordering,
+                    ),
+                    room_type=None,
+                    is_encrypted=False,
+                ),
+            },
+        )
+
+    # def test_forgotten_up_to_date(self) -> None:
+    #     """
+    #     Make sure we see up-to-date forgotten rooms
+    #     """
+    #     TODO
+
+    # Because `room_type` can only be set on room creation, it's always up-to-date once
+    # inserted.
 
     def test_joined_up_to_date_is_encrypted(self) -> None:
         """
