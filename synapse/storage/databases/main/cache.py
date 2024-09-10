@@ -41,11 +41,11 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.events import SLIDING_SYNC_RELEVANT_STATE_SET
 from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import CachedFunction
 from synapse.util.iterutils import batch_iter
-from synapse.storage.databases.main.events import SLIDING_SYNC_RELEVANT_STATE_SET
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
