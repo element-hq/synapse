@@ -1968,8 +1968,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # Fetch the set of event IDs that we want to update
             #
             # It's important to sort by `event_stream_ordering` *ascending* (oldest to
-            # newest) so that we can re-use the snapshots along the way if nothing has
-            # changed.
+            # newest) (at-least per-room) so that we can re-use the snapshots along the
+            # way if nothing has changed.
             #
             if initial_phase:
                 # There are some old out-of-band memberships (before
@@ -1993,7 +1993,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE (c.room_id, c.user_id) > (?, ?)
-                    ORDER BY c.event_stream_ordering ASC, c.room_id ASC, c.user_id ASC
+                    ORDER BY c.room_id ASC, c.event_stream_ordering ASC, c.user_id ASC
                     LIMIT ?
                     """,
                     (last_room_id, last_user_id, batch_size),
