@@ -2175,7 +2175,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # room.
             #
             can_use_last_snapshot = False
-            # TODO: We could also look in the database to see if a snapshot is available
+            # TODO: We could also look in the database to see if a snapshot is
+            # available. Is it worth the lookup time?
             last_to_insert_join_membership_snapshot = (
                 last_to_insert_join_membership_snapshots_by_room_id.get(room_id)
             )
