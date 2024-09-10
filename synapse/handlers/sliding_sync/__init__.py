@@ -47,7 +47,6 @@ from synapse.types import (
     MutableStateMap,
     PersistedEventPosition,
     Requester,
-    RoomStreamToken,
     SlidingSyncStreamToken,
     StateMap,
     StreamKeyType,
@@ -632,7 +631,7 @@ class SlidingSyncHandler:
                 # Use `stream_ordering` for updates
                 else paginate_room_events_by_stream_ordering
             )
-            timeline_events, new_room_key = await pagination_method(
+            timeline_events, new_room_key, limited = await pagination_method(
                 room_id=room_id,
                 # The bounds are reversed so we can paginate backwards
                 # (from newer to older events) starting at to_bound.
@@ -640,27 +639,12 @@ class SlidingSyncHandler:
                 from_key=to_bound,
                 to_key=timeline_from_bound,
                 direction=Direction.BACKWARDS,
-                # We add one so we can determine if there are enough events to saturate
-                # the limit or not (see `limited`)
-                limit=room_sync_config.timeline_limit + 1,
+                limit=room_sync_config.timeline_limit,
             )
 
             # We want to return the events in ascending order (the last event is the
             # most recent).
             timeline_events.reverse()
-
-            # Determine our `limited` status based on the timeline. We do this before
-            # filtering the events so we can accurately determine if there is more to
-            # paginate even if we filter out some/all events.
-            if len(timeline_events) > room_sync_config.timeline_limit:
-                limited = True
-                # Get rid of that extra "+ 1" event because we only used it to determine
-                # if we hit the limit or not
-                timeline_events = timeline_events[-room_sync_config.timeline_limit :]
-                assert timeline_events[0].internal_metadata.stream_ordering
-                new_room_key = RoomStreamToken(
-                    stream=timeline_events[0].internal_metadata.stream_ordering - 1
-                )
 
             # Make sure we don't expose any events that the client shouldn't see
             timeline_events = await filter_events_for_client(
