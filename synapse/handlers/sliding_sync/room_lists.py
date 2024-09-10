@@ -101,8 +101,10 @@ class SlidingSyncInterestedRooms:
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class SlidingSyncListResult(SlidingSyncResult.SlidingWindowList):
-    """Extension to the lists response that allows us to track the matching
-    room IDs in the list.
+    """Add a new field to the lists response that allows us to track the
+    matching room IDs in the list.
+
+    This is not returend to the client.
     """
 
     room_ids: StrCollection
