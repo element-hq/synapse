@@ -51,6 +51,7 @@ from synapse.storage.types import Cursor
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import json_encoder
 from synapse.util.iterutils import batch_iter
 
@@ -73,34 +74,6 @@ _REPLACE_STREAM_ORDERING_SQL_COMMANDS = (
     "ALTER INDEX events_room_stream2 RENAME TO events_room_stream",
     "ALTER INDEX events_ts2 RENAME TO events_ts",
 )
-
-
-class _BackgroundUpdates:
-    EVENT_ORIGIN_SERVER_TS_NAME = "event_origin_server_ts"
-    EVENT_FIELDS_SENDER_URL_UPDATE_NAME = "event_fields_sender_url"
-    DELETE_SOFT_FAILED_EXTREMITIES = "delete_soft_failed_extremities"
-    POPULATE_STREAM_ORDERING2 = "populate_stream_ordering2"
-    INDEX_STREAM_ORDERING2 = "index_stream_ordering2"
-    INDEX_STREAM_ORDERING2_CONTAINS_URL = "index_stream_ordering2_contains_url"
-    INDEX_STREAM_ORDERING2_ROOM_ORDER = "index_stream_ordering2_room_order"
-    INDEX_STREAM_ORDERING2_ROOM_STREAM = "index_stream_ordering2_room_stream"
-    INDEX_STREAM_ORDERING2_TS = "index_stream_ordering2_ts"
-    REPLACE_STREAM_ORDERING_COLUMN = "replace_stream_ordering_column"
-
-    EVENT_EDGES_DROP_INVALID_ROWS = "event_edges_drop_invalid_rows"
-    EVENT_EDGES_REPLACE_INDEX = "event_edges_replace_index"
-
-    EVENTS_POPULATE_STATE_KEY_REJECTIONS = "events_populate_state_key_rejections"
-
-    EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
-
-    SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE = (
-        "sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update"
-    )
-    SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE = "sliding_sync_joined_rooms_bg_update"
-    SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE = (
-        "sliding_sync_membership_snapshots_bg_update"
-    )
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
