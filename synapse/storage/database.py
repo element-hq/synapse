@@ -1576,9 +1576,8 @@ class DatabasePool:
                 key_values,
                 value_names,
                 value_values,
-                # TODO
-                # insertion_value_names=insertion_value_names,
-                # insertion_value_values=insertion_value_values,
+                insertion_value_names=insertion_value_names,
+                insertion_value_values=insertion_value_values,
             )
 
     def simple_upsert_many_txn_emulated(
