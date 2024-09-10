@@ -1144,6 +1144,7 @@ class SlidingSyncHandler:
             highlight_count=0,
         )
 
+    @trace
     async def _get_bump_stamp(
         self, room_id: str, to_token: StreamToken, timeline: List[EventBase]
     ) -> Optional[int]:
