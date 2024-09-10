@@ -2009,7 +2009,12 @@ class PersistEventsStore:
                     EventContentFields.TOMBSTONE_SUCCESSOR_ROOM
                 )
                 # Scrutinize JSON values
-                if successor_room_id is None or isinstance(successor_room_id, str):
+                if successor_room_id is None or (
+                    isinstance(successor_room_id, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in successor_room_id
+                ):
                     sliding_sync_insert_map["tombstone_successor_room_id"] = (
                         successor_room_id
                     )
@@ -2120,6 +2125,12 @@ class PersistEventsStore:
                     if tombstone_stripped_event is not None
                     else None
                 )
+
+                if (
+                    sliding_sync_insert_map["tombstone_successor_room_id"] is not None
+                    and "\0" in sliding_sync_insert_map["tombstone_successor_room_id"]
+                ):
+                    sliding_sync_insert_map.pop("tombstone_successor_room_id")
 
             else:
                 # No stripped state provided
