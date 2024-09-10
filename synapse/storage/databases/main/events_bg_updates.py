@@ -2166,7 +2166,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             ) in memberships_to_update_rows:
                 # Sanity check that we're working on the same room for all of the rows
                 # so the snapshot re-use logic can work properly (we need to process
-                # memberships in a room sequentially chronologically)
+                # memberships in a room sequentially by `stream_ordering` ascending)
                 assert room_id == room_id_for_all_rows
 
                 # We don't know how to handle `membership` values other than these. The
@@ -2564,7 +2564,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         # We can batch process each room concurrently.
         #
         # In order for the snapshot re-use logic to work correctly, we need to process
-        # memberships in a room sequentially chronologically.
+        # memberships in a room sequentially by `stream_ordering` ascending.
         await concurrently_execute(
             _handle_memberships_to_update_rows_for_room,
             room_id_to_memberships_to_update_rows.values(),
