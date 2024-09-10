@@ -81,7 +81,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id = _generate_delay_id()
         send_ts = creation_ts + delay
 
-        def _add_delayed_event_txn(txn: LoggingTransaction) -> bool:
+        def add_delayed_event_txn(txn: LoggingTransaction) -> bool:
             old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
 
             self.db_pool.simple_insert_txn(
@@ -104,7 +104,7 @@ class DelayedEventsStore(SQLBaseStore):
             return old_next_send_ts is None or send_ts < old_next_send_ts
 
         changed = await self.db_pool.runInteraction(
-            "add_delayed_event", _add_delayed_event_txn
+            "add_delayed_event", add_delayed_event_txn
         )
 
         return delay_id, changed
