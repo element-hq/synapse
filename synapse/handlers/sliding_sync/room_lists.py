@@ -54,7 +54,6 @@ from synapse.storage.roommember import (
 )
 from synapse.types import (
     MutableStateMap,
-    PersistedEventPosition,
     RoomStreamToken,
     StateMap,
     StrCollection,
@@ -219,6 +218,8 @@ class SlidingSyncRoomLists:
         # include rooms that are outside the list ranges.
         all_rooms: Set[str] = set()
 
+        # Note: this won't include rooms the user have left themselves. We add
+        # back in rooms that the user left since `from_token` below.
         room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
             user_id
         )
@@ -234,44 +235,26 @@ class SlidingSyncRoomLists:
                     room_membership_for_user_map.pop(room_id)
                     continue
 
-                existing_room = room_membership_for_user_map.get(room_id)
-                if existing_room is not None:
-                    # Update room membership events to the point in time of the `to_token`
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
-                        room_id=room_id,
-                        sender=change.sender,
-                        membership=change.membership,
-                        event_id=change.event_id,
-                        event_pos=change.event_pos,
-                        room_version_id=change.room_version_id,
-                        # We keep the current state of the room though
-                        room_type=existing_room.room_type,
-                        is_encrypted=existing_room.is_encrypted,
-                    )
-                else:
-                    # This can happen if we get "state reset" out of the room
-                    # after the `to_token`. In other words, there is no membership
-                    # for the room after the `to_token` but we see membership in
-                    # the token range.
+                current_room_entry = await self.store.get_sliding_sync_room_for_user(
+                    user_id, room_id
+                )
+                if current_room_entry is None:
+                    # We should always have an entry, even if we get state reset
+                    # out of the room.
+                    logger.error("Can't find room for user: %s / %s", user_id, room_id)
+                    continue
 
-                    # Get the state at the time. Note that room type never changes,
-                    # so we can just get current room type
-                    room_type = await self.store.get_room_type(room_id)
-                    is_encrypted = await self.get_is_encrypted_for_room_at_token(
-                        room_id, to_token.room_key
-                    )
-
-                    # Add back rooms that the user was state-reset out of after `to_token`
-                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
-                        room_id=room_id,
-                        sender=change.sender,
-                        membership=change.membership,
-                        event_id=change.event_id,
-                        event_pos=change.event_pos,
-                        room_version_id=change.room_version_id,
-                        room_type=room_type,
-                        is_encrypted=is_encrypted,
-                    )
+                room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                    room_id=room_id,
+                    sender=change.sender,
+                    membership=change.membership,
+                    event_id=change.event_id,
+                    event_pos=change.event_pos,
+                    room_version_id=change.room_version_id,
+                    # We keep the current state of the room though
+                    room_type=current_room_entry.room_type,
+                    is_encrypted=current_room_entry.is_encrypted,
+                )
 
         (
             newly_joined_room_ids,
@@ -281,31 +264,33 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
-        # Handle state resets in the from -> to token range.
-        state_reset_rooms = (
-            newly_left_room_map.keys() - room_membership_for_user_map.keys()
-        )
-        if state_reset_rooms:
+        # Handle leaves and state resets in the from -> to token range.
+        left_rooms = newly_left_room_map.keys() - room_membership_for_user_map.keys()
+        if left_rooms:
             room_membership_for_user_map = dict(room_membership_for_user_map)
-            for room_id in (
-                newly_left_room_map.keys() - room_membership_for_user_map.keys()
-            ):
-                # Get the state at the time. Note that room type never changes,
-                # so we can just get current room type
-                room_type = await self.store.get_room_type(room_id)
-                is_encrypted = await self.get_is_encrypted_for_room_at_token(
-                    room_id, newly_left_room_map[room_id].to_room_stream_token()
+            for room_id in left_rooms:
+                room_for_user = newly_left_room_map[room_id]
+
+                # We fetch the current room entry for the user, as that's the
+                # easiest way of getting the room type etc.
+                current_room_entry = await self.store.get_sliding_sync_room_for_user(
+                    user_id, room_id
                 )
+                if current_room_entry is None:
+                    # We should always have an entry, even if we get state reset
+                    # out of the room.
+                    logger.error("Can't find room for user: %s / %s", user_id, room_id)
+                    continue
 
                 room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
                     room_id=room_id,
-                    sender=None,
-                    membership=Membership.LEAVE,
-                    event_id=None,
-                    event_pos=newly_left_room_map[room_id],
-                    room_version_id=await self.store.get_room_version_id(room_id),
-                    room_type=room_type,
-                    is_encrypted=is_encrypted,
+                    sender=room_for_user.sender,
+                    membership=room_for_user.membership,
+                    event_id=room_for_user.event_id,
+                    event_pos=room_for_user.event_pos,
+                    room_version_id=room_for_user.room_version_id,
+                    room_type=current_room_entry.room_type,
+                    is_encrypted=current_room_entry.is_encrypted,
                 )
 
         if sync_config.lists:
@@ -417,8 +402,19 @@ class SlidingSyncRoomLists:
                     room_subscription,
                 ) in sync_config.room_subscriptions.items():
                     if room_id not in room_membership_for_user_map:
-                        # TODO: Handle rooms the user isn't in.
-                        continue
+                        # Check if we do have an entry for the room, but didn't
+                        # pull it out above. This could be e.g. a leave that we
+                        # don't pull out by default.
+                        current_room_entry = (
+                            await self.store.get_sliding_sync_room_for_user(
+                                user_id, room_id
+                            )
+                        )
+                        if not current_room_entry:
+                            # TODO: Handle rooms the user isn't in.
+                            continue
+
+                        room_membership_for_user_map[room_id] = current_room_entry
 
                     all_rooms.add(room_id)
 
@@ -944,18 +940,11 @@ class SlidingSyncRoomLists:
         # Ensure we have entries for rooms that the user has been "state reset"
         # out of. These are rooms appear in the `newly_left_rooms` map but
         # aren't in the `rooms_for_user` map.
-        for room_id, left_event_pos in newly_left_room_ids.items():
+        for room_id, room_membership in newly_left_room_ids.items():
             if room_id in rooms_for_user:
                 continue
 
-            rooms_for_user[room_id] = RoomsForUserStateReset(
-                room_id=room_id,
-                event_id=None,
-                event_pos=left_event_pos,
-                membership=Membership.LEAVE,
-                sender=None,
-                room_version_id=await self.store.get_room_version_id(room_id),
-            )
+            rooms_for_user[room_id] = room_membership
 
         return rooms_for_user, newly_joined_room_ids, set(newly_left_room_ids)
 
@@ -965,7 +954,7 @@ class SlidingSyncRoomLists:
         user_id: str,
         to_token: StreamToken,
         from_token: Optional[StreamToken],
-    ) -> Tuple[AbstractSet[str], Mapping[str, PersistedEventPosition]]:
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
         """Fetch the sets of rooms that the user newly joined or left in the
         given token range.
 
@@ -975,10 +964,10 @@ class SlidingSyncRoomLists:
 
         Returns:
             A 2-tuple of newly joined room IDs and a map of newly left room
-            IDs to the event position the leave happened at.
+            IDs to the `RoomsForUserStateReset` entry.
         """
         newly_joined_room_ids: Set[str] = set()
-        newly_left_room_map: Dict[str, PersistedEventPosition] = {}
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
 
         # We need to figure out the
         #
@@ -1045,12 +1034,21 @@ class SlidingSyncRoomLists:
             # 2)
             if last_membership_change_in_from_to_range.membership == Membership.JOIN:
                 possibly_newly_joined_room_ids.add(room_id)
+                break
 
             # 1) Figure out newly_left rooms (> `from_token` and <= `to_token`).
-            if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
+            if (
+                last_membership_change_in_from_to_range.prev_membership
+                == Membership.JOIN
+            ):
                 # 1) Mark this room as `newly_left`
-                newly_left_room_map[room_id] = (
-                    last_membership_change_in_from_to_range.event_pos
+                newly_left_room_map[room_id] = RoomsForUserStateReset(
+                    room_id=room_id,
+                    sender=last_membership_change_in_from_to_range.sender,
+                    membership=Membership.LEAVE,
+                    event_id=last_membership_change_in_from_to_range.event_id,
+                    event_pos=last_membership_change_in_from_to_range.event_pos,
+                    room_version_id=await self.store.get_room_version_id(room_id),
                 )
 
         # 2) Figure out `newly_joined`

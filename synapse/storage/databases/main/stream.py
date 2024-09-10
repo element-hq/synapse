@@ -947,6 +947,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             return []
 
         if from_key:
+            # TODO: We also need to invalidate this on current state change
             has_changed = self._membership_stream_cache.has_entity_changed(
                 user_id, int(from_key.stream)
             )

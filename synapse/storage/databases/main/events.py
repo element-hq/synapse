@@ -413,6 +413,8 @@ class PersistEventsStore:
         to_insert = delta_state.to_insert
         to_delete = delta_state.to_delete
 
+        # TODO: Add entry to membership snapshots on state resets.
+
         # If no state is changing, we don't need to do anything. This can happen when a
         # partial-stated room is re-syncing the current state.
         if not to_insert and not to_delete:
