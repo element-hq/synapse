@@ -1,1 +1,0 @@
-Speed up incremental Sliding Sync requests by avoiding extra work.

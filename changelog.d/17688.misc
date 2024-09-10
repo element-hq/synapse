@@ -1,1 +1,0 @@
-Speed up sync by pulling out fewer events from the database.
