@@ -45,6 +45,7 @@ from synapse.storage.engines import PostgresEngine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import CachedFunction
 from synapse.util.iterutils import batch_iter
+from synapse.storage.databases.main.events import SLIDING_SYNC_RELEVANT_STATE_SET
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -271,15 +272,20 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 self._attempt_to_invalidate_cache(
                     "get_rooms_for_user", (data.state_key,)
                 )
+                self._attempt_to_invalidate_cache(
+                    "get_sliding_sync_rooms_for_user", None
+                )
             elif data.type == EventTypes.RoomEncryption:
                 self._attempt_to_invalidate_cache(
                     "get_room_encryption", (data.room_id,)
                 )
+            elif data.type == EventTypes.Create:
+                self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
+
+            if (data.type, data.state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
                 self._attempt_to_invalidate_cache(
                     "get_sliding_sync_rooms_for_user", None
                 )
-            elif data.type == EventTypes.Create:
-                self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
         elif row.type == EventsStreamAllStateRow.TypeId:
             assert isinstance(data, EventsStreamAllStateRow)
             # Similar to the above, but the entire caches are invalidated. This is
@@ -368,6 +374,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         elif etype == EventTypes.RoomEncryption:
             self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+
+        if (etype, state_key) in SLIDING_SYNC_RELEVANT_STATE_SET:
             self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
         if relates_to:
