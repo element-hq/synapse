@@ -29,7 +29,7 @@ services:
     # In order to expose Synapse, remove one of the following, you might for
     # instance expose the TLS port directly:
     ports:
-      - 8448:8448/tcp
+      - 8008:8008/tcp
     # ... or use a reverse proxy, here is an example for traefik:
     labels:
       # The following lines are valid for Traefik version 1.x:
