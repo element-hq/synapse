@@ -19,7 +19,8 @@
 #
 #
 
-""" This module contains REST servlets to do with rooms: /rooms/<paths> """
+"""This module contains REST servlets to do with rooms: /rooms/<paths>"""
+
 import logging
 import re
 from enum import Enum
@@ -67,7 +68,8 @@ from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, Requester, StreamToken, ThirdPartyInstanceID, UserID
 from synapse.types.state import StateFilter
 from synapse.util.cancellation import cancellable
-from synapse.util.stringutils import parse_and_validate_server_name, random_string
+from synapse.util.events import generate_fake_event_id
+from synapse.util.stringutils import parse_and_validate_server_name
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -325,7 +327,7 @@ class RoomStateEventRestServlet(RestServlet):
                 )
                 event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         ret = {"event_id": event_id}
@@ -377,7 +379,7 @@ class RoomSendEventRestServlet(TransactionRestServlet):
             )
             event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         return 200, {"event_id": event_id}
@@ -417,7 +419,6 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
         super().__init__(hs)
         super(ResolveRoomIdMixin, self).__init__(hs)  # ensure the Mixin is set up
         self.auth = hs.get_auth()
-        self._support_via = hs.config.experimental.msc4156_enabled
 
     def register(self, http_server: HttpServer) -> None:
         # /join/$room_identifier[/$txn_id]
@@ -435,13 +436,11 @@ class JoinRoomAliasServlet(ResolveRoomIdMixin, TransactionRestServlet):
 
         # twisted.web.server.Request.args is incorrectly defined as Optional[Any]
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
-        remote_room_hosts = parse_strings_from_args(args, "server_name", required=False)
-        if self._support_via:
+        # Prefer via over server_name (deprecated with MSC4156)
+        remote_room_hosts = parse_strings_from_args(args, "via", required=False)
+        if remote_room_hosts is None:
             remote_room_hosts = parse_strings_from_args(
-                args,
-                "org.matrix.msc4156.via",
-                default=remote_room_hosts,
-                required=False,
+                args, "server_name", required=False
             )
         room_id, remote_room_hosts = await self.resolve_room_id(
             room_identifier,
@@ -1193,7 +1192,7 @@ class RoomRedactEventRestServlet(TransactionRestServlet):
 
             event_id = event.event_id
         except ShadowBanError:
-            event_id = "$" + random_string(43)
+            event_id = generate_fake_event_id()
 
         set_tag("event_id", event_id)
         return 200, {"event_id": event_id}

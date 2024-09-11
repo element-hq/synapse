@@ -157,12 +157,9 @@ class LoggingConfig(Config):
         self, config_dir_path: str, server_name: str, **kwargs: Any
     ) -> str:
         log_config = os.path.join(config_dir_path, server_name + ".log.config")
-        return (
-            """\
+        return """\
         log_config: "%(log_config)s"
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.no_redirect_stdio is not None:

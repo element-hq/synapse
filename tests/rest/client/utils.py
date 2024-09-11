@@ -45,7 +45,7 @@ from typing_extensions import Literal
 from twisted.test.proto_helpers import MemoryReactorClock
 from twisted.web.server import Site
 
-from synapse.api.constants import Membership
+from synapse.api.constants import Membership, ReceiptTypes
 from synapse.api.errors import Codes
 from synapse.server import HomeServer
 from synapse.types import JsonDict
@@ -330,22 +330,24 @@ class RestHelper:
             data,
         )
 
-        assert (
-            channel.code == expect_code
-        ), "Expected: %d, got: %d, PUT %s -> resp: %r" % (
-            expect_code,
-            channel.code,
-            path,
-            channel.result["body"],
+        assert channel.code == expect_code, (
+            "Expected: %d, got: %d, PUT %s -> resp: %r"
+            % (
+                expect_code,
+                channel.code,
+                path,
+                channel.result["body"],
+            )
         )
 
         if expect_errcode:
-            assert (
-                str(channel.json_body["errcode"]) == expect_errcode
-            ), "Expected: %r, got: %r, resp: %r" % (
-                expect_errcode,
-                channel.json_body["errcode"],
-                channel.result["body"],
+            assert str(channel.json_body["errcode"]) == expect_errcode, (
+                "Expected: %r, got: %r, resp: %r"
+                % (
+                    expect_errcode,
+                    channel.json_body["errcode"],
+                    channel.result["body"],
+                )
             )
 
         if expect_additional_fields is not None:
@@ -354,13 +356,14 @@ class RestHelper:
                     expect_key,
                     channel.json_body,
                 )
-                assert (
-                    channel.json_body[expect_key] == expect_value
-                ), "Expected: %s at %s, got: %s, resp: %s" % (
-                    expect_value,
-                    expect_key,
-                    channel.json_body[expect_key],
-                    channel.json_body,
+                assert channel.json_body[expect_key] == expect_value, (
+                    "Expected: %s at %s, got: %s, resp: %s"
+                    % (
+                        expect_value,
+                        expect_key,
+                        channel.json_body[expect_key],
+                        channel.json_body,
+                    )
                 )
 
         self.auth_user_id = temp_id
@@ -944,3 +947,15 @@ class RestHelper:
         assert len(p.links) == 1, "not exactly one link in confirmation page"
         oauth_uri = p.links[0]
         return oauth_uri
+
+    def send_read_receipt(self, room_id: str, event_id: str, *, tok: str) -> None:
+        """Send a read receipt into the room at the given event"""
+        channel = make_request(
+            self.reactor,
+            self.site,
+            method="POST",
+            path=f"/rooms/{room_id}/receipt/{ReceiptTypes.READ}/{event_id}",
+            content={},
+            access_token=tok,
+        )
+        assert channel.code == HTTPStatus.OK, channel.text_body

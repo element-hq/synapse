@@ -19,8 +19,7 @@
 #
 #
 
-"""A circular doubly linked list implementation.
-"""
+"""A circular doubly linked list implementation."""
 
 import threading
 from typing import Generic, Optional, Type, TypeVar

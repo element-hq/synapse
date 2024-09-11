@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Mapping, NoReturn, Optional, Tuple, cast
 import psycopg2.extensions
 
 from synapse.storage.engines._base import (
+    AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
     BaseDatabaseEngine,
     IncorrectDatabaseSetup,
     IsolationLevel,
@@ -256,4 +257,10 @@ class PostgresEngine(
         executing the script in its own transaction. The script transaction is
         left open and it is the responsibility of the caller to commit it.
         """
+        # Replace auto increment placeholder with the appropriate directive
+        script = script.replace(
+            AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
+            "BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY",
+        )
+
         cursor.execute(f"COMMIT; BEGIN TRANSACTION; {script}")

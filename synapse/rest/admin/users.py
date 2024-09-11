@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import StrictBool
 from synapse.api.constants import Direction, UserTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -55,11 +55,6 @@ from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import StrictBool
-else:
-    from pydantic import StrictBool
 
 
 logger = logging.getLogger(__name__)

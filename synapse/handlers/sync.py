@@ -43,6 +43,7 @@ from prometheus_client import Counter
 
 from synapse.api.constants import (
     AccountDataTypes,
+    Direction,
     EventContentFields,
     EventTypes,
     JoinRules,
@@ -64,6 +65,7 @@ from synapse.logging.opentracing import (
 )
 from synapse.storage.databases.main.event_push_actions import RoomNotifCounts
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import MemberSummary
 from synapse.types import (
     DeviceListUpdates,
@@ -84,7 +86,7 @@ from synapse.util.async_helpers import concurrently_execute
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.caches.lrucache import LruCache
 from synapse.util.caches.response_cache import ResponseCache, ResponseCacheContext
-from synapse.util.metrics import Measure, measure_func
+from synapse.util.metrics import Measure
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -181,10 +183,7 @@ class JoinedSyncResult:
         to tell if room needs to be part of the sync result.
         """
         return bool(
-            self.timeline
-            or self.state
-            or self.ephemeral
-            or self.account_data
+            self.timeline or self.state or self.ephemeral or self.account_data
             # nb the notification count does not, er, count: if there's nothing
             # else in the result, we don't need to send it.
         )
@@ -573,10 +572,10 @@ class SyncHandler:
         if timeout == 0 or since_token is None or full_state:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
-            result: Union[SyncResult, E2eeSyncResult] = (
-                await self.current_sync_for_user(
-                    sync_config, sync_version, since_token, full_state=full_state
-                )
+            result: Union[
+                SyncResult, E2eeSyncResult
+            ] = await self.current_sync_for_user(
+                sync_config, sync_version, since_token, full_state=full_state
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
@@ -671,10 +670,10 @@ class SyncHandler:
 
             # Go through the `/sync` v2 path
             if sync_version == SyncVersion.SYNC_V2:
-                sync_result: Union[SyncResult, E2eeSyncResult] = (
-                    await self.generate_sync_result(
-                        sync_config, since_token, full_state
-                    )
+                sync_result: Union[
+                    SyncResult, E2eeSyncResult
+                ] = await self.generate_sync_result(
+                    sync_config, since_token, full_state
                 )
             # Go through the MSC3575 Sliding Sync `/sync/e2ee` path
             elif sync_version == SyncVersion.E2EE_SYNC:
@@ -879,22 +878,47 @@ class SyncHandler:
                 since_key = since_token.room_key
 
             while limited and len(recents) < timeline_limit and max_repeat:
-                # If we have a since_key then we are trying to get any events
-                # that have happened since `since_key` up to `end_key`, so we
-                # can just use `get_room_events_stream_for_room`.
-                # Otherwise, we want to return the last N events in the room
-                # in topological ordering.
-                if since_key:
-                    events, end_key = await self.store.get_room_events_stream_for_room(
-                        room_id,
-                        limit=load_limit + 1,
-                        from_key=since_key,
-                        to_key=end_key,
-                    )
-                else:
-                    events, end_key = await self.store.get_recent_events_for_room(
-                        room_id, limit=load_limit + 1, end_token=end_key
-                    )
+                # For initial `/sync`, we want to view a historical section of the
+                # timeline; to fetch events by `topological_ordering` (best
+                # representation of the room DAG as others were seeing it at the time).
+                # This also aligns with the order that `/messages` returns events in.
+                #
+                # For incremental `/sync`, we want to get all updates for rooms since
+                # the last `/sync` (regardless if those updates arrived late or happened
+                # a while ago in the past); to fetch events by `stream_ordering` (in the
+                # order they were received by the server).
+                #
+                # Relevant spec issue: https://github.com/matrix-org/matrix-spec/issues/1917
+                #
+                # FIXME: Using workaround for mypy,
+                # https://github.com/python/mypy/issues/10740#issuecomment-1997047277 and
+                # https://github.com/python/mypy/issues/17479
+                paginate_room_events_by_topological_ordering: PaginateFunction = (
+                    self.store.paginate_room_events_by_topological_ordering
+                )
+                paginate_room_events_by_stream_ordering: PaginateFunction = (
+                    self.store.paginate_room_events_by_stream_ordering
+                )
+                pagination_method: PaginateFunction = (
+                    # Use `topographical_ordering` for historical events
+                    paginate_room_events_by_topological_ordering
+                    if since_key is None
+                    # Use `stream_ordering` for updates
+                    else paginate_room_events_by_stream_ordering
+                )
+                events, end_key, limited = await pagination_method(
+                    room_id=room_id,
+                    # The bounds are reversed so we can paginate backwards
+                    # (from newer to older events) starting at to_bound.
+                    # This ensures we fill the `limit` with the newest events first,
+                    from_key=end_key,
+                    to_key=since_key,
+                    direction=Direction.BACKWARDS,
+                    limit=load_limit,
+                )
+                # We want to return the events in ascending order (the last event is the
+                # most recent).
+                events.reverse()
 
                 log_kv({"loaded_recents": len(events)})
 
@@ -945,9 +969,6 @@ class SyncHandler:
                 loaded_recents.extend(recents)
                 recents = loaded_recents
 
-                if len(events) <= load_limit:
-                    limited = False
-                    break
                 max_repeat -= 1
 
             if len(recents) > timeline_limit:
@@ -1459,13 +1480,16 @@ class SyncHandler:
                     # timeline here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[0].event_id,
-                        # we only want members!
-                        state_filter=StateFilter.from_types(
-                            (EventTypes.Member, member) for member in members_to_fetch
-                        ),
-                        await_full_state=False,
+                    state_ids = (
+                        await self._state_storage_controller.get_state_ids_for_event(
+                            batch.events[0].event_id,
+                            # we only want members!
+                            state_filter=StateFilter.from_types(
+                                (EventTypes.Member, member)
+                                for member in members_to_fetch
+                            ),
+                            await_full_state=False,
+                        )
                     )
             return state_ids
 
@@ -1750,8 +1774,15 @@ class SyncHandler:
                     )
 
                 if include_device_list_updates:
-                    device_lists = await self._generate_sync_entry_for_device_list(
-                        sync_result_builder,
+                    # include_device_list_updates can only be True if we have a
+                    # since token.
+                    assert since_token is not None
+
+                    device_lists = await self._device_handler.generate_sync_entry_for_device_list(
+                        user_id=user_id,
+                        since_token=since_token,
+                        now_token=sync_result_builder.now_token,
+                        joined_room_ids=sync_result_builder.joined_room_ids,
                         newly_joined_rooms=newly_joined_rooms,
                         newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                         newly_left_rooms=newly_left_rooms,
@@ -1863,8 +1894,14 @@ class SyncHandler:
                 newly_left_users,
             ) = sync_result_builder.calculate_user_changes()
 
-            device_lists = await self._generate_sync_entry_for_device_list(
-                sync_result_builder,
+            # include_device_list_updates can only be True if we have a
+            # since token.
+            assert since_token is not None
+            device_lists = await self._device_handler.generate_sync_entry_for_device_list(
+                user_id=user_id,
+                since_token=since_token,
+                now_token=sync_result_builder.now_token,
+                joined_room_ids=sync_result_builder.joined_room_ids,
                 newly_joined_rooms=newly_joined_rooms,
                 newly_joined_or_invited_or_knocked_users=newly_joined_or_invited_or_knocked_users,
                 newly_left_rooms=newly_left_rooms,
@@ -2041,94 +2078,6 @@ class SyncHandler:
 
         return sync_result_builder
 
-    @measure_func("_generate_sync_entry_for_device_list")
-    async def _generate_sync_entry_for_device_list(
-        self,
-        sync_result_builder: "SyncResultBuilder",
-        newly_joined_rooms: AbstractSet[str],
-        newly_joined_or_invited_or_knocked_users: AbstractSet[str],
-        newly_left_rooms: AbstractSet[str],
-        newly_left_users: AbstractSet[str],
-    ) -> DeviceListUpdates:
-        """Generate the DeviceListUpdates section of sync
-
-        Args:
-            sync_result_builder
-            newly_joined_rooms: Set of rooms user has joined since previous sync
-            newly_joined_or_invited_or_knocked_users: Set of users that have joined,
-                been invited to a room or are knocking on a room since
-                previous sync.
-            newly_left_rooms: Set of rooms user has left since previous sync
-            newly_left_users: Set of users that have left a room we're in since
-                previous sync
-        """
-
-        user_id = sync_result_builder.sync_config.user.to_string()
-        since_token = sync_result_builder.since_token
-        assert since_token is not None
-
-        # Take a copy since these fields will be mutated later.
-        newly_joined_or_invited_or_knocked_users = set(
-            newly_joined_or_invited_or_knocked_users
-        )
-        newly_left_users = set(newly_left_users)
-
-        # We want to figure out what user IDs the client should refetch
-        # device keys for, and which users we aren't going to track changes
-        # for anymore.
-        #
-        # For the first step we check:
-        #   a. if any users we share a room with have updated their devices,
-        #      and
-        #   b. we also check if we've joined any new rooms, or if a user has
-        #      joined a room we're in.
-        #
-        # For the second step we just find any users we no longer share a
-        # room with by looking at all users that have left a room plus users
-        # that were in a room we've left.
-
-        users_that_have_changed = set()
-
-        joined_room_ids = sync_result_builder.joined_room_ids
-
-        # Step 1a, check for changes in devices of users we share a room
-        # with
-        users_that_have_changed = (
-            await self._device_handler.get_device_changes_in_shared_rooms(
-                user_id,
-                joined_room_ids,
-                from_token=since_token,
-                now_token=sync_result_builder.now_token,
-            )
-        )
-
-        # Step 1b, check for newly joined rooms
-        for room_id in newly_joined_rooms:
-            joined_users = await self.store.get_users_in_room(room_id)
-            newly_joined_or_invited_or_knocked_users.update(joined_users)
-
-        # TODO: Check that these users are actually new, i.e. either they
-        # weren't in the previous sync *or* they left and rejoined.
-        users_that_have_changed.update(newly_joined_or_invited_or_knocked_users)
-
-        user_signatures_changed = await self.store.get_users_whose_signatures_changed(
-            user_id, since_token.device_list_key
-        )
-        users_that_have_changed.update(user_signatures_changed)
-
-        # Now find users that we no longer track
-        for room_id in newly_left_rooms:
-            left_users = await self.store.get_users_in_room(room_id)
-            newly_left_users.update(left_users)
-
-        # Remove any users that we still share a room with.
-        left_users_rooms = await self.store.get_rooms_for_users(newly_left_users)
-        for user_id, entries in left_users_rooms.items():
-            if any(rid in joined_room_ids for rid in entries):
-                newly_left_users.discard(user_id)
-
-        return DeviceListUpdates(changed=users_that_have_changed, left=newly_left_users)
-
     @trace
     async def _generate_sync_entry_for_to_device(
         self, sync_result_builder: "SyncResultBuilder"
@@ -2212,18 +2161,18 @@ class SyncHandler:
 
             if push_rules_changed:
                 global_account_data = dict(global_account_data)
-                global_account_data[AccountDataTypes.PUSH_RULES] = (
-                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
-                )
+                global_account_data[
+                    AccountDataTypes.PUSH_RULES
+                ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
             global_account_data = dict(all_global_account_data)
-            global_account_data[AccountDataTypes.PUSH_RULES] = (
-                await self._push_rules_handler.push_rules_for_user(sync_config.user)
-            )
+            global_account_data[
+                AccountDataTypes.PUSH_RULES
+            ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(
@@ -2641,9 +2590,10 @@ class SyncHandler:
         # a "gap" in the timeline, as described by the spec for /sync.
         room_to_events = await self.store.get_room_events_stream_for_rooms(
             room_ids=sync_result_builder.joined_room_ids,
-            from_key=since_token.room_key,
-            to_key=now_token.room_key,
+            from_key=now_token.room_key,
+            to_key=since_token.room_key,
             limit=timeline_limit + 1,
+            direction=Direction.BACKWARDS,
         )
 
         # We loop through all room ids, even if there are no new events, in case
@@ -2653,7 +2603,10 @@ class SyncHandler:
 
             newly_joined = room_id in newly_joined_rooms
             if room_entry:
-                events, start_key = room_entry
+                events, start_key, _ = room_entry
+                # We want to return the events in ascending order (the last event is the
+                # most recent).
+                events.reverse()
 
                 prev_batch_token = now_token.copy_and_replace(
                     StreamKeyType.ROOM, start_key

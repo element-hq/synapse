@@ -144,6 +144,16 @@ class ProfileWorkerStore(SQLBaseStore):
         return 50
 
     async def get_profileinfo(self, user_id: UserID) -> ProfileInfo:
+        """
+        Fetch the display name and avatar URL of a user.
+
+        Args:
+            user_id: The user ID to fetch the profile for.
+
+        Returns:
+            The user's display name and avatar URL. Values may be null if unset
+             or if the user doesn't exist.
+        """
         profile = await self.db_pool.simple_select_one(
             table="profiles",
             keyvalues={"full_user_id": user_id.to_string()},
@@ -158,6 +168,15 @@ class ProfileWorkerStore(SQLBaseStore):
         return ProfileInfo(avatar_url=profile[1], display_name=profile[0])
 
     async def get_profile_displayname(self, user_id: UserID) -> Optional[str]:
+        """
+        Fetch the display name of a user.
+
+        Args:
+            user_id: The user to get the display name for.
+
+        Raises:
+            404 if the user does not exist.
+        """
         return await self.db_pool.simple_select_one_onecol(
             table="profiles",
             keyvalues={"full_user_id": user_id.to_string()},
@@ -166,6 +185,15 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def get_profile_avatar_url(self, user_id: UserID) -> Optional[str]:
+        """
+        Fetch the avatar URL of a user.
+
+        Args:
+            user_id: The user to get the avatar URL for.
+
+        Raises:
+            404 if the user does not exist.
+        """
         return await self.db_pool.simple_select_one_onecol(
             table="profiles",
             keyvalues={"full_user_id": user_id.to_string()},
@@ -174,6 +202,12 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def create_profile(self, user_id: UserID) -> None:
+        """
+        Create a blank profile for a user.
+
+        Args:
+            user_id: The user to create the profile for.
+        """
         user_localpart = user_id.localpart
         await self.db_pool.simple_insert(
             table="profiles",
