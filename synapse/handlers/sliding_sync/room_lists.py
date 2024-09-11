@@ -27,6 +27,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
 )
 
 import attr
@@ -355,11 +356,18 @@ class SlidingSyncRoomLists:
                     if list_config.ranges:
                         if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
                             # If we are asking for the full range, we don't need to sort the list.
-                            sorted_room_info = list(filtered_sync_room_map.values())
+                            sorted_room_info: List[RoomsForUserType] = list(
+                                filtered_sync_room_map.values()
+                            )
                         else:
                             # Sort the list
-                            sorted_room_info = await self.sort_rooms_using_tables(
-                                filtered_sync_room_map, to_token
+                            sorted_room_info = await self.sort_rooms(
+                                # Cast is safe because RoomsForUserSlidingSync is part
+                                # of the `RoomsForUserType` union. Why can't it detect this?
+                                cast(
+                                    Dict[str, RoomsForUserType], filtered_sync_room_map
+                                ),
+                                to_token,
                             )
 
                         for range in list_config.ranges:
@@ -1761,63 +1769,6 @@ class SlidingSyncRoomLists:
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
-
-    @trace
-    async def sort_rooms_using_tables(
-        self,
-        sync_room_map: Mapping[str, RoomsForUserSlidingSync],
-        to_token: StreamToken,
-    ) -> List[RoomsForUserSlidingSync]:
-        """
-        Sort by `stream_ordering` of the last event that the user should see in the
-        room. `stream_ordering` is unique so we get a stable sort.
-
-        Args:
-            sync_room_map: Dictionary of room IDs to sort along with membership
-                information in the room at the time of `to_token`.
-            to_token: We sort based on the events in the room at this token (<= `to_token`)
-
-        Returns:
-            A sorted list of room IDs by `stream_ordering` along with membership information.
-        """
-
-        # Assemble a map of room ID to the `stream_ordering` of the last activity that the
-        # user should see in the room (<= `to_token`)
-        last_activity_in_room_map: Dict[str, int] = {}
-
-        for room_id, room_for_user in sync_room_map.items():
-            if room_for_user.membership != Membership.JOIN:
-                # If the user has left/been invited/knocked/been banned from a
-                # room, they shouldn't see anything past that point.
-                #
-                # FIXME: It's possible that people should see beyond this point
-                # in invited/knocked cases if for example the room has
-                # `invite`/`world_readable` history visibility, see
-                # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
-
-        # For fully-joined rooms, we find the latest activity at/before the
-        # `to_token`.
-        joined_room_positions = (
-            await self.store.bulk_get_last_event_pos_in_room_before_stream_ordering(
-                [
-                    room_id
-                    for room_id, room_for_user in sync_room_map.items()
-                    if room_for_user.membership == Membership.JOIN
-                ],
-                to_token.room_key,
-            )
-        )
-
-        last_activity_in_room_map.update(joined_room_positions)
-
-        return sorted(
-            sync_room_map.values(),
-            # Sort by the last activity (stream_ordering) in the room
-            key=lambda room_info: last_activity_in_room_map[room_info.room_id],
-            # We want descending order
-            reverse=True,
-        )
 
     @trace
     async def sort_rooms(

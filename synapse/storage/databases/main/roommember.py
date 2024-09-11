@@ -51,7 +51,6 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
-from synapse.storage.databases.main.events_bg_updates import _BackgroundUpdates
 from synapse.storage.databases.main.events_worker import EventsWorkerStore
 from synapse.storage.engines import Sqlite3Engine
 from synapse.storage.roommember import (
@@ -1447,17 +1446,6 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         return await self.db_pool.runInteraction(
             "get_sliding_sync_rooms_for_user",
             get_sliding_sync_rooms_for_user_txn,
-        )
-
-    async def have_finished_sliding_sync_background_jobs(self) -> bool:
-        """Return if it's safe to use the sliding sync membership tables."""
-
-        return await self.db_pool.updates.have_completed_background_updates(
-            (
-                _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
-                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
-                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
-            )
         )
 
 
