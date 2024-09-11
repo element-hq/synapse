@@ -83,11 +83,13 @@ class DelayedEventsServlet(RestServlet):
         self.auth = hs.get_auth()
         self.delayed_events_handler = hs.get_delayed_events_handler()
 
-    async def on_GET(self, request: SynapseRequest) -> Tuple[int, List[JsonDict]]:
+    async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
         # TODO: Support Pagination stream API ("from" query parameter)
-        data = await self.delayed_events_handler.get_all_for_user(requester)
-        return 200, data
+        delayed_events = await self.delayed_events_handler.get_all_for_user(requester)
+
+        ret = {"delayed_events": delayed_events}
+        return 200, ret
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
