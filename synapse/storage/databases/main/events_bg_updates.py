@@ -1967,9 +1967,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         ]:
             # Fetch the set of event IDs that we want to update
             #
-            # It's important to sort by `event_stream_ordering` *ascending* (oldest to
+            # It's important to sort by `stream_ordering` *ascending* (oldest to
             # newest) (at-least per-room) so that we can re-use the snapshots along the
             # way if nothing has changed.
+            #
+            # Also be careful because `local_current_membership.event_stream_ordering`
+            # is nullable and not always filled in. We need to join on `events` to rely
+            # on `events.stream_ordering` instead. Even though the
+            # `events.stream_ordering` also doesn't have a `NOT NULL` constraint, it
+            # doesn't have any rows where this is the case (checked on `matrix.org`).
+            # The fact the `events.stream_ordering` is a nullable column is a holdover
+            # from a rename of the column.
             #
             if initial_phase:
                 # There are some old out-of-band memberships (before
@@ -1999,7 +2007,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     (last_room_id, last_user_id, batch_size),
                 )
             elif last_event_stream_ordering is not None:
-                # It's important to sort by `event_stream_ordering` *ascending* (oldest to
+                # It's important to sort by `stream_ordering` *ascending* (oldest to
                 # newest) so that if we see that this background update in progress and want
                 # to start the catch-up process, we can safely assume that it will
                 # eventually get to the rooms we want to catch-up on anyway (see
@@ -2017,13 +2025,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.sender,
                         c.event_id,
                         c.membership,
-                        c.event_stream_ordering,
+                        e.stream_ordering,
                         e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
                     INNER JOIN events AS e USING (event_id)
-                    WHERE event_stream_ordering > ?
-                    ORDER BY event_stream_ordering ASC
+                    WHERE e.stream_ordering > ?
+                    ORDER BY e.stream_ordering ASC
                     LIMIT ?
                     """,
                     (last_event_stream_ordering, batch_size),
