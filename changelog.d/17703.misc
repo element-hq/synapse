@@ -1,1 +1,1 @@
-Move sliding sync filter tests to rest layer so sliding sync has better test coverage.
+Refactor sliding sync filter unit tests so the sliding sync API has better test coverage.
