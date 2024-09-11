@@ -12,7 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 import logging
-from typing import Any, Iterable, Literal, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 from unittest.mock import AsyncMock
 
 from parameterized import parameterized_class
@@ -21,7 +21,14 @@ from typing_extensions import assert_never
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.events import EventBase
+from synapse.api.constants import (
+    AccountDataTypes,
+    EventTypes,
+    Membership,
+)
+from synapse.api.room_versions import RoomVersions
+from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
+from synapse.events.snapshot import EventContext
 from synapse.rest.client import devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
@@ -134,6 +141,167 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             # Message to help understand the diff in context
             message=str(actual_required_state),
         )
+
+    def _add_new_dm_to_global_account_data(
+        self, source_user_id: str, target_user_id: str, target_room_id: str
+    ) -> None:
+        """
+        Helper to handle inserting a new DM for the source user into global account data
+        (handles all of the list merging).
+
+        Args:
+            source_user_id: The user ID of the DM mapping we're going to update
+            target_user_id: User ID of the person the DM is with
+            target_room_id: Room ID of the DM
+        """
+        store = self.hs.get_datastores().main
+
+        # Get the current DM map
+        existing_dm_map = self.get_success(
+            store.get_global_account_data_by_type_for_user(
+                source_user_id, AccountDataTypes.DIRECT
+            )
+        )
+        # Scrutinize the account data since it has no concrete type. We're just copying
+        # everything into a known type. It should be a mapping from user ID to a list of
+        # room IDs. Ignore anything else.
+        new_dm_map: Dict[str, List[str]] = {}
+        if isinstance(existing_dm_map, dict):
+            for user_id, room_ids in existing_dm_map.items():
+                if isinstance(user_id, str) and isinstance(room_ids, list):
+                    for room_id in room_ids:
+                        if isinstance(room_id, str):
+                            new_dm_map[user_id] = new_dm_map.get(user_id, []) + [
+                                room_id
+                            ]
+
+        # Add the new DM to the map
+        new_dm_map[target_user_id] = new_dm_map.get(target_user_id, []) + [
+            target_room_id
+        ]
+        # Save the DM map to global account data
+        self.get_success(
+            store.add_account_data_for_user(
+                source_user_id,
+                AccountDataTypes.DIRECT,
+                new_dm_map,
+            )
+        )
+
+    def _create_dm_room(
+        self,
+        inviter_user_id: str,
+        inviter_tok: str,
+        invitee_user_id: str,
+        invitee_tok: str,
+        should_join_room: bool = True,
+    ) -> str:
+        """
+        Helper to create a DM room as the "inviter" and invite the "invitee" user to the
+        room. The "invitee" user also will join the room. The `m.direct` account data
+        will be set for both users.
+        """
+        # Create a room and send an invite the other user
+        room_id = self.helper.create_room_as(
+            inviter_user_id,
+            is_public=False,
+            tok=inviter_tok,
+        )
+        self.helper.invite(
+            room_id,
+            src=inviter_user_id,
+            targ=invitee_user_id,
+            tok=inviter_tok,
+            extra_data={"is_direct": True},
+        )
+        if should_join_room:
+            # Person that was invited joins the room
+            self.helper.join(room_id, invitee_user_id, tok=invitee_tok)
+
+        # Mimic the client setting the room as a direct message in the global account
+        # data for both users.
+        self._add_new_dm_to_global_account_data(
+            invitee_user_id, inviter_user_id, room_id
+        )
+        self._add_new_dm_to_global_account_data(
+            inviter_user_id, invitee_user_id, room_id
+        )
+
+        return room_id
+
+    _remote_invite_count: int = 0
+
+    def _create_remote_invite_room_for_user(
+        self,
+        invitee_user_id: str,
+        unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
+    ) -> str:
+        """
+        Create a fake invite for a remote room and persist it.
+
+        We don't have any state for these kind of rooms and can only rely on the
+        stripped state included in the unsigned portion of the invite event to identify
+        the room.
+
+        Args:
+            invitee_user_id: The person being invited
+            unsigned_invite_room_state: List of stripped state events to assist the
+                receiver in identifying the room.
+
+        Returns:
+            The room ID of the remote invite room
+        """
+        store = self.hs.get_datastores().main
+
+        invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
+
+        invite_event_dict = {
+            "room_id": invite_room_id,
+            "sender": "@inviter:remote_server",
+            "state_key": invitee_user_id,
+            "depth": 1,
+            "origin_server_ts": 1,
+            "type": EventTypes.Member,
+            "content": {"membership": Membership.INVITE},
+            "auth_events": [],
+            "prev_events": [],
+        }
+        if unsigned_invite_room_state is not None:
+            serialized_stripped_state_events = []
+            for stripped_event in unsigned_invite_room_state:
+                serialized_stripped_state_events.append(
+                    {
+                        "type": stripped_event.type,
+                        "state_key": stripped_event.state_key,
+                        "sender": stripped_event.sender,
+                        "content": stripped_event.content,
+                    }
+                )
+
+            invite_event_dict["unsigned"] = {
+                "invite_room_state": serialized_stripped_state_events
+            }
+
+        invite_event = make_event_from_dict(
+            invite_event_dict,
+            room_version=RoomVersions.V10,
+        )
+        invite_event.internal_metadata.outlier = True
+        invite_event.internal_metadata.out_of_band_membership = True
+
+        self.get_success(
+            store.maybe_store_room_on_outlier_membership(
+                room_id=invite_room_id, room_version=invite_event.room_version
+            )
+        )
+        context = EventContext.for_outlier(self.hs.get_storage_controllers())
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+        self.get_success(persist_controller.persist_event(invite_event, context))
+
+        self._remote_invite_count += 1
+
+        return invite_room_id
 
     def _bump_notifier_wait_for_events(
         self,

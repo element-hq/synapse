@@ -1044,7 +1044,7 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
-            # The absense of this flag means `False`.
+            # The absence of this flag means `False`.
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
