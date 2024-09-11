@@ -1,6 +1,8 @@
 import logging
 from typing import List, NewType, Optional, Tuple
 
+import attr
+
 from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction, StoreError
@@ -20,17 +22,21 @@ StateKey = NewType("StateKey", str)
 Delay = NewType("Delay", int)
 Timestamp = NewType("Timestamp", int)
 
-# TODO: Maybe use attr class
-DelayedEventDetails = Tuple[
-    DelayID,
-    UserLocalpart,
-    RoomID,
-    EventType,
-    Optional[StateKey],
-    Timestamp,
-    JsonDict,
-    Optional[DeviceID],
-]
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class EventDetails:
+    room_id: RoomID
+    type: EventType
+    state_key: Optional[StateKey]
+    origin_server_ts: Timestamp
+    content: JsonDict
+    device_id: Optional[DeviceID]
+
+
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class DelayedEventDetails(EventDetails):
+    delay_id: DelayID
+    user_localpart: UserLocalpart
 
 
 class DelayedEventsStore(SQLBaseStore):
@@ -318,15 +324,15 @@ class DelayedEventsStore(SQLBaseStore):
                 assert txn.rowcount == len(rows)
 
             events = [
-                (
-                    DelayID(row[0]),
-                    UserLocalpart(row[1]),
+                DelayedEventDetails(
                     RoomID.from_string(row[2]),
                     EventType(row[3]),
                     StateKey(row[4]) if row[4] is not None else None,
                     Timestamp(row[5] if row[5] is not None else row[6]),
                     db_to_json(row[7]),
                     DeviceID(row[8]) if row[8] is not None else None,
+                    DelayID(row[0]),
+                    UserLocalpart(row[1]),
                 )
                 for row in rows
             ]
@@ -343,14 +349,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
     ) -> Tuple[
-        Tuple[
-            RoomID,
-            EventType,
-            Optional[StateKey],
-            Timestamp,
-            JsonDict,
-            Optional[DeviceID],
-        ],
+        EventDetails,
         bool,
         Optional[Timestamp],
     ]:
@@ -373,14 +372,7 @@ class DelayedEventsStore(SQLBaseStore):
         def process_target_delayed_event_txn(
             txn: LoggingTransaction,
         ) -> Tuple[
-            Tuple[
-                RoomID,
-                EventType,
-                Optional[StateKey],
-                Timestamp,
-                JsonDict,
-                Optional[DeviceID],
-            ],
+            EventDetails,
             bool,
             Optional[Timestamp],
         ]:
@@ -414,7 +406,7 @@ class DelayedEventsStore(SQLBaseStore):
                 assert txn.rowcount == 1
 
             send_ts = Timestamp(row[4])
-            event = (
+            event = EventDetails(
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,

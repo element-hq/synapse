@@ -1,6 +1,8 @@
 import logging
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
+import attr
+
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
@@ -12,7 +14,6 @@ from synapse.storage.databases.main.delayed_events import (
     Delay,
     DelayedEventDetails,
     DelayID,
-    DeviceID,
     EventType,
     StateKey,
     Timestamp,
@@ -308,9 +309,12 @@ class DelayedEventsHandler:
             self._schedule_next_at_or_none(next_send_ts)
 
         await self._send_event(
-            DelayID(delay_id),
-            UserLocalpart(requester.user.localpart),
-            *event,
+            DelayedEventDetails(
+                # NOTE: mypy thinks that (*attr.astuple, ...) is too many args, so use kwargs instead
+                delay_id=DelayID(delay_id),
+                user_localpart=UserLocalpart(requester.user.localpart),
+                **attr.asdict(event),
+            )
         )
 
     async def _send_on_timeout(self) -> None:
@@ -327,34 +331,16 @@ class DelayedEventsHandler:
 
     async def _send_events(self, events: List[DelayedEventDetails]) -> None:
         sent_state: Set[Tuple[RoomID, EventType, StateKey]] = set()
-        for (
-            delay_id,
-            user_localpart,
-            room_id,
-            event_type,
-            state_key,
-            origin_server_ts,
-            content,
-            device_id,
-        ) in events:
-            if state_key is not None:
-                state_info = (room_id, event_type, state_key)
+        for event in events:
+            if event.state_key is not None:
+                state_info = (event.room_id, event.type, event.state_key)
                 if state_info in sent_state:
                     continue
             else:
                 state_info = None
             try:
                 # TODO: send in background if message event or non-conflicting state event
-                await self._send_event(
-                    delay_id,
-                    user_localpart,
-                    room_id,
-                    event_type,
-                    state_key,
-                    origin_server_ts,
-                    content,
-                    device_id,
-                )
+                await self._send_event(event)
                 if state_info is not None:
                     sent_state.add(state_info)
             except Exception:
@@ -400,65 +386,58 @@ class DelayedEventsHandler:
 
     async def _send_event(
         self,
-        delay_id: DelayID,
-        user_localpart: UserLocalpart,
-        room_id: RoomID,
-        event_type: EventType,
-        state_key: Optional[StateKey],
-        origin_server_ts: Timestamp,
-        content: JsonDict,
-        device_id: Optional[DeviceID],
+        event: DelayedEventDetails,
         txn_id: Optional[str] = None,
     ) -> None:
-        user_id = UserID(user_localpart, self._config.server.server_name)
+        user_id = UserID(event.user_localpart, self._config.server.server_name)
         user_id_str = user_id.to_string()
         # Create a new requester from what data is currently available
         requester = create_requester(
             user_id,
             is_guest=await self._store.is_guest(user_id_str),
-            device_id=device_id,
+            device_id=event.device_id,
         )
 
         try:
-            if state_key is not None and event_type == EventTypes.Member:
-                membership = content.get("membership")
+            if event.state_key is not None and event.type == EventTypes.Member:
+                membership = event.content.get("membership")
                 assert membership is not None
                 event_id, _ = await self._room_member_handler.update_membership(
                     requester,
-                    target=UserID.from_string(state_key),
-                    room_id=room_id.to_string(),
+                    target=UserID.from_string(event.state_key),
+                    room_id=event.room_id.to_string(),
                     action=membership,
-                    content=content,
-                    origin_server_ts=origin_server_ts,
+                    content=event.content,
+                    origin_server_ts=event.origin_server_ts,
                 )
             else:
                 event_dict: JsonDict = {
-                    "type": event_type,
-                    "content": content,
-                    "room_id": room_id.to_string(),
+                    "type": event.type,
+                    "content": event.content,
+                    "room_id": event.room_id.to_string(),
                     "sender": user_id_str,
-                    "origin_server_ts": origin_server_ts,
+                    "origin_server_ts": event.origin_server_ts,
                 }
 
-                if state_key is not None:
-                    event_dict["state_key"] = state_key
+                if event.state_key is not None:
+                    event_dict["state_key"] = event.state_key
 
                 (
-                    event,
+                    sent_event,
                     _,
                 ) = await self._event_creation_handler.create_and_send_nonmember_event(
                     requester,
                     event_dict,
                     txn_id=txn_id,
                 )
-                event_id = event.event_id
+                event_id = sent_event.event_id
         except ShadowBanError:
             event_id = generate_fake_event_id()
         finally:
             # TODO: If this is a temporary error, retry. Otherwise, consider notifying clients of the failure
             try:
                 await self._store.delete_processed_delayed_event(
-                    delay_id, user_localpart
+                    event.delay_id, event.user_localpart
                 )
             except Exception:
                 logger.exception("Failed to delete processed delayed event")
