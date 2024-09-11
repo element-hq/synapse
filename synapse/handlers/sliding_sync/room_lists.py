@@ -219,9 +219,12 @@ class SlidingSyncRoomLists:
         # include rooms that are outside the list ranges.
         all_rooms: Set[str] = set()
 
-        room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
-            user_id
-        )
+        # We can't trace the function directly because it's cached and the `@cached`
+        # decorator doesn't mix with `@trace` yet.
+        with start_active_span("get_sliding_sync_rooms_for_user"):
+            room_membership_for_user_map = (
+                await self.store.get_sliding_sync_rooms_for_user(user_id)
+            )
 
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
