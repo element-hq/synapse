@@ -792,14 +792,6 @@ class SlidingSyncRestServlet(RestServlet):
             "lists": {
                 "foo-list": {
                     "count": 1337,
-                    "ops": [{
-                        "op": "SYNC",
-                        "range": [0, 99],
-                        "room_ids": [
-                            "!foo:bar",
-                            // ... 99 more room IDs
-                        ]
-                    }]
                 }
             },
             // Aggregated rooms from lists and room subscriptions
@@ -977,20 +969,10 @@ class SlidingSyncRestServlet(RestServlet):
     def encode_lists(
         self, lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     ) -> JsonDict:
-        def encode_operation(
-            operation: SlidingSyncResult.SlidingWindowList.Operation,
-        ) -> JsonDict:
-            return {
-                "op": operation.op.value,
-                "range": operation.range,
-                "room_ids": operation.room_ids,
-            }
-
         serialized_lists = {}
         for list_key, list_result in lists.items():
             serialized_lists[list_key] = {
                 "count": list_result.count,
-                "ops": [encode_operation(op) for op in list_result.ops],
             }
 
         return serialized_lists

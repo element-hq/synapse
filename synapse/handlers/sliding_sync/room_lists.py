@@ -64,7 +64,6 @@ from synapse.types import (
 )
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
-    OperationType,
     PerConnectionState,
     RoomSyncConfig,
     SlidingSyncConfig,
@@ -106,7 +105,7 @@ class SlidingSyncInterestedRooms:
         dm_room_ids: The set of rooms the user consider as direct-message (DM) rooms
     """
 
-    lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
+    lists: Mapping[str, "SlidingSyncListResult"]
     relevant_room_map: Mapping[str, RoomSyncConfig]
     relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig]
     all_rooms: Set[str]
@@ -115,6 +114,17 @@ class SlidingSyncInterestedRooms:
     newly_joined_rooms: AbstractSet[str]
     newly_left_rooms: AbstractSet[str]
     dm_room_ids: AbstractSet[str]
+
+
+@attr.s(auto_attribs=True, slots=True, frozen=True)
+class SlidingSyncListResult(SlidingSyncResult.SlidingWindowList):
+    """Add a new field to the lists response that allows us to track the
+    matching room IDs in the list.
+
+    This is not returend to the client.
+    """
+
+    room_ids: StrCollection
 
 
 class Sentinel(enum.Enum):
@@ -212,7 +222,7 @@ class SlidingSyncRoomLists:
         user_id = sync_config.user.to_string()
 
         # Assemble sliding window lists
-        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        lists: Dict[str, SlidingSyncListResult] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
         # The set of room IDs of all rooms that could appear in any list. These
@@ -350,7 +360,7 @@ class SlidingSyncRoomLists:
 
                     all_rooms.update(filtered_sync_room_map)
 
-                    ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+                    room_ids_in_list: List[str] = []
 
                     if list_config.ranges:
                         if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
@@ -363,8 +373,6 @@ class SlidingSyncRoomLists:
                             )
 
                         for range in list_config.ranges:
-                            room_ids_in_list: List[str] = []
-
                             # We're going to loop through the sorted list of rooms starting
                             # at the range start index and keep adding rooms until we fill
                             # up the range or run out of rooms.
@@ -393,17 +401,8 @@ class SlidingSyncRoomLists:
 
                                 room_ids_in_list.append(room_id)
 
-                            ops.append(
-                                SlidingSyncResult.SlidingWindowList.Operation(
-                                    op=OperationType.SYNC,
-                                    range=range,
-                                    room_ids=room_ids_in_list,
-                                )
-                            )
-
-                    lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                        count=len(sorted_room_info),
-                        ops=ops,
+                    lists[list_key] = SlidingSyncListResult(
+                        count=len(sorted_room_info), room_ids=room_ids_in_list
                     )
 
         if sync_config.room_subscriptions:
@@ -484,7 +483,7 @@ class SlidingSyncRoomLists:
         dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
 
         # Assemble sliding window lists
-        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        lists: Dict[str, SlidingSyncListResult] = {}
         # Keep track of the rooms that we can display and need to fetch more info about
         relevant_room_map: Dict[str, RoomSyncConfig] = {}
         # The set of room IDs of all rooms that could appear in any list. These
@@ -535,11 +534,9 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map, to_token
                     )
 
-                    ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+                    room_ids_in_list: List[str] = []
                     if list_config.ranges:
                         for range in list_config.ranges:
-                            room_ids_in_list: List[str] = []
-
                             # We're going to loop through the sorted list of rooms starting
                             # at the range start index and keep adding rooms until we fill
                             # up the range or run out of rooms.
@@ -568,17 +565,8 @@ class SlidingSyncRoomLists:
 
                                 room_ids_in_list.append(room_id)
 
-                            ops.append(
-                                SlidingSyncResult.SlidingWindowList.Operation(
-                                    op=OperationType.SYNC,
-                                    range=range,
-                                    room_ids=room_ids_in_list,
-                                )
-                            )
-
-                    lists[list_key] = SlidingSyncResult.SlidingWindowList(
-                        count=len(sorted_room_info),
-                        ops=ops,
+                    lists[list_key] = SlidingSyncListResult(
+                        count=len(sorted_room_info), room_ids=room_ids_in_list
                     )
 
         if sync_config.room_subscriptions:

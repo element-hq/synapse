@@ -20,6 +20,7 @@ from typing_extensions import assert_never
 
 from synapse.api.constants import AccountDataTypes, EduTypes
 from synapse.handlers.receipts import ReceiptEventSource
+from synapse.handlers.sliding_sync.room_lists import SlidingSyncListResult
 from synapse.logging.opentracing import trace
 from synapse.storage.databases.main.receipts import ReceiptInRoom
 from synapse.types import (
@@ -33,7 +34,6 @@ from synapse.types import (
 from synapse.types.handlers.sliding_sync import (
     HaveSentRoomFlag,
     MutablePerConnectionState,
-    OperationType,
     PerConnectionState,
     SlidingSyncConfig,
     SlidingSyncResult,
@@ -60,7 +60,7 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncListResult],
         actual_room_ids: Set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         to_token: StreamToken,
@@ -151,7 +151,7 @@ class SlidingSyncExtensionHandler:
         self,
         requested_lists: Optional[StrCollection],
         requested_room_ids: Optional[StrCollection],
-        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncListResult],
         actual_room_ids: AbstractSet[str],
     ) -> Set[str]:
         """
@@ -193,28 +193,18 @@ class SlidingSyncExtensionHandler:
         if requested_lists is not None:
             for list_key in requested_lists:
                 # Just some typing because we share the variable name in multiple places
-                actual_list: Optional[SlidingSyncResult.SlidingWindowList] = None
+                actual_list: Optional[SlidingSyncListResult] = None
 
                 # A wildcard means we process rooms from all lists
                 if list_key == "*":
                     for actual_list in actual_lists.values():
-                        # We only expect a single SYNC operation for any list
-                        assert len(actual_list.ops) == 1
-                        sync_op = actual_list.ops[0]
-                        assert sync_op.op == OperationType.SYNC
-
-                        relevant_room_ids.update(sync_op.room_ids)
+                        relevant_room_ids.update(actual_list.room_ids)
 
                     break
 
                 actual_list = actual_lists.get(list_key)
                 if actual_list is not None:
-                    # We only expect a single SYNC operation for any list
-                    assert len(actual_list.ops) == 1
-                    sync_op = actual_list.ops[0]
-                    assert sync_op.op == OperationType.SYNC
-
-                    relevant_room_ids.update(sync_op.room_ids)
+                    relevant_room_ids.update(actual_list.room_ids)
 
         return relevant_room_ids
 
@@ -348,7 +338,7 @@ class SlidingSyncExtensionHandler:
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncListResult],
         actual_room_ids: Set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
         to_token: StreamToken,
@@ -441,7 +431,7 @@ class SlidingSyncExtensionHandler:
         sync_config: SlidingSyncConfig,
         previous_connection_state: "PerConnectionState",
         new_connection_state: "MutablePerConnectionState",
-        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncListResult],
         actual_room_ids: Set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         receipts_request: SlidingSyncConfig.Extensions.ReceiptsExtension,
@@ -637,7 +627,7 @@ class SlidingSyncExtensionHandler:
     async def get_typing_extension_response(
         self,
         sync_config: SlidingSyncConfig,
-        actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
+        actual_lists: Mapping[str, SlidingSyncListResult],
         actual_room_ids: Set[str],
         actual_room_response_map: Mapping[str, SlidingSyncResult.RoomResult],
         typing_request: SlidingSyncConfig.Extensions.TypingExtension,
