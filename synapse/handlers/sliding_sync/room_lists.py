@@ -27,6 +27,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
 )
 
 import attr
@@ -355,11 +356,18 @@ class SlidingSyncRoomLists:
                     if list_config.ranges:
                         if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
                             # If we are asking for the full range, we don't need to sort the list.
-                            sorted_room_info = list(filtered_sync_room_map.values())
+                            sorted_room_info: List[RoomsForUserType] = list(
+                                filtered_sync_room_map.values()
+                            )
                         else:
                             # Sort the list
                             sorted_room_info = await self.sort_rooms(
-                                filtered_sync_room_map, to_token
+                                # Cast is safe because RoomsForUserSlidingSync is part
+                                # of the `RoomsForUserType` union. Why can't it detect this?
+                                cast(
+                                    Dict[str, RoomsForUserType], filtered_sync_room_map
+                                ),
+                                to_token,
                             )
 
                         for range in list_config.ranges:
