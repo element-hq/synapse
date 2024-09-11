@@ -38,6 +38,7 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncConfig,
     SlidingSyncResult,
 )
+from synapse.util.async_helpers import concurrently_execute
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -106,6 +107,8 @@ class SlidingSyncExtensionHandler:
         if sync_config.extensions.account_data is not None:
             account_data_response = await self.get_account_data_extension_response(
                 sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                new_connection_state=new_connection_state,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
                 account_data_request=sync_config.extensions.account_data,
@@ -348,6 +351,8 @@ class SlidingSyncExtensionHandler:
     async def get_account_data_extension_response(
         self,
         sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        new_connection_state: "MutablePerConnectionState",
         actual_lists: Mapping[str, SlidingSyncResult.SlidingWindowList],
         actual_room_ids: Set[str],
         account_data_request: SlidingSyncConfig.Extensions.AccountDataExtension,
@@ -402,7 +407,7 @@ class SlidingSyncExtensionHandler:
             ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
 
         # Fetch room account data
-        account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {}
+        account_data_by_room_map: Dict[str, Mapping[str, JsonMapping]] = {}
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
             requested_room_ids=account_data_request.rooms,
@@ -410,25 +415,88 @@ class SlidingSyncExtensionHandler:
             actual_room_ids=actual_room_ids,
         )
         if len(relevant_room_ids) > 0:
+            # We need to handle the different cases depending on if we have sent
+            # down account data previously or not, so we split the relevant
+            # rooms up into different collections based on status.
+            live_rooms = set()
+            previously_rooms: Dict[str, int] = {}
+            initial_rooms = set()
+
+            for room_id in relevant_room_ids:
+                if not from_token:
+                    initial_rooms.add(room_id)
+                    continue
+
+                room_status = previous_connection_state.account_data.have_sent_room(
+                    room_id
+                )
+                if room_status.status == HaveSentRoomFlag.LIVE:
+                    live_rooms.add(room_id)
+                elif room_status.status == HaveSentRoomFlag.PREVIOUSLY:
+                    assert room_status.last_token is not None
+                    previously_rooms[room_id] = room_status.last_token
+                elif room_status.status == HaveSentRoomFlag.NEVER:
+                    initial_rooms.add(room_id)
+                else:
+                    assert_never(room_status.status)
+
+            # We fetch all room account data since the from token. This is so
+            # that we can record which rooms have updates that haven't been sent
+            # down.
             if from_token is not None:
-                # TODO: This should take into account the `from_token` and `to_token`
-                account_data_by_room_map = (
-                    await self.store.get_updated_room_account_data_for_user(
-                        user_id, from_token.stream_token.account_data_key
-                    )
+                all_updates = await self.store.get_updated_room_account_data_for_user(
+                    user_id, from_token.stream_token.account_data_key
                 )
             else:
-                # TODO: This should take into account the `to_token`
-                account_data_by_room_map = (
-                    await self.store.get_room_account_data_for_user(user_id)
+                all_updates = {}
+
+            # For live rooms we just get the updates from `all_updates`
+            if live_rooms:
+                for room_id in all_updates.keys() & live_rooms:
+                    account_data_by_room_map[room_id] = all_updates[room_id]
+
+            # For previously and initial rooms we query each room individually.
+            if previously_rooms or initial_rooms:
+                # We handle these rooms concurrently to speed it up.
+
+                async def handle_previously(room_id: str) -> None:
+                    # Either get updates or all account data in the room
+                    # depending on if the room state is PREVIOUSLY or NEVER.
+                    previous_token = previously_rooms.get(room_id)
+                    if previous_token is not None:
+                        room_account_data = await (
+                            self.store.get_updated_room_account_data_for_user_for_room(
+                                user_id, room_id, previous_token
+                            )
+                        )
+
+                        # Only add an entry if there were any updates.
+                        if room_account_data:
+                            account_data_by_room_map[room_id] = room_account_data
+                    else:
+                        room_account_data = await self.store.get_account_data_for_room(
+                            user_id, room_id
+                        )
+
+                        account_data_by_room_map[room_id] = room_account_data
+
+                await concurrently_execute(
+                    handle_previously,
+                    previously_rooms.keys() | initial_rooms,
+                    limit=20,
                 )
 
-        # Filter down to the relevant rooms
-        account_data_by_room_map = {
-            room_id: account_data_map
-            for room_id, account_data_map in account_data_by_room_map.items()
-            if room_id in relevant_room_ids
-        }
+            # Now record which rooms are now up to data, and which rooms have
+            # pending updates to send.
+            new_connection_state.account_data.record_sent_rooms(relevant_room_ids)
+            missing_updates = all_updates.keys() - relevant_room_ids
+            if missing_updates:
+                # If we have missing updates then we must have had a from token.
+                assert from_token is not None
+
+                new_connection_state.account_data.record_unsent_rooms(
+                    missing_updates, from_token.stream_token.account_data_key
+                )
 
         return SlidingSyncResult.Extensions.AccountDataExtension(
             global_account_data_map=global_account_data_map,
