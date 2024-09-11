@@ -158,7 +158,7 @@ it:
 
 We **strongly** recommend using a CAPTCHA, particularly if your homeserver is exposed to
 the public internet. Without it, anyone can freely register accounts on your homeserver.
-This can be exploited by attackers to create spambots targetting the rest of the Matrix
+This can be exploited by attackers to create spambots targeting the rest of the Matrix
 federation.
 
 Your new user name will be formed partly from the ``server_name``, and partly
