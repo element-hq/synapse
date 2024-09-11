@@ -678,7 +678,7 @@ class HaveSentRoomFlag(Enum):
     LIVE = "live"
 
 
-T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken)
+T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken, int)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -826,6 +826,7 @@ class PerConnectionState:
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
+    account_data: RoomStatusMap[int] = attr.Factory(RoomStatusMap)
 
     room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
@@ -836,6 +837,7 @@ class PerConnectionState:
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
+            account_data=self.account_data.get_mutable(),
             room_configs=ChainMap({}, room_configs),
         )
 
@@ -843,6 +845,7 @@ class PerConnectionState:
         return PerConnectionState(
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
+            account_data=self.account_data.copy(),
             room_configs=dict(self.room_configs),
         )
 
@@ -856,6 +859,7 @@ class MutablePerConnectionState(PerConnectionState):
 
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
+    account_data: MutableRoomStatusMap[int]
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
@@ -863,6 +867,7 @@ class MutablePerConnectionState(PerConnectionState):
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
+            or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
         )
 
