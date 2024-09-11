@@ -4,6 +4,7 @@ from typing import List, NewType, Optional, Tuple
 from synapse.api.errors import NotFoundError
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction, StoreError
+from synapse.storage.engines import PostgresEngine
 from synapse.types import JsonDict, RoomID
 from synapse.util import json_encoder, stringutils as stringutils
 
@@ -292,7 +293,13 @@ class DelayedEventsStore(SQLBaseStore):
             sql_where = "WHERE send_ts <= ? AND NOT is_processed"
             sql_args = (current_ts,)
             sql_order = "ORDER BY send_ts"
-            if self.database_engine.supports_returning:
+            if isinstance(self.database_engine, PostgresEngine):
+                # Do this only in Postgres because:
+                # - SQLite's RETURNING emits rows in an arbitrary order
+                #   - https://www.sqlite.org/lang_returning.html#limitations_and_caveats
+                # - SQLite does not support data-modifying statements in a WITH clause
+                #   - https://www.sqlite.org/lang_with.html
+                #   - https://www.postgresql.org/docs/current/queries-with.html#QUERIES-WITH-MODIFYING
                 txn.execute(
                     f"""
                     WITH events_to_send AS (
