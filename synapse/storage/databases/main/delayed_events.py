@@ -224,7 +224,6 @@ class DelayedEventsStore(SQLBaseStore):
         user_localpart: str,
     ) -> List[JsonDict]:
         """Returns all pending delayed events owned by the given user."""
-        # TODO: Store and return "transaction_id"
         # TODO: Support Pagination stream API ("next_batch" field)
         rows = await self.db_pool.simple_select_list(
             table="delayed_events",
