@@ -1435,7 +1435,9 @@ class RedactUser(RestServlet):
         body = parse_json_object_from_request(request, allow_empty_body=True)
         rooms = body.get("rooms")
         if rooms is None:
-            raise SynapseError(400, "Must provide a value for rooms.")
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Must provide a value for rooms."
+            )
 
         reason = body.get("reason")
         limit = body.get("limit")

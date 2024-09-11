@@ -2462,31 +2462,24 @@ class EventsWorkerStore(SQLBaseStore):
             offset: int,
         ) -> Tuple[Optional[List[str]], int]:
             if filter:
-                filter_sql = " AND type in ("
-                for i, _ in enumerate(filter):
-                    if i < len(filter) - 1:
-                        filter_sql += "?, "
-                    else:
-                        filter_sql += "?)"
-
-                sql = f"""
-                        SELECT event_id FROM events
-                        WHERE sender = ? AND room_id = ?
-                        {filter_sql}
-                        ORDER BY received_ts DESC
-                        LIMIT ?
-                        OFFSET ?
-                      """
-                txn.execute(sql, (user_id, room_id, *filter, batch_size, offset))
+                base_clause, args = make_in_list_sql_clause(
+                    txn.database_engine, "type", filter
+                )
+                clause = f"AND {base_clause}"
+                parameters = (user_id, room_id, *args, batch_size, offset)
             else:
-                sql = """
-                        SELECT event_id FROM events
-                        WHERE sender = ? AND room_id = ?
-                        ORDER BY received_ts DESC
-                        LIMIT ?
-                        OFFSET ?
-                      """
-                txn.execute(sql, (user_id, room_id, batch_size, offset))
+                clause = ""
+                parameters = (user_id, room_id, batch_size, offset)
+
+            sql = f"""
+                    SELECT event_id FROM events
+                    WHERE sender = ? AND room_id = ?
+                    {clause}
+                    ORDER BY received_ts DESC
+                    LIMIT ?
+                    OFFSET ?
+                  """
+            txn.execute(sql, parameters)
             res = txn.fetchall()
             if res:
                 events = [row[0] for row in res]

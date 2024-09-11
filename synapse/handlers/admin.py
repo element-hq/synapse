@@ -431,28 +431,19 @@ class AdminHandler:
                 user_id,
                 room,
                 limit,
-                [
-                    "m.room.member",
-                    "m.text",
-                    "m.emote",
-                    "m.image",
-                    "m.file",
-                    "m.audio",
-                    "m.video",
-                ],
+                ["m.room.member", "m.room.message"],
             )
             if not event_ids:
                 # there's nothing to redact
                 return TaskStatus.COMPLETE, result, None
 
-            events = await self._store.get_events_as_list(set(event_ids))
+            events = await self._store.get_events_as_list(event_ids)
             for event in events:
                 # we care about join events but not other membership events
                 if event.type == "m.room.member":
-                    dict = event.get_dict()
-                    content = dict.get("content")
+                    content = event.content
                     if content:
-                        if content.get("membership") == "join":
+                        if content.get("membership") == "Membership.JOIN":
                             pass
                         else:
                             continue
