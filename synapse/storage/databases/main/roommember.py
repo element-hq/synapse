@@ -1365,6 +1365,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             self._invalidate_cache_and_stream(
                 txn, self.get_forgotten_rooms_for_user, (user_id,)
             )
+            self._invalidate_cache_and_stream(
+                txn, self.get_sliding_sync_rooms_for_user, (user_id,)
+            )
 
         await self.db_pool.runInteraction("forget_membership", f)
 
@@ -1410,6 +1413,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def get_sliding_sync_rooms_for_user_txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
+            # XXX: If you use any new columns that can change (like from
+            # `sliding_sync_joined_rooms` or `forgotten`), make sure to bust the
+            # `get_sliding_sync_rooms_for_user` cache in the appropriate places (and add
+            # tests).
             sql = """
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
@@ -1432,7 +1439,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     room_version_id=row[4],
                     event_pos=PersistedEventPosition(row[5], row[6]),
                     room_type=row[7],
-                    is_encrypted=row[8],
+                    is_encrypted=bool(row[8]),
                 )
                 for row in txn
             }
