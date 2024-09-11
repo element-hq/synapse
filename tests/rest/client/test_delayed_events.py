@@ -2,9 +2,9 @@
 
 from http import HTTPStatus
 
-from tests.unittest import HomeserverTestCase
-
 from synapse.rest.client import delayed_events
+
+from tests.unittest import HomeserverTestCase
 
 PATH_PREFIX = b"/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
 

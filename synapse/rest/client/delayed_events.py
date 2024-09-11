@@ -3,7 +3,7 @@
 import logging
 from enum import Enum
 from http import HTTPStatus
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.errors import Codes, SynapseError
 from synapse.http.server import HttpServer
