@@ -478,13 +478,14 @@ class AdminHandler:
                     # set the prev event to the offending message to allow for redactions
                     # to be processed in the case where the user has been kicked/banned before
                     # redactions are requested
-                    redaction, _ = (
-                        await self.event_creation_handler.create_and_send_nonmember_event(
-                            requester,
-                            event_dict,
-                            prev_event_ids=[event.event_id],
-                            ratelimit=False,
-                        )
+                    (
+                        redaction,
+                        _,
+                    ) = await self.event_creation_handler.create_and_send_nonmember_event(
+                        requester,
+                        event_dict,
+                        prev_event_ids=[event.event_id],
+                        ratelimit=False,
                     )
                 except Exception as ex:
                     logger.info(

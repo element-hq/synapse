@@ -2547,4 +2547,3 @@ class EventsWorkerStore(SQLBaseStore):
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
         )
-
