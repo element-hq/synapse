@@ -1595,17 +1595,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # starve disk usage while this goes on.
             #
             # We upsert in case we have to run this multiple times.
-            #
-            # The `WHERE TRUE` clause is to avoid "Parsing Ambiguity"
             txn.execute(
                 """
                 INSERT INTO sliding_sync_joined_rooms_to_recalculate
                     (room_id)
-                SELECT room_id FROM rooms WHERE ?
+                SELECT DISTINCT room_id FROM local_current_membership
+                WHERE membership = 'join'
                 ON CONFLICT (room_id)
                 DO NOTHING;
                 """,
-                (True,),
             )
 
         await self.db_pool.runInteraction(
@@ -1689,7 +1687,15 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             if not current_state_ids_map:
                 continue
 
-            fetched_events = await self.get_events(current_state_ids_map.values())
+            try:
+                fetched_events = await self.get_events(current_state_ids_map.values())
+            except (DatabaseCorruptionError, InvalidEventError) as e:
+                logger.warning(
+                    "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                    room_id,
+                    e,
+                )
+                continue
 
             current_state_map: StateMap[EventBase] = {
                 state_key: fetched_events[event_id]
@@ -1722,10 +1728,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 + "given we pulled the room out of `current_state_events`"
             )
             most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
-            assert most_recent_event_stream_ordering > 0, (
-                "We should have at-least one event in the room (our own join membership event for example) "
-                + "that isn't backfilled (negative `stream_ordering`)  if we are joined to the room."
-            )
+
+            # The `most_recent_event_stream_ordering` should be positive,
+            # however there are (very rare) rooms where that is not the case in
+            # the matrix.org database. It's not clear how they got into that
+            # state, but does mean that we cannot assert that the stream
+            # ordering is indeed positive.
+
             # Figure out the latest `bump_stamp` in the room. This could be `None` for a
             # federated room you just joined where all of events are still `outliers` or
             # backfilled history. In the Sliding Sync API, we default to the user's
@@ -1966,7 +1975,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
                 return 0
 
-        def _find_previous_membership_txn(
+        def _find_previous_invite_or_knock_membership_txn(
             txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
         ) -> Tuple[str, str]:
             # Find the previous invite/knock event before the leave event
@@ -2007,6 +2016,10 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 (
                     room_id,
                     user_id,
+                    # We look explicitly for `invite` and `knock` events instead of
+                    # just their previous membership as someone could have been `invite`
+                    # -> `ban` -> unbanned (`leave`) and we want to find the `invite`
+                    # event where the stripped state is.
                     Membership.INVITE,
                     Membership.KNOCK,
                     event_id,
@@ -2155,8 +2168,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         invite_or_knock_event_id,
                         invite_or_knock_membership,
                     ) = await self.db_pool.runInteraction(
-                        "sliding_sync_membership_snapshots_bg_update._find_previous_membership",
-                        _find_previous_membership_txn,
+                        "sliding_sync_membership_snapshots_bg_update._find_previous_invite_or_knock_membership_txn",
+                        _find_previous_invite_or_knock_membership_txn,
                         room_id,
                         user_id,
                         membership_event_id,
