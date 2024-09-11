@@ -1980,7 +1980,12 @@ class PersistEventsStore:
             if state_key == (EventTypes.Create, ""):
                 room_type = event.content.get(EventContentFields.ROOM_TYPE)
                 # Scrutinize JSON values
-                if room_type is None or isinstance(room_type, str):
+                if room_type is None or (
+                    isinstance(room_type, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in room_type
+                ):
                     sliding_sync_insert_map["room_type"] = room_type
             elif state_key == (EventTypes.RoomEncryption, ""):
                 encryption_algorithm = event.content.get(
@@ -1990,15 +1995,26 @@ class PersistEventsStore:
                 sliding_sync_insert_map["is_encrypted"] = is_encrypted
             elif state_key == (EventTypes.Name, ""):
                 room_name = event.content.get(EventContentFields.ROOM_NAME)
-                # Scrutinize JSON values
-                if room_name is None or isinstance(room_name, str):
+                # Scrutinize JSON values. We ignore values with nulls as
+                # postgres doesn't allow null bytes in text columns.
+                if room_name is None or (
+                    isinstance(room_name, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in room_name
+                ):
                     sliding_sync_insert_map["room_name"] = room_name
             elif state_key == (EventTypes.Tombstone, ""):
                 successor_room_id = event.content.get(
                     EventContentFields.TOMBSTONE_SUCCESSOR_ROOM
                 )
                 # Scrutinize JSON values
-                if successor_room_id is None or isinstance(successor_room_id, str):
+                if successor_room_id is None or (
+                    isinstance(successor_room_id, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in successor_room_id
+                ):
                     sliding_sync_insert_map["tombstone_successor_room_id"] = (
                         successor_room_id
                     )
@@ -2081,6 +2097,21 @@ class PersistEventsStore:
                     else None
                 )
 
+                # Check for null bytes in the room name and type. We have to
+                # ignore values with null bytes as Postgres doesn't allow them
+                # in text columns.
+                if (
+                    sliding_sync_insert_map["room_name"] is not None
+                    and "\0" in sliding_sync_insert_map["room_name"]
+                ):
+                    sliding_sync_insert_map.pop("room_name")
+
+                if (
+                    sliding_sync_insert_map["room_type"] is not None
+                    and "\0" in sliding_sync_insert_map["room_type"]
+                ):
+                    sliding_sync_insert_map.pop("room_type")
+
                 # Find the tombstone_successor_room_id
                 # Note: This isn't one of the stripped state events according to the spec
                 # but seems like there is no reason not to support this kind of thing.
@@ -2094,6 +2125,12 @@ class PersistEventsStore:
                     if tombstone_stripped_event is not None
                     else None
                 )
+
+                if (
+                    sliding_sync_insert_map["tombstone_successor_room_id"] is not None
+                    and "\0" in sliding_sync_insert_map["tombstone_successor_room_id"]
+                ):
+                    sliding_sync_insert_map.pop("tombstone_successor_room_id")
 
             else:
                 # No stripped state provided

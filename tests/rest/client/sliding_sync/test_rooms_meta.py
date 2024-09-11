@@ -371,14 +371,17 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "mxc://UPDATED_DUMMY_MEDIA_ID",
             response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            1,
+
+        # We don't give extra room information to invitees
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            1,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
+
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
         )
@@ -450,15 +453,16 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "mxc://DUMMY_MEDIA_ID",
             response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            # FIXME: The actual number should be "1" (user2) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+
+        # FIXME: We possibly want to return joined and invited counts for rooms
+        # you're banned form
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            0,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
@@ -692,19 +696,15 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             [],
         )
 
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            # FIXME: The actual number should be "1" (user2) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+        # FIXME: We possibly want to return joined and invited counts for rooms
+        # you're banned form
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            # We shouldn't see user5 since they were invited after user1 was banned.
-            #
-            # FIXME: The actual number should be "1" (user3) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
 
     def test_rooms_meta_heroes_incremental_sync_no_change(self) -> None:
