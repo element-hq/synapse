@@ -267,7 +267,7 @@ class SlidingSyncHandler:
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
-                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
+                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
 
         extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
