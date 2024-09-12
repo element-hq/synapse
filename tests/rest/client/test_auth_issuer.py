@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from http import HTTPStatus
+from unittest.mock import AsyncMock
 
 from synapse.rest.client import auth_issuer
 
@@ -50,10 +51,29 @@ class AuthIssuerTestCase(HomeserverTestCase):
         }
     )
     def test_returns_issuer_when_oidc_enabled(self) -> None:
-        # Make an unauthenticated request for the discovery info.
+        # Patch the HTTP client to return the issuer metadata
+        req_mock = AsyncMock(return_value={"issuer": ISSUER})
+        self.hs.get_proxied_http_client().get_json = req_mock  # type: ignore[method-assign]
+
         channel = self.make_request(
             "GET",
             "/_matrix/client/unstable/org.matrix.msc2965/auth_issuer",
         )
+
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(channel.json_body, {"issuer": ISSUER})
+
+        req_mock.assert_called_with(
+            "https://account.example.com/.well-known/openid-configuration"
+        )
+        req_mock.reset_mock()
+
+        # Second call it should use the cached value
+        channel = self.make_request(
+            "GET",
+            "/_matrix/client/unstable/org.matrix.msc2965/auth_issuer",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(channel.json_body, {"issuer": ISSUER})
+        req_mock.assert_not_called()

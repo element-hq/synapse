@@ -22,17 +22,17 @@
 
 import argparse
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import BaseModel, Extra, StrictBool, StrictInt, StrictStr
-else:
-    from pydantic import BaseModel, Extra, StrictBool, StrictInt, StrictStr
-
+from synapse._pydantic_compat import (
+    BaseModel,
+    Extra,
+    StrictBool,
+    StrictInt,
+    StrictStr,
+)
 from synapse.config._base import (
     Config,
     ConfigError,
@@ -328,10 +328,11 @@ class WorkerConfig(Config):
                 )
 
         # type-ignore: the expression `Union[A, B]` is not a Type[Union[A, B]] currently
-        self.instance_map: Dict[
-            str, InstanceLocationConfig
-        ] = parse_and_validate_mapping(
-            instance_map, InstanceLocationConfig  # type: ignore[arg-type]
+        self.instance_map: Dict[str, InstanceLocationConfig] = (
+            parse_and_validate_mapping(
+                instance_map,
+                InstanceLocationConfig,  # type: ignore[arg-type]
+            )
         )
 
         # Map from type of streams to source, c.f. WriterLocations.

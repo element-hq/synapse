@@ -201,7 +201,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         txn.execute_batch(
             "INSERT INTO event_backward_extremities (room_id, event_id)"
             " VALUES (?, ?)",
-            [(room_id, event_id) for event_id, in new_backwards_extrems],
+            [(room_id, event_id) for (event_id,) in new_backwards_extrems],
         )
 
         logger.info("[purge] finding state groups referenced by deleted events")
@@ -215,7 +215,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         """
         )
 
-        referenced_state_groups = {sg for sg, in txn}
+        referenced_state_groups = {sg for (sg,) in txn}
         logger.info(
             "[purge] found %i referenced state groups", len(referenced_state_groups)
         )

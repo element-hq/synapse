@@ -1,3 +1,119 @@
+# Synapse 1.115.0rc1 (2024-09-10)
+
+### Features
+
+- Improve cross-signing upload when using [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) to use a custom UIA flow stage, with web fallback support. ([\#17509](https://github.com/element-hq/synapse/issues/17509))
+
+### Bugfixes
+
+- Return `400 M_BAD_JSON` upon attempting to complete various room actions with a non-local user ID and unknown room ID, rather than an internal server error. ([\#17607](https://github.com/element-hq/synapse/issues/17607))
+- Fix authenticated media responses using a wrong limit when following redirects over federation. ([\#17626](https://github.com/element-hq/synapse/issues/17626))
+- Fix bug where we returned the wrong `bump_stamp` for invites in sliding sync response, causing incorrect ordering of invites in the room list. ([\#17674](https://github.com/element-hq/synapse/issues/17674))
+
+### Improved Documentation
+
+- Clarify that the admin api resource is only loaded on the main process and not workers. ([\#17590](https://github.com/element-hq/synapse/issues/17590))
+- Fixed typo in `saml2_config` config [example](https://element-hq.github.io/synapse/latest/usage/configuration/config_documentation.html#saml2_config). ([\#17594](https://github.com/element-hq/synapse/issues/17594))
+
+### Deprecations and Removals
+
+- Stabilise [MSC4156](https://github.com/matrix-org/matrix-spec-proposals/pull/4156) by removing the `msc4156_enabled` config setting and defaulting it to `true`. ([\#17650](https://github.com/element-hq/synapse/issues/17650))
+
+### Internal Changes
+
+- Update [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) implementation: load the issuer and account management URLs from OIDC discovery. ([\#17407](https://github.com/element-hq/synapse/issues/17407))
+- Pre-populate room data used in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint for quick filtering/sorting. ([\#17512](https://github.com/element-hq/synapse/issues/17512), [\#17632](https://github.com/element-hq/synapse/issues/17632), [\#17633](https://github.com/element-hq/synapse/issues/17633), [\#17634](https://github.com/element-hq/synapse/issues/17634), [\#17635](https://github.com/element-hq/synapse/issues/17635), [\#17636](https://github.com/element-hq/synapse/issues/17636), [\#17641](https://github.com/element-hq/synapse/issues/17641), [\#17654](https://github.com/element-hq/synapse/issues/17654), [\#17673](https://github.com/element-hq/synapse/issues/17673))
+- Store sliding sync per-connection state in the database. ([\#17599](https://github.com/element-hq/synapse/issues/17599), [\#17631](https://github.com/element-hq/synapse/issues/17631))
+- Make the sliding sync `PerConnectionState` class immutable. ([\#17600](https://github.com/element-hq/synapse/issues/17600))
+- Replace `isort` and `black` with `ruff`. ([\#17620](https://github.com/element-hq/synapse/issues/17620), [\#17643](https://github.com/element-hq/synapse/issues/17643))
+- Sliding Sync: Split up `get_room_membership_for_user_at_to_token`. ([\#17629](https://github.com/element-hq/synapse/issues/17629))
+- Use new database tables for sliding sync. ([\#17630](https://github.com/element-hq/synapse/issues/17630), [\#17649](https://github.com/element-hq/synapse/issues/17649))
+- Prevent duplicate tags being added to Sliding Sync traces. ([\#17655](https://github.com/element-hq/synapse/issues/17655))
+- Get `bump_stamp` from [new sliding sync tables](https://github.com/element-hq/synapse/pull/17512) which should be faster. ([\#17658](https://github.com/element-hq/synapse/issues/17658))
+- Speed up incremental Sliding Sync requests by avoiding extra work. ([\#17665](https://github.com/element-hq/synapse/issues/17665))
+- Small performance improvement in speeding up sliding sync. ([\#17666](https://github.com/element-hq/synapse/issues/17666), [\#17670](https://github.com/element-hq/synapse/issues/17670), [\#17672](https://github.com/element-hq/synapse/issues/17672))
+- Speed up sliding sync by reducing number of database calls. ([\#17684](https://github.com/element-hq/synapse/issues/17684))
+- Speed up sync by pulling out fewer events from the database. ([\#17688](https://github.com/element-hq/synapse/issues/17688))
+
+
+
+### Updates to locked dependencies
+
+* Bump authlib from 1.3.1 to 1.3.2. ([\#17679](https://github.com/element-hq/synapse/issues/17679))
+* Bump idna from 3.7 to 3.8. ([\#17682](https://github.com/element-hq/synapse/issues/17682))
+* Bump ruff from 0.6.2 to 0.6.4. ([\#17680](https://github.com/element-hq/synapse/issues/17680))
+* Bump towncrier from 24.7.1 to 24.8.0. ([\#17645](https://github.com/element-hq/synapse/issues/17645))
+* Bump twisted from 24.7.0rc1 to 24.7.0. ([\#17647](https://github.com/element-hq/synapse/issues/17647))
+* Bump types-pillow from 10.2.0.20240520 to 10.2.0.20240822. ([\#17644](https://github.com/element-hq/synapse/issues/17644))
+* Bump types-psycopg2 from 2.9.21.20240417 to 2.9.21.20240819. ([\#17646](https://github.com/element-hq/synapse/issues/17646))
+* Bump types-setuptools from 71.1.0.20240818 to 74.1.0.20240907. ([\#17681](https://github.com/element-hq/synapse/issues/17681))
+
+# Synapse 1.114.0 (2024-09-02)
+
+This release enables support for
+[MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) —
+Simplified Sliding Sync. This allows using the upcoming releases of the Element
+X mobile apps without having to run a Sliding Sync Proxy.
+
+
+### Features
+
+- Enable native sliding sync support ([MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) and [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186)) by default. ([\#17648](https://github.com/element-hq/synapse/issues/17648))
+
+
+
+
+# Synapse 1.114.0rc3 (2024-08-30)
+
+### Bugfixes
+
+- Fix regression in v1.114.0rc2 that caused workers to fail to start. ([\#17626](https://github.com/element-hq/synapse/issues/17626))
+
+
+
+
+# Synapse 1.114.0rc2 (2024-08-30)
+
+### Features
+
+- Improve cross-signing upload when using [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) to use a custom UIA flow stage, with web fallback support. ([\#17509](https://github.com/element-hq/synapse/issues/17509))
+- Make `hash_password` script accept password input from stdin. ([\#17608](https://github.com/element-hq/synapse/issues/17608))
+
+### Bugfixes
+
+- Fix hierarchy returning 403 when room is accessible through federation. Contributed by Krishan (@kfiven). ([\#17194](https://github.com/element-hq/synapse/issues/17194))
+- Fix content-length on federation `/thumbnail` responses. ([\#17532](https://github.com/element-hq/synapse/issues/17532))
+- Fix authenticated media responses using a wrong limit when following redirects over federation. ([\#17543](https://github.com/element-hq/synapse/issues/17543))
+
+### Internal Changes
+
+- MSC3861: load the issuer and account management URLs from OIDC discovery. ([\#17407](https://github.com/element-hq/synapse/issues/17407))
+- Refactor sliding sync class into multiple files. ([\#17595](https://github.com/element-hq/synapse/issues/17595))
+- Store sliding sync per-connection state in the database. ([\#17599](https://github.com/element-hq/synapse/issues/17599))
+- Make the sliding sync `PerConnectionState` class immutable. ([\#17600](https://github.com/element-hq/synapse/issues/17600))
+- Add support to `@tag_args` for standalone functions. ([\#17604](https://github.com/element-hq/synapse/issues/17604))
+- Speed up incremental syncs in sliding sync by adding some more caching. ([\#17606](https://github.com/element-hq/synapse/issues/17606))
+- Always return the user's own read receipts in sliding sync. ([\#17617](https://github.com/element-hq/synapse/issues/17617))
+- Replace `isort` and `black` with `ruff`. ([\#17620](https://github.com/element-hq/synapse/issues/17620))
+- Refactor sliding sync code to move room list logic out into a separate class. ([\#17622](https://github.com/element-hq/synapse/issues/17622))
+
+
+
+### Updates to locked dependencies
+
+* Bump attrs from 23.2.0 to 24.2.0. ([\#17609](https://github.com/element-hq/synapse/issues/17609))
+* Bump cryptography from 42.0.8 to 43.0.0. ([\#17584](https://github.com/element-hq/synapse/issues/17584))
+* Bump phonenumbers from 8.13.43 to 8.13.44. ([\#17610](https://github.com/element-hq/synapse/issues/17610))
+* Bump pygithub from 2.3.0 to 2.4.0. ([\#17612](https://github.com/element-hq/synapse/issues/17612))
+* Bump pyyaml from 6.0.1 to 6.0.2. ([\#17611](https://github.com/element-hq/synapse/issues/17611))
+* Bump sentry-sdk from 2.12.0 to 2.13.0. ([\#17585](https://github.com/element-hq/synapse/issues/17585))
+* Bump serde from 1.0.206 to 1.0.208. ([\#17581](https://github.com/element-hq/synapse/issues/17581))
+* Bump serde from 1.0.208 to 1.0.209. ([\#17613](https://github.com/element-hq/synapse/issues/17613))
+* Bump serde_json from 1.0.124 to 1.0.125. ([\#17582](https://github.com/element-hq/synapse/issues/17582))
+* Bump serde_json from 1.0.125 to 1.0.127. ([\#17614](https://github.com/element-hq/synapse/issues/17614))
+* Bump types-jsonschema from 4.23.0.20240712 to 4.23.0.20240813. ([\#17583](https://github.com/element-hq/synapse/issues/17583))
+* Bump types-setuptools from 71.1.0.20240726 to 71.1.0.20240818. ([\#17586](https://github.com/element-hq/synapse/issues/17586))
+
 # Synapse 1.114.0rc1 (2024-08-20)
 
 ### Features

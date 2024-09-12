@@ -338,8 +338,10 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
-        # MSC3575 (Sliding Sync API endpoints)
-        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", False)
+        # MSC3575 (Sliding Sync) alternate endpoints, c.f. MSC4186.
+        #
+        # This is enabled by default as a replacement for the sliding sync proxy.
+        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", True)
 
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
@@ -445,6 +447,3 @@ class ExperimentalConfig(Config):
 
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
-
-        # MSC4156: Migrate server_name to via
-        self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)

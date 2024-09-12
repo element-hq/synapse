@@ -717,9 +717,7 @@ class Porter:
                 return
 
             # Check if all background updates are done, abort if not.
-            updates_complete = (
-                await self.sqlite_store.db_pool.updates.has_completed_background_updates()
-            )
+            updates_complete = await self.sqlite_store.db_pool.updates.has_completed_background_updates()
             if not updates_complete:
                 end_error = (
                     "Pending background updates exist in the SQLite3 database."
@@ -1095,10 +1093,10 @@ class Porter:
         return done, remaining + done
 
     async def _setup_state_group_id_seq(self) -> None:
-        curr_id: Optional[int] = (
-            await self.sqlite_store.db_pool.simple_select_one_onecol(
-                table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
-            )
+        curr_id: Optional[
+            int
+        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="state_groups", keyvalues={}, retcol="MAX(id)", allow_none=True
         )
 
         if not curr_id:
@@ -1186,13 +1184,13 @@ class Porter:
         )
 
     async def _setup_auth_chain_sequence(self) -> None:
-        curr_chain_id: Optional[int] = (
-            await self.sqlite_store.db_pool.simple_select_one_onecol(
-                table="event_auth_chains",
-                keyvalues={},
-                retcol="MAX(chain_id)",
-                allow_none=True,
-            )
+        curr_chain_id: Optional[
+            int
+        ] = await self.sqlite_store.db_pool.simple_select_one_onecol(
+            table="event_auth_chains",
+            keyvalues={},
+            retcol="MAX(chain_id)",
+            allow_none=True,
         )
 
         def r(txn: LoggingTransaction) -> None:

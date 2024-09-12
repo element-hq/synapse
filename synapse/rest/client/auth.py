@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from twisted.web.server import Request
 
@@ -70,11 +70,17 @@ class AuthRestServlet(RestServlet):
             self.hs.config.experimental.msc3861.enabled
             and stagetype == "org.matrix.cross_signing_reset"
         ):
-            config = self.hs.config.experimental.msc3861
-            if config.account_management_url is not None:
-                url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
+            # If MSC3861 is enabled, we can assume self._auth is an instance of MSC3861DelegatedAuth
+            # We import lazily here because of the authlib requirement
+            from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
+            auth = cast(MSC3861DelegatedAuth, self.auth)
+
+            url = await auth.account_management_url()
+            if url is not None:
+                url = f"{url}?action=org.matrix.cross_signing_reset"
             else:
-                url = config.issuer
+                url = await auth.issuer()
             respond_with_redirect(request, str.encode(url))
 
         if stagetype == LoginType.RECAPTCHA:

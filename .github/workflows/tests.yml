@@ -131,8 +131,11 @@ jobs:
         with:
           install-project: "false"
 
-      - name: Check style
+      - name: Run ruff check
         run: poetry run ruff check --output-format=github .
+
+      - name: Run ruff format
+        run: poetry run ruff format --check .
 
   lint-mypy:
     runs-on: ubuntu-latest

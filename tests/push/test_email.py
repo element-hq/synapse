@@ -44,6 +44,7 @@ from tests.unittest import HomeserverTestCase
 @attr.s(auto_attribs=True)
 class _User:
     "Helper wrapper for user ID and access token"
+
     id: str
     token: str
 

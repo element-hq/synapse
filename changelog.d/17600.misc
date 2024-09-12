@@ -1,1 +1,0 @@
-Make the sliding sync `PerConnectionState` class immutable.

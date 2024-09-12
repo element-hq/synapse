@@ -13,7 +13,9 @@
 #
 import logging
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
+from unittest.mock import AsyncMock
 
+from parameterized import parameterized_class
 from typing_extensions import assert_never
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -47,7 +49,24 @@ logger = logging.getLogger(__name__)
 class SlidingSyncBase(unittest.HomeserverTestCase):
     """Base class for sliding sync test cases"""
 
+    # Flag as to whether to use the new sliding sync tables or not
+    #
+    # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+    # foreground update for
+    # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+    # https://github.com/element-hq/synapse/issues/17623)
+    use_new_tables: bool = True
+
     sync_endpoint = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+        # foreground update for
+        # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+        # https://github.com/element-hq/synapse/issues/17623)
+        hs.get_datastores().main.have_finished_sliding_sync_background_jobs = AsyncMock(  # type: ignore[method-assign]
+            return_value=self.use_new_tables
+        )
 
     def default_config(self) -> JsonDict:
         config = super().default_config()
@@ -203,6 +222,20 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             )
 
 
+# FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+# foreground update for
+# `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+# https://github.com/element-hq/synapse/issues/17623)
+@parameterized_class(
+    ("use_new_tables",),
+    [
+        (True,),
+        (False,),
+    ],
+    class_name_func=lambda cls,
+    num,
+    params_dict: f"{cls.__name__}_{'new' if params_dict['use_new_tables'] else 'fallback'}",
+)
 class SlidingSyncTestCase(SlidingSyncBase):
     """
     Tests regarding MSC3575 Sliding Sync `/sync` endpoint.
@@ -225,6 +258,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
         self.account_data_handler = hs.get_account_data_handler()
+
+        super().prepare(reactor, clock, hs)
 
     def _add_new_dm_to_global_account_data(
         self, source_user_id: str, target_user_id: str, target_room_id: str
@@ -687,43 +722,37 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.join(space_room_id, user1_id, tok=user1_tok)
 
         # Make an initial Sliding Sync request
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint,
-            {
-                "lists": {
-                    "all-list": {
-                        "ranges": [[0, 99]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                        "filters": {},
+        sync_body = {
+            "lists": {
+                "all-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {},
+                },
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                    "filters": {
+                        "is_encrypted": True,
+                        "room_types": [RoomTypes.SPACE],
                     },
-                    "foo-list": {
-                        "ranges": [[0, 99]],
-                        "required_state": [],
-                        "timeline_limit": 1,
-                        "filters": {
-                            "is_encrypted": True,
-                            "room_types": [RoomTypes.SPACE],
-                        },
-                    },
-                }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
-        from_token = channel.json_body["pos"]
+                },
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make sure the response has the lists we requested
         self.assertListEqual(
-            list(channel.json_body["lists"].keys()),
+            list(response_body["lists"].keys()),
             ["all-list", "foo-list"],
-            channel.json_body["lists"].keys(),
+            response_body["lists"].keys(),
         )
 
         # Make sure the lists have the correct rooms
         self.assertListEqual(
-            list(channel.json_body["lists"]["all-list"]["ops"]),
+            list(response_body["lists"]["all-list"]["ops"]),
             [
                 {
                     "op": "SYNC",
@@ -733,7 +762,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ],
         )
         self.assertListEqual(
-            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            list(response_body["lists"]["foo-list"]["ops"]),
             [
                 {
                     "op": "SYNC",
@@ -748,35 +777,30 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.leave(space_room_id, user2_id, tok=user2_tok)
 
         # Make an incremental Sliding Sync request
-        channel = self.make_request(
-            "POST",
-            self.sync_endpoint + f"?pos={from_token}",
-            {
-                "lists": {
-                    "all-list": {
-                        "ranges": [[0, 99]],
-                        "required_state": [],
-                        "timeline_limit": 0,
-                        "filters": {},
+        sync_body = {
+            "lists": {
+                "all-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {},
+                },
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                    "filters": {
+                        "is_encrypted": True,
+                        "room_types": [RoomTypes.SPACE],
                     },
-                    "foo-list": {
-                        "ranges": [[0, 99]],
-                        "required_state": [],
-                        "timeline_limit": 1,
-                        "filters": {
-                            "is_encrypted": True,
-                            "room_types": [RoomTypes.SPACE],
-                        },
-                    },
-                }
-            },
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.json_body)
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         # Make sure the lists have the correct rooms even though we `newly_left`
         self.assertListEqual(
-            list(channel.json_body["lists"]["all-list"]["ops"]),
+            list(response_body["lists"]["all-list"]["ops"]),
             [
                 {
                     "op": "SYNC",
@@ -786,7 +810,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             ],
         )
         self.assertListEqual(
-            list(channel.json_body["lists"]["foo-list"]["ops"]),
+            list(response_body["lists"]["foo-list"]["ops"]),
             [
                 {
                     "op": "SYNC",
@@ -794,6 +818,98 @@ class SlidingSyncTestCase(SlidingSyncBase):
                     "room_ids": [space_room_id],
                 }
             ],
+        )
+
+    def test_filter_is_encrypted_up_to_date(self) -> None:
+        """
+        Make sure we get up-to-date `is_encrypted` status for a joined room
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "is_encrypted": True,
+                    },
+                },
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
+        # Update the encryption status
+        self.helper.send_state(
+            room_id,
+            EventTypes.RoomEncryption,
+            {EventContentFields.ENCRYPTION_ALGORITHM: "m.megolm.v1.aes-sha2"},
+            tok=user1_tok,
+        )
+
+        # We should see the room now because it's encrypted
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+    def test_forgotten_up_to_date(self) -> None:
+        """
+        Make sure we get up-to-date `forgotten` status for rooms
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is banned from the room (was never in the room)
+        self.helper.ban(room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {},
+                },
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+        # User1 forgets the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # We should no longer see the forgotten room
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
         )
 
     def test_sort_list(self) -> None:

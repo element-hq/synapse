@@ -247,7 +247,7 @@ class _StreamFromIdGen(Stream):
 
 
 def current_token_without_instance(
-    current_token: Callable[[], int]
+    current_token: Callable[[], int],
 ) -> Callable[[str], int]:
     """Takes a current token callback function for a single writer stream
     that doesn't take an instance name parameter and wraps it in a function that

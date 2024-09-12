@@ -19,8 +19,8 @@
 #
 #
 
-""" This module contains REST servlets to do with presence: /presence/<paths>
-"""
+"""This module contains REST servlets to do with presence: /presence/<paths>"""
+
 import logging
 from typing import TYPE_CHECKING, Tuple
 

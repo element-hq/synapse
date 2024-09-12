@@ -183,10 +183,7 @@ class JoinedSyncResult:
         to tell if room needs to be part of the sync result.
         """
         return bool(
-            self.timeline
-            or self.state
-            or self.ephemeral
-            or self.account_data
+            self.timeline or self.state or self.ephemeral or self.account_data
             # nb the notification count does not, er, count: if there's nothing
             # else in the result, we don't need to send it.
         )
@@ -575,10 +572,10 @@ class SyncHandler:
         if timeout == 0 or since_token is None or full_state:
             # we are going to return immediately, so don't bother calling
             # notifier.wait_for_events.
-            result: Union[SyncResult, E2eeSyncResult] = (
-                await self.current_sync_for_user(
-                    sync_config, sync_version, since_token, full_state=full_state
-                )
+            result: Union[
+                SyncResult, E2eeSyncResult
+            ] = await self.current_sync_for_user(
+                sync_config, sync_version, since_token, full_state=full_state
             )
         else:
             # Otherwise, we wait for something to happen and report it to the user.
@@ -673,10 +670,10 @@ class SyncHandler:
 
             # Go through the `/sync` v2 path
             if sync_version == SyncVersion.SYNC_V2:
-                sync_result: Union[SyncResult, E2eeSyncResult] = (
-                    await self.generate_sync_result(
-                        sync_config, since_token, full_state
-                    )
+                sync_result: Union[
+                    SyncResult, E2eeSyncResult
+                ] = await self.generate_sync_result(
+                    sync_config, since_token, full_state
                 )
             # Go through the MSC3575 Sliding Sync `/sync/e2ee` path
             elif sync_version == SyncVersion.E2EE_SYNC:
@@ -909,7 +906,7 @@ class SyncHandler:
                     # Use `stream_ordering` for updates
                     else paginate_room_events_by_stream_ordering
                 )
-                events, end_key = await pagination_method(
+                events, end_key, limited = await pagination_method(
                     room_id=room_id,
                     # The bounds are reversed so we can paginate backwards
                     # (from newer to older events) starting at to_bound.
@@ -917,9 +914,7 @@ class SyncHandler:
                     from_key=end_key,
                     to_key=since_key,
                     direction=Direction.BACKWARDS,
-                    # We add one so we can determine if there are enough events to saturate
-                    # the limit or not (see `limited`)
-                    limit=load_limit + 1,
+                    limit=load_limit,
                 )
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
@@ -974,9 +969,6 @@ class SyncHandler:
                 loaded_recents.extend(recents)
                 recents = loaded_recents
 
-                if len(events) <= load_limit:
-                    limited = False
-                    break
                 max_repeat -= 1
 
             if len(recents) > timeline_limit:
@@ -1488,13 +1480,16 @@ class SyncHandler:
                     # timeline here. The caller will then dedupe any redundant
                     # ones.
 
-                    state_ids = await self._state_storage_controller.get_state_ids_for_event(
-                        batch.events[0].event_id,
-                        # we only want members!
-                        state_filter=StateFilter.from_types(
-                            (EventTypes.Member, member) for member in members_to_fetch
-                        ),
-                        await_full_state=False,
+                    state_ids = (
+                        await self._state_storage_controller.get_state_ids_for_event(
+                            batch.events[0].event_id,
+                            # we only want members!
+                            state_filter=StateFilter.from_types(
+                                (EventTypes.Member, member)
+                                for member in members_to_fetch
+                            ),
+                            await_full_state=False,
+                        )
                     )
             return state_ids
 
@@ -2166,18 +2161,18 @@ class SyncHandler:
 
             if push_rules_changed:
                 global_account_data = dict(global_account_data)
-                global_account_data[AccountDataTypes.PUSH_RULES] = (
-                    await self._push_rules_handler.push_rules_for_user(sync_config.user)
-                )
+                global_account_data[
+                    AccountDataTypes.PUSH_RULES
+                ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             all_global_account_data = await self.store.get_global_account_data_for_user(
                 user_id
             )
 
             global_account_data = dict(all_global_account_data)
-            global_account_data[AccountDataTypes.PUSH_RULES] = (
-                await self._push_rules_handler.push_rules_for_user(sync_config.user)
-            )
+            global_account_data[
+                AccountDataTypes.PUSH_RULES
+            ] = await self._push_rules_handler.push_rules_for_user(sync_config.user)
 
         account_data_for_user = (
             await sync_config.filter_collection.filter_global_account_data(
@@ -2608,7 +2603,7 @@ class SyncHandler:
 
             newly_joined = room_id in newly_joined_rooms
             if room_entry:
-                events, start_key = room_entry
+                events, start_key, _ = room_entry
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
                 events.reverse()
