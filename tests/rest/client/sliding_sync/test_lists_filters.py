@@ -142,6 +142,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         self.assertIncludes(
             response_body["lists"].keys(),
             {"all", "dms", "non-dms", "room-invites"},
+            exact=True,
         )
 
         # Make sure the lists have the correct rooms
