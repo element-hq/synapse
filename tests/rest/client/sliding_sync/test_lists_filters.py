@@ -1723,6 +1723,17 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def _add_tag_to_room(
+        self, *, room_id: str, user_id: str, access_token: str, tag_name: str
+    ) -> None:
+        channel = self.make_request(
+            method="PUT",
+            path=f"/user/{user_id}/rooms/{room_id}/tags/{tag_name}",
+            content={},
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
     def test_filters_tags(self) -> None:
         """
         Test `filters.tags` for rooms with given tags
@@ -1733,25 +1744,39 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Create a room with no tags
         self.helper.create_room_as(user1_id, tok=user1_tok)
 
+        # Create some rooms with tags
         foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Create a room without multiple tags
+        foobar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        # Add the "foo" tag to the room
-        channel = self.make_request(
-            method="PUT",
-            path=f"/user/{user1_id}/rooms/{foo_room_id}/tags/foo",
-            content={},
+        # Add the "foo" tag to the foo room
+        self._add_tag_to_room(
+            room_id=foo_room_id,
+            user_id=user1_id,
             access_token=user1_tok,
+            tag_name="foo",
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
-        # Add the "bar" tag to the room
-        channel = self.make_request(
-            method="PUT",
-            path=f"/user/{user1_id}/rooms/{bar_room_id}/tags/bar",
-            content={},
+        # Add the "bar" tag to the bar room
+        self._add_tag_to_room(
+            room_id=bar_room_id,
+            user_id=user1_id,
             access_token=user1_tok,
+            tag_name="bar",
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        # Add both "foo" and "bar" tags to the foobar room
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
 
         # Try finding rooms with the "foo" tag
         sync_body = {
@@ -1769,7 +1794,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {foo_room_id},
+            {foo_room_id, foobar_room_id},
             exact=True,
         )
 
@@ -1789,7 +1814,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {foo_room_id, bar_room_id},
+            {foo_room_id, bar_room_id, foobar_room_id},
             exact=True,
         )
 
@@ -1845,25 +1870,39 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Create a room with no tags
         untagged_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
+        # Create some rooms with tags
         foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Create a room without multiple tags
+        foobar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        # Add the "foo" tag to the room
-        channel = self.make_request(
-            method="PUT",
-            path=f"/user/{user1_id}/rooms/{foo_room_id}/tags/foo",
-            content={},
+        # Add the "foo" tag to the foo room
+        self._add_tag_to_room(
+            room_id=foo_room_id,
+            user_id=user1_id,
             access_token=user1_tok,
+            tag_name="foo",
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
-        # Add the "bar" tag to the room
-        channel = self.make_request(
-            method="PUT",
-            path=f"/user/{user1_id}/rooms/{bar_room_id}/tags/bar",
-            content={},
+        # Add the "bar" tag to the bar room
+        self._add_tag_to_room(
+            room_id=bar_room_id,
+            user_id=user1_id,
             access_token=user1_tok,
+            tag_name="bar",
         )
-        self.assertEqual(channel.code, 200, channel.json_body)
+        # Add both "foo" and "bar" tags to the foobar room
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
 
         # Try finding rooms without the "foo" tag
         sync_body = {
@@ -1945,6 +1984,6 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {untagged_room_id, foo_room_id, bar_room_id},
+            {untagged_room_id, foo_room_id, bar_room_id, foobar_room_id},
             exact=True,
         )
