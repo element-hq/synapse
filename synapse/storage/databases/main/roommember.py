@@ -1420,6 +1420,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
                     r.room_version,
                     m.event_instance_name, m.event_stream_ordering,
+                    m.has_known_state,
                     COALESCE(j.room_type, m.room_type),
                     COALESCE(j.is_encrypted, m.is_encrypted)
                 FROM sliding_sync_membership_snapshots AS m
@@ -1437,8 +1438,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     event_id=row[3],
                     room_version_id=row[4],
                     event_pos=PersistedEventPosition(row[5], row[6]),
-                    room_type=row[7],
-                    is_encrypted=bool(row[8]),
+                    has_known_state=bool(row[7]),
+                    room_type=row[8],
+                    is_encrypted=bool(row[9]),
                 )
                 for row in txn
             }
