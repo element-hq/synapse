@@ -510,6 +510,7 @@ class PaginationHandler:
         (
             events,
             next_key,
+            _,
         ) = await self.store.paginate_room_events_by_topological_ordering(
             room_id=room_id,
             from_key=from_token.room_key,
@@ -588,6 +589,7 @@ class PaginationHandler:
                     (
                         events,
                         next_key,
+                        _,
                     ) = await self.store.paginate_room_events_by_topological_ordering(
                         room_id=room_id,
                         from_key=from_token.room_key,

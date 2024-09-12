@@ -34,11 +34,11 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events import DeltaState
 from synapse.storage.databases.main.events_bg_updates import (
-    _BackgroundUpdates,
     _resolve_stale_data_in_sliding_sync_joined_rooms_table,
     _resolve_stale_data_in_sliding_sync_membership_snapshots_table,
 )
 from synapse.types import create_requester
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import Clock
 
 from tests.test_utils.event_injection import create_event
@@ -105,6 +105,12 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
         persist_events_store = self.hs.get_datastores().persist_events
         assert persist_events_store is not None
         self.persist_events_store = persist_events_store
+
+        persist_controller = self.hs.get_storage_controllers().persistence
+        assert persist_controller is not None
+        self.persist_controller = persist_controller
+
+        self.state_handler = self.hs.get_state_handler()
 
     def _get_sliding_sync_joined_rooms(self) -> Dict[str, _SlidingSyncJoinedRoomResult]:
         """
@@ -260,10 +266,8 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             )
         )
         context = EventContext.for_outlier(self.hs.get_storage_controllers())
-        persist_controller = self.hs.get_storage_controllers().persistence
-        assert persist_controller is not None
         persisted_event, _, _ = self.get_success(
-            persist_controller.persist_event(invite_event, context)
+            self.persist_controller.persist_event(invite_event, context)
         )
 
         self._remote_invite_count += 1
@@ -316,10 +320,8 @@ class SlidingSyncTablesTestCaseBase(HomeserverTestCase):
             )
         )
         context = EventContext.for_outlier(self.hs.get_storage_controllers())
-        persist_controller = self.hs.get_storage_controllers().persistence
-        assert persist_controller is not None
         persisted_event, _, _ = self.get_success(
-            persist_controller.persist_event(kick_event, context)
+            self.persist_controller.persist_event(kick_event, context)
         )
 
         return persisted_event
@@ -926,6 +928,201 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
             user2_snapshot,
         )
 
+    def test_joined_room_bump_stamp_backfill(self) -> None:
+        """
+        Test that `bump_stamp` ignores backfilled events, i.e. events with a
+        negative stream ordering.
+        """
+        user1_id = self.register_user("user1", "pass")
+        _user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote room
+        creator = "@user:other"
+        room_id = "!foo:other"
+        room_version = RoomVersions.V10
+        shared_kwargs = {
+            "room_id": room_id,
+            "room_version": room_version.identifier,
+        }
+
+        create_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[],
+                type=EventTypes.Create,
+                state_key="",
+                content={
+                    # The `ROOM_CREATOR` field could be removed if we used a room
+                    # version > 10 (in favor of relying on `sender`)
+                    EventContentFields.ROOM_CREATOR: creator,
+                    EventContentFields.ROOM_VERSION: room_version.identifier,
+                },
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        creator_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[create_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=creator,
+                content={"membership": Membership.JOIN},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        room_name_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[creator_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
+                type=EventTypes.Name,
+                state_key="",
+                content={
+                    EventContentFields.ROOM_NAME: "my super duper room",
+                },
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        # We add a message event as a valid "bump type"
+        msg_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[room_name_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
+                type=EventTypes.Message,
+                content={"body": "foo", "msgtype": "m.text"},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+        invite_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[msg_tuple[0].event_id],
+                auth_event_ids=[create_tuple[0].event_id, creator_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.INVITE},
+                sender=creator,
+                **shared_kwargs,
+            )
+        )
+
+        remote_events_and_contexts = [
+            create_tuple,
+            creator_tuple,
+            room_name_tuple,
+            msg_tuple,
+            invite_tuple,
+        ]
+
+        # Ensure the local HS knows the room version
+        self.get_success(self.store.store_room(room_id, creator, False, room_version))
+
+        # Persist these events as backfilled events.
+        for event, context in remote_events_and_contexts:
+            self.get_success(
+                self.persist_controller.persist_event(event, context, backfilled=True)
+            )
+
+        # Now we join the local user to the room. We want to make this feel as close to
+        # the real `process_remote_join()` as possible but we'd like to avoid some of
+        # the auth checks that would be done in the real code.
+        #
+        # FIXME: The test was originally written using this less-real
+        # `persist_event(...)` shortcut but it would be nice to use the real remote join
+        # process in a `FederatingHomeserverTestCase`.
+        flawed_join_tuple = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[invite_tuple[0].event_id],
+                # This doesn't work correctly to create an `EventContext` that includes
+                # both of these state events. I assume it's because we're working on our
+                # local homeserver which has the remote state set as `outlier`. We have
+                # to create our own EventContext below to get this right.
+                auth_event_ids=[create_tuple[0].event_id, invite_tuple[0].event_id],
+                type=EventTypes.Member,
+                state_key=user1_id,
+                content={"membership": Membership.JOIN},
+                sender=user1_id,
+                **shared_kwargs,
+            )
+        )
+        # We have to create our own context to get the state set correctly. If we use
+        # the `EventContext` from the `flawed_join_tuple`, the `current_state_events`
+        # table will only have the join event in it which should never happen in our
+        # real server.
+        join_event = flawed_join_tuple[0]
+        join_context = self.get_success(
+            self.state_handler.compute_event_context(
+                join_event,
+                state_ids_before_event={
+                    (e.type, e.state_key): e.event_id
+                    for e in [create_tuple[0], invite_tuple[0], room_name_tuple[0]]
+                },
+                partial_state=False,
+            )
+        )
+        join_event, _join_event_pos, _room_token = self.get_success(
+            self.persist_controller.persist_event(join_event, join_context)
+        )
+
+        # Make sure the tables are populated correctly
+        sliding_sync_joined_rooms_results = self._get_sliding_sync_joined_rooms()
+        self.assertIncludes(
+            set(sliding_sync_joined_rooms_results.keys()),
+            {room_id},
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_joined_rooms_results[room_id],
+            _SlidingSyncJoinedRoomResult(
+                room_id=room_id,
+                # This should be the last event in the room (the join membership)
+                event_stream_ordering=join_event.internal_metadata.stream_ordering,
+                # Since all of the bump events are backfilled, the `bump_stamp` should
+                # still be `None`. (and we will fallback to the users membership event
+                # position in the Sliding Sync API)
+                bump_stamp=None,
+                room_type=None,
+                # We still pick up state of the room even if it's backfilled
+                room_name="my super duper room",
+                is_encrypted=False,
+                tombstone_successor_room_id=None,
+            ),
+        )
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id, user1_id),
+            },
+            exact=True,
+        )
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id,
+                user_id=user1_id,
+                sender=user1_id,
+                membership_event_id=join_event.event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=join_event.internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name="my super duper room",
+                is_encrypted=False,
+                tombstone_successor_room_id=None,
+            ),
+        )
+
     @parameterized.expand(
         # Test both an insert an upsert into the
         # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` to exercise
@@ -1036,11 +1233,9 @@ class SlidingSyncTablesTestCase(SlidingSyncTablesTestCaseBase):
             context = self.get_success(unpersisted_context.persist(event))
             events_to_persist.append((event, context))
 
-            persist_controller = self.hs.get_storage_controllers().persistence
-            assert persist_controller is not None
             for event, context in events_to_persist:
                 self.get_success(
-                    persist_controller.persist_event(
+                    self.persist_controller.persist_event(
                         event,
                         context,
                     )
@@ -4219,136 +4414,6 @@ class SlidingSyncTablesBackgroundUpdatesTestCase(SlidingSyncTablesTestCaseBase):
                 is_encrypted=False,
                 tombstone_successor_room_id=None,
             ),
-        )
-
-    def test_membership_snapshots_background_update_forgotten_partial(self) -> None:
-        """
-        Test an existing `sliding_sync_membership_snapshots` row is updated with the
-        latest `forgotten` status after the background update passes over it.
-        """
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
-
-        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
-
-        # User1 joins the room
-        self.helper.join(room_id, user1_id, tok=user1_tok)
-        # User1 leaves the room (we have to leave in order to forget the room)
-        self.helper.leave(room_id, user1_id, tok=user1_tok)
-
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id)
-        )
-
-        # Forget the room
-        channel = self.make_request(
-            "POST",
-            f"/_matrix/client/r0/rooms/{room_id}/forget",
-            content={},
-            access_token=user1_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-
-        # Clean-up the `sliding_sync_joined_rooms` table as if the forgotten status
-        # never made it into the table.
-        self.get_success(
-            self.store.db_pool.simple_update(
-                table="sliding_sync_membership_snapshots",
-                keyvalues={"room_id": room_id},
-                updatevalues={"forgotten": 0},
-                desc="sliding_sync_membership_snapshots.test_membership_snapshots_background_update_forgotten_partial",
-            )
-        )
-
-        # We should see the partial row that we made in preparation for the test.
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (room_id, user1_id),
-                (room_id, user2_id),
-            },
-            exact=True,
-        )
-        user1_snapshot = _SlidingSyncMembershipSnapshotResult(
-            room_id=room_id,
-            user_id=user1_id,
-            sender=user1_id,
-            membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
-            membership=Membership.LEAVE,
-            event_stream_ordering=state_map[
-                (EventTypes.Member, user1_id)
-            ].internal_metadata.stream_ordering,
-            has_known_state=True,
-            room_type=None,
-            room_name=None,
-            is_encrypted=False,
-            tombstone_successor_room_id=None,
-            # Room is *not* forgotten because of our test preparation
-            forgotten=False,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
-            user1_snapshot,
-        )
-        user2_snapshot = _SlidingSyncMembershipSnapshotResult(
-            room_id=room_id,
-            user_id=user2_id,
-            sender=user2_id,
-            membership_event_id=state_map[(EventTypes.Member, user2_id)].event_id,
-            membership=Membership.JOIN,
-            event_stream_ordering=state_map[
-                (EventTypes.Member, user2_id)
-            ].internal_metadata.stream_ordering,
-            has_known_state=True,
-            room_type=None,
-            room_name=None,
-            is_encrypted=False,
-            tombstone_successor_room_id=None,
-        )
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
-            user2_snapshot,
-        )
-
-        # Insert and run the background update.
-        self.get_success(
-            self.store.db_pool.simple_insert(
-                "background_updates",
-                {
-                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
-                    "progress_json": "{}",
-                },
-            )
-        )
-        self.store.db_pool.updates._all_done = False
-        self.wait_for_background_updates()
-
-        # Make sure the table is populated
-        sliding_sync_membership_snapshots_results = (
-            self._get_sliding_sync_membership_snapshots()
-        )
-        self.assertIncludes(
-            set(sliding_sync_membership_snapshots_results.keys()),
-            {
-                (room_id, user1_id),
-                (room_id, user2_id),
-            },
-            exact=True,
-        )
-        # Forgotten status is now updated
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
-            attr.evolve(user1_snapshot, forgotten=True),
-        )
-        # Holds the info according to the current state when the user joined
-        self.assertEqual(
-            sliding_sync_membership_snapshots_results.get((room_id, user2_id)),
-            user2_snapshot,
         )
 
 

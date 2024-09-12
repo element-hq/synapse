@@ -19,6 +19,7 @@ from enum import Enum
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    Any,
     Callable,
     Dict,
     Final,
@@ -36,23 +37,20 @@ from typing import (
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
-from synapse.types import MultiWriterStreamToken, RoomStreamToken, StrCollection, UserID
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra
-else:
-    from pydantic import Extra
-
 from synapse.events import EventBase
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
+    StrCollection,
     StreamToken,
+    UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
 
@@ -196,8 +194,8 @@ class SlidingSyncResult:
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         num_live: Optional[int]
         bump_stamp: int
-        joined_count: int
-        invited_count: int
+        joined_count: Optional[int]
+        invited_count: Optional[int]
         notification_count: int
         highlight_count: int
 
@@ -206,6 +204,12 @@ class SlidingSyncResult:
                 # If this is the first time the client is seeing the room, we should not filter it out
                 # under any circumstance.
                 self.initial
+                # We need to let the client know if any of the info has changed
+                or self.name is not None
+                or self.avatar is not None
+                or bool(self.heroes)
+                or self.joined_count is not None
+                or self.invited_count is not None
                 # We need to let the client know if there are any new events
                 or bool(self.required_state)
                 or bool(self.timeline_events)
@@ -703,7 +707,12 @@ class HaveSentRoom(Generic[T]):
 
     @staticmethod
     def never() -> "HaveSentRoom[T]":
-        return HaveSentRoom(HaveSentRoomFlag.NEVER, None)
+        # We use a singleton to avoid repeatedly instantiating new `never`
+        # values.
+        return _HAVE_SENT_ROOM_NEVER
+
+
+_HAVE_SENT_ROOM_NEVER: HaveSentRoom[Any] = HaveSentRoom(HaveSentRoomFlag.NEVER, None)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)

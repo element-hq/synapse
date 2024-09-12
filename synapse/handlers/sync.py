@@ -906,7 +906,7 @@ class SyncHandler:
                     # Use `stream_ordering` for updates
                     else paginate_room_events_by_stream_ordering
                 )
-                events, end_key = await pagination_method(
+                events, end_key, limited = await pagination_method(
                     room_id=room_id,
                     # The bounds are reversed so we can paginate backwards
                     # (from newer to older events) starting at to_bound.
@@ -914,9 +914,7 @@ class SyncHandler:
                     from_key=end_key,
                     to_key=since_key,
                     direction=Direction.BACKWARDS,
-                    # We add one so we can determine if there are enough events to saturate
-                    # the limit or not (see `limited`)
-                    limit=load_limit + 1,
+                    limit=load_limit,
                 )
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
@@ -971,9 +969,6 @@ class SyncHandler:
                 loaded_recents.extend(recents)
                 recents = loaded_recents
 
-                if len(events) <= load_limit:
-                    limited = False
-                    break
                 max_repeat -= 1
 
             if len(recents) > timeline_limit:
@@ -2608,7 +2603,7 @@ class SyncHandler:
 
             newly_joined = room_id in newly_joined_rooms
             if room_entry:
-                events, start_key = room_entry
+                events, start_key, _ = room_entry
                 # We want to return the events in ascending order (the last event is the
                 # most recent).
                 events.reverse()
