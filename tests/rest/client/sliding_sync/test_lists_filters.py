@@ -1149,6 +1149,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             exact=True,
         )
 
+        # Just make sure we know what happens when you specify an empty list of room_types
+        # (we should find nothing)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "room_types": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
     def test_filters_not_room_types(self) -> None:
         """
         Test `filters.not_room_types` for different room types
@@ -1281,6 +1302,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             {space_room_id},
+            exact=True,
+        )
+
+        # Just make sure we know what happens when you specify an empty list of not_room_types
+        # (we should find all of the rooms)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_room_types": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id, foo_room_id, space_room_id},
             exact=True,
         )
 
@@ -1691,13 +1733,13 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Create a room with no tags
         self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-        bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         # Add the "foo" tag to the room
         channel = self.make_request(
             method="PUT",
-            path=f"/user/{user1_id}/rooms/{footag_room_id}/tags/foo",
+            path=f"/user/{user1_id}/rooms/{foo_room_id}/tags/foo",
             content={},
             access_token=user1_tok,
         )
@@ -1705,13 +1747,13 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Add the "bar" tag to the room
         channel = self.make_request(
             method="PUT",
-            path=f"/user/{user1_id}/rooms/{bartag_room_id}/tags/bar",
+            path=f"/user/{user1_id}/rooms/{bar_room_id}/tags/bar",
             content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Try with `tags=foo`
+        # Try finding rooms with the "foo" tag
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -1727,7 +1769,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {footag_room_id},
+            {foo_room_id},
+            exact=True,
+        )
+
+        # Try finding rooms with either "foo" or "bar" tags
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["foo", "bar"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {foo_room_id, bar_room_id},
             exact=True,
         )
 
@@ -1752,6 +1814,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             exact=True,
         )
 
+        # Just make sure we know what happens when you specify an empty list of tags
+        # (we should find nothing)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
     def test_filters_not_tags(self) -> None:
         """
         Test `filters.not_tags` for excluding rooms with given tags
@@ -1762,13 +1845,13 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Create a room with no tags
         untagged_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
-        footag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
-        bartag_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
         # Add the "foo" tag to the room
         channel = self.make_request(
             method="PUT",
-            path=f"/user/{user1_id}/rooms/{footag_room_id}/tags/foo",
+            path=f"/user/{user1_id}/rooms/{foo_room_id}/tags/foo",
             content={},
             access_token=user1_tok,
         )
@@ -1776,13 +1859,13 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         # Add the "bar" tag to the room
         channel = self.make_request(
             method="PUT",
-            path=f"/user/{user1_id}/rooms/{bartag_room_id}/tags/bar",
+            path=f"/user/{user1_id}/rooms/{bar_room_id}/tags/bar",
             content={},
             access_token=user1_tok,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # Try with `not_tags=foo`
+        # Try finding rooms without the "foo" tag
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -1798,11 +1881,11 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
-            {untagged_room_id, bartag_room_id},
+            {untagged_room_id, bar_room_id},
             exact=True,
         )
 
-        # Try with not_tags=[foo,bar]
+        # Try finding rooms without either "foo" or "bar" tags
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -1819,5 +1902,49 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             {untagged_room_id},
+            exact=True,
+        )
+
+        # Test how it behaves when we have both `tags` and `not_tags`.
+        # `not_tags` should win.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["foo"],
+                        "not_tags": ["foo"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # Nothing matches because nothing is both tagged with "foo" and not tagged with "foo"
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
+        # Just make sure we know what happens when you specify an empty list of not_tags
+        # (we should find all of the rooms)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_tags": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {untagged_room_id, foo_room_id, bar_room_id},
             exact=True,
         )
