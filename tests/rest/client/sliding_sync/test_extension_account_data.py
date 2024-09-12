@@ -255,6 +255,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
 
         # Create another room with some room account data
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
@@ -264,6 +273,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 room_id=room_id2,
                 account_data_type="org.matrix.roorarraz",
                 content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
             )
         )
 
@@ -301,7 +319,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 .get("rooms")
                 .get(room_id1)
             },
-            {"org.matrix.roorarraz"},
+            {"org.matrix.roorarraz", AccountDataTypes.TAG},
             exact=True,
         )
 
@@ -323,6 +341,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
 
         # Create another room with some room account data
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
@@ -332,6 +359,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 room_id=room_id2,
                 account_data_type="org.matrix.roorarraz",
                 content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
             )
         )
 
@@ -369,6 +405,23 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add another room tag
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.server_notice",
+                content={},
+            )
+        )
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -390,7 +443,7 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 .get("rooms")
                 .get(room_id1)
             },
-            {"org.matrix.roorarraz2"},
+            {"org.matrix.roorarraz2", AccountDataTypes.TAG},
             exact=True,
         )
 
