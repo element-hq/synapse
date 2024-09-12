@@ -14,7 +14,15 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, AbstractSet, Dict, Mapping, Optional, Sequence, Set
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    Dict,
+    Mapping,
+    Optional,
+    Sequence,
+    Set,
+)
 
 from typing_extensions import assert_never
 
@@ -391,13 +399,17 @@ class SlidingSyncExtensionHandler:
                 ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             # TODO: This should take into account the `to_token`
-            all_global_account_data = await self.store.get_global_account_data_for_user(
-                user_id
+            immutable_global_account_data_map = (
+                await self.store.get_global_account_data_for_user(user_id)
             )
 
-            global_account_data_map = dict(all_global_account_data)
+            # We have to make a copy of the immutable data from the cache as we will
+            # be mutating it below.
+            #
+            # FIXME: It would be good to avoid this big copy
+            global_account_data_map = dict(immutable_global_account_data_map)
 
-            # TODO: This should take into account the  `to_token`
+            # TODO: This should take into account the `to_token`
             global_account_data_map[
                 AccountDataTypes.PUSH_RULES
             ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
@@ -437,7 +449,9 @@ class SlidingSyncExtensionHandler:
                     await self.store.get_room_account_data_for_user(user_id)
                 )
                 # We have to make a copy of the immutable data from the cache as we will
-                # be modifying it.
+                # be mutating it below.
+                #
+                # FIXME: It would be good to avoid this big copy
                 for (
                     room_id,
                     room_account_data_map,
