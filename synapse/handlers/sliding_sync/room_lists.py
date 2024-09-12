@@ -1525,6 +1525,8 @@ class SlidingSyncRoomLists:
             A filtered dictionary of room IDs along with membership information in the
             room at the time of `to_token`.
         """
+        user_id = user.to_string()
+
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
         ] = {}
@@ -1658,9 +1660,36 @@ class SlidingSyncRoomLists:
                 # )
                 raise NotImplementedError()
 
+        # Filter by room tags according to the users account data
         if filters.tags is not None or filters.not_tags is not None:
             with start_active_span("filters.tags"):
-                raise NotImplementedError()
+                # Fetch the user tags for their rooms
+                room_tags = await self.store.get_tags_for_user(user_id)
+                room_id_to_tag_name_set: Dict[str, Set[str]] = {
+                    room_id: set(tags.keys()) for room_id, tags in room_tags.items()
+                }
+
+                if filters.tags is not None:
+                    tags_set = set(filters.tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms that don't have one of the tags in the filter
+                        if room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            tags_set
+                        )
+                    }
+
+                if filters.not_tags is not None:
+                    not_tags_set = set(filters.not_tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms if they have any of the tags in the filter
+                        if not room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            not_tags_set
+                        )
+                    }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
