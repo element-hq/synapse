@@ -1,0 +1,1 @@
+Add tracing to `get_sliding_sync_rooms_for_user(...)`.
