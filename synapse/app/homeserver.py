@@ -65,7 +65,7 @@ from synapse.rest import ClientRestResource
 from synapse.rest.admin import AdminRestResource
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
-from synapse.rest.scim import SCIMResource
+from synapse.rest.scim import HAS_SCIM2, SCIMResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
 from synapse.rest.well_known import well_known_resource
 from synapse.server import HomeServer
@@ -186,10 +186,14 @@ class SynapseHomeServer(HomeServer):
                     CLIENT_API_PREFIX: client_resource,
                     "/.well-known": well_known_resource(self),
                     "/_synapse/admin": AdminRestResource(self),
-                    "/_matrix/client/unstable/coop.yaal/scim/": SCIMResource(self),
                     **build_synapse_client_resource_tree(self),
                 }
             )
+
+            if HAS_SCIM2:
+                resources["/_matrix/client/unstable/coop.yaal/scim/"] = SCIMResource(
+                    self
+                )
 
             if self.config.email.can_verify_email:
                 from synapse.rest.synapse.client.password_reset import (
