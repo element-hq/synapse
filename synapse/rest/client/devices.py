@@ -216,6 +216,16 @@ class DeviceRestServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
 
         body = parse_and_validate_json_object_from_request(request, self.PutBody)
+
+        # MSC4190 allows appservices to create devices through this endpoint
+        if requester.app_service and requester.app_service.msc4190_device_management:
+            created = await self.device_handler.upsert_device(
+                user_id=requester.user.to_string(),
+                device_id=device_id,
+                display_name=body.display_name,
+            )
+            return 201 if created else 200, {}
+
         await self.device_handler.update_device(
             requester.user.to_string(), device_id, body.dict()
         )
