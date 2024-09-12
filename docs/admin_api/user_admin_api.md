@@ -1440,4 +1440,4 @@ The following fields are returned in the JSON response body:
 - failed_redactions: a dict where the keys are event ids the process was unable to redact, if any, and the values are 
   the corresponding error that caused the redaction to fail
 
-_Added in Synapse 1.115.0._
+_Added in Synapse 1.116.0._

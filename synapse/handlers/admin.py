@@ -451,7 +451,7 @@ class AdminHandler:
                 if event.type == "m.room.member":
                     content = event.content
                     if content:
-                        if content.get("membership") == "Membership.JOIN":
+                        if content.get("membership") == "join":
                             pass
                         else:
                             continue

@@ -5117,7 +5117,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         """
         Test that request to redact events in all rooms user is member of is successful
         """
-        # create rooms, some with updated redaction rules
+        # create rooms - room versions 11+ store the `redacts` key in content while
+        # earlier ones don't so we use a mix of room versions
         rm1 = self.helper.create_room_as(
             self.admin, tok=self.admin_tok, room_version="7"
         )
@@ -5129,7 +5130,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         # join rooms, send some messages
         originals = []
         for rm in [rm1, rm2, rm3]:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
             for i in range(15):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
@@ -5179,7 +5181,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
         originals = []
         for rm in [rm1, rm2, rm3]:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
             for i in range(15):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
@@ -5214,8 +5217,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                         and event["redacts"] == event_id
                     ):
                         matches.append((event_id, event))
-            # we redacted 15 messages
-            self.assertEqual(len(matches), 15)
+            # we redacted 16 messages
+            self.assertEqual(len(matches), 16)
 
         channel = self.make_request(
             "GET", f"rooms/{rm2}/messages?limit=50", access_token=self.admin_tok
@@ -5238,7 +5241,9 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
         originals = []
         for rm in [rm1, rm2, rm3]:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            if rm == rm2:
+                originals.append(join["event_id"])
             for i in range(5):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
@@ -5307,7 +5312,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
         originals = []
         for rm in [rm1, rm2, rm3]:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+            originals.append(join["event_id"])
             for i in range(5):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
