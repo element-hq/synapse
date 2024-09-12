@@ -37,23 +37,20 @@ from typing import (
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
-from synapse.types import MultiWriterStreamToken, RoomStreamToken, StrCollection, UserID
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra
-else:
-    from pydantic import Extra
-
 from synapse.events import EventBase
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
+    StrCollection,
     StreamToken,
+    UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
 

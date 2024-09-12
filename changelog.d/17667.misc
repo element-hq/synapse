@@ -1,0 +1,5 @@
+Import pydantic objects from the `_pydantic_compat` module.
+
+This allows `check_pydantic_models.py` to mock those pydantic objects
+only in the synapse module, and not interfere with pydantic objects in
+external dependencies.

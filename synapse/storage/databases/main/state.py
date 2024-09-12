@@ -736,6 +736,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
     CURRENT_STATE_INDEX_UPDATE_NAME = "current_state_members_idx"
     EVENT_STATE_GROUP_INDEX_UPDATE_NAME = "event_to_state_groups_sg_index"
     DELETE_CURRENT_STATE_UPDATE_NAME = "delete_old_current_state_events"
+    MEMBERS_CURRENT_STATE_UPDATE_NAME = "current_state_events_members_room_index"
 
     def __init__(
         self,
@@ -763,6 +764,13 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
         self.db_pool.updates.register_background_update_handler(
             self.DELETE_CURRENT_STATE_UPDATE_NAME,
             self._background_remove_left_rooms,
+        )
+        self.db_pool.updates.register_background_index_update(
+            self.MEMBERS_CURRENT_STATE_UPDATE_NAME,
+            index_name="current_state_events_members_room_index",
+            table="current_state_events",
+            columns=["room_id", "membership"],
+            where_clause="type='m.room.member'",
         )
 
     async def _background_remove_left_rooms(
