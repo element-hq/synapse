@@ -120,7 +120,7 @@ class SCIMServlet(RestServlet):
             ).model_dump(),
         )
 
-    def parse_search_request(self, request: SynapseRequest) -> SearchRequest:
+    def parse_search_request(self, request: SynapseRequest) -> "SearchRequest":
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
         return SearchRequest(
             attributes=parse_strings_from_args(args, "attributes"),
@@ -131,7 +131,7 @@ class SCIMServlet(RestServlet):
             ),
         )
 
-    async def get_scim_user(self, user_id: str) -> User:
+    async def get_scim_user(self, user_id: str) -> "User":
         user_id_obj = UserID.from_string(user_id)
         user = await self.store.get_user_by_id(user_id)
         profile = await self.store.get_profileinfo(user_id_obj)
@@ -419,7 +419,7 @@ class ServiceProviderConfigServlet(SCIMServlet):
 
 
 class BaseSchemaServlet(SCIMServlet):
-    schemas: Dict[str, Schema]
+    schemas: Dict[str, "Schema"]
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
@@ -480,7 +480,7 @@ class SchemaServlet(BaseSchemaServlet):
 
 
 class BaseResourceTypeServlet(SCIMServlet):
-    resource_type: ResourceType
+    resource_type: "ResourceType"
 
     def __init__(self, hs: "HomeServer"):
         super().__init__(hs)
