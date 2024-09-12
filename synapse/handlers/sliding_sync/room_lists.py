@@ -54,7 +54,6 @@ from synapse.storage.roommember import (
     RoomsForUserStateReset,
 )
 from synapse.types import (
-    JsonMapping,
     MutableStateMap,
     PersistedEventPosition,
     RoomStreamToken,
