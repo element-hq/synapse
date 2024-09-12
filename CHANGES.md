@@ -1,3 +1,13 @@
+# Synapse 1.115.0rc2 (2024-09-12)
+
+### Internal Changes
+
+- Pre-populate room data used in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint for quick filtering/sorting. ([\#17652](https://github.com/element-hq/synapse/issues/17652))
+- Speed up sliding sync by reducing amount of data pulled out of the database for large rooms. ([\#17683](https://github.com/element-hq/synapse/issues/17683))
+
+
+
+
 # Synapse 1.115.0rc1 (2024-09-10)
 
 ### Features
