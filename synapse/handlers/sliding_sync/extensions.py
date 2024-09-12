@@ -396,13 +396,16 @@ class SlidingSyncExtensionHandler:
             )
 
             global_account_data_map = dict(all_global_account_data)
+
             # TODO: This should take into account the  `to_token`
             global_account_data_map[
                 AccountDataTypes.PUSH_RULES
             ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
 
         # Fetch room account data
-        account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {}
+        #
+        # Mapping from room_id to mapping of `type` to `content` of room account data events.
+        account_data_by_room_map: Dict[str, Dict[str, JsonMapping]] = {}
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
             requested_room_ids=account_data_request.rooms,
@@ -417,11 +420,38 @@ class SlidingSyncExtensionHandler:
                         user_id, from_token.stream_token.account_data_key
                     )
                 )
+
+                # Add room tags
+                #
+                # TODO: This should take into account the `from_token` and `to_token`
+                tags_by_room = await self.store.get_updated_tags(
+                    user_id, from_token.stream_token.account_data_key
+                )
+                for room_id, tags in tags_by_room.items():
+                    account_data_by_room_map.setdefault(room_id, {})[
+                        AccountDataTypes.TAG
+                    ] = {"tags": tags}
             else:
                 # TODO: This should take into account the `to_token`
-                account_data_by_room_map = (
+                immutable_account_data_by_room_map = (
                     await self.store.get_room_account_data_for_user(user_id)
                 )
+                # We have to make a copy of the immutable data from the cache as we will
+                # be modifying it.
+                for (
+                    room_id,
+                    room_account_data_map,
+                ) in immutable_account_data_by_room_map.items():
+                    account_data_by_room_map[room_id] = dict(room_account_data_map)
+
+                # Add room tags
+                #
+                # TODO: This should take into account the `to_token`
+                tags_by_room = await self.store.get_tags_for_user(user_id)
+                for room_id, tags in tags_by_room.items():
+                    account_data_by_room_map.setdefault(room_id, {})[
+                        AccountDataTypes.TAG
+                    ] = {"tags": tags}
 
         # Filter down to the relevant rooms
         account_data_by_room_map = {
