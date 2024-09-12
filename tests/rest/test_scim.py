@@ -5,14 +5,16 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 import synapse.rest.scim
 from synapse.rest.client import login
+from synapse.rest.scim import HAS_SCIM2
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
-from tests import unittest
+from tests.unittest import HomeserverTestCase, skip_unless
 
 
-class UserProvisioningTestCase(unittest.HomeserverTestCase):
+@skip_unless(HAS_SCIM2, "requires scim2-models")
+class UserProvisioningTestCase(HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
         synapse.rest.scim.register_servlets,
@@ -477,7 +479,8 @@ class UserProvisioningTestCase(unittest.HomeserverTestCase):
         )
 
 
-class SCIMMetadataTestCase(unittest.HomeserverTestCase):
+@skip_unless(HAS_SCIM2, "requires scim2-models")
+class SCIMMetadataTestCase(HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
         synapse.rest.scim.register_servlets,
