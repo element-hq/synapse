@@ -29,28 +29,6 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Dict, List, Tuple, Union
 
-from scim2_models import (
-    AuthenticationScheme,
-    Bulk,
-    ChangePassword,
-    Context,
-    Email,
-    Error,
-    ETag,
-    Filter,
-    ListResponse,
-    Meta,
-    Patch,
-    PhoneNumber,
-    Photo,
-    ResourceType,
-    Schema,
-    SearchRequest,
-    ServiceProviderConfig,
-    Sort,
-    User,
-)
-
 from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer, JsonResource
 from synapse.http.servlet import (
@@ -62,6 +40,34 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin._base import assert_requester_is_admin, assert_user_is_admin
 from synapse.types import JsonDict, UserID
+
+try:
+    from scim2_models import (
+        AuthenticationScheme,
+        Bulk,
+        ChangePassword,
+        Context,
+        Email,
+        Error,
+        ETag,
+        Filter,
+        ListResponse,
+        Meta,
+        Patch,
+        PhoneNumber,
+        Photo,
+        ResourceType,
+        Schema,
+        SearchRequest,
+        ServiceProviderConfig,
+        Sort,
+        User,
+    )
+
+    HAS_SCIM2 = True
+
+except ImportError:
+    HAS_SCIM2 = False
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

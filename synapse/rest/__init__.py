@@ -120,8 +120,11 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     login_token_request.register_servlets,
     rendezvous.register_servlets,
     auth_issuer.register_servlets,
-    scim.register_servlets,
 )
+
+if scim.HAS_SCIM2:
+    CLIENT_SERVLET_FUNCTIONS += (scim.register_servlets,)
+
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
     "client": CLIENT_SERVLET_FUNCTIONS,
