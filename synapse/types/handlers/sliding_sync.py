@@ -314,18 +314,14 @@ class SlidingSyncResult:
             """The Account Data extension (MSC3959)
 
             Attributes:
-                global_account_data_map: Mapping from `type` to `content` of
-                    global account data events.
-                account_data_by_room_map: List of -> Mapping from room_id to mapping of
-                    `type` to `content` of room account data events. These are lists so
-                    we can avoid making copies of immutable data and instead just
-                    provide a multiple maps that need to be combined when sending down
-                    the data.
+                global_account_data_map: Mapping from `type` to `content` of global
+                    account data events.
+                account_data_by_room_map: Mapping from room_id to mapping of `type` to
+                    `content` of room account data events.
             """
 
             global_account_data_map: Mapping[str, JsonMapping]
             account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]]
-            # account_data_by_room_maps: Sequence[Mapping[str, Mapping[str, JsonMapping]]]
 
             def __bool__(self) -> bool:
                 return bool(

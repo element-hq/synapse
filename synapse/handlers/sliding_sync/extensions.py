@@ -19,6 +19,7 @@ from typing import (
     AbstractSet,
     ChainMap,
     Dict,
+    List,
     Mapping,
     MutableMapping,
     Optional,
@@ -422,8 +423,15 @@ class SlidingSyncExtensionHandler:
 
         # Fetch room account data
         #
-        # Mapping from room_id to mapping of `type` to `content` of room account data events.
-        account_data_by_room_map: Dict[str, Dict[str, JsonMapping]] = {}
+        # List of -> Mapping from room_id to mapping of `type` to `content` of room
+        # account data events.
+        #
+        # This is is a list so we can avoid making copies of immutable data and instead
+        # just provide a multiple maps that need to be combined. Normally, we could
+        # reach for `ChainMap` in this scenario, but this is a nested map and accessing
+        # the ChainMap by room_id won't combine the two maps for that room (we would
+        # need a new `NestedChainMap` type class).
+        account_data_by_room_maps: List[Mapping[str, Mapping[str, JsonMapping]]] = []
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
             requested_room_ids=account_data_request.rooms,
@@ -449,40 +457,44 @@ class SlidingSyncExtensionHandler:
                     account_data_by_room_map.setdefault(room_id, {})[
                         AccountDataTypes.TAG
                     ] = {"tags": tags}
+
+                account_data_by_room_maps.append(account_data_by_room_map)
             else:
                 # TODO: This should take into account the `to_token`
                 immutable_account_data_by_room_map = (
                     await self.store.get_room_account_data_for_user(user_id)
                 )
-                # We have to make a copy of the immutable data from the cache as we will
-                # be mutating it below.
-                #
-                # FIXME: It would be good to avoid this big copy
-                for (
-                    room_id,
-                    room_account_data_map,
-                ) in immutable_account_data_by_room_map.items():
-                    account_data_by_room_map[room_id] = dict(room_account_data_map)
+                account_data_by_room_maps.append(immutable_account_data_by_room_map)
 
                 # Add room tags
                 #
                 # TODO: This should take into account the `to_token`
                 tags_by_room = await self.store.get_tags_for_user(user_id)
-                for room_id, tags in tags_by_room.items():
-                    account_data_by_room_map.setdefault(room_id, {})[
-                        AccountDataTypes.TAG
-                    ] = {"tags": tags}
+                account_data_by_room_maps.append(
+                    {
+                        room_id: {AccountDataTypes.TAG: {"tags": tags}}
+                        for room_id, tags in tags_by_room.items()
+                    }
+                )
 
-        # Filter down to the relevant rooms
-        account_data_by_room_map = {
-            room_id: account_data_map
-            for room_id, account_data_map in account_data_by_room_map.items()
-            if room_id in relevant_room_ids
+        # Filter down to the relevant rooms ... and combine the maps
+        relevant_account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {
+            room_id: ChainMap(
+                {},
+                *(
+                    # Cast is safe because `ChainMap` only mutates the top-most map,
+                    # see https://github.com/python/typeshed/issues/8430
+                    cast(MutableMapping[str, JsonMapping], room_map[room_id])
+                    for room_map in account_data_by_room_maps
+                    if room_map.get(room_id)
+                ),
+            )
+            for room_id in relevant_room_ids
         }
 
         return SlidingSyncResult.Extensions.AccountDataExtension(
             global_account_data_map=global_account_data_map,
-            account_data_by_room_map=account_data_by_room_map,
+            account_data_by_room_map=relevant_account_data_by_room_map,
         )
 
     @trace
