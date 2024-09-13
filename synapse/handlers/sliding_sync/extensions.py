@@ -38,6 +38,7 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncConfig,
     SlidingSyncResult,
 )
+from synapse.util.async_helpers import concurrently_execute
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -534,7 +535,10 @@ class SlidingSyncExtensionHandler:
             # For rooms we've previously sent down, but aren't up to date, we
             # need to use the from token from the room status.
             if previously_rooms:
-                for room_id, receipt_token in previously_rooms.items():
+                # Fetch any missing rooms concurrently.
+
+                async def handle_previously_room(room_id: str) -> None:
+                    receipt_token = previously_rooms[room_id]
                     # TODO: Limit the number of receipts we're about to send down
                     # for the room, if its too many we should TODO
                     previously_receipts = (
@@ -545,6 +549,10 @@ class SlidingSyncExtensionHandler:
                         )
                     )
                     fetched_receipts.extend(previously_receipts)
+
+                await concurrently_execute(
+                    handle_previously_room, previously_rooms.keys(), 20
+                )
 
             if initial_rooms:
                 # We also always send down receipts for the current user.
