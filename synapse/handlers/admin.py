@@ -200,6 +200,7 @@ class AdminHandler:
                 (
                     events,
                     _,
+                    _,
                 ) = await self._store.paginate_room_events_by_topological_ordering(
                     room_id=room_id,
                     from_key=from_key,

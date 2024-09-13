@@ -327,6 +327,13 @@ class PersistEventsStore:
 
         async with stream_ordering_manager as stream_orderings:
             for (event, _), stream in zip(events_and_contexts, stream_orderings):
+                # XXX: We can't rely on `stream_ordering`/`instance_name` being correct
+                # at this point. We could be working with events that were previously
+                # persisted as an `outlier` with one `stream_ordering` but are now being
+                # persisted again and de-outliered and are being assigned a different
+                # `stream_ordering` here that won't end up being used.
+                # `_update_outliers_txn()` will fix this discrepancy (always use the
+                # `stream_ordering` from the first time it was persisted).
                 event.internal_metadata.stream_ordering = stream
                 event.internal_metadata.instance_name = self._instance_name
 
@@ -470,11 +477,11 @@ class PersistEventsStore:
                 membership_infos_to_insert_membership_snapshots.append(
                     # XXX: We don't use `SlidingSyncMembershipInfoWithEventPos` here
                     # because we're sourcing the event from `events_and_contexts`, we
-                    # can't rely on `stream_ordering`/`instance_name` being correct. We
-                    # could be working with events that were previously persisted as an
-                    # `outlier` with one `stream_ordering` but are now being persisted
-                    # again and de-outliered and assigned a different `stream_ordering`
-                    # that won't end up being used. Since we call
+                    # can't rely on `stream_ordering`/`instance_name` being correct at
+                    # this point. We could be working with events that were previously
+                    # persisted as an `outlier` with one `stream_ordering` but are now
+                    # being persisted again and de-outliered and assigned a different
+                    # `stream_ordering` that won't end up being used. Since we call
                     # `_calculate_sliding_sync_table_changes()` before
                     # `_update_outliers_txn()` which fixes this discrepancy (always use
                     # the `stream_ordering` from the first time it was persisted), we're
@@ -591,11 +598,17 @@ class PersistEventsStore:
                         event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES,
                     )
                 )
-                bump_stamp_to_fully_insert = (
-                    most_recent_bump_event_pos_results[1].stream
-                    if most_recent_bump_event_pos_results is not None
-                    else None
-                )
+                if most_recent_bump_event_pos_results is not None:
+                    _, new_bump_event_pos = most_recent_bump_event_pos_results
+
+                    # If we've just joined a remote room, then the last bump event may
+                    # have been backfilled (and so have a negative stream ordering).
+                    # These negative stream orderings can't sensibly be compared, so
+                    # instead just leave it as `None` in the table and we will use their
+                    # membership event position as the bump event position in the
+                    # Sliding Sync API.
+                    if new_bump_event_pos.stream > 0:
+                        bump_stamp_to_fully_insert = new_bump_event_pos.stream
 
                 current_state_ids_map = dict(
                     await self.store.get_partial_filtered_current_state_ids(
@@ -1967,7 +1980,12 @@ class PersistEventsStore:
             if state_key == (EventTypes.Create, ""):
                 room_type = event.content.get(EventContentFields.ROOM_TYPE)
                 # Scrutinize JSON values
-                if room_type is None or isinstance(room_type, str):
+                if room_type is None or (
+                    isinstance(room_type, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in room_type
+                ):
                     sliding_sync_insert_map["room_type"] = room_type
             elif state_key == (EventTypes.RoomEncryption, ""):
                 encryption_algorithm = event.content.get(
@@ -1977,15 +1995,26 @@ class PersistEventsStore:
                 sliding_sync_insert_map["is_encrypted"] = is_encrypted
             elif state_key == (EventTypes.Name, ""):
                 room_name = event.content.get(EventContentFields.ROOM_NAME)
-                # Scrutinize JSON values
-                if room_name is None or isinstance(room_name, str):
+                # Scrutinize JSON values. We ignore values with nulls as
+                # postgres doesn't allow null bytes in text columns.
+                if room_name is None or (
+                    isinstance(room_name, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in room_name
+                ):
                     sliding_sync_insert_map["room_name"] = room_name
             elif state_key == (EventTypes.Tombstone, ""):
                 successor_room_id = event.content.get(
                     EventContentFields.TOMBSTONE_SUCCESSOR_ROOM
                 )
                 # Scrutinize JSON values
-                if successor_room_id is None or isinstance(successor_room_id, str):
+                if successor_room_id is None or (
+                    isinstance(successor_room_id, str)
+                    # We ignore values with null bytes as Postgres doesn't allow them in
+                    # text columns.
+                    and "\0" not in successor_room_id
+                ):
                     sliding_sync_insert_map["tombstone_successor_room_id"] = (
                         successor_room_id
                     )
@@ -2068,6 +2097,21 @@ class PersistEventsStore:
                     else None
                 )
 
+                # Check for null bytes in the room name and type. We have to
+                # ignore values with null bytes as Postgres doesn't allow them
+                # in text columns.
+                if (
+                    sliding_sync_insert_map["room_name"] is not None
+                    and "\0" in sliding_sync_insert_map["room_name"]
+                ):
+                    sliding_sync_insert_map.pop("room_name")
+
+                if (
+                    sliding_sync_insert_map["room_type"] is not None
+                    and "\0" in sliding_sync_insert_map["room_type"]
+                ):
+                    sliding_sync_insert_map.pop("room_type")
+
                 # Find the tombstone_successor_room_id
                 # Note: This isn't one of the stripped state events according to the spec
                 # but seems like there is no reason not to support this kind of thing.
@@ -2081,6 +2125,12 @@ class PersistEventsStore:
                     if tombstone_stripped_event is not None
                     else None
                 )
+
+                if (
+                    sliding_sync_insert_map["tombstone_successor_room_id"] is not None
+                    and "\0" in sliding_sync_insert_map["tombstone_successor_room_id"]
+                ):
+                    sliding_sync_insert_map.pop("tombstone_successor_room_id")
 
             else:
                 # No stripped state provided
@@ -2123,31 +2173,26 @@ class PersistEventsStore:
         if len(events_and_contexts) == 0:
             return
 
-        # We only update the sliding sync tables for non-backfilled events.
-        #
-        # Check if the first event is a backfilled event (with a negative
-        # `stream_ordering`). If one event is backfilled, we assume this whole batch was
-        # backfilled.
-        first_event_stream_ordering = events_and_contexts[0][
-            0
-        ].internal_metadata.stream_ordering
-        # This should exist for persisted events
-        assert first_event_stream_ordering is not None
-        if first_event_stream_ordering < 0:
-            return
-
         # Since the list is sorted ascending by `stream_ordering`, the last event should
         # have the highest `stream_ordering`.
         max_stream_ordering = events_and_contexts[-1][
             0
         ].internal_metadata.stream_ordering
+        # `stream_ordering` should be assigned for persisted events
+        assert max_stream_ordering is not None
+        # Check if the event is a backfilled event (with a negative `stream_ordering`).
+        # If one event is backfilled, we assume this whole batch was backfilled.
+        if max_stream_ordering < 0:
+            # We only update the sliding sync tables for non-backfilled events.
+            return
+
         max_bump_stamp = None
         for event, _ in reversed(events_and_contexts):
             # Sanity check that all events belong to the same room
             assert event.room_id == room_id
 
             if event.type in SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES:
-                # This should exist for persisted events
+                # `stream_ordering` should be assigned for persisted events
                 assert event.internal_metadata.stream_ordering is not None
 
                 max_bump_stamp = event.internal_metadata.stream_ordering
@@ -2155,11 +2200,6 @@ class PersistEventsStore:
                 # Since we're iterating in reverse, we can break as soon as we find a
                 # matching bump event which should have the highest `stream_ordering`.
                 break
-
-        # We should have exited earlier if there were no events
-        assert (
-            max_stream_ordering is not None
-        ), "Expected to have a stream_ordering if we have events"
 
         # Handle updating the `sliding_sync_joined_rooms` table.
         #

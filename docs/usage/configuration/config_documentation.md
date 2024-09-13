@@ -2329,6 +2329,22 @@ Example configuration:
 turn_shared_secret: "YOUR_SHARED_SECRET"
 ```
 ---
+### `turn_shared_secret_path`
+
+An alternative to [`turn_shared_secret`](#turn_shared_secret):
+allows the shared secret to be specified in an external file.
+
+The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.
+
+Example configuration:
+```yaml
+turn_shared_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.116.0._
+
+---
 ### `turn_username` and `turn_password`
 
 The Username and password if the TURN server needs them and does not use a token.

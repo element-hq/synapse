@@ -23,7 +23,12 @@ from typing import Any
 
 from synapse.types import JsonDict
 
-from ._base import Config
+from ._base import Config, ConfigError, read_file
+
+CONFLICTING_SHARED_SECRET_OPTS_ERROR = """\
+You have configured both `turn_shared_secret` and `turn_shared_secret_path`.
+These are mutually incompatible.
+"""
 
 
 class VoipConfig(Config):
@@ -32,6 +37,13 @@ class VoipConfig(Config):
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
         self.turn_uris = config.get("turn_uris", [])
         self.turn_shared_secret = config.get("turn_shared_secret")
+        turn_shared_secret_path = config.get("turn_shared_secret_path")
+        if turn_shared_secret_path:
+            if self.turn_shared_secret:
+                raise ConfigError(CONFLICTING_SHARED_SECRET_OPTS_ERROR)
+            self.turn_shared_secret = read_file(
+                turn_shared_secret_path, ("turn_shared_secret_path",)
+            ).strip()
         self.turn_username = config.get("turn_username")
         self.turn_password = config.get("turn_password")
         self.turn_user_lifetime = self.parse_duration(

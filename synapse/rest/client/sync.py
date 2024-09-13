@@ -1011,11 +1011,15 @@ class SlidingSyncRestServlet(RestServlet):
         for room_id, room_result in rooms.items():
             serialized_rooms[room_id] = {
                 "bump_stamp": room_result.bump_stamp,
-                "joined_count": room_result.joined_count,
-                "invited_count": room_result.invited_count,
                 "notification_count": room_result.notification_count,
                 "highlight_count": room_result.highlight_count,
             }
+
+            if room_result.joined_count is not None:
+                serialized_rooms[room_id]["joined_count"] = room_result.joined_count
+
+            if room_result.invited_count is not None:
+                serialized_rooms[room_id]["invited_count"] = room_result.invited_count
 
             if room_result.name:
                 serialized_rooms[room_id]["name"] = room_result.name
@@ -1040,7 +1044,7 @@ class SlidingSyncRestServlet(RestServlet):
                 serialized_rooms[room_id]["heroes"] = serialized_heroes
 
             # We should only include the `initial` key if it's `True` to save bandwidth.
-            # The absense of this flag means `False`.
+            # The absence of this flag means `False`.
             if room_result.initial:
                 serialized_rooms[room_id]["initial"] = room_result.initial
 
