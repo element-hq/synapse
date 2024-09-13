@@ -83,7 +83,7 @@ class DelayedEventsStore(SQLBaseStore):
         Inserts a new delayed event in the DB.
 
         Returns: The generated ID assigned to the added delayed event,
-            and whether the added delayed event is the next to be sent.
+            and whether the next delayed event is now this event instead.
         """
         delay_id = _generate_delay_id()
         send_ts = creation_ts + delay
