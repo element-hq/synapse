@@ -15,7 +15,6 @@ from synapse.replication.http.delayed_events import (
     ReplicationAddedDelayedEventRestServlet,
 )
 from synapse.storage.databases.main.delayed_events import (
-    Delay,
     DelayedEventDetails,
     DelayID,
     EventType,
@@ -178,13 +177,13 @@ class DelayedEventsHandler:
                 "Handling: %r %r, %s", delta.event_type, delta.state_key, delta.event_id
             )
 
-            changed, next_send_ts = await self._store.cancel_delayed_state_events(
+            next_send_ts = await self._store.cancel_delayed_state_events(
                 room_id=delta.room_id,
                 event_type=delta.event_type,
                 state_key=delta.state_key,
             )
 
-            if changed:
+            if self._next_send_ts_changed(next_send_ts):
                 self._schedule_next_at_or_none(next_send_ts)
 
     async def add(
@@ -233,7 +232,7 @@ class DelayedEventsHandler:
 
         creation_ts = self._get_current_ts()
 
-        delay_id, changed = await self._store.add_delayed_event(
+        delay_id, next_send_ts = await self._store.add_delayed_event(
             user_localpart=requester.user.localpart,
             device_id=requester.device_id,
             creation_ts=creation_ts,
@@ -245,23 +244,22 @@ class DelayedEventsHandler:
             delay=delay,
         )
 
-        if changed:
-            next_send_ts = creation_ts + delay
-            if self._repl_client is None:
-                self._schedule_next_at(Timestamp(next_send_ts))
-            else:
-                # NOTE: If this throws, the delayed event will remain in the DB and
-                # will be picked up once the main worker gets another delayed event
-                # with a sooner send time.
-                await self._repl_client(
-                    instance_name=MAIN_PROCESS_INSTANCE_NAME,
-                    next_send_ts=next_send_ts,
-                )
+        if self._repl_client is not None:
+            # NOTE: If this throws, the delayed event will remain in the DB and
+            # will be picked up once the main worker gets another delayed event.
+            await self._repl_client(
+                instance_name=MAIN_PROCESS_INSTANCE_NAME,
+                next_send_ts=next_send_ts,
+            )
+        elif self._next_send_ts_changed(next_send_ts):
+            self._schedule_next_at(next_send_ts)
 
         return delay_id
 
     def on_added(self, next_send_ts: int) -> None:
-        self._schedule_next_at(Timestamp(next_send_ts))
+        next_send_ts = Timestamp(next_send_ts)
+        if self._next_send_ts_changed(next_send_ts):
+            self._schedule_next_at(next_send_ts)
 
     async def cancel(self, requester: Requester, delay_id: str) -> None:
         """
@@ -278,12 +276,12 @@ class DelayedEventsHandler:
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        changed, next_send_ts = await self._store.cancel_delayed_event(
+        next_send_ts = await self._store.cancel_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
         )
 
-        if changed:
+        if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
     async def restart(self, requester: Requester, delay_id: str) -> None:
@@ -301,14 +299,14 @@ class DelayedEventsHandler:
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        changed_next_send_ts = await self._store.restart_delayed_event(
+        next_send_ts = await self._store.restart_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
             current_ts=self._get_current_ts(),
         )
 
-        if changed_next_send_ts is not None:
-            self._schedule_next_at(changed_next_send_ts)
+        if self._next_send_ts_changed(next_send_ts):
+            self._schedule_next_at(next_send_ts)
 
     async def send(self, requester: Requester, delay_id: str) -> None:
         """
@@ -325,12 +323,12 @@ class DelayedEventsHandler:
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
-        event, changed, next_send_ts = await self._store.process_target_delayed_event(
+        event, next_send_ts = await self._store.process_target_delayed_event(
             delay_id=delay_id,
             user_localpart=requester.user.localpart,
         )
 
-        if changed:
+        if self._next_send_ts_changed(next_send_ts):
             self._schedule_next_at_or_none(next_send_ts)
 
         await self._send_event(
@@ -386,9 +384,7 @@ class DelayedEventsHandler:
             self._next_delayed_event_call = None
 
     def _schedule_next_at(self, next_send_ts: Timestamp) -> None:
-        return self._schedule_next(self._get_delay_until(next_send_ts))
-
-    def _schedule_next(self, delay: Delay) -> None:
+        delay = next_send_ts - self._get_current_ts()
         delay_sec = delay / 1000 if delay > 0 else 0
 
         if self._next_delayed_event_call is None:
@@ -471,9 +467,14 @@ class DelayedEventsHandler:
     def _get_current_ts(self) -> Timestamp:
         return Timestamp(self._clock.time_msec())
 
-    def _get_delay_until(self, to_ts: Timestamp) -> Delay:
-        return _get_delay_between(self._get_current_ts(), to_ts)
-
-
-def _get_delay_between(from_ts: Timestamp, to_ts: Timestamp) -> Delay:
-    return Delay(to_ts - from_ts)
+    def _next_send_ts_changed(self, next_send_ts: Optional[Timestamp]) -> bool:
+        # The DB alone knows if the next send time changed after adding/modifying
+        # a delayed event, but if we were to ever miss updating our delayed call's
+        # firing time, we may miss other updates. So, keep track of changes to the
+        # the next send time here instead of in the DB.
+        cached_next_send_ts = (
+            int(self._next_delayed_event_call.getTime() * 1000)
+            if self._next_delayed_event_call is not None
+            else None
+        )
+        return next_send_ts != cached_next_send_ts

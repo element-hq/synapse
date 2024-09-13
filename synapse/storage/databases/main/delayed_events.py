@@ -78,19 +78,18 @@ class DelayedEventsStore(SQLBaseStore):
         origin_server_ts: Optional[int],
         content: JsonDict,
         delay: int,
-    ) -> Tuple[DelayID, bool]:
+    ) -> Tuple[DelayID, Timestamp]:
         """
         Inserts a new delayed event in the DB.
 
         Returns: The generated ID assigned to the added delayed event,
-            and whether the next delayed event is now this event instead.
+            and the send time of the next delayed event to be sent,
+            which is either the event just added or one added earlier.
         """
         delay_id = _generate_delay_id()
-        send_ts = creation_ts + delay
+        send_ts = Timestamp(creation_ts + delay)
 
-        def add_delayed_event_txn(txn: LoggingTransaction) -> bool:
-            old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-
+        def add_delayed_event_txn(txn: LoggingTransaction) -> Timestamp:
             self.db_pool.simple_insert_txn(
                 txn,
                 table="delayed_events",
@@ -108,13 +107,15 @@ class DelayedEventsStore(SQLBaseStore):
                 },
             )
 
-            return old_next_send_ts is None or send_ts < old_next_send_ts
+            next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
+            assert next_send_ts is not None
+            return next_send_ts
 
-        changed = await self.db_pool.runInteraction(
+        next_send_ts = await self.db_pool.runInteraction(
             "add_delayed_event", add_delayed_event_txn
         )
 
-        return delay_id, changed
+        return delay_id, next_send_ts
 
     async def restart_delayed_event(
         self,
@@ -122,7 +123,7 @@ class DelayedEventsStore(SQLBaseStore):
         delay_id: str,
         user_localpart: str,
         current_ts: Timestamp,
-    ) -> Optional[Timestamp]:
+    ) -> Timestamp:
         """
         Restarts the send time of the matching delayed event,
         as long as it hasn't already been marked for processing.
@@ -132,9 +133,9 @@ class DelayedEventsStore(SQLBaseStore):
             user_localpart: The localpart of the delayed event's owner.
             current_ts: The current time, which will be used to calculate the new send time.
 
-        Returns: None if the matching delayed event would not have been the next to be sent;
-            otherwise, the send time of the next delayed event to be sent (which may be the
-            matching delayed event, or another one sent before it).
+        Returns: The send time of the next delayed event to be sent,
+            which is either the event just restarted, or another one
+            with an earlier send time than the restarted one's new send time.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -142,49 +143,14 @@ class DelayedEventsStore(SQLBaseStore):
 
         def restart_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Optional[Timestamp]:
+        ) -> Timestamp:
             txn.execute(
                 """
-                SELECT delay_id, user_localpart, send_ts
-                FROM delayed_events
-                WHERE NOT is_processed
-                ORDER BY send_ts
-                LIMIT 2
-                """
-            )
-            if txn.rowcount == 0:
-                # Return early if there are no delayed events at all
-                raise NotFoundError("Delayed event not found")
-
-            if txn.rowcount == 1:
-                # The restarted event is the only event
-                changed = True
-                second_next_send_ts = None
-            else:
-                next_event, second_next_event = txn.fetchmany(2)
-                if (
-                    # The restarted event is the next to be sent
-                    delay_id == next_event[0]
-                    and user_localpart == next_event[1]
-                    # The next two events to be sent aren't scheduled at the same time
-                    and next_event[2] != second_next_event[2]
-                ):
-                    changed = True
-                    second_next_send_ts = Timestamp(second_next_event[2])
-                else:
-                    changed = False
-
-            sql_base = """
                 UPDATE delayed_events
                 SET send_ts = ? + delay
                 WHERE delay_id = ? AND user_localpart = ?
                     AND NOT is_processed
-                """
-            if changed and self.database_engine.supports_returning:
-                sql_base += "RETURNING send_ts"
-
-            txn.execute(
-                sql_base,
+                """,
                 (
                     current_ts,
                     delay_id,
@@ -194,32 +160,9 @@ class DelayedEventsStore(SQLBaseStore):
             if txn.rowcount == 0:
                 raise NotFoundError("Delayed event not found")
 
-            if changed:
-                if self.database_engine.supports_returning:
-                    row = txn.fetchone()
-                    assert row is not None
-                    restarted_send_ts = Timestamp(row[0])
-                else:
-                    restarted_send_ts = Timestamp(
-                        self.db_pool.simple_select_one_onecol_txn(
-                            txn,
-                            table="delayed_events",
-                            keyvalues={
-                                "delay_id": delay_id,
-                                "user_localpart": user_localpart,
-                                "is_processed": False,
-                            },
-                            retcol="send_ts",
-                        )
-                    )
-
-                return (
-                    restarted_send_ts
-                    if second_next_send_ts is None
-                    else min(restarted_send_ts, second_next_send_ts)
-                )
-
-            return None
+            next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
+            assert next_send_ts is not None
+            return next_send_ts
 
         return await self.db_pool.runInteraction(
             "restart_delayed_event", restart_delayed_event_txn
@@ -350,7 +293,6 @@ class DelayedEventsStore(SQLBaseStore):
         user_localpart: str,
     ) -> Tuple[
         EventDetails,
-        bool,
         Optional[Timestamp],
     ]:
         """
@@ -362,7 +304,6 @@ class DelayedEventsStore(SQLBaseStore):
             user_localpart: The localpart of the delayed event's owner.
 
         Returns: The details of the matching delayed event,
-            whether the matching delayed event would have been the next to be sent,
             and the send time of the next delayed event to be sent, if any.
 
         Raises:
@@ -373,7 +314,6 @@ class DelayedEventsStore(SQLBaseStore):
             txn: LoggingTransaction,
         ) -> Tuple[
             EventDetails,
-            bool,
             Optional[Timestamp],
         ]:
             sql_cols = ", ".join(
@@ -405,18 +345,16 @@ class DelayedEventsStore(SQLBaseStore):
                 txn.execute(f"{sql_update} {sql_where}", sql_args)
                 assert txn.rowcount == 1
 
-            send_ts = Timestamp(row[4])
             event = EventDetails(
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,
-                Timestamp(row[3]) if row[3] is not None else send_ts,
+                Timestamp(row[3]) if row[3] is not None else Timestamp(row[4]),
                 db_to_json(row[5]),
                 DeviceID(row[6]) if row[6] is not None else None,
             )
 
-            next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-            return event, next_send_ts != send_ts, next_send_ts
+            return event, self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(
             "process_target_delayed_event", process_target_delayed_event_txn
@@ -427,7 +365,7 @@ class DelayedEventsStore(SQLBaseStore):
         *,
         delay_id: str,
         user_localpart: str,
-    ) -> Tuple[bool, Optional[Timestamp]]:
+    ) -> Optional[Timestamp]:
         """
         Cancels the matching delayed event, i.e. remove it as long as it hasn't been processed.
 
@@ -435,8 +373,7 @@ class DelayedEventsStore(SQLBaseStore):
             delay_id: The ID of the delayed event to restart.
             user_localpart: The localpart of the delayed event's owner.
 
-        Returns: Whether the matching delayed event would have been the next to be sent,
-            and if so, what the next soonest send time is, if any.
+        Returns: The send time of the next delayed event to be sent, if any.
 
         Raises:
             NotFoundError: if there is no matching delayed event.
@@ -444,12 +381,7 @@ class DelayedEventsStore(SQLBaseStore):
 
         def cancel_delayed_event_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, Optional[Timestamp]]:
-            old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-            if old_next_send_ts is None:
-                # Return early if there are no delayed events at all
-                raise NotFoundError("Delayed event not found")
-
+        ) -> Optional[Timestamp]:
             try:
                 self.db_pool.simple_delete_one_txn(
                     txn,
@@ -466,8 +398,7 @@ class DelayedEventsStore(SQLBaseStore):
                 else:
                     raise
 
-            new_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-            return new_next_send_ts != old_next_send_ts, new_next_send_ts
+            return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(
             "cancel_delayed_event", cancel_delayed_event_txn
@@ -479,37 +410,27 @@ class DelayedEventsStore(SQLBaseStore):
         room_id: str,
         event_type: str,
         state_key: str,
-    ) -> Tuple[bool, Optional[Timestamp]]:
+    ) -> Optional[Timestamp]:
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
 
-        Returns: Whether any of the matching delayed events would have been the next to be sent,
-            and if so, what the next soonest send time is, if any.
+        Returns: The send time of the next delayed event to be sent, if any.
         """
 
         def cancel_delayed_state_events_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[bool, Optional[Timestamp]]:
-            old_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-
-            if (
-                self.db_pool.simple_delete_txn(
-                    txn,
-                    table="delayed_events",
-                    keyvalues={
-                        "room_id": room_id,
-                        "event_type": event_type,
-                        "state_key": state_key,
-                        "is_processed": False,
-                    },
-                )
-                > 0
-            ):
-                assert old_next_send_ts is not None
-                new_next_send_ts = self._get_next_delayed_event_send_ts_txn(txn)
-                return new_next_send_ts != old_next_send_ts, new_next_send_ts
-
-            return False, None
+        ) -> Optional[Timestamp]:
+            self.db_pool.simple_delete_txn(
+                txn,
+                table="delayed_events",
+                keyvalues={
+                    "room_id": room_id,
+                    "event_type": event_type,
+                    "state_key": state_key,
+                    "is_processed": False,
+                },
+            )
+            return self._get_next_delayed_event_send_ts_txn(txn)
 
         return await self.db_pool.runInteraction(
             "cancel_delayed_state_events", cancel_delayed_state_events_txn
