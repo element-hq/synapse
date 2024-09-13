@@ -394,7 +394,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_global_account_data_for_user(
         self, user_id: str, stream_id: int
-    ) -> Mapping[str, JsonMapping]:
+    ) -> Dict[str, JsonMapping]:
         """Get all the global account_data that's changed for a user.
 
         Args:
@@ -407,7 +407,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_global_account_data_for_user(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonDict]:
+        ) -> Dict[str, JsonMapping]:
             sql = """
                 SELECT account_data_type, content FROM account_data
                 WHERE user_id = ? AND stream_id > ?

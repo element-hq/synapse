@@ -17,11 +17,14 @@ import logging
 from typing import (
     TYPE_CHECKING,
     AbstractSet,
+    ChainMap,
     Dict,
     Mapping,
+    MutableMapping,
     Optional,
     Sequence,
     Set,
+    cast,
 )
 
 from typing_extensions import assert_never
@@ -388,12 +391,11 @@ class SlidingSyncExtensionHandler:
                 )
             )
 
+            # TODO: This should take into account the `from_token` and `to_token`
             have_push_rules_changed = await self.store.have_push_rules_changed_for_user(
                 user_id, from_token.stream_token.push_rules_key
             )
             if have_push_rules_changed:
-                global_account_data_map = dict(global_account_data_map)
-                # TODO: This should take into account the `from_token` and `to_token`
                 global_account_data_map[
                     AccountDataTypes.PUSH_RULES
                 ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
@@ -403,16 +405,20 @@ class SlidingSyncExtensionHandler:
                 await self.store.get_global_account_data_for_user(user_id)
             )
 
-            # We have to make a copy of the immutable data from the cache as we will
-            # be mutating it below.
-            #
-            # FIXME: It would be good to avoid this big copy
-            global_account_data_map = dict(immutable_global_account_data_map)
-
-            # TODO: This should take into account the `to_token`
-            global_account_data_map[
-                AccountDataTypes.PUSH_RULES
-            ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
+            # Use a `ChainMap` to avoid copying the immutable data from the cache
+            global_account_data_map = ChainMap(
+                {
+                    # TODO: This should take into account the `to_token`
+                    AccountDataTypes.PUSH_RULES: await self.push_rules_handler.push_rules_for_user(
+                        sync_config.user
+                    )
+                },
+                # Cast is safe because `ChainMap` only mutates the top-most map,
+                # see https://github.com/python/typeshed/issues/8430
+                cast(
+                    MutableMapping[str, JsonMapping], immutable_global_account_data_map
+                ),
+            )
 
         # Fetch room account data
         #
