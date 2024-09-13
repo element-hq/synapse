@@ -7,9 +7,13 @@ from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import ShadowBanError
+from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import event_processing_positions
 from synapse.metrics.background_process_metrics import run_as_background_process
+from synapse.replication.http.delayed_events import (
+    ReplicationAddedDelayedEventRestServlet,
+)
 from synapse.storage.databases.main.delayed_events import (
     Delay,
     DelayedEventDetails,
@@ -54,43 +58,46 @@ class DelayedEventsHandler:
         # Guard to ensure we only process event deltas one at a time
         self._event_processing = False
 
-        if hs.config.worker.run_background_tasks:
+        if hs.config.worker.worker_app is None:
             hs.get_notifier().add_replication_callback(self.notify_new_event)
 
             # We kick this off to pick up outstanding work from before the last restart.
             self._clock.call_later(0, self.notify_new_event)
 
-        # TODO: Refactor or remove this
-        async def _schedule_db_events() -> None:
-            # Delayed events that are already marked as processed on startup might not have been
-            # sent properly on the last run of the server, so unmark them to send them again.
-            # Caveats:
-            # - This will double-send delayed events that successfully persisted, but failed to be
-            #   removed from the DB table of delayed events.
-            # - This will interfere with workers that are in the act of processing delayed events.
-            # TODO: To avoid double-sending, scan the timeline to find which of these events were
-            # already sent. To do so, must store delay_ids in sent events to retrieve them later.
-            # TODO: To avoid interfering with workers, think of a way to distinguish between
-            # events being processed by a worker vs ones that got lost after a server crash.
-            await self._store.unprocess_delayed_events()
+            self._repl_client = None
 
-            events, next_send_ts = await self._store.process_timeout_delayed_events(
-                self._get_current_ts()
+            async def _schedule_db_events() -> None:
+                # Delayed events that are already marked as processed on startup might not have been
+                # sent properly on the last run of the server, so unmark them to send them again.
+                # Caveat: this will double-send delayed events that successfully persisted, but failed
+                # to be removed from the DB table of delayed events.
+                # TODO: To avoid double-sending, scan the timeline to find which of these events were
+                # already sent. To do so, must store delay_ids in sent events to retrieve them later.
+                await self._store.unprocess_delayed_events()
+
+                events, next_send_ts = await self._store.process_timeout_delayed_events(
+                    self._get_current_ts()
+                )
+
+                if next_send_ts:
+                    self._schedule_next_at(next_send_ts)
+
+                # Can send the events in background after having awaited on marking them as processed
+                run_as_background_process(
+                    "_send_events",
+                    self._send_events,
+                    events,
+                )
+
+            self._initialized_from_db = run_as_background_process(
+                "_schedule_db_events", _schedule_db_events
             )
+        else:
+            self._repl_client = ReplicationAddedDelayedEventRestServlet.make_client(hs)
 
-            if next_send_ts:
-                self._schedule_next_at(next_send_ts)
-
-            # Can send the events in background after having awaited on marking them as processed
-            run_as_background_process(
-                "_send_events",
-                self._send_events,
-                events,
-            )
-
-        self._initialized_from_db = run_as_background_process(
-            "_schedule_db_events", _schedule_db_events
-        )
+    @property
+    def _is_master(self) -> bool:
+        return self._repl_client is None
 
     def notify_new_event(self) -> None:
         """
@@ -207,7 +214,6 @@ class DelayedEventsHandler:
             SynapseError: if the delayed event fails validation checks.
         """
         await self._request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
 
         self._event_creation_handler.validator.validate_builder(
             self._event_creation_handler.event_builder_factory.for_room_version(
@@ -237,9 +243,22 @@ class DelayedEventsHandler:
         )
 
         if changed:
-            self._schedule_next_at(Timestamp(creation_ts + delay))
+            next_send_ts = creation_ts + delay
+            if self._repl_client is None:
+                self._schedule_next_at(Timestamp(next_send_ts))
+            else:
+                # NOTE: If this throws, the delayed event will remain in the DB and
+                # will be picked up once the main worker gets another delayed event
+                # with a sooner send time.
+                await self._repl_client(
+                    instance_name=MAIN_PROCESS_INSTANCE_NAME,
+                    next_send_ts=next_send_ts,
+                )
 
         return delay_id
+
+    def on_added(self, next_send_ts: int) -> None:
+        self._schedule_next_at(Timestamp(next_send_ts))
 
     async def cancel(self, requester: Requester, delay_id: str) -> None:
         """
@@ -252,6 +271,7 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
+        assert self._is_master
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
@@ -274,6 +294,7 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
+        assert self._is_master
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
@@ -297,6 +318,7 @@ class DelayedEventsHandler:
         Raises:
             NotFoundError: if no matching delayed event could be found.
         """
+        assert self._is_master
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
@@ -379,7 +401,6 @@ class DelayedEventsHandler:
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._request_ratelimiter.ratelimit(requester)
-        await self._initialized_from_db
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart
         )

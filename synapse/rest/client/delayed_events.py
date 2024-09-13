@@ -93,5 +93,7 @@ class DelayedEventsServlet(RestServlet):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    UpdateDelayedEventServlet(hs).register(http_server)
+    # The following can't currently be instantiated on workers.
+    if hs.config.worker.worker_app is None:
+        UpdateDelayedEventServlet(hs).register(http_server)
     DelayedEventsServlet(hs).register(http_server)
