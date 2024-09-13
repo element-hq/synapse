@@ -59,14 +59,17 @@ class DelayedEventsHandler:
         self._event_processing = False
 
         if hs.config.worker.worker_app is None:
-            hs.get_notifier().add_replication_callback(self.notify_new_event)
-
-            # We kick this off to pick up outstanding work from before the last restart.
-            self._clock.call_later(0, self.notify_new_event)
-
             self._repl_client = None
 
             async def _schedule_db_events() -> None:
+                # We kick this off to pick up outstanding work from before the last restart.
+                # Block until we're up to date.
+                await self._unsafe_process_new_event()
+                hs.get_notifier().add_replication_callback(self.notify_new_event)
+                # Kick off again (without blocking) to catch any missed notifications
+                # that may have fired before the callback was added.
+                self._clock.call_later(0, self.notify_new_event)
+
                 # Delayed events that are already marked as processed on startup might not have been
                 # sent properly on the last run of the server, so unmark them to send them again.
                 # Caveat: this will double-send delayed events that successfully persisted, but failed
