@@ -478,19 +478,30 @@ class SlidingSyncExtensionHandler:
                 )
 
         # Filter down to the relevant rooms ... and combine the maps
-        relevant_account_data_by_room_map: Mapping[str, Mapping[str, JsonMapping]] = {
-            room_id: ChainMap(
-                {},
-                *(
-                    # Cast is safe because `ChainMap` only mutates the top-most map,
-                    # see https://github.com/python/typeshed/issues/8430
-                    cast(MutableMapping[str, JsonMapping], room_map[room_id])
-                    for room_map in account_data_by_room_maps
-                    if room_map.get(room_id)
-                ),
-            )
-            for room_id in relevant_room_ids
-        }
+        relevant_account_data_by_room_map: MutableMapping[
+            str, Mapping[str, JsonMapping]
+        ] = {}
+        for room_id in relevant_room_ids:
+            # We want to avoid adding empty maps for relevant rooms that have no room
+            # account data so do a quick check to see if it's in any of the maps.
+            is_room_in_maps = False
+            for room_map in account_data_by_room_maps:
+                if room_id in room_map:
+                    is_room_in_maps = True
+                    break
+
+            # If we found the room in any of the maps, combine the maps for that room
+            if is_room_in_maps:
+                relevant_account_data_by_room_map[room_id] = ChainMap(
+                    {},
+                    *(
+                        # Cast is safe because `ChainMap` only mutates the top-most map,
+                        # see https://github.com/python/typeshed/issues/8430
+                        cast(MutableMapping[str, JsonMapping], room_map[room_id])
+                        for room_map in account_data_by_room_maps
+                        if room_map.get(room_id)
+                    ),
+                )
 
         return SlidingSyncResult.Extensions.AccountDataExtension(
             global_account_data_map=global_account_data_map,
