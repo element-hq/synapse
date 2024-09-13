@@ -427,7 +427,7 @@ class SlidingSyncExtensionHandler:
         # account data events.
         #
         # This is is a list so we can avoid making copies of immutable data and instead
-        # just provide a multiple maps that need to be combined. Normally, we could
+        # just provide multiple maps that need to be combined. Normally, we could
         # reach for `ChainMap` in this scenario, but this is a nested map and accessing
         # the ChainMap by room_id won't combine the two maps for that room (we would
         # need a new `NestedChainMap` type class).
