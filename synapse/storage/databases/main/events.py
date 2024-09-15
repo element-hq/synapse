@@ -31,6 +31,7 @@ from typing import (
     Generator,
     Iterable,
     List,
+    Mapping,
     Optional,
     Sequence,
     Set,
@@ -271,6 +272,7 @@ class PersistEventsStore:
         new_event_links: Dict[str, NewEventChainLinks],
         use_negative_stream_ordering: bool = False,
         inhibit_local_membership_updates: bool = False,
+        visibilities: Mapping[str, str] = {},
     ) -> None:
         """Persist a set of events alongside updates to the current state and
                 forward extremities tables.
@@ -355,6 +357,7 @@ class PersistEventsStore:
                 new_forward_extremities=new_forward_extremities,
                 new_event_links=new_event_links,
                 sliding_sync_table_changes=sliding_sync_table_changes,
+                visibilities=visibilities,
             )
             persist_event_counter.inc(len(events_and_contexts))
 
@@ -874,6 +877,7 @@ class PersistEventsStore:
         new_forward_extremities: Optional[Set[str]],
         new_event_links: Dict[str, NewEventChainLinks],
         sliding_sync_table_changes: Optional[SlidingSyncTableChanges],
+        visibilities: Mapping[str, str] = {},
     ) -> None:
         """Insert some number of room events into the necessary database tables.
 
@@ -1026,6 +1030,52 @@ class PersistEventsStore:
         self._update_sliding_sync_tables_with_new_persisted_events_txn(
             txn, room_id, events_and_contexts
         )
+
+        changes = [
+            (visibilities[event.event_id], event.internal_metadata.stream_ordering)
+            for event, context in events_and_contexts
+            if event.event_id in visibilities
+        ]
+
+        if changes:
+            sql = """
+                SELECT visibility, start_range FROM history_visibility_ranges
+                WHERE room_id = ?
+                ORDER BY start_range DESC
+                LIMIT 1
+            """
+            txn.execute(sql, (room_id,))
+            row = txn.fetchone()
+            prev_visibility = None
+            start_range = None
+            if row:
+                (
+                    prev_visibility,
+                    start_range,
+                ) = row
+
+            for new_visibility, stream_ordering in changes:
+                assert stream_ordering is not None
+                if new_visibility != prev_visibility:
+                    if start_range is not None:
+                        self.db_pool.simple_update_one_txn(
+                            txn,
+                            table="history_visibility_ranges",
+                            keyvalues={"room_id": room_id, "start_range": start_range},
+                            updatevalues={"end_range": stream_ordering},
+                        )
+                    self.db_pool.simple_insert_txn(
+                        txn,
+                        table="history_visibility_ranges",
+                        values={
+                            "room_id": room_id,
+                            "visibility": new_visibility,
+                            "start_range": stream_ordering,
+                            "end_range": None,
+                        },
+                    )
+                    prev_visibility = new_visibility
+                    start_range = stream_ordering
 
     def _persist_event_auth_chain_txn(
         self,
