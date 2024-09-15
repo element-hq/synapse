@@ -14,11 +14,12 @@
 
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, cast
+from typing import TYPE_CHECKING, Collection, Dict, List, Mapping, Optional, Set, cast
 
 import attr
 
 from synapse.api.errors import SlidingSyncUnknownPosition
+from synapse.events import EventBase
 from synapse.logging.opentracing import log_kv
 from synapse.storage._base import SQLBaseStore, db_to_json
 from synapse.storage.database import LoggingTransaction
@@ -449,6 +450,38 @@ class SlidingSyncStore(SQLBaseStore):
             receipts=RoomStatusMap(receipts),
             account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
+        )
+
+    async def get_visibility_for_events(
+        self, room_id: str, events: Collection[EventBase]
+    ) -> Mapping[str, Optional[str]]:
+        def get_visibility_for_events_txn(
+            txn: LoggingTransaction,
+        ) -> Mapping[str, Optional[str]]:
+            sql = """
+                SELECT visibility FROM history_visibility_ranges
+                WHERE start_range <= ? AND (? < end_range OR end_range IS NULL)
+                    AND room_id = ?
+            """
+
+            results = {}
+            for event in events:
+                txn.execute(
+                    sql,
+                    (
+                        event.internal_metadata.stream_ordering,
+                        event.internal_metadata.stream_ordering,
+                        room_id,
+                    ),
+                )
+                row = txn.fetchone()
+                if row is not None:
+                    results[event.event_id] = row[0]
+
+            return results
+
+        return await self.db_pool.runInteraction(
+            "get_visibility_for_events", get_visibility_for_events_txn
         )
 
 
