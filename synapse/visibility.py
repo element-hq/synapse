@@ -105,8 +105,6 @@ async def filter_events_for_client(
         The filtered events. The `unsigned` data is annotated with the membership state
         of `user_id` at each event.
     """
-    if not events:
-        return []
 
     # Filter out events that have been soft failed so that we don't relay them
     # to clients.
@@ -124,6 +122,9 @@ async def filter_events_for_client(
         _HISTORY_VIS_KEY,
         (EventTypes.Member, user_id),
     )
+
+    if not events:
+        return []
 
     room_id = events[0].room_id
     assert all(event.room_id == room_id for event in events)
