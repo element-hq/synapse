@@ -25,21 +25,21 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use anyhow::Error;
-use pyo3::prelude::*;
+use pyo3::{prelude::*, pybacked::PyBackedStr};
 use regex::Regex;
 
 use crate::push::utils::{glob_to_regex, GlobMatchType};
 
 /// Called when registering modules with python.
-pub fn register_module(py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    let child_module = PyModule::new(py, "acl")?;
+pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let child_module = PyModule::new_bound(py, "acl")?;
     child_module.add_class::<ServerAclEvaluator>()?;
 
-    m.add_submodule(child_module)?;
+    m.add_submodule(&child_module)?;
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import acl` work.
-    py.import("sys")?
+    py.import_bound("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.acl", child_module)?;
 
@@ -59,8 +59,8 @@ impl ServerAclEvaluator {
     #[new]
     pub fn py_new(
         allow_ip_literals: bool,
-        allow: Vec<&str>,
-        deny: Vec<&str>,
+        allow: Vec<PyBackedStr>,
+        deny: Vec<PyBackedStr>,
     ) -> Result<Self, Error> {
         let allow = allow
             .iter()

@@ -128,6 +128,10 @@ class Codes(str, Enum):
     # MSC2677
     DUPLICATE_ANNOTATION = "M_DUPLICATE_ANNOTATION"
 
+    # MSC3575 we are telling the client they need to expire their sliding sync
+    # connection.
+    UNKNOWN_POS = "M_UNKNOWN_POS"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
@@ -846,4 +850,18 @@ class PartialStateConflictError(SynapseError):
             HTTPStatus.CONFLICT,
             msg=PartialStateConflictError.message(),
             errcode=Codes.UNKNOWN,
+        )
+
+
+class SlidingSyncUnknownPosition(SynapseError):
+    """An error that Synapse can return to signal to the client to expire their
+    sliding sync connection (i.e. send a new request without a `?since=`
+    param).
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            HTTPStatus.BAD_REQUEST,
+            msg="Unknown position",
+            errcode=Codes.UNKNOWN_POS,
         )

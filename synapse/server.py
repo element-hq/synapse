@@ -28,12 +28,13 @@
 import abc
 import functools
 import logging
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Type, TypeVar, cast
 
 from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
+from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
@@ -109,6 +110,7 @@ from synapse.handlers.room_summary import RoomSummaryHandler
 from synapse.handlers.search import SearchHandler
 from synapse.handlers.send_email import SendEmailHandler
 from synapse.handlers.set_password import SetPasswordHandler
+from synapse.handlers.sliding_sync import SlidingSyncHandler
 from synapse.handlers.sso import SsoHandler
 from synapse.handlers.stats import StatsHandler
 from synapse.handlers.sync import SyncHandler
@@ -122,6 +124,7 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
+from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -143,6 +146,7 @@ from synapse.state import StateHandler, StateResolutionHandler
 from synapse.storage import Databases
 from synapse.storage.controllers import StorageControllers
 from synapse.streams.events import EventSources
+from synapse.synapse_rust.rendezvous import RendezvousHandler
 from synapse.types import DomainSpecificString, ISynapseReactor
 from synapse.util import Clock
 from synapse.util.distributor import Distributor
@@ -159,6 +163,7 @@ if TYPE_CHECKING:
     from synapse.handlers.jwt import JwtHandler
     from synapse.handlers.oidc import OidcHandler
     from synapse.handlers.saml import SamlHandler
+    from synapse.storage._base import SQLBaseStore
 
 
 # The annotation for `cache_in_self` used to be
@@ -253,10 +258,13 @@ class HomeServer(metaclass=abc.ABCMeta):
         "stats",
     ]
 
-    # This is overridden in derived application classes
-    # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
-    # instantiated during setup() for future return by get_datastores()
-    DATASTORE_CLASS = abc.abstractproperty()
+    @property
+    @abc.abstractmethod
+    def DATASTORE_CLASS(self) -> Type["SQLBaseStore"]:
+        # This is overridden in derived application classes
+        # (such as synapse.app.homeserver.SynapseHomeServer) and gives the class to be
+        # instantiated during setup() for future return by get_datastores()
+        pass
 
     def __init__(
         self,
@@ -552,6 +560,10 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_sync_handler(self) -> SyncHandler:
         return SyncHandler(self)
+
+    @cache_in_self
+    def get_sliding_sync_handler(self) -> SlidingSyncHandler:
+        return SlidingSyncHandler(self)
 
     @cache_in_self
     def get_room_list_handler(self) -> RoomListHandler:
@@ -860,6 +872,10 @@ class HomeServer(metaclass=abc.ABCMeta):
         return RoomForgetterHandler(self)
 
     @cache_in_self
+    def get_rendezvous_handler(self) -> RendezvousHandler:
+        return RendezvousHandler(self)
+
+    @cache_in_self
     def get_outbound_redis_connection(self) -> "ConnectionHandler":
         """
         The Redis connection used for replication.
@@ -927,3 +943,24 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_task_scheduler(self) -> TaskScheduler:
         return TaskScheduler(self)
+
+    @cache_in_self
+    def get_media_sender_thread_pool(self) -> ThreadPool:
+        """Fetch the threadpool used to read files when responding to media
+        download requests."""
+
+        # We can choose a large threadpool size as these threads predominately
+        # do IO rather than CPU work.
+        media_threadpool = ThreadPool(
+            name="media_threadpool", minthreads=1, maxthreads=50
+        )
+
+        media_threadpool.start()
+        self.get_reactor().addSystemEventTrigger(
+            "during", "shutdown", media_threadpool.stop
+        )
+
+        # Register the threadpool with our metrics.
+        register_threadpool("media", media_threadpool)
+
+        return media_threadpool

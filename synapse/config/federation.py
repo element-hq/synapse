@@ -42,6 +42,10 @@ class FederationConfig(Config):
             for domain in federation_domain_whitelist:
                 self.federation_domain_whitelist[domain] = True
 
+        self.federation_whitelist_endpoint_enabled = config.get(
+            "federation_whitelist_endpoint_enabled", False
+        )
+
         federation_metrics_domains = config.get("federation_metrics_domains") or []
         validate_config(
             _METRICS_FOR_DOMAINS_SCHEMA,

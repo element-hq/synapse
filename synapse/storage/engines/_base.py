@@ -28,6 +28,11 @@ if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
 
 
+# A string that will be replaced with the appropriate auto increment directive
+# for the database engine, expands to an auto incrementing integer primary key.
+AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER = "$%AUTO_INCREMENT_PRIMARY_KEY%$"
+
+
 class IsolationLevel(IntEnum):
     READ_COMMITTED: int = 1
     REPEATABLE_READ: int = 2

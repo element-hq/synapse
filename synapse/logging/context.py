@@ -20,7 +20,7 @@
 #
 #
 
-""" Thread-local-alike tracking of log contexts within synapse
+"""Thread-local-alike tracking of log contexts within synapse
 
 This module provides objects and utilities for tracking contexts through
 synapse code, so that log lines can include a request identifier, and so that
@@ -29,6 +29,7 @@ them.
 
 See doc/log_contexts.rst for details on how this works.
 """
+
 import logging
 import threading
 import typing
@@ -751,7 +752,7 @@ def preserve_fn(
     f: Union[
         Callable[P, R],
         Callable[P, Awaitable[R]],
-    ]
+    ],
 ) -> Callable[P, "defer.Deferred[R]"]:
     """Function decorator which wraps the function with run_in_background"""
 

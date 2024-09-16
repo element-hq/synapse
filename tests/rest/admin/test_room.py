@@ -21,6 +21,7 @@
 import json
 import time
 import urllib.parse
+from http import HTTPStatus
 from typing import List, Optional
 from unittest.mock import AsyncMock, Mock
 
@@ -1794,6 +1795,83 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(room_id, channel.json_body["rooms"][0].get("room_id"))
         self.assertEqual("ж", channel.json_body["rooms"][0].get("name"))
 
+    def test_filter_public_rooms(self) -> None:
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=False
+        )
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(3, response.json_body["total_rooms"])
+        self.assertEqual(3, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?public_rooms=true",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(2, response.json_body["total_rooms"])
+        self.assertEqual(2, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?public_rooms=false",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(1, response.json_body["total_rooms"])
+        self.assertEqual(1, len(response.json_body["rooms"]))
+
+    def test_filter_empty_rooms(self) -> None:
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=True
+        )
+        room_id = self.helper.create_room_as(
+            self.admin_user, tok=self.admin_user_tok, is_public=False
+        )
+        self.helper.leave(room_id, self.admin_user, tok=self.admin_user_tok)
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(3, response.json_body["total_rooms"])
+        self.assertEqual(3, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?empty_rooms=false",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(2, response.json_body["total_rooms"])
+        self.assertEqual(2, len(response.json_body["rooms"]))
+
+        response = self.make_request(
+            "GET",
+            "/_synapse/admin/v1/rooms?empty_rooms=true",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, response.code, msg=response.json_body)
+        self.assertEqual(1, response.json_body["total_rooms"])
+        self.assertEqual(1, len(response.json_body["rooms"]))
+
     def test_single_room(self) -> None:
         """Test that a single room can be requested correctly"""
         # Create two test rooms
@@ -2190,6 +2268,33 @@ class RoomMessagesTestCase(unittest.HomeserverTestCase):
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
 
+    def test_room_message_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.room_id}/messages?dir=b&filter={valid_filter_str}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{self.room_id}/messages?dir=b&filter={invalid_filter_str}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
+
 
 class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -2521,6 +2626,39 @@ class JoinAliasRoomTestCase(unittest.HomeserverTestCase):
                     break
             else:
                 self.fail("Event %s from events_after not found" % j)
+
+    def test_room_event_context_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+
+        # Create a user with room and event_id.
+        user_id = self.register_user("test", "test")
+        user_tok = self.login("test", "test")
+        room_id = self.helper.create_room_as(user_id, tok=user_tok)
+        event_id = self.helper.send(room_id, "message 1", tok=user_tok)["event_id"]
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/context/{event_id}?filter={valid_filter_str}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/context/{event_id}?filter={invalid_filter_str}",
+            access_token=self.admin_user_tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
 
 
 class MakeRoomAdminTestCase(unittest.HomeserverTestCase):

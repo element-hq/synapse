@@ -660,6 +660,7 @@ class TransactionWorkerStore(CacheInvalidationWorkerStore):
                     limit=limit,
                     retcols=("room_id", "stream_ordering"),
                     order_direction=order,
+                    keyvalues={"destination": destination},
                 ),
             )
             return rooms, count

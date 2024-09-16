@@ -24,7 +24,7 @@ import tempfile
 from binascii import unhexlify
 from io import BytesIO
 from typing import Any, BinaryIO, ClassVar, Dict, List, Optional, Tuple, Union
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 from urllib import parse
 
 import attr
@@ -36,9 +36,12 @@ from twisted.internet import defer
 from twisted.internet.defer import Deferred
 from twisted.python.failure import Failure
 from twisted.test.proto_helpers import MemoryReactor
+from twisted.web.http_headers import Headers
+from twisted.web.iweb import UNKNOWN_LENGTH, IResponse
 from twisted.web.resource import Resource
 
 from synapse.api.errors import Codes, HttpResponseException
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.events import EventBase
 from synapse.http.types import QueryParams
 from synapse.logging.context import make_deferred_yieldable
@@ -46,11 +49,11 @@ from synapse.media._base import FileInfo, ThumbnailInfo
 from synapse.media.filepath import MediaFilePaths
 from synapse.media.media_storage import MediaStorage, ReadableFileWrapper
 from synapse.media.storage_provider import FileStorageProviderBackend
+from synapse.media.thumbnailer import ThumbnailProvider
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks.spamchecker_callbacks import load_legacy_spam_checkers
 from synapse.rest import admin
-from synapse.rest.client import login
-from synapse.rest.media.thumbnail_resource import ThumbnailResource
+from synapse.rest.client import login, media
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias
 from synapse.util import Clock
@@ -58,6 +61,7 @@ from synapse.util import Clock
 from tests import unittest
 from tests.server import FakeChannel
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 from tests.utils import default_config
 
 
@@ -124,7 +128,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class _TestImage:
+class TestImage:
     """An image for testing thumbnailing with the expected results
 
     Attributes:
@@ -153,68 +157,54 @@ class _TestImage:
     is_inline: bool = True
 
 
-@parameterized_class(
-    ("test_image",),
-    [
-        # small png
-        (
-            _TestImage(
-                SMALL_PNG,
-                b"image/png",
-                b".png",
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d4948445200000020000000200806"
-                    b"000000737a7af40000001a49444154789cedc101010000008220"
-                    b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
-                    b"44ae426082"
-                ),
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d4948445200000001000000010806"
-                    b"0000001f15c4890000000d49444154789c636060606000000005"
-                    b"0001a5f645400000000049454e44ae426082"
-                ),
-            ),
-        ),
-        # small png with transparency.
-        (
-            _TestImage(
-                unhexlify(
-                    b"89504e470d0a1a0a0000000d49484452000000010000000101000"
-                    b"00000376ef9240000000274524e5300010194fdae0000000a4944"
-                    b"4154789c636800000082008177cd72b60000000049454e44ae426"
-                    b"082"
-                ),
-                b"image/png",
-                b".png",
-                # Note that we don't check the output since it varies across
-                # different versions of Pillow.
-            ),
-        ),
-        # small lossless webp
-        (
-            _TestImage(
-                unhexlify(
-                    b"524946461a000000574542505650384c0d0000002f0000001007"
-                    b"1011118888fe0700"
-                ),
-                b"image/webp",
-                b".webp",
-            ),
-        ),
-        # an empty file
-        (
-            _TestImage(
-                b"",
-                b"image/gif",
-                b".gif",
-                expected_found=False,
-                unable_to_thumbnail=True,
-            ),
-        ),
-        # An SVG.
-        (
-            _TestImage(
-                b"""<?xml version="1.0"?>
+small_png = TestImage(
+    SMALL_PNG,
+    b"image/png",
+    b".png",
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000020000000200806"
+        b"000000737a7af40000001a49444154789cedc101010000008220"
+        b"ffaf6e484001000000ef0610200001194334ee0000000049454e"
+        b"44ae426082"
+    ),
+    unhexlify(
+        b"89504e470d0a1a0a0000000d4948445200000001000000010806"
+        b"0000001f15c4890000000d49444154789c636060606000000005"
+        b"0001a5f645400000000049454e44ae426082"
+    ),
+)
+
+small_png_with_transparency = TestImage(
+    unhexlify(
+        b"89504e470d0a1a0a0000000d49484452000000010000000101000"
+        b"00000376ef9240000000274524e5300010194fdae0000000a4944"
+        b"4154789c636800000082008177cd72b60000000049454e44ae426"
+        b"082"
+    ),
+    b"image/png",
+    b".png",
+    # Note that we don't check the output since it varies across
+    # different versions of Pillow.
+)
+
+small_lossless_webp = TestImage(
+    unhexlify(
+        b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
+    ),
+    b"image/webp",
+    b".webp",
+)
+
+empty_file = TestImage(
+    b"",
+    b"image/gif",
+    b".gif",
+    expected_found=False,
+    unable_to_thumbnail=True,
+)
+
+SVG = TestImage(
+    b"""<?xml version="1.0"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
 
@@ -223,17 +213,26 @@ class _TestImage:
   <circle cx="100" cy="100" r="50" stroke="black"
     stroke-width="5" fill="red" />
 </svg>""",
-                b"image/svg",
-                b".svg",
-                expected_found=False,
-                unable_to_thumbnail=True,
-                is_inline=False,
-            ),
-        ),
-    ],
+    b"image/svg",
+    b".svg",
+    expected_found=False,
+    unable_to_thumbnail=True,
+    is_inline=False,
 )
+test_images = [
+    small_png,
+    small_png_with_transparency,
+    small_lossless_webp,
+    empty_file,
+    SVG,
+]
+input_values = [(x,) for x in test_images]
+
+
+@parameterized_class(("test_image",), input_values)
 class MediaRepoTests(unittest.HomeserverTestCase):
-    test_image: ClassVar[_TestImage]
+    servlets = [media.register_servlets]
+    test_image: ClassVar[TestImage]
     hijack_auth = True
     user_id = "@test:user"
 
@@ -251,16 +250,18 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             destination: str,
             path: str,
             output_stream: BinaryIO,
+            download_ratelimiter: Ratelimiter,
+            ip_address: Any,
+            max_size: int,
             args: Optional[QueryParams] = None,
             retry_on_dns_fail: bool = True,
-            max_size: Optional[int] = None,
             ignore_backoff: bool = False,
             follow_redirects: bool = False,
         ) -> "Deferred[Tuple[int, Dict[bytes, List[bytes]]]]":
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
             ) -> Tuple[int, Dict[bytes, List[bytes]]]:
                 data, response = r
                 output_stream.write(data)
@@ -502,7 +503,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=scale"
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -530,7 +531,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/thumbnail/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -571,7 +572,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             await_result=False,
         )
         self.pump()
-
         headers = {
             b"Content-Length": [b"%d" % (len(self.test_image.data))],
             b"Content-Type": [self.test_image.content_type],
@@ -580,7 +580,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             (self.test_image.data, (len(self.test_image.data), headers))
         )
         self.pump()
-
         if expected_found:
             self.assertEqual(channel.code, 200)
 
@@ -625,12 +624,12 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         content_type = self.test_image.content_type.decode()
         media_repo = self.hs.get_media_repository()
-        thumbnail_resouce = ThumbnailResource(
+        thumbnail_provider = ThumbnailProvider(
             self.hs, media_repo, media_repo.media_storage
         )
 
         self.assertIsNotNone(
-            thumbnail_resouce._select_thumbnail(
+            thumbnail_provider._select_thumbnail(
                 desired_width=desired_size,
                 desired_height=desired_size,
                 desired_method=method,
@@ -879,3 +878,249 @@ class SpamCheckerTestCase(unittest.HomeserverTestCase):
             tok=self.tok,
             expect_code=400,
         )
+
+
+class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        config = self.default_config()
+
+        self.storage_path = self.mktemp()
+        self.media_store_path = self.mktemp()
+        os.mkdir(self.storage_path)
+        os.mkdir(self.media_store_path)
+        config["media_store_path"] = self.media_store_path
+
+        provider_config = {
+            "module": "synapse.media.storage_provider.FileStorageProviderBackend",
+            "store_local": True,
+            "store_synchronous": False,
+            "store_remote": True,
+            "config": {"directory": self.storage_path},
+        }
+
+        config["media_storage_providers"] = [provider_config]
+
+        return self.setup_test_homeserver(config=config)
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.repo = hs.get_media_repository()
+        self.client = hs.get_federation_http_client()
+        self.store = hs.get_datastores().main
+
+    def create_resource_dict(self) -> Dict[str, Resource]:
+        # We need to manually set the resource tree to include media, the
+        # default only does `/_matrix/client` APIs.
+        return {"/_matrix/media": self.hs.get_media_repository_resource()}
+
+    # mock actually reading file body
+    def read_body_with_max_size_30MiB(*args: Any, **kwargs: Any) -> Deferred:
+        d: Deferred = defer.Deferred()
+        d.callback(31457280)
+        return d
+
+    def read_body_with_max_size_50MiB(*args: Any, **kwargs: Any) -> Deferred:
+        d: Deferred = defer.Deferred()
+        d.callback(52428800)
+        return d
+
+    @patch(
+        "synapse.http.matrixfederationclient.read_body_with_max_size",
+        read_body_with_max_size_30MiB,
+    )
+    def test_download_ratelimit_default(self) -> None:
+        """
+        Test remote media download ratelimiting against default configuration - 500MB bucket
+        and 87kb/second drain rate
+        """
+
+        # mock out actually sending the request, returns a 30MiB response
+        async def _send_request(*args: Any, **kwargs: Any) -> IResponse:
+            resp = MagicMock(spec=IResponse)
+            resp.code = 200
+            resp.length = 31457280
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
+            resp.phrase = b"OK"
+            return resp
+
+        self.client._send_request = _send_request  # type: ignore
+
+        # first request should go through
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyz",
+            shorthand=False,
+        )
+        assert channel.code == 200
+
+        # next 15 should go through
+        for i in range(15):
+            channel2 = self.make_request(
+                "GET",
+                f"/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy{i}",
+                shorthand=False,
+            )
+            assert channel2.code == 200
+
+        # 17th will hit ratelimit
+        channel3 = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyx",
+            shorthand=False,
+        )
+        assert channel3.code == 429
+
+        # however, a request from a different IP will go through
+        channel4 = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyz",
+            shorthand=False,
+            client_ip="187.233.230.159",
+        )
+        assert channel4.code == 200
+
+        # at 87Kib/s it should take about 2 minutes for enough to drain from bucket that another
+        # 30MiB download is authorized - The last download was blocked at 503,316,480.
+        # The next download will be authorized when bucket hits 492,830,720
+        # (524,288,000 total capacity - 31,457,280 download size) so 503,316,480 - 492,830,720 ~= 10,485,760
+        # needs to drain before another download will be authorized, that will take ~=
+        # 2 minutes (10,485,760/89,088/60)
+        self.reactor.pump([2.0 * 60.0])
+
+        # enough has drained and next request goes through
+        channel5 = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyb",
+            shorthand=False,
+        )
+        assert channel5.code == 200
+
+    @override_config(
+        {
+            "remote_media_download_per_second": "50M",
+            "remote_media_download_burst_count": "50M",
+        }
+    )
+    @patch(
+        "synapse.http.matrixfederationclient.read_body_with_max_size",
+        read_body_with_max_size_50MiB,
+    )
+    def test_download_rate_limit_config(self) -> None:
+        """
+        Test that download rate limit config options are correctly picked up and applied
+        """
+
+        async def _send_request(*args: Any, **kwargs: Any) -> IResponse:
+            resp = MagicMock(spec=IResponse)
+            resp.code = 200
+            resp.length = 52428800
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
+            resp.phrase = b"OK"
+            return resp
+
+        self.client._send_request = _send_request  # type: ignore
+
+        # first request should go through
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyz",
+            shorthand=False,
+        )
+        assert channel.code == 200
+
+        # immediate second request should fail
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy1",
+            shorthand=False,
+        )
+        assert channel.code == 429
+
+        # advance half a second
+        self.reactor.pump([0.5])
+
+        # request still fails
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy2",
+            shorthand=False,
+        )
+        assert channel.code == 429
+
+        # advance another half second
+        self.reactor.pump([0.5])
+
+        # enough has drained from bucket and request is successful
+        channel = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy3",
+            shorthand=False,
+        )
+        assert channel.code == 200
+
+    @override_config({"remote_media_download_burst_count": "87M"})
+    @patch(
+        "synapse.http.matrixfederationclient.read_body_with_max_size",
+        read_body_with_max_size_30MiB,
+    )
+    def test_download_ratelimit_unknown_length(self) -> None:
+        """
+        Test that if no content-length is provided, ratelimit will still be applied after
+        download once length is known
+        """
+
+        # mock out actually sending the request
+        async def _send_request(*args: Any, **kwargs: Any) -> IResponse:
+            resp = MagicMock(spec=IResponse)
+            resp.code = 200
+            resp.length = UNKNOWN_LENGTH
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
+            resp.phrase = b"OK"
+            return resp
+
+        self.client._send_request = _send_request  # type: ignore
+
+        # 3 requests should go through (note 3rd one would technically violate ratelimit but
+        # is applied *after* download - the next one will be ratelimited)
+        for i in range(3):
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy{i}",
+                shorthand=False,
+            )
+            assert channel.code == 200
+
+        # 4th will hit ratelimit
+        channel2 = self.make_request(
+            "GET",
+            "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyx",
+            shorthand=False,
+        )
+        assert channel2.code == 429
+
+    @override_config({"max_upload_size": "29M"})
+    @patch(
+        "synapse.http.matrixfederationclient.read_body_with_max_size",
+        read_body_with_max_size_30MiB,
+    )
+    def test_max_download_respected(self) -> None:
+        """
+        Test that the max download size is enforced - note that max download size is determined
+        by the max_upload_size
+        """
+
+        # mock out actually sending the request
+        async def _send_request(*args: Any, **kwargs: Any) -> IResponse:
+            resp = MagicMock(spec=IResponse)
+            resp.code = 200
+            resp.length = 31457280
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
+            resp.phrase = b"OK"
+            return resp
+
+        self.client._send_request = _send_request  # type: ignore
+
+        channel = self.make_request(
+            "GET", "/_matrix/media/v3/download/remote.org/abcd", shorthand=False
+        )
+        assert channel.code == 502
+        assert channel.json_body["errcode"] == "M_TOO_LARGE"

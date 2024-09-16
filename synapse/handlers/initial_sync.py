@@ -199,7 +199,7 @@ class InitialSyncHandler:
                     )
                 elif event.membership == Membership.LEAVE:
                     room_end_token = RoomStreamToken(
-                        stream=event.stream_ordering,
+                        stream=event.event_pos.stream,
                     )
                     deferred_room_state = run_in_background(
                         self._state_storage_controller.get_state_for_events,
@@ -221,7 +221,9 @@ class InitialSyncHandler:
                 ).addErrback(unwrapFirstError)
 
                 messages = await filter_events_for_client(
-                    self._storage_controllers, user_id, messages
+                    self._storage_controllers,
+                    user_id,
+                    messages,
                 )
 
                 start_token = now_token.copy_and_replace(StreamKeyType.ROOM, token)

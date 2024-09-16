@@ -53,7 +53,7 @@ from synapse.storage.databases.main.receipts import ReceiptsWorkerStore
 from synapse.storage.databases.main.roommember import RoomMemberWorkerStore
 from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.storage.push_rule import InconsistentRuleException, RuleNotFoundException
-from synapse.storage.util.id_generators import IdGenerator, StreamIdGenerator
+from synapse.storage.util.id_generators import IdGenerator, MultiWriterIdGenerator
 from synapse.synapse_rust.push import FilteredPushRules, PushRule, PushRules
 from synapse.types import JsonDict
 from synapse.util import json_encoder, unwrapFirstError
@@ -126,7 +126,7 @@ class PushRulesWorkerStore(
     `get_max_push_rules_stream_id` which can be called in the initializer.
     """
 
-    _push_rules_stream_id_gen: StreamIdGenerator
+    _push_rules_stream_id_gen: MultiWriterIdGenerator
 
     def __init__(
         self,
@@ -140,14 +140,17 @@ class PushRulesWorkerStore(
             hs.get_instance_name() in hs.config.worker.writers.push_rules
         )
 
-        # In the worker store this is an ID tracker which we overwrite in the non-worker
-        # class below that is used on the main process.
-        self._push_rules_stream_id_gen = StreamIdGenerator(
-            db_conn,
-            hs.get_replication_notifier(),
-            "push_rules_stream",
-            "stream_id",
-            is_writer=self._is_push_writer,
+        self._push_rules_stream_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="push_rules_stream",
+            instance_name=self._instance_name,
+            tables=[
+                ("push_rules_stream", "instance_name", "stream_id"),
+            ],
+            sequence_name="push_rules_stream_sequence",
+            writers=hs.config.worker.writers.push_rules,
         )
 
         push_rules_prefill, push_rules_id = self.db_pool.get_cache_dict(
@@ -174,6 +177,9 @@ class PushRulesWorkerStore(
             int
         """
         return self._push_rules_stream_id_gen.get_current_token()
+
+    def get_push_rules_stream_id_gen(self) -> MultiWriterIdGenerator:
+        return self._push_rules_stream_id_gen
 
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]
@@ -880,6 +886,7 @@ class PushRulesWorkerStore(
             raise Exception("Not a push writer")
 
         values = {
+            "instance_name": self._instance_name,
             "stream_id": stream_id,
             "event_stream_ordering": event_stream_ordering,
             "user_id": user_id,

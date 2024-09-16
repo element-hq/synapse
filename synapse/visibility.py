@@ -36,10 +36,15 @@ from typing import (
 
 import attr
 
-from synapse.api.constants import EventTypes, HistoryVisibility, Membership
+from synapse.api.constants import (
+    EventTypes,
+    EventUnsignedContentFields,
+    HistoryVisibility,
+    Membership,
+)
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
-from synapse.events.utils import prune_event
+from synapse.events.utils import clone_event, prune_event
 from synapse.logging.opentracing import trace
 from synapse.storage.controllers import StorageControllers
 from synapse.storage.databases.main import DataStore
@@ -97,7 +102,8 @@ async def filter_events_for_client(
             also be called to check whether a user can see the state at a given point.
 
     Returns:
-        The filtered events.
+        The filtered events. The `unsigned` data is annotated with the membership state
+        of `user_id` at each event.
     """
     # Filter out events that have been soft failed so that we don't relay them
     # to clients.
@@ -129,26 +135,56 @@ async def filter_events_for_client(
         retention_policies: Dict[str, RetentionPolicy] = {}
 
         for room_id in room_ids:
-            retention_policies[room_id] = (
-                await storage.main.get_retention_policy_for_room(room_id)
-            )
+            retention_policies[
+                room_id
+            ] = await storage.main.get_retention_policy_for_room(room_id)
 
     def allowed(event: EventBase) -> Optional[EventBase]:
-        return _check_client_allowed_to_see_event(
+        state_after_event = event_id_to_state.get(event.event_id)
+        filtered = _check_client_allowed_to_see_event(
             user_id=user_id,
             event=event,
             clock=storage.main.clock,
             filter_send_to_client=filter_send_to_client,
             sender_ignored=event.sender in ignore_list,
             always_include_ids=always_include_ids,
-            retention_policy=retention_policies[room_id],
-            state=event_id_to_state.get(event.event_id),
+            retention_policy=retention_policies[event.room_id],
+            state=state_after_event,
             is_peeking=is_peeking,
             sender_erased=erased_senders.get(event.sender, False),
         )
+        if filtered is None:
+            return None
 
-    # Check each event: gives an iterable of None or (a potentially modified)
-    # EventBase.
+        # Annotate the event with the user's membership after the event.
+        #
+        # Normally we just look in `state_after_event`, but if the event is an outlier
+        # we won't have such a state. The only outliers that are returned here are the
+        # user's own membership event, so we can just inspect that.
+
+        user_membership_event: Optional[EventBase]
+        if event.type == EventTypes.Member and event.state_key == user_id:
+            user_membership_event = event
+        elif state_after_event is not None:
+            user_membership_event = state_after_event.get((EventTypes.Member, user_id))
+        else:
+            # unreachable!
+            raise Exception("Missing state for event that is not user's own membership")
+
+        user_membership = (
+            user_membership_event.membership
+            if user_membership_event
+            else Membership.LEAVE
+        )
+
+        # Copy the event before updating the unsigned data: this shouldn't be persisted
+        # to the cache!
+        cloned = clone_event(filtered)
+        cloned.unsigned[EventUnsignedContentFields.MEMBERSHIP] = user_membership
+
+        return cloned
+
+    # Check each event: gives an iterable of None or (a modified) EventBase.
     filtered_events = map(allowed, events)
 
     # Turn it into a list and remove None entries before returning.
@@ -396,7 +432,13 @@ def _check_client_allowed_to_see_event(
 
 @attr.s(frozen=True, slots=True, auto_attribs=True)
 class _CheckMembershipReturn:
-    "Return value of _check_membership"
+    """Return value of `_check_membership`.
+
+    Attributes:
+        allowed: Whether the user should be allowed to see the event.
+        joined: Whether the user was joined to the room at the event.
+    """
+
     allowed: bool
     joined: bool
 
@@ -408,12 +450,7 @@ def _check_membership(
     state: StateMap[EventBase],
     is_peeking: bool,
 ) -> _CheckMembershipReturn:
-    """Check whether the user can see the event due to their membership
-
-    Returns:
-        True if they can, False if they can't, plus the membership of the user
-        at the event.
-    """
+    """Check whether the user can see the event due to their membership"""
     # If the event is the user's own membership event, use the 'most joined'
     # membership
     membership = None
@@ -435,7 +472,7 @@ def _check_membership(
         if membership == "leave" and (
             prev_membership == "join" or prev_membership == "invite"
         ):
-            return _CheckMembershipReturn(True, membership == Membership.JOIN)
+            return _CheckMembershipReturn(True, False)
 
         new_priority = MEMBERSHIP_PRIORITY.index(membership)
         old_priority = MEMBERSHIP_PRIORITY.index(prev_membership)

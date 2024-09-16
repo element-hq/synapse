@@ -27,6 +27,8 @@ from twisted.internet import defer
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EduTypes, RoomEncryptionAlgorithms
+from synapse.api.presence import UserPresenceState
+from synapse.federation.sender.per_destination_queue import MAX_PRESENCE_STATES_PER_EDU
 from synapse.federation.units import Transaction
 from synapse.handlers.device import DeviceHandler
 from synapse.rest import admin
@@ -264,6 +266,123 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
                 }
             ],
         )
+
+
+class FederationSenderPresenceTestCases(HomeserverTestCase):
+    """
+    Test federation sending for presence updates.
+    """
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_transport_client = Mock(spec=["send_transaction"])
+        self.federation_transport_client.send_transaction = AsyncMock()
+        hs = self.setup_test_homeserver(
+            federation_transport_client=self.federation_transport_client,
+        )
+
+        return hs
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["federation_sender_instances"] = None
+        return config
+
+    def test_presence_simple(self) -> None:
+        "Test that sending a single presence update works"
+
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+        self.get_success(
+            sender.send_presence_to_destinations(
+                [UserPresenceState.default("@user:test")],
+                ["server"],
+            )
+        )
+
+        self.pump()
+
+        # expect a call to send_transaction
+        mock_send_transaction.assert_awaited_once()
+
+        json_cb = mock_send_transaction.call_args[0][1]
+        data = json_cb()
+        self.assertEqual(
+            data["edus"],
+            [
+                {
+                    "edu_type": EduTypes.PRESENCE,
+                    "content": {
+                        "push": [
+                            {
+                                "presence": "offline",
+                                "user_id": "@user:test",
+                            }
+                        ]
+                    },
+                }
+            ],
+        )
+
+    def test_presence_batched(self) -> None:
+        """Test that sending lots of presence updates to a destination are
+        batched, rather than having them all sent in one EDU."""
+
+        mock_send_transaction: AsyncMock = (
+            self.federation_transport_client.send_transaction
+        )
+        mock_send_transaction.return_value = {}
+
+        sender = self.hs.get_federation_sender()
+
+        # We now send lots of presence updates to force the federation sender to
+        # batch the mup.
+        number_presence_updates_to_send = MAX_PRESENCE_STATES_PER_EDU * 2
+        self.get_success(
+            sender.send_presence_to_destinations(
+                [
+                    UserPresenceState.default(f"@user{i}:test")
+                    for i in range(number_presence_updates_to_send)
+                ],
+                ["server"],
+            )
+        )
+
+        self.pump()
+
+        # We should have seen at least one transcation be sent by now.
+        mock_send_transaction.assert_called()
+
+        # We don't want to specify exactly how the presence EDUs get sent out,
+        # could be one per transaction or multiple per transaction. We just want
+        # to assert that a) each presence EDU has bounded number of updates, and
+        # b) that all updates get sent out.
+        presence_edus = []
+        for transaction_call in mock_send_transaction.call_args_list:
+            json_cb = transaction_call[0][1]
+            data = json_cb()
+
+            for edu in data["edus"]:
+                self.assertEqual(edu.get("edu_type"), EduTypes.PRESENCE)
+                presence_edus.append(edu)
+
+        # A set of all user presence we see, this should end up matching the
+        # number we sent out above.
+        seen_users: Set[str] = set()
+
+        for edu in presence_edus:
+            presence_states = edu["content"]["push"]
+
+            # This is where we actually check that the number of presence
+            # updates is bounded.
+            self.assertLessEqual(len(presence_states), MAX_PRESENCE_STATES_PER_EDU)
+
+            seen_users.update(p["user_id"] for p in presence_states)
+
+        self.assertEqual(len(seen_users), number_presence_updates_to_send)
 
 
 class FederationSenderDevicesTestCases(HomeserverTestCase):

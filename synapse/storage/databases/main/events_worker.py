@@ -55,7 +55,7 @@ from synapse.api.room_versions import (
 )
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.events.utils import prune_event
+from synapse.events.utils import prune_event, strip_event
 from synapse.logging.context import (
     PreserveLoggingContext,
     current_context,
@@ -75,16 +75,15 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
-from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.storage.util.id_generators import (
     AbstractStreamIdGenerator,
     MultiWriterIdGenerator,
-    StreamIdGenerator,
 )
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
 from synapse.util.caches.descriptors import cached, cachedList
@@ -98,6 +97,26 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 logger = logging.getLogger(__name__)
+
+
+class DatabaseCorruptionError(RuntimeError):
+    """We found an event in the DB that has a persisted event ID that doesn't
+    match its computed event ID."""
+
+    def __init__(
+        self, room_id: str, persisted_event_id: str, computed_event_id: str
+    ) -> None:
+        self.room_id = room_id
+        self.persisted_event_id = persisted_event_id
+        self.computed_event_id = computed_event_id
+
+        message = (
+            f"Database corruption: Event {persisted_event_id} in room {room_id} "
+            f"from the database appears to have been modified (calculated "
+            f"event id {computed_event_id})"
+        )
+
+        super().__init__(message)
 
 
 # These values are used in the `enqueue_event` and `_fetch_loop` methods to
@@ -158,6 +177,7 @@ class _EventRow:
 
     event_id: str
     stream_ordering: int
+    instance_name: str
     json: str
     internal_metadata: str
     format_version: Optional[int]
@@ -193,53 +213,37 @@ class EventsWorkerStore(SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self._stream_id_gen: AbstractStreamIdGenerator
-        self._backfill_id_gen: AbstractStreamIdGenerator
-        if isinstance(database.engine, PostgresEngine):
-            # If we're using Postgres than we can use `MultiWriterIdGenerator`
-            # regardless of whether this process writes to the streams or not.
-            self._stream_id_gen = MultiWriterIdGenerator(
-                db_conn=db_conn,
-                db=database,
-                notifier=hs.get_replication_notifier(),
-                stream_name="events",
-                instance_name=hs.get_instance_name(),
-                tables=[("events", "instance_name", "stream_ordering")],
-                sequence_name="events_stream_seq",
-                writers=hs.config.worker.writers.events,
-            )
-            self._backfill_id_gen = MultiWriterIdGenerator(
-                db_conn=db_conn,
-                db=database,
-                notifier=hs.get_replication_notifier(),
-                stream_name="backfill",
-                instance_name=hs.get_instance_name(),
-                tables=[("events", "instance_name", "stream_ordering")],
-                sequence_name="events_backfill_stream_seq",
-                positive=False,
-                writers=hs.config.worker.writers.events,
-            )
-        else:
-            # Multiple writers are not supported for SQLite.
-            #
-            # We shouldn't be running in worker mode with SQLite, but its useful
-            # to support it for unit tests.
-            self._stream_id_gen = StreamIdGenerator(
-                db_conn,
-                hs.get_replication_notifier(),
-                "events",
-                "stream_ordering",
-                is_writer=hs.get_instance_name() in hs.config.worker.writers.events,
-            )
-            self._backfill_id_gen = StreamIdGenerator(
-                db_conn,
-                hs.get_replication_notifier(),
-                "events",
-                "stream_ordering",
-                step=-1,
-                extra_tables=[("ex_outlier_stream", "event_stream_ordering")],
-                is_writer=hs.get_instance_name() in hs.config.worker.writers.events,
-            )
+        self._stream_id_gen: MultiWriterIdGenerator
+        self._backfill_id_gen: MultiWriterIdGenerator
+
+        self._stream_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="events",
+            instance_name=hs.get_instance_name(),
+            tables=[
+                ("events", "instance_name", "stream_ordering"),
+                ("current_state_delta_stream", "instance_name", "stream_id"),
+                ("ex_outlier_stream", "instance_name", "event_stream_ordering"),
+            ],
+            sequence_name="events_stream_seq",
+            writers=hs.config.worker.writers.events,
+        )
+        self._backfill_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="backfill",
+            instance_name=hs.get_instance_name(),
+            tables=[
+                ("events", "instance_name", "stream_ordering"),
+                ("ex_outlier_stream", "instance_name", "event_stream_ordering"),
+            ],
+            sequence_name="events_backfill_stream_seq",
+            positive=False,
+            writers=hs.config.worker.writers.events,
+        )
 
         events_max = self._stream_id_gen.get_current_token()
         curr_state_delta_prefill, min_curr_state_delta_id = self.db_pool.get_cache_dict(
@@ -309,27 +313,17 @@ class EventsWorkerStore(SQLBaseStore):
 
         self._un_partial_stated_events_stream_id_gen: AbstractStreamIdGenerator
 
-        if isinstance(database.engine, PostgresEngine):
-            self._un_partial_stated_events_stream_id_gen = MultiWriterIdGenerator(
-                db_conn=db_conn,
-                db=database,
-                notifier=hs.get_replication_notifier(),
-                stream_name="un_partial_stated_event_stream",
-                instance_name=hs.get_instance_name(),
-                tables=[
-                    ("un_partial_stated_event_stream", "instance_name", "stream_id")
-                ],
-                sequence_name="un_partial_stated_event_stream_sequence",
-                # TODO(faster_joins, multiple writers) Support multiple writers.
-                writers=["master"],
-            )
-        else:
-            self._un_partial_stated_events_stream_id_gen = StreamIdGenerator(
-                db_conn,
-                hs.get_replication_notifier(),
-                "un_partial_stated_event_stream",
-                "stream_id",
-            )
+        self._un_partial_stated_events_stream_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="un_partial_stated_event_stream",
+            instance_name=hs.get_instance_name(),
+            tables=[("un_partial_stated_event_stream", "instance_name", "stream_id")],
+            sequence_name="un_partial_stated_event_stream_sequence",
+            # TODO(faster_joins, multiple writers) Support multiple writers.
+            writers=["master"],
+        )
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
@@ -484,6 +478,8 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Optional[EventBase]:
         """Get an event from the database by event_id.
 
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_id: The event_id of the event to fetch
 
@@ -538,6 +534,10 @@ class EventsWorkerStore(SQLBaseStore):
     ) -> Dict[str, EventBase]:
         """Get events from the database
 
+        Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
+
         Args:
             event_ids: The event_ids of the events to fetch
 
@@ -579,6 +579,8 @@ class EventsWorkerStore(SQLBaseStore):
         as given by `event_ids` arg.
 
         Unknown events will be omitted from the response.
+
+        Events for unknown room versions will also be filtered out.
 
         Args:
             event_ids: The event_ids of the events to fetch
@@ -1052,15 +1054,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         state_to_include = await self.get_events(selected_state_ids.values())
 
-        return [
-            {
-                "type": e.type,
-                "state_key": e.state_key,
-                "content": e.content,
-                "sender": e.sender,
-            }
-            for e in state_to_include.values()
-        ]
+        return [strip_event(e) for e in state_to_include.values()]
 
     def _maybe_start_fetch_thread(self) -> None:
         """Starts an event fetch thread if we are not yet at the maximum number."""
@@ -1382,6 +1376,7 @@ class EventsWorkerStore(SQLBaseStore):
                 rejected_reason=rejected_reason,
             )
             original_ev.internal_metadata.stream_ordering = row.stream_ordering
+            original_ev.internal_metadata.instance_name = row.instance_name
             original_ev.internal_metadata.outlier = row.outlier
 
             # Consistency check: if the content of the event has been modified in the
@@ -1390,10 +1385,8 @@ class EventsWorkerStore(SQLBaseStore):
             if original_ev.event_id != event_id:
                 # it's difficult to see what to do here. Pretty much all bets are off
                 # if Synapse cannot rely on the consistency of its database.
-                raise RuntimeError(
-                    f"Database corruption: Event {event_id} in room {d['room_id']} "
-                    f"from the database appears to have been modified (calculated "
-                    f"event id {original_ev.event_id})"
+                raise DatabaseCorruptionError(
+                    d["room_id"], event_id, original_ev.event_id
                 )
 
             event_map[event_id] = original_ev
@@ -1467,6 +1460,7 @@ class EventsWorkerStore(SQLBaseStore):
                 SELECT
                   e.event_id,
                   e.stream_ordering,
+                  e.instance_name,
                   ej.internal_metadata,
                   ej.json,
                   ej.format_version,
@@ -1490,13 +1484,15 @@ class EventsWorkerStore(SQLBaseStore):
                 event_dict[event_id] = _EventRow(
                     event_id=event_id,
                     stream_ordering=row[1],
-                    internal_metadata=row[2],
-                    json=row[3],
-                    format_version=row[4],
-                    room_version_id=row[5],
-                    rejected_reason=row[6],
+                    # If instance_name is null we default to "master"
+                    instance_name=row[2] or "master",
+                    internal_metadata=row[3],
+                    json=row[4],
+                    format_version=row[5],
+                    room_version_id=row[6],
+                    rejected_reason=row[7],
                     redactions=[],
-                    outlier=bool(row[7]),  # This is an int in SQLite3
+                    outlier=bool(row[8]),  # This is an int in SQLite3
                 )
 
             # check for redactions
@@ -1670,7 +1666,7 @@ class EventsWorkerStore(SQLBaseStore):
                 txn.database_engine, "e.event_id", event_ids
             )
             txn.execute(sql + clause, args)
-            found_events = {eid for eid, in txn}
+            found_events = {eid for (eid,) in txn}
 
             # ... and then we can update the results for each key
             return {eid: (eid in found_events) for eid in event_ids}
@@ -1869,9 +1865,9 @@ class EventsWorkerStore(SQLBaseStore):
                 " LIMIT ?"
             )
             txn.execute(sql, (-last_id, -current_id, instance_name, limit))
-            new_event_updates: List[Tuple[int, Tuple[str, str, str, str, str, str]]] = (
-                []
-            )
+            new_event_updates: List[
+                Tuple[int, Tuple[str, str, str, str, str, str]]
+            ] = []
             row: Tuple[int, str, str, str, str, str, str]
             # Type safety: iterating over `txn` yields `Tuple`, i.e.
             # `Tuple[Any, ...]` of arbitrary length. Mypy detects assigning a
@@ -2470,3 +2466,14 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
+
+    async def have_finished_sliding_sync_background_jobs(self) -> bool:
+        """Return if it's safe to use the sliding sync membership tables."""
+
+        return await self.db_pool.updates.have_completed_background_updates(
+            (
+                _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+            )
+        )

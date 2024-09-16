@@ -64,37 +64,11 @@ class UserMediaStatisticsRestServlet(RestServlet):
         )
 
         start = parse_integer(request, "from", default=0)
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
         limit = parse_integer(request, "limit", default=100)
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
         from_ts = parse_integer(request, "from_ts", default=0)
-        if from_ts < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from_ts must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
         until_ts = parse_integer(request, "until_ts")
+
         if until_ts is not None:
-            if until_ts < 0:
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    "Query parameter until_ts must be a string representing a positive integer.",
-                    errcode=Codes.INVALID_PARAM,
-                )
             if until_ts <= from_ts:
                 raise SynapseError(
                     HTTPStatus.BAD_REQUEST,

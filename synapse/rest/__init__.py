@@ -18,7 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Callable
+import logging
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 from synapse.http.server import HttpServer, JsonResource
 from synapse.rest import admin
@@ -53,7 +54,7 @@ from synapse.rest.client import (
     register,
     relations,
     rendezvous,
-    report_event,
+    reporting,
     room,
     room_keys,
     room_upgrade_rest_servlet,
@@ -67,10 +68,63 @@ from synapse.rest.client import (
     voip,
 )
 
+logger = logging.getLogger(__name__)
+
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 RegisterServletsFunc = Callable[["HomeServer", HttpServer], None]
+
+CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
+    versions.register_servlets,
+    initial_sync.register_servlets,
+    room.register_deprecated_servlets,
+    events.register_servlets,
+    room.register_servlets,
+    login.register_servlets,
+    profile.register_servlets,
+    presence.register_servlets,
+    directory.register_servlets,
+    voip.register_servlets,
+    pusher.register_servlets,
+    push_rule.register_servlets,
+    logout.register_servlets,
+    sync.register_servlets,
+    filter.register_servlets,
+    account.register_servlets,
+    register.register_servlets,
+    auth.register_servlets,
+    receipts.register_servlets,
+    read_marker.register_servlets,
+    room_keys.register_servlets,
+    keys.register_servlets,
+    tokenrefresh.register_servlets,
+    tags.register_servlets,
+    account_data.register_servlets,
+    reporting.register_servlets,
+    openid.register_servlets,
+    notifications.register_servlets,
+    devices.register_servlets,
+    thirdparty.register_servlets,
+    sendtodevice.register_servlets,
+    user_directory.register_servlets,
+    room_upgrade_rest_servlet.register_servlets,
+    capabilities.register_servlets,
+    account_validity.register_servlets,
+    relations.register_servlets,
+    password_policy.register_servlets,
+    knock.register_servlets,
+    appservice_ping.register_servlets,
+    admin.register_servlets_for_client_rest_resource,
+    mutual_rooms.register_servlets,
+    login_token_request.register_servlets,
+    rendezvous.register_servlets,
+    auth_issuer.register_servlets,
+)
+
+SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {
+    "client": CLIENT_SERVLET_FUNCTIONS,
+}
 
 
 class ClientRestResource(JsonResource):
@@ -83,76 +137,56 @@ class ClientRestResource(JsonResource):
        * etc
     """
 
-    def __init__(self, hs: "HomeServer"):
+    def __init__(self, hs: "HomeServer", servlet_groups: Optional[List[str]] = None):
         JsonResource.__init__(self, hs, canonical_json=False)
-        self.register_servlets(self, hs)
+        if hs.config.media.can_load_media_repo:
+            # This import is here to prevent a circular import failure
+            from synapse.rest.client import media
+
+            SERVLET_GROUPS["media"] = (media.register_servlets,)
+        self.register_servlets(self, hs, servlet_groups)
 
     @staticmethod
-    def register_servlets(client_resource: HttpServer, hs: "HomeServer") -> None:
+    def register_servlets(
+        client_resource: HttpServer,
+        hs: "HomeServer",
+        servlet_groups: Optional[Iterable[str]] = None,
+    ) -> None:
         # Some servlets are only registered on the main process (and not worker
         # processes).
         is_main_process = hs.config.worker.worker_app is None
 
-        versions.register_servlets(hs, client_resource)
+        if not servlet_groups:
+            servlet_groups = SERVLET_GROUPS.keys()
 
-        # Deprecated in r0
-        initial_sync.register_servlets(hs, client_resource)
-        room.register_deprecated_servlets(hs, client_resource)
+        for servlet_group in servlet_groups:
+            # Fail on unknown servlet groups.
+            if servlet_group not in SERVLET_GROUPS:
+                if servlet_group == "media":
+                    logger.warn(
+                        "media.can_load_media_repo needs to be configured for the media servlet to be available"
+                    )
+                raise RuntimeError(
+                    f"Attempting to register unknown client servlet: '{servlet_group}'"
+                )
 
-        # Partially deprecated in r0
-        events.register_servlets(hs, client_resource)
+            for servletfunc in SERVLET_GROUPS[servlet_group]:
+                if not is_main_process and servletfunc in [
+                    pusher.register_servlets,
+                    logout.register_servlets,
+                    auth.register_servlets,
+                    tokenrefresh.register_servlets,
+                    reporting.register_servlets,
+                    openid.register_servlets,
+                    thirdparty.register_servlets,
+                    room_upgrade_rest_servlet.register_servlets,
+                    account_validity.register_servlets,
+                    admin.register_servlets_for_client_rest_resource,
+                    mutual_rooms.register_servlets,
+                    login_token_request.register_servlets,
+                    rendezvous.register_servlets,
+                    auth_issuer.register_servlets,
+                ]:
+                    continue
 
-        room.register_servlets(hs, client_resource)
-        login.register_servlets(hs, client_resource)
-        profile.register_servlets(hs, client_resource)
-        presence.register_servlets(hs, client_resource)
-        directory.register_servlets(hs, client_resource)
-        voip.register_servlets(hs, client_resource)
-        if is_main_process:
-            pusher.register_servlets(hs, client_resource)
-        push_rule.register_servlets(hs, client_resource)
-        if is_main_process:
-            logout.register_servlets(hs, client_resource)
-        sync.register_servlets(hs, client_resource)
-        filter.register_servlets(hs, client_resource)
-        account.register_servlets(hs, client_resource)
-        register.register_servlets(hs, client_resource)
-        if is_main_process:
-            auth.register_servlets(hs, client_resource)
-        receipts.register_servlets(hs, client_resource)
-        read_marker.register_servlets(hs, client_resource)
-        room_keys.register_servlets(hs, client_resource)
-        keys.register_servlets(hs, client_resource)
-        if is_main_process:
-            tokenrefresh.register_servlets(hs, client_resource)
-        tags.register_servlets(hs, client_resource)
-        account_data.register_servlets(hs, client_resource)
-        if is_main_process:
-            report_event.register_servlets(hs, client_resource)
-            openid.register_servlets(hs, client_resource)
-        notifications.register_servlets(hs, client_resource)
-        devices.register_servlets(hs, client_resource)
-        if is_main_process:
-            thirdparty.register_servlets(hs, client_resource)
-        sendtodevice.register_servlets(hs, client_resource)
-        user_directory.register_servlets(hs, client_resource)
-        if is_main_process:
-            room_upgrade_rest_servlet.register_servlets(hs, client_resource)
-        capabilities.register_servlets(hs, client_resource)
-        if is_main_process:
-            account_validity.register_servlets(hs, client_resource)
-        relations.register_servlets(hs, client_resource)
-        password_policy.register_servlets(hs, client_resource)
-        knock.register_servlets(hs, client_resource)
-        appservice_ping.register_servlets(hs, client_resource)
-
-        # moving to /_synapse/admin
-        if is_main_process:
-            admin.register_servlets_for_client_rest_resource(hs, client_resource)
-
-        # unstable
-        if is_main_process:
-            mutual_rooms.register_servlets(hs, client_resource)
-            login_token_request.register_servlets(hs, client_resource)
-            rendezvous.register_servlets(hs, client_resource)
-            auth_issuer.register_servlets(hs, client_resource)
+                servletfunc(hs, client_resource)

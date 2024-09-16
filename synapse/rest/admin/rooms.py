@@ -21,7 +21,6 @@
 import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
-from urllib import parse as urlparse
 
 import attr
 
@@ -36,8 +35,10 @@ from synapse.http.servlet import (
     ResolveRoomIdMixin,
     RestServlet,
     assert_params_in_dict,
+    parse_boolean,
     parse_enum,
     parse_integer,
+    parse_json,
     parse_json_object_from_request,
     parse_string,
 )
@@ -51,7 +52,6 @@ from synapse.storage.databases.main.room import RoomSortOrder
 from synapse.streams.config import PaginationConfig
 from synapse.types import JsonDict, RoomID, ScheduledTask, UserID, create_requester
 from synapse.types.state import StateFilter
-from synapse.util import json_decoder
 
 if TYPE_CHECKING:
     from synapse.api.auth import Auth
@@ -243,13 +243,23 @@ class ListRoomRestServlet(RestServlet):
                 errcode=Codes.INVALID_PARAM,
             )
 
+        public_rooms = parse_boolean(request, "public_rooms")
+        empty_rooms = parse_boolean(request, "empty_rooms")
+
         direction = parse_enum(request, "dir", Direction, default=Direction.FORWARDS)
         reverse_order = True if direction == Direction.BACKWARDS else False
 
         # Return list of rooms according to parameters
         rooms, total_rooms = await self.store.get_rooms_paginate(
-            start, limit, order_by, reverse_order, search_term
+            start,
+            limit,
+            order_by,
+            reverse_order,
+            search_term,
+            public_rooms,
+            empty_rooms,
         )
+
         response = {
             # next_token should be opaque, so return a value the client can parse
             "offset": start,
@@ -776,14 +786,8 @@ class RoomEventContextServlet(RestServlet):
         limit = parse_integer(request, "limit", default=10)
 
         # picking the API shape for symmetry with /messages
-        filter_str = parse_string(request, "filter", encoding="utf-8")
-        if filter_str:
-            filter_json = urlparse.unquote(filter_str)
-            event_filter: Optional[Filter] = Filter(
-                self._hs, json_decoder.decode(filter_json)
-            )
-        else:
-            event_filter = None
+        filter_json = parse_json(request, "filter", encoding="utf-8")
+        event_filter = Filter(self._hs, filter_json) if filter_json else None
 
         event_context = await self.room_context_handler.get_event_context(
             requester,
@@ -914,21 +918,16 @@ class RoomMessagesRestServlet(RestServlet):
         )
         # Twisted will have processed the args by now.
         assert request.args is not None
+
+        filter_json = parse_json(request, "filter", encoding="utf-8")
+        event_filter = Filter(self._hs, filter_json) if filter_json else None
+
         as_client_event = b"raw" not in request.args
-        filter_str = parse_string(request, "filter", encoding="utf-8")
-        if filter_str:
-            filter_json = urlparse.unquote(filter_str)
-            event_filter: Optional[Filter] = Filter(
-                self._hs, json_decoder.decode(filter_json)
-            )
-            if (
-                event_filter
-                and event_filter.filter_json.get("event_format", "client")
-                == "federation"
-            ):
-                as_client_event = False
-        else:
-            event_filter = None
+        if (
+            event_filter
+            and event_filter.filter_json.get("event_format", "client") == "federation"
+        ):
+            as_client_event = False
 
         msgs = await self._pagination_handler.get_messages(
             room_id=room_id,

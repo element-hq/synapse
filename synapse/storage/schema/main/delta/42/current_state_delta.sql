@@ -32,7 +32,10 @@
  * limitations under the License.
  */
 
-
+-- Tracks what the server thinks is the current state of the room as time goes. It does
+-- not track how state progresses from the beginning of the room. So for example, when
+-- you remotely join a room, the first rows will just be the state when you joined and
+-- progress from there.
 CREATE TABLE current_state_delta_stream (
     stream_id BIGINT NOT NULL,
     room_id TEXT NOT NULL,

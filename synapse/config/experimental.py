@@ -140,6 +140,12 @@ class MSC3861:
                 ("experimental", "msc3861", "client_auth_method"),
             )
 
+    introspection_endpoint: Optional[str] = attr.ib(
+        default=None,
+        validator=attr.validators.optional(attr.validators.instance_of(str)),
+    )
+    """The URL of the introspection endpoint used to validate access tokens."""
+
     account_management_url: Optional[str] = attr.ib(
         default=None,
         validator=attr.validators.optional(attr.validators.instance_of(str)),
@@ -332,6 +338,11 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
+        # MSC3575 (Sliding Sync) alternate endpoints, c.f. MSC4186.
+        #
+        # This is enabled by default as a replacement for the sliding sync proxy.
+        self.msc3575_enabled: bool = experimental.get("msc3575_enabled", True)
+
         # MSC3773: Thread notifications
         self.msc3773_enabled: bool = experimental.get("msc3773_enabled", False)
 
@@ -390,9 +401,6 @@ class ExperimentalConfig(Config):
         # MSC3391: Removing account data.
         self.msc3391_enabled = experimental.get("msc3391_enabled", False)
 
-        # MSC3967: Do not require UIA when first uploading cross signing keys
-        self.msc3967_enabled = experimental.get("msc3967_enabled", False)
-
         # MSC3861: Matrix architecture change to delegate authentication via OIDC
         try:
             self.msc3861 = MSC3861(**experimental.get("msc3861", {}))
@@ -411,3 +419,31 @@ class ExperimentalConfig(Config):
         self.msc4069_profile_inhibit_propagation = experimental.get(
             "msc4069_profile_inhibit_propagation", False
         )
+
+        # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
+        self.msc4108_enabled = experimental.get("msc4108_enabled", False)
+
+        self.msc4108_delegation_endpoint: Optional[str] = experimental.get(
+            "msc4108_delegation_endpoint", None
+        )
+
+        if (
+            self.msc4108_enabled or self.msc4108_delegation_endpoint is not None
+        ) and not self.msc3861.enabled:
+            raise ConfigError(
+                "MSC4108 requires MSC3861 to be enabled",
+                ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        if self.msc4108_delegation_endpoint is not None and self.msc4108_enabled:
+            raise ConfigError(
+                "You cannot have MSC4108 both enabled and delegated at the same time",
+                ("experimental", "msc4108_delegation_endpoint"),
+            )
+
+        self.msc3823_account_suspension = experimental.get(
+            "msc3823_account_suspension", False
+        )
+
+        # MSC4151: Report room API (Client-Server API)
+        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)

@@ -1,6 +1,6 @@
 # Edit Room Membership API
 
-This API allows an administrator to join an user account with a given `user_id`
+This API allows an administrator to join a user account with a given `user_id`
 to a room with a given `room_id_or_alias`. You can only modify the membership of
 local users. The server administrator must be in the room and have permission to
 invite users.

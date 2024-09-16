@@ -147,3 +147,10 @@ class BaseFederationAuthorizationTests(unittest.TestCase):
             ),
             ("foo", "ed25519:1", "sig", "bar"),
         )
+        # test that "optional whitespace(s)" (space and tabulation) are allowed between comma-separated auth-param components
+        self.assertEqual(
+            _parse_auth_header(
+                b'X-Matrix origin=foo , key="ed25519:1",  sig="sig",	destination="bar",		extra_field=ignored'
+            ),
+            ("foo", "ed25519:1", "sig", "bar"),
+        )

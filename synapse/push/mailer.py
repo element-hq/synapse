@@ -28,7 +28,7 @@ import jinja2
 from markupsafe import Markup
 from prometheus_client import Counter
 
-from synapse.api.constants import EventTypes, Membership, RoomTypes
+from synapse.api.constants import EventContentFields, EventTypes, Membership, RoomTypes
 from synapse.api.errors import StoreError
 from synapse.config.emailconfig import EmailSubjectConfig
 from synapse.events import EventBase
@@ -203,6 +203,22 @@ class Mailer:
             self.email_subjects.email_validation
             % {"server_name": self.hs.config.server.server_name, "app": self.app_name},
             template_vars,
+        )
+
+    emails_sent_counter.labels("already_in_use")
+
+    async def send_already_in_use_mail(self, email_address: str) -> None:
+        """Send an email if the address is already bound to an user account
+
+        Args:
+            email_address: Email address we're sending to the "already in use" mail
+        """
+
+        await self.send_email(
+            email_address,
+            self.email_subjects.email_already_in_use
+            % {"server_name": self.hs.config.server.server_name, "app": self.app_name},
+            {},
         )
 
     emails_sent_counter.labels("add_threepid")
@@ -513,7 +529,9 @@ class Mailer:
         }
 
         the_events = await filter_events_for_client(
-            self._storage_controllers, user_id, results.events_before
+            self._storage_controllers,
+            user_id,
+            results.events_before,
         )
         the_events.append(notif_event)
 
@@ -698,7 +716,8 @@ class Mailer:
                 )
                 if (
                     create_event
-                    and create_event.content.get("room_type") == RoomTypes.SPACE
+                    and create_event.content.get(EventContentFields.ROOM_TYPE)
+                    == RoomTypes.SPACE
                 ):
                     return self.email_subjects.invite_from_person_to_space % {
                         "person": inviter_name,

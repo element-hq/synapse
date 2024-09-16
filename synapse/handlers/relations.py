@@ -188,13 +188,13 @@ class RelationsHandler:
         if include_original_event:
             # Do not bundle aggregations when retrieving the original event because
             # we want the content before relations are applied to it.
-            return_value["original_event"] = (
-                await self._event_serializer.serialize_event(
-                    event,
-                    now,
-                    bundle_aggregations=None,
-                    config=serialize_options,
-                )
+            return_value[
+                "original_event"
+            ] = await self._event_serializer.serialize_event(
+                event,
+                now,
+                bundle_aggregations=None,
+                config=serialize_options,
             )
 
         if next_token:
@@ -391,9 +391,9 @@ class RelationsHandler:
 
                 # Attempt to find another event to use as the latest event.
                 potential_events, _ = await self._main_store.get_relations_for_event(
+                    room_id,
                     event_id,
                     event,
-                    room_id,
                     RelationTypes.THREAD,
                     direction=Direction.FORWARDS,
                 )

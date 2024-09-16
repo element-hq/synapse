@@ -155,71 +155,6 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
         }
 
     def test_device_signing_with_uia(self) -> None:
-        """Device signing key upload requires UIA."""
-        password = "wonderland"
-        device_id = "ABCDEFGHI"
-        alice_id = self.register_user("alice", password)
-        alice_token = self.login("alice", password, device_id=device_id)
-
-        content = self.make_device_keys(alice_id, device_id)
-
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/v3/keys/device_signing/upload",
-            content,
-            alice_token,
-        )
-
-        self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.result)
-        # Grab the session
-        session = channel.json_body["session"]
-        # Ensure that flows are what is expected.
-        self.assertIn({"stages": ["m.login.password"]}, channel.json_body["flows"])
-
-        # add UI auth
-        content["auth"] = {
-            "type": "m.login.password",
-            "identifier": {"type": "m.id.user", "user": alice_id},
-            "password": password,
-            "session": session,
-        }
-
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/v3/keys/device_signing/upload",
-            content,
-            alice_token,
-        )
-
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-
-    @override_config({"ui_auth": {"session_timeout": "15m"}})
-    def test_device_signing_with_uia_session_timeout(self) -> None:
-        """Device signing key upload requires UIA buy passes with grace period."""
-        password = "wonderland"
-        device_id = "ABCDEFGHI"
-        alice_id = self.register_user("alice", password)
-        alice_token = self.login("alice", password, device_id=device_id)
-
-        content = self.make_device_keys(alice_id, device_id)
-
-        channel = self.make_request(
-            "POST",
-            "/_matrix/client/v3/keys/device_signing/upload",
-            content,
-            alice_token,
-        )
-
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-
-    @override_config(
-        {
-            "experimental_features": {"msc3967_enabled": True},
-            "ui_auth": {"session_timeout": "15s"},
-        }
-    )
-    def test_device_signing_with_msc3967(self) -> None:
-        """Device signing key follows MSC3967 behaviour when enabled."""
         password = "wonderland"
         device_id = "ABCDEFGHI"
         alice_id = self.register_user("alice", password)
@@ -380,9 +315,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key2,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(
@@ -414,9 +347,7 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key3,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)
 
         # Pretend that MAS did UIA and allowed us to replace the master key.
         channel = self.make_request(
@@ -441,6 +372,4 @@ class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
                     "master_key": master_key3,
                 },
             )
-            self.assertEqual(
-                channel.code, HTTPStatus.NOT_IMPLEMENTED, channel.json_body
-            )
+            self.assertEqual(channel.code, HTTPStatus.UNAUTHORIZED, channel.json_body)

@@ -20,8 +20,7 @@
 #
 #
 
-"""An interactive script for doing a release. See `cli()` below.
-"""
+"""An interactive script for doing a release. See `cli()` below."""
 
 import glob
 import json
@@ -70,6 +69,7 @@ def cli() -> None:
             pip install -e .[dev]
 
       - A checkout of the sytest repository at ../sytest
+      - A checkout of the complement repository at ../complement
 
     Then to use:
 
@@ -112,10 +112,12 @@ def _prepare() -> None:
     # Make sure we're in a git repo.
     synapse_repo = get_repo_and_check_clean_checkout()
     sytest_repo = get_repo_and_check_clean_checkout("../sytest", "sytest")
+    complement_repo = get_repo_and_check_clean_checkout("../complement", "complement")
 
     click.secho("Updating Synapse and Sytest git repos...")
     synapse_repo.remote().fetch()
     sytest_repo.remote().fetch()
+    complement_repo.remote().fetch()
 
     # Get the current version and AST from root Synapse module.
     current_version = get_package_version()
@@ -208,7 +210,15 @@ def _prepare() -> None:
             "Which branch should the release be based on?", default=default
         )
 
-        for repo_name, repo in {"synapse": synapse_repo, "sytest": sytest_repo}.items():
+        for repo_name, repo in {
+            "synapse": synapse_repo,
+            "sytest": sytest_repo,
+            "complement": complement_repo,
+        }.items():
+            # Special case for Complement: `develop` maps to `main`
+            if repo_name == "complement" and branch_name == "develop":
+                branch_name = "main"
+
             base_branch = find_ref(repo, branch_name)
             if not base_branch:
                 print(f"Could not find base branch {branch_name} for {repo_name}!")
@@ -230,6 +240,12 @@ def _prepare() -> None:
         # not on subsequent RCs or full releases).
         if click.confirm("Push new SyTest branch?", default=True):
             sytest_repo.git.push("-u", sytest_repo.remote().name, release_branch_name)
+
+        # Same for Complement
+        if click.confirm("Push new Complement branch?", default=True):
+            complement_repo.git.push(
+                "-u", complement_repo.remote().name, release_branch_name
+            )
 
     # Switch to the release branch and ensure it's up to date.
     synapse_repo.git.checkout(release_branch_name)
@@ -306,6 +322,11 @@ def tag(gh_token: Optional[str]) -> None:
 
 def _tag(gh_token: Optional[str]) -> None:
     """Tags the release and generates a draft GitHub release"""
+
+    if gh_token:
+        # Test that the GH Token is valid before continuing.
+        gh = Github(gh_token)
+        gh.get_user()
 
     # Make sure we're in a git repo.
     repo = get_repo_and_check_clean_checkout()
@@ -401,6 +422,11 @@ def publish(gh_token: str) -> None:
 def _publish(gh_token: str) -> None:
     """Publish release on GitHub."""
 
+    if gh_token:
+        # Test that the GH Token is valid before continuing.
+        gh = Github(gh_token)
+        gh.get_user()
+
     # Make sure we're in a git repo.
     get_repo_and_check_clean_checkout()
 
@@ -442,6 +468,11 @@ def upload(gh_token: Optional[str]) -> None:
 
 def _upload(gh_token: Optional[str]) -> None:
     """Upload release to pypi."""
+
+    if gh_token:
+        # Test that the GH Token is valid before continuing.
+        gh = Github(gh_token)
+        gh.get_user()
 
     current_version = get_package_version()
     tag_name = f"v{current_version}"
@@ -538,6 +569,11 @@ def wait_for_actions(gh_token: Optional[str]) -> None:
 
 
 def _wait_for_actions(gh_token: Optional[str]) -> None:
+    if gh_token:
+        # Test that the GH Token is valid before continuing.
+        gh = Github(gh_token)
+        gh.get_user()
+
     # Find out the version and tag name.
     current_version = get_package_version()
     tag_name = f"v{current_version}"
@@ -630,6 +666,9 @@ def _merge_back() -> None:
     else:
         # Full release
         sytest_repo = get_repo_and_check_clean_checkout("../sytest", "sytest")
+        complement_repo = get_repo_and_check_clean_checkout(
+            "../complement", "complement"
+        )
 
         if click.confirm(f"Merge {branch_name} → master?", default=True):
             _merge_into(synapse_repo, branch_name, "master")
@@ -642,6 +681,9 @@ def _merge_back() -> None:
 
         if click.confirm("On SyTest, merge master → develop?", default=True):
             _merge_into(sytest_repo, "master", "develop")
+
+        if click.confirm(f"On Complement, merge {branch_name} → main?", default=True):
+            _merge_into(complement_repo, branch_name, "main")
 
 
 @cli.command()
@@ -688,6 +730,11 @@ Ask the designated people to do the blog and tweets."""
 @cli.command()
 @click.option("--gh-token", envvar=["GH_TOKEN", "GITHUB_TOKEN"], required=True)
 def full(gh_token: str) -> None:
+    if gh_token:
+        # Test that the GH Token is valid before continuing.
+        gh = Github(gh_token)
+        gh.get_user()
+
     click.echo("1. If this is a security release, read the security wiki page.")
     click.echo("2. Check for any release blockers before proceeding.")
     click.echo("    https://github.com/element-hq/synapse/labels/X-Release-Blocker")

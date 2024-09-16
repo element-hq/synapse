@@ -145,6 +145,7 @@ class FileStorageProviderBackend(StorageProvider):
 
     def __init__(self, hs: "HomeServer", config: str):
         self.hs = hs
+        self.reactor = hs.get_reactor()
         self.cache_directory = hs.config.media.media_store_path
         self.base_directory = config
 
@@ -165,7 +166,7 @@ class FileStorageProviderBackend(StorageProvider):
         shutil_copyfile: Callable[[str, str], str] = shutil.copyfile
         with start_active_span("shutil_copyfile"):
             await defer_to_thread(
-                self.hs.get_reactor(),
+                self.reactor,
                 shutil_copyfile,
                 primary_fname,
                 backup_fname,
@@ -177,7 +178,7 @@ class FileStorageProviderBackend(StorageProvider):
 
         backup_fname = os.path.join(self.base_directory, path)
         if os.path.isfile(backup_fname):
-            return FileResponder(open(backup_fname, "rb"))
+            return FileResponder(self.hs, open(backup_fname, "rb"))
 
         return None
 

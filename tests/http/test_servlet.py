@@ -76,7 +76,7 @@ class TestServletUtils(unittest.TestCase):
 
         # Invalid UTF-8.
         with self.assertRaises(SynapseError):
-            parse_json_value_from_request(make_request(b"\xFF\x00"))
+            parse_json_value_from_request(make_request(b"\xff\x00"))
 
         # Invalid JSON.
         with self.assertRaises(SynapseError):

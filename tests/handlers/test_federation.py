@@ -44,16 +44,12 @@ from synapse.rest.client import login, room
 from synapse.server import HomeServer
 from synapse.storage.databases.main.events_worker import EventCacheEntry
 from synapse.util import Clock
-from synapse.util.stringutils import random_string
+from synapse.util.events import generate_fake_event_id
 
 from tests import unittest
 from tests.test_utils import event_injection
 
 logger = logging.getLogger(__name__)
-
-
-def generate_fake_event_id() -> str:
-    return "$fake_" + random_string(43)
 
 
 class FederationTestCase(unittest.FederatingHomeserverTestCase):
@@ -483,6 +479,7 @@ class FederationTestCase(unittest.FederatingHomeserverTestCase):
                 event.room_version,
             ),
             exc=LimitExceededError,
+            by=0.5,
         )
 
     def _build_and_send_join_event(

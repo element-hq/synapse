@@ -1,21 +1,17 @@
 # Experimental Features API
 
 This API allows a server administrator to enable or disable some experimental features on a per-user
-basis. The currently supported features are: 
-- [MSC3026](https://github.com/matrix-org/matrix-spec-proposals/pull/3026): busy 
-presence state enabled
-- [MSC3881](https://github.com/matrix-org/matrix-spec-proposals/pull/3881): enable remotely toggling push notifications 
-for another client 
-- [MSC3967](https://github.com/matrix-org/matrix-spec-proposals/pull/3967): do not require
-UIA when first uploading cross-signing keys. 
-
+basis. The currently supported features are:
+- [MSC3881](https://github.com/matrix-org/matrix-spec-proposals/pull/3881): enable remotely toggling push notifications
+for another client
+- [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575): enable experimental sliding sync support
 
 To use it, you will need to authenticate by providing an `access_token`
 for a server admin: see [Admin API](../usage/administration/admin_api/).
 
 ## Enabling/Disabling Features
 
-This API allows a server administrator to enable experimental features for a given user. The request must 
+This API allows a server administrator to enable experimental features for a given user. The request must
 provide a body containing the user id and listing the features to enable/disable in the following format:
 ```json
 {
@@ -35,7 +31,7 @@ PUT /_synapse/admin/v1/experimental_features/<user_id>
 ```
 
 ## Listing Enabled Features
- 
+
 To list which features are enabled/disabled for a given user send a request to the following API:
 
 ```

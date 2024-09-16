@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup mdbook
-        uses: peaceiris/actions-mdbook@adeb05db28a0c0004681db83893d56c0388ea9ea # v1.2.0
+        uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
           mdbook-version: '0.4.17'
 
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup mdbook
-        uses: peaceiris/actions-mdbook@adeb05db28a0c0004681db83893d56c0388ea9ea # v1.2.0
+        uses: peaceiris/actions-mdbook@ee69d230fe19748b7abf22df32acaa93833fad08 # v2.0.0
         with:
           mdbook-version: '0.4.17'
 

@@ -477,9 +477,9 @@ class TypingWriterHandler(FollowerTypingHandler):
 
         rows = []
         for room_id in changed_rooms:
-            serial = self._room_serials[room_id]
-            if last_id < serial <= current_id:
-                typing = self._room_typing[room_id]
+            serial = self._room_serials.get(room_id)
+            if serial and last_id < serial <= current_id:
+                typing = self._room_typing.get(room_id, set())
                 rows.append((serial, [room_id, list(typing)]))
         rows.sort()
 
@@ -565,7 +565,12 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
         room_ids: Iterable[str],
         is_guest: bool,
         explicit_room_id: Optional[str] = None,
+        to_key: Optional[int] = None,
     ) -> Tuple[List[JsonMapping], int]:
+        """
+        Find typing notifications for given rooms (> `from_token` and <= `to_token`)
+        """
+
         with Measure(self.clock, "typing.get_new_events"):
             from_key = int(from_key)
             handler = self.get_typing_handler()
@@ -574,7 +579,9 @@ class TypingNotificationEventSource(EventSource[int, JsonMapping]):
             for room_id in room_ids:
                 if room_id not in handler._room_serials:
                     continue
-                if handler._room_serials[room_id] <= from_key:
+                if handler._room_serials[room_id] <= from_key or (
+                    to_key is not None and handler._room_serials[room_id] > to_key
+                ):
                     continue
 
                 events.append(self._make_event_for(room_id))

@@ -268,7 +268,7 @@ class LoginRestServlet(RestServlet):
                     approval_notice_medium=ApprovalNoticeMedium.NONE,
                 )
 
-        well_known_data = self._well_known_builder.get_well_known()
+        well_known_data = await self._well_known_builder.get_well_known()
         if well_known_data:
             result["well_known"] = well_known_data
         return 200, result

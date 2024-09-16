@@ -241,7 +241,7 @@ in memory constrained environments, or increased if performance starts to
 degrade.
 
 However, degraded performance due to a low cache factor, common on
-machines with slow disks, often leads to explosions in memory use due
+machines with slow disks, often leads to explosions in memory use due to
 backlogged requests. In this case, reducing the cache factor will make
 things worse. Instead, try increasing it drastically. 2.0 is a good
 starting value.
@@ -250,10 +250,10 @@ Using [libjemalloc](https://jemalloc.net) can also yield a significant
 improvement in overall memory use, and especially in terms of giving back
 RAM to the OS. To use it, the library must simply be put in the
 LD_PRELOAD environment variable when launching Synapse. On Debian, this
-can be done by installing the `libjemalloc1` package and adding this
+can be done by installing the `libjemalloc2` package and adding this
 line to `/etc/default/matrix-synapse`:
 
-    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.1
+    LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
 This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.

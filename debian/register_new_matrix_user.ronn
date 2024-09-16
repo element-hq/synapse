@@ -31,8 +31,12 @@ A sample YAML file accepted by `register_new_matrix_user` is described below:
     Local part of the new user. Will prompt if omitted.
 
   * `-p`, `--password`:
-    New password for user. Will prompt if omitted. Supplying the password
-    on the command line is not recommended. Use the STDIN instead.
+    New password for user. Will prompt if this option and `--password-file` are omitted.
+    Supplying the password on the command line is not recommended.
+
+  * `--password-file`:
+    File containing the new password for user. If set, overrides `--password`.
+    This is a more secure alternative to specifying the password on the command line.
 
   * `-a`, `--admin`:
     Register new user as an admin. Will prompt if omitted.
@@ -43,6 +47,9 @@ A sample YAML file accepted by `register_new_matrix_user` is described below:
   * `-k`, `--shared-secret`:
     Shared secret as defined in server config file. This is an optional
     parameter as it can be also supplied via the YAML file.
+
+  * `--exists-ok`:
+    Do not fail if the user already exists. The user account will be not updated in this case.
 
   * `server_url`:
     URL of the home server. Defaults to 'https://localhost:8448'.

@@ -23,10 +23,13 @@
 import logging
 import re
 from collections import Counter
-from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
 
-from synapse.api.errors import Codes, InvalidAPICallError, SynapseError
+from synapse.api.errors import (
+    InteractiveAuthIncompleteError,
+    InvalidAPICallError,
+    SynapseError,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -36,7 +39,6 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.logging.opentracing import log_kv, set_tag
-from synapse.replication.http.devices import ReplicationUploadKeysForUserRestServlet
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
 from synapse.types import JsonDict, StreamToken
 from synapse.util.cancellation import cancellable
@@ -105,13 +107,8 @@ class KeyUploadServlet(RestServlet):
         self.auth = hs.get_auth()
         self.e2e_keys_handler = hs.get_e2e_keys_handler()
         self.device_handler = hs.get_device_handler()
-
-        if hs.config.worker.worker_app is None:
-            # if main process
-            self.key_uploader = self.e2e_keys_handler.upload_keys_for_user
-        else:
-            # then a worker
-            self.key_uploader = ReplicationUploadKeysForUserRestServlet.make_client(hs)
+        self._clock = hs.get_clock()
+        self._store = hs.get_datastores().main
 
     async def on_POST(
         self, request: SynapseRequest, device_id: Optional[str]
@@ -151,9 +148,10 @@ class KeyUploadServlet(RestServlet):
                 400, "To upload keys, you must pass device_id when authenticating"
             )
 
-        result = await self.key_uploader(
+        result = await self.e2e_keys_handler.upload_keys_for_user(
             user_id=user_id, device_id=device_id, keys=body
         )
+
         return 200, result
 
 
@@ -261,9 +259,15 @@ class KeyChangesServlet(RestServlet):
 
         user_id = requester.user.to_string()
 
-        results = await self.device_handler.get_user_ids_changed(user_id, from_token)
+        device_list_updates = await self.device_handler.get_user_ids_changed(
+            user_id, from_token
+        )
 
-        return 200, results
+        response: JsonDict = {}
+        response["changed"] = list(device_list_updates.changed)
+        response["left"] = list(device_list_updates.left)
+
+        return 200, response
 
 
 class OneTimeKeyServlet(RestServlet):
@@ -387,41 +391,54 @@ class SigningKeyUploadServlet(RestServlet):
             master_key_updatable_without_uia,
         ) = await self.e2e_keys_handler.check_cross_signing_setup(user_id)
 
-        # Before MSC3967 we required UIA both when setting up cross signing for the
-        # first time and when resetting the device signing key. With MSC3967 we only
-        # require UIA when resetting cross-signing, and not when setting up the first
-        # time. Because there is no UIA in MSC3861, for now we throw an error if the
-        # user tries to reset the device signing key when MSC3861 is enabled, but allow
-        # first-time setup.
-        #
-        # XXX: We now have a get-out clause by which MAS can temporarily mark the master
-        # key as replaceable. It should do its own equivalent of user interactive auth
-        # before doing so.
-        if self.hs.config.experimental.msc3861.enabled:
-            # The auth service has to explicitly mark the master key as replaceable
-            # without UIA to reset the device signing key with MSC3861.
-            if is_cross_signing_setup and not master_key_updatable_without_uia:
-                raise SynapseError(
-                    HTTPStatus.NOT_IMPLEMENTED,
-                    "Resetting cross signing keys is not yet supported with MSC3861",
-                    Codes.UNRECOGNIZED,
-                )
-            # But first-time setup is fine
+        # Resending exactly the same keys should just 200 OK without doing a UIA prompt.
+        keys_are_different = await self.e2e_keys_handler.has_different_keys(
+            user_id, body
+        )
+        if not keys_are_different:
+            return 200, {}
 
-        elif self.hs.config.experimental.msc3967_enabled:
-            # MSC3967 allows this endpoint to 200 OK for idempotency. Resending exactly the same
-            # keys should just 200 OK without doing a UIA prompt.
-            keys_are_different = await self.e2e_keys_handler.has_different_keys(
-                user_id, body
-            )
-            if not keys_are_different:
-                # FIXME: we do not fallthrough to upload_signing_keys_for_user because confusingly
-                # if we do, we 500 as it looks like it tries to INSERT the same key twice, causing a
-                # unique key constraint violation. This sounds like a bug?
-                return 200, {}
-            # the keys are different, is x-signing set up? If no, then the keys don't exist which is
-            # why they are different. If yes, then we need to UIA to change them.
-            if is_cross_signing_setup:
+        # The keys are different; is x-signing set up? If no, then this is first-time
+        # setup, and that is allowed without UIA, per MSC3967.
+        # If yes, then we need to authenticate the change.
+        if is_cross_signing_setup:
+            # With MSC3861, UIA is not possible. Instead, the auth service has to
+            # explicitly mark the master key as replaceable.
+            if self.hs.config.experimental.msc3861.enabled:
+                if not master_key_updatable_without_uia:
+                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
+                    # We import lazily here because of the authlib requirement
+                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
+
+                    auth = cast(MSC3861DelegatedAuth, self.auth)
+
+                    uri = await auth.account_management_url()
+                    if uri is not None:
+                        url = f"{uri}?action=org.matrix.cross_signing_reset"
+                    else:
+                        url = await auth.issuer()
+
+                    # We use a dummy session ID as this isn't really a UIA flow, but we
+                    # reuse the same API shape for better client compatibility.
+                    raise InteractiveAuthIncompleteError(
+                        "dummy",
+                        {
+                            "session": "dummy",
+                            "flows": [
+                                {"stages": ["org.matrix.cross_signing_reset"]},
+                            ],
+                            "params": {
+                                "org.matrix.cross_signing_reset": {
+                                    "url": url,
+                                },
+                            },
+                            "msg": "To reset your end-to-end encryption cross-signing "
+                            f"identity, you first need to approve it at {url} and "
+                            "then try again.",
+                        },
+                    )
+            else:
+                # Without MSC3861, we require UIA.
                 await self.auth_handler.validate_user_via_ui_auth(
                     requester,
                     request,
@@ -430,18 +447,6 @@ class SigningKeyUploadServlet(RestServlet):
                     # Do not allow skipping of UIA auth.
                     can_skip_ui_auth=False,
                 )
-            # Otherwise we don't require UIA since we are setting up cross signing for first time
-        else:
-            # Previous behaviour is to always require UIA but allow it to be skipped
-            await self.auth_handler.validate_user_via_ui_auth(
-                requester,
-                request,
-                body,
-                "add a device signing key to your account",
-                # Allow skipping of UI auth since this is frequently called directly
-                # after login and it is silly to ask users to re-auth immediately.
-                can_skip_ui_auth=True,
-            )
 
         result = await self.e2e_keys_handler.upload_signing_keys_for_user(user_id, body)
         return 200, result

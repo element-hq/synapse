@@ -23,6 +23,7 @@ from synapse.config import (  # noqa: F401
     api,
     appservice,
     auth,
+    auto_accept_invites,
     background_updates,
     cache,
     captcha,
@@ -120,6 +121,7 @@ class RootConfig:
     federation: federation.FederationConfig
     retention: retention.RetentionConfig
     background_updates: background_updates.BackgroundUpdateConfig
+    auto_accept_invites: auto_accept_invites.AutoAcceptInvitesConfig
 
     config_classes: List[Type["Config"]] = ...
     config_files: List[str]

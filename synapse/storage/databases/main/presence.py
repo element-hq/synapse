@@ -40,14 +40,9 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
-from synapse.storage.engines import PostgresEngine
 from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.types import Connection
-from synapse.storage.util.id_generators import (
-    AbstractStreamIdGenerator,
-    MultiWriterIdGenerator,
-    StreamIdGenerator,
-)
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.util.caches.descriptors import cached, cachedList
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 from synapse.util.iterutils import batch_iter
@@ -85,27 +80,22 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
         super().__init__(database, db_conn, hs)
 
         self._instance_name = hs.get_instance_name()
-        self._presence_id_gen: AbstractStreamIdGenerator
+        self._presence_id_gen: MultiWriterIdGenerator
 
         self._can_persist_presence = (
             self._instance_name in hs.config.worker.writers.presence
         )
 
-        if isinstance(database.engine, PostgresEngine):
-            self._presence_id_gen = MultiWriterIdGenerator(
-                db_conn=db_conn,
-                db=database,
-                notifier=hs.get_replication_notifier(),
-                stream_name="presence_stream",
-                instance_name=self._instance_name,
-                tables=[("presence_stream", "instance_name", "stream_id")],
-                sequence_name="presence_stream_sequence",
-                writers=hs.config.worker.writers.presence,
-            )
-        else:
-            self._presence_id_gen = StreamIdGenerator(
-                db_conn, hs.get_replication_notifier(), "presence_stream", "stream_id"
-            )
+        self._presence_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="presence_stream",
+            instance_name=self._instance_name,
+            tables=[("presence_stream", "instance_name", "stream_id")],
+            sequence_name="presence_stream_sequence",
+            writers=hs.config.worker.writers.presence,
+        )
 
         self.hs = hs
         self._presence_on_startup = self._get_active_presence(db_conn)
@@ -461,6 +451,9 @@ class PresenceStore(PresenceBackgroundUpdateStore, CacheInvalidationWorkerStore)
 
     def get_current_presence_token(self) -> int:
         return self._presence_id_gen.get_current_token()
+
+    def get_presence_stream_id_gen(self) -> MultiWriterIdGenerator:
+        return self._presence_id_gen
 
     def _get_active_presence(self, db_conn: Connection) -> List[UserPresenceState]:
         """Fetch non-offline presence from the database so that we can register

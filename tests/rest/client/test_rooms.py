@@ -48,7 +48,16 @@ from synapse.appservice import ApplicationService
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.rest import admin
-from synapse.rest.client import account, directory, login, profile, register, room, sync
+from synapse.rest.client import (
+    account,
+    directory,
+    knock,
+    login,
+    profile,
+    register,
+    room,
+    sync,
+)
 from synapse.server import HomeServer
 from synapse.types import JsonDict, RoomAlias, UserID, create_requester
 from synapse.util import Clock
@@ -733,7 +742,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(32, channel.resource_usage.db_txn_count)
+        self.assertEqual(33, channel.resource_usage.db_txn_count)
 
     def test_post_room_initial_state(self) -> None:
         # POST with initial_state config key, expect new room id
@@ -746,7 +755,7 @@ class RoomsCreateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
         self.assertTrue("room_id" in channel.json_body)
         assert channel.resource_usage is not None
-        self.assertEqual(34, channel.resource_usage.db_txn_count)
+        self.assertEqual(35, channel.resource_usage.db_txn_count)
 
     def test_post_room_visibility_key(self) -> None:
         # POST with visibility config key, expect new room id
@@ -1154,6 +1163,7 @@ class RoomJoinTestCase(RoomBase):
         admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
+        knock.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -1166,6 +1176,8 @@ class RoomJoinTestCase(RoomBase):
         self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
         self.room2 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
         self.room3 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+
+        self.store = hs.get_datastores().main
 
     def test_spam_checker_may_join_room_deprecated(self) -> None:
         """Tests that the user_may_join_room spam checker callback is correctly called
@@ -1315,6 +1327,57 @@ class RoomJoinTestCase(RoomBase):
             expect_errcode=return_value[0],
             tok=self.tok2,
             expect_additional_fields=return_value[1],
+        )
+
+    def test_suspended_user_cannot_join_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user2, True))
+
+        channel = self.make_request(
+            "POST", f"/join/{self.room1}", access_token=self.tok2
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        channel = self.make_request(
+            "POST", f"/rooms/{self.room1}/join", access_token=self.tok2
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_knock_on_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user2, True))
+
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/v3/knock/{self.room1}",
+            access_token=self.tok2,
+            content={},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 403)
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_invite_to_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # first user invites second user
+        channel = self.make_request(
+            "POST",
+            f"/rooms/{self.room1}/invite",
+            access_token=self.tok1,
+            content={"user_id": self.user2},
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
         )
 
 
@@ -2174,6 +2237,31 @@ class RoomMessageListTestCase(RoomBase):
 
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 0, [event["content"] for event in chunk])
+
+    def test_room_message_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={valid_filter_str}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/messages?access_token=x&dir=b&filter={invalid_filter_str}",
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
 
 
 class RoomMessageFilterTestCase(RoomBase):
@@ -3213,6 +3301,33 @@ class ContextTestCase(unittest.HomeserverTestCase):
         self.assertDictEqual(events_after[0].get("content"), {}, events_after[0])
         self.assertEqual(events_after[1].get("content"), {}, events_after[1])
 
+    def test_room_event_context_filter_query_validation(self) -> None:
+        # Test json validation in (filter) query parameter.
+        # Does not test the validity of the filter, only the json validation.
+        event_id = self.helper.send(self.room_id, "message 7", tok=self.tok)["event_id"]
+
+        # Check Get with valid json filter parameter, expect 200.
+        valid_filter_str = '{"types": ["m.room.message"]}'
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={valid_filter_str}",
+            access_token=self.tok,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        # Check Get with invalid json filter parameter, expect 400 NOT_JSON.
+        invalid_filter_str = "}}}{}"
+        channel = self.make_request(
+            "GET",
+            f"/rooms/{self.room_id}/context/{event_id}?filter={invalid_filter_str}",
+            access_token=self.tok,
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.NOT_JSON, channel.json_body
+        )
+
 
 class RoomAliasListTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -3704,3 +3819,108 @@ class TimestampLookupTestCase(unittest.HomeserverTestCase):
 
         # Make sure the outlier event is not returned
         self.assertNotEqual(channel.json_body["event_id"], outlier_event.event_id)
+
+
+class UserSuspensionTests(unittest.HomeserverTestCase):
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        profile.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user1 = self.register_user("thomas", "hackme")
+        self.tok1 = self.login("thomas", "hackme")
+
+        self.user2 = self.register_user("teresa", "hackme")
+        self.tok2 = self.login("teresa", "hackme")
+
+        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.store = hs.get_datastores().main
+
+    def test_suspended_user_cannot_send_message_to_room(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        channel = self.make_request(
+            "PUT",
+            f"/rooms/{self.room1}/send/m.room.message/1",
+            access_token=self.tok1,
+            content={"body": "hello", "msgtype": "m.text"},
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_change_profile_data(self) -> None:
+        # set the user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user1}/avatar_url",
+            access_token=self.tok1,
+            content={"avatar_url": "mxc://matrix.org/wefh34uihSDRGhw34"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        channel2 = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/profile/{self.user1}/displayname",
+            access_token=self.tok1,
+            content={"displayname": "something offensive"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel2.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+    def test_suspended_user_cannot_redact_messages_other_than_their_own(self) -> None:
+        # first user sends message
+        self.make_request("POST", f"/rooms/{self.room1}/join", access_token=self.tok2)
+        res = self.helper.send_event(
+            self.room1,
+            "m.room.message",
+            {"body": "hello", "msgtype": "m.text"},
+            tok=self.tok2,
+        )
+        event_id = res["event_id"]
+
+        # second user sends message
+        self.make_request("POST", f"/rooms/{self.room1}/join", access_token=self.tok1)
+        res2 = self.helper.send_event(
+            self.room1,
+            "m.room.message",
+            {"body": "bad_message", "msgtype": "m.text"},
+            tok=self.tok1,
+        )
+        event_id2 = res2["event_id"]
+
+        # set the second user as suspended
+        self.get_success(self.store.set_user_suspended_status(self.user1, True))
+
+        # second user can't redact first user's message
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/redact/{event_id}/1",
+            access_token=self.tok1,
+            content={"reason": "bogus"},
+            shorthand=False,
+        )
+        self.assertEqual(
+            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+        )
+
+        # but can redact their own
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/rooms/{self.room1}/redact/{event_id2}/1",
+            access_token=self.tok1,
+            content={"reason": "bogus"},
+            shorthand=False,
+        )
+        self.assertEqual(channel.code, 200)

@@ -22,17 +22,11 @@
 import logging
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import StrictStr
-else:
-    from pydantic import StrictStr
-
 from typing_extensions import Literal
 
 from twisted.web.server import Request
 
+from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -41,8 +35,8 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict, RoomAlias
+from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

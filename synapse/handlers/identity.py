@@ -21,6 +21,7 @@
 #
 
 """Utilities for interacting with Identity Servers"""
+
 import logging
 import urllib.parse
 from typing import TYPE_CHECKING, Awaitable, Callable, Dict, List, Optional, Tuple

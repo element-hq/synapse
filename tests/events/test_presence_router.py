@@ -36,7 +36,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, StreamToken, create_requester
 from synapse.util import Clock
 
-from tests.handlers.test_sync import generate_sync_config
+from tests.handlers.test_sync import SyncRequestKey, SyncVersion, generate_sync_config
 from tests.unittest import (
     FederatingHomeserverTestCase,
     HomeserverTestCase,
@@ -498,6 +498,15 @@ def send_presence_update(
     return channel.json_body
 
 
+_request_key = 0
+
+
+def generate_request_key() -> SyncRequestKey:
+    global _request_key
+    _request_key += 1
+    return ("request_key", _request_key)
+
+
 def sync_presence(
     testcase: HomeserverTestCase,
     user_id: str,
@@ -521,7 +530,11 @@ def sync_presence(
     sync_config = generate_sync_config(requester.user.to_string())
     sync_result = testcase.get_success(
         testcase.hs.get_sync_handler().wait_for_sync_for_user(
-            requester, sync_config, since_token
+            requester,
+            sync_config,
+            SyncVersion.SYNC_V2,
+            generate_request_key(),
+            since_token,
         )
     )
 

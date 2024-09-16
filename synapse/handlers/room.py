@@ -20,6 +20,7 @@
 #
 
 """Contains functions for performing actions on rooms."""
+
 import itertools
 import logging
 import math
@@ -40,7 +41,6 @@ from typing import (
 )
 
 import attr
-from typing_extensions import TypedDict
 
 import synapse.events.snapshot
 from synapse.api.constants import (
@@ -88,6 +88,7 @@ from synapse.types import (
     UserID,
     create_requester,
 )
+from synapse.types.handlers import ShutdownRoomParams, ShutdownRoomResponse
 from synapse.types.state import StateFilter
 from synapse.util import stringutils
 from synapse.util.caches.response_cache import ResponseCache
@@ -900,11 +901,9 @@ class RoomCreationHandler:
         )
 
         # Check whether this visibility value is blocked by a third party module
-        allowed_by_third_party_rules = (
-            await (
-                self._third_party_event_rules.check_visibility_can_be_modified(
-                    room_id, visibility
-                )
+        allowed_by_third_party_rules = await (
+            self._third_party_event_rules.check_visibility_can_be_modified(
+                room_id, visibility
             )
         )
         if not allowed_by_third_party_rules:
@@ -1188,6 +1187,8 @@ class RoomCreationHandler:
             )
             events_to_send.append((power_event, power_context))
         else:
+            # Please update the docs for `default_power_level_content_override` when
+            # updating the `events` dict below
             power_level_content: JsonDict = {
                 "users": {creator_id: 100},
                 "users_default": 0,
@@ -1748,11 +1749,11 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
                 from_key=from_key,
                 to_key=to_key,
                 limit=limit or 10,
-                order="ASC",
+                direction=Direction.FORWARDS,
             )
 
             events = list(room_events)
-            events.extend(e for evs, _ in room_to_events.values() for e in evs)
+            events.extend(e for evs, _, _ in room_to_events.values() for e in evs)
 
             # We know stream_ordering must be not None here, as its been
             # persisted, but mypy doesn't know that
@@ -1777,63 +1778,6 @@ class RoomEventSource(EventSource[RoomStreamToken, EventBase]):
 
     def get_current_key_for_room(self, room_id: str) -> Awaitable[RoomStreamToken]:
         return self.store.get_current_room_stream_token_for_room_id(room_id)
-
-
-class ShutdownRoomParams(TypedDict):
-    """
-    Attributes:
-        requester_user_id:
-            User who requested the action. Will be recorded as putting the room on the
-            blocking list.
-        new_room_user_id:
-            If set, a new room will be created with this user ID
-            as the creator and admin, and all users in the old room will be
-            moved into that room. If not set, no new room will be created
-            and the users will just be removed from the old room.
-        new_room_name:
-            A string representing the name of the room that new users will
-            be invited to. Defaults to `Content Violation Notification`
-        message:
-            A string containing the first message that will be sent as
-            `new_room_user_id` in the new room. Ideally this will clearly
-            convey why the original room was shut down.
-            Defaults to `Sharing illegal content on this server is not
-            permitted and rooms in violation will be blocked.`
-        block:
-            If set to `true`, this room will be added to a blocking list,
-            preventing future attempts to join the room. Defaults to `false`.
-        purge:
-            If set to `true`, purge the given room from the database.
-        force_purge:
-            If set to `true`, the room will be purged from database
-            even if there are still users joined to the room.
-    """
-
-    requester_user_id: Optional[str]
-    new_room_user_id: Optional[str]
-    new_room_name: Optional[str]
-    message: Optional[str]
-    block: bool
-    purge: bool
-    force_purge: bool
-
-
-class ShutdownRoomResponse(TypedDict):
-    """
-    Attributes:
-        kicked_users: An array of users (`user_id`) that were kicked.
-        failed_to_kick_users:
-            An array of users (`user_id`) that that were not kicked.
-        local_aliases:
-            An array of strings representing the local aliases that were
-            migrated from the old room to the new.
-        new_room_id: A string representing the room ID of the new room.
-    """
-
-    kicked_users: List[str]
-    failed_to_kick_users: List[str]
-    local_aliases: List[str]
-    new_room_id: Optional[str]
 
 
 class RoomShutdownHandler:

@@ -169,9 +169,9 @@ class RelationsWorkerStore(SQLBaseStore):
     @cached(uncached_args=("event",), tree=True)
     async def get_relations_for_event(
         self,
+        room_id: str,
         event_id: str,
         event: EventBase,
-        room_id: str,
         relation_type: Optional[str] = None,
         event_type: Optional[str] = None,
         limit: int = 5,

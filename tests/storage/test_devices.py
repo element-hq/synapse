@@ -36,6 +36,14 @@ class DeviceStoreTestCase(HomeserverTestCase):
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+
+        # We 'enable' federation otherwise `get_device_updates_by_remote` will
+        # throw an exception.
+        config["federation_sender_instances"] = ["master"]
+        return config
+
     def add_device_change(self, user_id: str, device_ids: List[str], host: str) -> None:
         """Add a device list change for the given device to
         `device_lists_outbound_pokes` table.

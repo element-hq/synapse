@@ -546,7 +546,25 @@ class FederationServer(FederationBase):
                 edu_type=edu_dict["edu_type"],
                 content=edu_dict["content"],
             )
-            await self.registry.on_edu(edu.edu_type, origin, edu.content)
+            try:
+                await self.registry.on_edu(edu.edu_type, origin, edu.content)
+            except Exception:
+                # If there was an error handling the EDU, we must reject the
+                # transaction.
+                #
+                # Some EDU types (notably, to-device messages) are, despite their name,
+                # expected to be reliable; if we weren't able to do something with it,
+                # we have to tell the sender that, and the only way the protocol gives
+                # us to do so is by sending an HTTP error back on the transaction.
+                #
+                # We log the exception now, and then raise a new SynapseError to cause
+                # the transaction to be failed.
+                logger.exception("Error handling EDU of type %s", edu.edu_type)
+                raise SynapseError(500, f"Error handing EDU of type {edu.edu_type}")
+
+                # TODO: if the first EDU fails, we should probably abort the whole
+                #   thing rather than carrying on with the rest of them. That would
+                #   probably be best done inside `concurrently_execute`.
 
         await concurrently_execute(
             _process_edu,
@@ -656,7 +674,7 @@ class FederationServer(FederationBase):
         # This is in addition to the HS-level rate limiting applied by
         # BaseFederationServlet.
         # type-ignore: mypy doesn't seem able to deduce the type of the limiter(!?)
-        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(  # type: ignore[has-type]
+        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(
             requester=None,
             key=room_id,
             update=False,
@@ -699,7 +717,7 @@ class FederationServer(FederationBase):
             SynapseTags.SEND_JOIN_RESPONSE_IS_PARTIAL_STATE,
             caller_supports_partial_state,
         )
-        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(  # type: ignore[has-type]
+        await self._room_member_handler._join_rate_per_room_limiter.ratelimit(
             requester=None,
             key=room_id,
             update=False,
@@ -1414,12 +1432,7 @@ class FederationHandlerRegistry:
         handler = self.edu_handlers.get(edu_type)
         if handler:
             with start_active_span_from_edu(content, "handle_edu"):
-                try:
-                    await handler(origin, content)
-                except SynapseError as e:
-                    logger.info("Failed to handle edu %r: %r", edu_type, e)
-                except Exception:
-                    logger.exception("Failed to handle edu %r", edu_type)
+                await handler(origin, content)
             return
 
         # Check if we can route it somewhere else that isn't us
@@ -1428,17 +1441,12 @@ class FederationHandlerRegistry:
             # Pick an instance randomly so that we don't overload one.
             route_to = random.choice(instances)
 
-            try:
-                await self._send_edu(
-                    instance_name=route_to,
-                    edu_type=edu_type,
-                    origin=origin,
-                    content=content,
-                )
-            except SynapseError as e:
-                logger.info("Failed to handle edu %r: %r", edu_type, e)
-            except Exception:
-                logger.exception("Failed to handle edu %r", edu_type)
+            await self._send_edu(
+                instance_name=route_to,
+                edu_type=edu_type,
+                origin=origin,
+                content=content,
+            )
             return
 
         # Oh well, let's just log and move on.

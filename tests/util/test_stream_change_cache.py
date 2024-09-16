@@ -1,3 +1,5 @@
+from parameterized import parameterized
+
 from synapse.util.caches.stream_change_cache import StreamChangeCache
 
 from tests import unittest
@@ -161,7 +163,8 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertFalse(cache.has_any_entity_changed(2))
         self.assertFalse(cache.has_any_entity_changed(3))
 
-    def test_get_entities_changed(self) -> None:
+    @parameterized.expand([(0,), (1000000000,)])
+    def test_get_entities_changed(self, perf_factor: int) -> None:
         """
         StreamChangeCache.get_entities_changed will return the entities in the
         given list that have changed since the provided stream ID.  If the
@@ -178,7 +181,9 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         # get the ones after that point.
         self.assertEqual(
             cache.get_entities_changed(
-                ["user@foo.com", "bar@baz.net", "user@elsewhere.org"], stream_pos=2
+                ["user@foo.com", "bar@baz.net", "user@elsewhere.org"],
+                stream_pos=2,
+                _perf_factor=perf_factor,
             ),
             {"bar@baz.net", "user@elsewhere.org"},
         )
@@ -195,6 +200,7 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
                     "not@here.website",
                 ],
                 stream_pos=2,
+                _perf_factor=perf_factor,
             ),
             {"bar@baz.net", "user@elsewhere.org"},
         )
@@ -210,6 +216,7 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
                     "not@here.website",
                 ],
                 stream_pos=0,
+                _perf_factor=perf_factor,
             ),
             {"user@foo.com", "bar@baz.net", "user@elsewhere.org", "not@here.website"},
         )
@@ -217,7 +224,11 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         # Query a subset of the entries mid-way through the stream. We should
         # only get back the subset.
         self.assertEqual(
-            cache.get_entities_changed(["bar@baz.net"], stream_pos=2),
+            cache.get_entities_changed(
+                ["bar@baz.net"],
+                stream_pos=2,
+                _perf_factor=perf_factor,
+            ),
             {"bar@baz.net"},
         )
 
@@ -238,5 +249,5 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertEqual(cache.get_max_pos_of_last_change("bar@baz.net"), 3)
         self.assertEqual(cache.get_max_pos_of_last_change("user@elsewhere.org"), 4)
 
-        # Unknown entities will return the stream start position.
-        self.assertEqual(cache.get_max_pos_of_last_change("not@here.website"), 1)
+        # Unknown entities will return None
+        self.assertEqual(cache.get_max_pos_of_last_change("not@here.website"), None)

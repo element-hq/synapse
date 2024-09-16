@@ -62,6 +62,6 @@ following documentation:
 
 ## Reporting a security vulnerability
 
-If you've found a security issue in Synapse or any other Matrix.org Foundation
-project, please report it to us in accordance with our [Security Disclosure
-Policy](https://www.matrix.org/security-disclosure-policy/). Thank you!
+If you've found a security issue in Synapse or any other Element project,
+please report it to us in accordance with our [Security Disclosure
+Policy](https://element.io/security/security-disclosure-policy). Thank you!

@@ -384,7 +384,7 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
             "PUT",
             url,
             content={
-                "features": {"msc3026": True, "msc3881": True},
+                "features": {"msc3881": True},
             },
             access_token=self.admin_user_tok,
         )
@@ -401,10 +401,6 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(
             True,
-            channel.json_body["features"]["msc3026"],
-        )
-        self.assertEqual(
-            True,
             channel.json_body["features"]["msc3881"],
         )
 
@@ -413,7 +409,7 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             url,
-            content={"features": {"msc3026": False}},
+            content={"features": {"msc3881": False}},
             access_token=self.admin_user_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -429,15 +425,7 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(
             False,
-            channel.json_body["features"]["msc3026"],
-        )
-        self.assertEqual(
-            True,
             channel.json_body["features"]["msc3881"],
-        )
-        self.assertEqual(
-            False,
-            channel.json_body["features"]["msc3967"],
         )
 
         # test nothing blows up if you try to disable a feature that isn't already enabled
@@ -445,7 +433,7 @@ class ExperimentalFeaturesTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             url,
-            content={"features": {"msc3026": False}},
+            content={"features": {"msc3881": False}},
             access_token=self.admin_user_tok,
         )
         self.assertEqual(channel.code, 200)

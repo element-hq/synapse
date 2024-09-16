@@ -75,9 +75,6 @@ class PaginationConfig:
             raise SynapseError(400, "'to' parameter is invalid")
 
         limit = parse_integer(request, "limit", default=default_limit)
-        if limit < 0:
-            raise SynapseError(400, "Limit must be 0 or above")
-
         limit = min(limit, MAX_LIMIT)
 
         try:

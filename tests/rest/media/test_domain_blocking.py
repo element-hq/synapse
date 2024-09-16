@@ -44,13 +44,13 @@ class MediaDomainBlockingTests(unittest.HomeserverTestCase):
         # from a regular 404.
         file_id = "abcdefg12345"
         file_info = FileInfo(server_name=self.remote_server_name, file_id=file_id)
-        with hs.get_media_repository().media_storage.store_into_file(file_info) as (
-            f,
-            fname,
-            finish,
-        ):
-            f.write(SMALL_PNG)
-            self.get_success(finish())
+
+        media_storage = hs.get_media_repository().media_storage
+
+        ctx = media_storage.store_into_file(file_info)
+        (f, fname) = self.get_success(ctx.__aenter__())
+        f.write(SMALL_PNG)
+        self.get_success(ctx.__aexit__(None, None, None))
 
         self.get_success(
             self.store.store_cached_remote_media(

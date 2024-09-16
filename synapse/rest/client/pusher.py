@@ -32,6 +32,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.push import PusherConfigException
+from synapse.rest.admin.experimental_features import ExperimentalFeature
 from synapse.rest.client._base import client_patterns
 from synapse.rest.synapse.client.unsubscribe import UnsubscribeResource
 from synapse.types import JsonDict
@@ -49,20 +50,22 @@ class PushersRestServlet(RestServlet):
         super().__init__()
         self.hs = hs
         self.auth = hs.get_auth()
-        self._msc3881_enabled = self.hs.config.experimental.msc3881_enabled
+        self._store = hs.get_datastores().main
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        user = requester.user
+        user_id = requester.user.to_string()
 
-        pushers = await self.hs.get_datastores().main.get_pushers_by_user_id(
-            user.to_string()
+        msc3881_enabled = await self._store.is_feature_enabled(
+            user_id, ExperimentalFeature.MSC3881
         )
+
+        pushers = await self.hs.get_datastores().main.get_pushers_by_user_id(user_id)
 
         pusher_dicts = [p.as_dict() for p in pushers]
 
         for pusher in pusher_dicts:
-            if self._msc3881_enabled:
+            if msc3881_enabled:
                 pusher["org.matrix.msc3881.enabled"] = pusher["enabled"]
                 pusher["org.matrix.msc3881.device_id"] = pusher["device_id"]
             del pusher["enabled"]
@@ -80,11 +83,15 @@ class PushersSetRestServlet(RestServlet):
         self.auth = hs.get_auth()
         self.notifier = hs.get_notifier()
         self.pusher_pool = self.hs.get_pusherpool()
-        self._msc3881_enabled = self.hs.config.experimental.msc3881_enabled
+        self._store = hs.get_datastores().main
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         requester = await self.auth.get_user_by_req(request)
-        user = requester.user
+        user_id = requester.user.to_string()
+
+        msc3881_enabled = await self._store.is_feature_enabled(
+            user_id, ExperimentalFeature.MSC3881
+        )
 
         content = parse_json_object_from_request(request)
 
@@ -95,7 +102,7 @@ class PushersSetRestServlet(RestServlet):
             and content["kind"] is None
         ):
             await self.pusher_pool.remove_pusher(
-                content["app_id"], content["pushkey"], user_id=user.to_string()
+                content["app_id"], content["pushkey"], user_id=user_id
             )
             return 200, {}
 
@@ -120,19 +127,19 @@ class PushersSetRestServlet(RestServlet):
             append = content["append"]
 
         enabled = True
-        if self._msc3881_enabled and "org.matrix.msc3881.enabled" in content:
+        if msc3881_enabled and "org.matrix.msc3881.enabled" in content:
             enabled = content["org.matrix.msc3881.enabled"]
 
         if not append:
             await self.pusher_pool.remove_pushers_by_app_id_and_pushkey_not_user(
                 app_id=content["app_id"],
                 pushkey=content["pushkey"],
-                not_user_id=user.to_string(),
+                not_user_id=user_id,
             )
 
         try:
             await self.pusher_pool.add_or_update_pusher(
-                user_id=user.to_string(),
+                user_id=user_id,
                 kind=content["kind"],
                 app_id=content["app_id"],
                 app_display_name=content["app_display_name"],

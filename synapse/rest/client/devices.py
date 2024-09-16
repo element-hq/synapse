@@ -24,13 +24,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra, StrictStr
-else:
-    from pydantic import Extra, StrictStr
-
+from synapse._pydantic_compat import Extra, StrictStr
 from synapse.api import errors
 from synapse.api.errors import NotFoundError, SynapseError, UnrecognizedRequestError
 from synapse.handlers.device import DeviceHandler
@@ -42,9 +36,9 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns, interactive_auth_handler
-from synapse.rest.client.models import AuthenticationData
-from synapse.rest.models import RequestBodyModel
 from synapse.types import JsonDict
+from synapse.types.rest import RequestBodyModel
+from synapse.types.rest.client import AuthenticationData
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer

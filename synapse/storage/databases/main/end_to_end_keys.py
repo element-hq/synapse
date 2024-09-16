@@ -58,7 +58,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
 from synapse.storage.engines import PostgresEngine
-from synapse.storage.util.id_generators import StreamIdGenerator
+from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util import json_decoder, json_encoder
 from synapse.util.caches.descriptors import cached, cachedList
@@ -123,9 +123,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         if stream_name == DeviceListsStream.NAME:
             for row in rows:
                 assert isinstance(row, DeviceListsStream.DeviceListsStreamRow)
-                if row.entity.startswith("@"):
+                if not row.hosts_calculated:
                     self._get_e2e_device_keys_for_federation_query_inner.invalidate(
-                        (row.entity,)
+                        (row.user_id,)
                     )
 
         super().process_replication_rows(stream_name, instance_name, token, rows)
@@ -472,9 +472,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         signature_sql = """
             SELECT user_id, key_id, target_device_id, signature
             FROM e2e_cross_signing_signatures WHERE %s
-            """ % (
-            " OR ".join("(" + q + ")" for q in signature_query_clauses)
-        )
+            """ % (" OR ".join("(" + q + ")" for q in signature_query_clauses))
 
         txn.execute(signature_sql, signature_query_params)
         return cast(
@@ -917,9 +915,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                         FROM e2e_cross_signing_keys
                         WHERE %(clause)s
                         ORDER BY user_id, keytype, stream_id DESC
-                """ % {
-                    "clause": clause
-                }
+                """ % {"clause": clause}
             else:
                 # SQLite has special handling for bare columns when using
                 # MIN/MAX with a `GROUP BY` clause where it picks the value from
@@ -929,9 +925,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                         FROM e2e_cross_signing_keys
                         WHERE %(clause)s
                         GROUP BY user_id, keytype
-                """ % {
-                    "clause": clause
-                }
+                """ % {"clause": clause}
 
             txn.execute(sql, params)
 
@@ -1448,11 +1442,17 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
 
-        self._cross_signing_id_gen = StreamIdGenerator(
-            db_conn,
-            hs.get_replication_notifier(),
-            "e2e_cross_signing_keys",
-            "stream_id",
+        self._cross_signing_id_gen = MultiWriterIdGenerator(
+            db_conn=db_conn,
+            db=database,
+            notifier=hs.get_replication_notifier(),
+            stream_name="e2e_cross_signing_keys",
+            instance_name=self._instance_name,
+            tables=[
+                ("e2e_cross_signing_keys", "instance_name", "stream_id"),
+            ],
+            sequence_name="e2e_cross_signing_keys_sequence",
+            writers=["master"],
         )
 
     async def set_e2e_device_keys(
@@ -1627,6 +1627,7 @@ class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
                 "keytype": key_type,
                 "keydata": json_encoder.encode(key),
                 "stream_id": stream_id,
+                "instance_name": self._instance_name,
             },
         )
 

@@ -32,6 +32,7 @@ from synapse.events.utils import (
     PowerLevelsContent,
     SerializeEventConfig,
     _split_field,
+    clone_event,
     copy_and_fixup_power_levels_contents,
     maybe_upsert_event_field,
     prune_event,
@@ -611,6 +612,32 @@ class PruneEventTestCase(stdlib_unittest.TestCase):
         )
 
 
+class CloneEventTestCase(stdlib_unittest.TestCase):
+    def test_unsigned_is_copied(self) -> None:
+        original = make_event_from_dict(
+            {
+                "type": "A",
+                "event_id": "$test:domain",
+                "unsigned": {"a": 1, "b": 2},
+            },
+            RoomVersions.V1,
+            {"txn_id": "txn"},
+        )
+        original.internal_metadata.stream_ordering = 1234
+        self.assertEqual(original.internal_metadata.stream_ordering, 1234)
+        original.internal_metadata.instance_name = "worker1"
+        self.assertEqual(original.internal_metadata.instance_name, "worker1")
+
+        cloned = clone_event(original)
+        cloned.unsigned["b"] = 3
+
+        self.assertEqual(original.unsigned, {"a": 1, "b": 2})
+        self.assertEqual(cloned.unsigned, {"a": 1, "b": 3})
+        self.assertEqual(cloned.internal_metadata.stream_ordering, 1234)
+        self.assertEqual(cloned.internal_metadata.instance_name, "worker1")
+        self.assertEqual(cloned.internal_metadata.txn_id, "txn")
+
+
 class SerializeEventTestCase(stdlib_unittest.TestCase):
     def serialize(self, ev: EventBase, fields: Optional[List[str]]) -> JsonDict:
         return serialize_event(
@@ -729,7 +756,8 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
             self.serialize(
-                MockEvent(room_id="!foo:bar", content={"foo": "bar"}), ["room_id", 4]  # type: ignore[list-item]
+                MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
+                ["room_id", 4],  # type: ignore[list-item]
             )
 
 

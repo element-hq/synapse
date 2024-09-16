@@ -49,7 +49,7 @@ from synapse.api.errors import Codes, SynapseError
 from synapse.api.room_versions import RoomVersion
 from synapse.types import JsonDict, Requester
 
-from . import EventBase
+from . import EventBase, StrippedStateEvent, make_event_from_dict
 
 if TYPE_CHECKING:
     from synapse.handlers.relations import BundledAggregations
@@ -82,23 +82,45 @@ def prune_event(event: EventBase) -> EventBase:
     """
     pruned_event_dict = prune_event_dict(event.room_version, event.get_dict())
 
-    from . import make_event_from_dict
-
     pruned_event = make_event_from_dict(
         pruned_event_dict, event.room_version, event.internal_metadata.get_dict()
     )
 
-    # copy the internal fields
+    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`
     pruned_event.internal_metadata.stream_ordering = (
         event.internal_metadata.stream_ordering
     )
-
+    pruned_event.internal_metadata.instance_name = event.internal_metadata.instance_name
     pruned_event.internal_metadata.outlier = event.internal_metadata.outlier
 
     # Mark the event as redacted
     pruned_event.internal_metadata.redacted = True
 
     return pruned_event
+
+
+def clone_event(event: EventBase) -> EventBase:
+    """Take a copy of the event.
+
+    This is mostly useful because it does a *shallow* copy of the `unsigned` data,
+    which means it can then be updated without corrupting the in-memory cache. Note that
+    other properties of the event, such as `content`, are *not* (currently) copied here.
+    """
+    # XXX: We rely on at least one of `event.get_dict()` and `make_event_from_dict()`
+    #   making a copy of `unsigned`. Currently, both do, though I don't really know why.
+    #   Still, as long as they do, there's not much point doing yet another copy here.
+    new_event = make_event_from_dict(
+        event.get_dict(), event.room_version, event.internal_metadata.get_dict()
+    )
+
+    # Copy the bits of `internal_metadata` that aren't returned by `get_dict`.
+    new_event.internal_metadata.stream_ordering = (
+        event.internal_metadata.stream_ordering
+    )
+    new_event.internal_metadata.instance_name = event.internal_metadata.instance_name
+    new_event.internal_metadata.outlier = event.internal_metadata.outlier
+
+    return new_event
 
 
 def prune_event_dict(room_version: RoomVersion, event_dict: JsonDict) -> JsonDict:
@@ -814,3 +836,48 @@ def maybe_upsert_event_field(
             del container[key]
 
     return upsert_okay
+
+
+def strip_event(event: EventBase) -> JsonDict:
+    """
+    Used for "stripped state" events which provide a simplified view of the state of a
+    room intended to help a potential joiner identify the room (relevant when the user
+    is invited or knocked).
+
+    Stripped state events can only have the `sender`, `type`, `state_key` and `content`
+    properties present.
+    """
+
+    return {
+        "type": event.type,
+        "state_key": event.state_key,
+        "content": event.content,
+        "sender": event.sender,
+    }
+
+
+def parse_stripped_state_event(raw_stripped_event: Any) -> Optional[StrippedStateEvent]:
+    """
+    Given a raw value from an event's `unsigned` field, attempt to parse it into a
+    `StrippedStateEvent`.
+    """
+    if isinstance(raw_stripped_event, dict):
+        # All of these fields are required
+        type = raw_stripped_event.get("type")
+        state_key = raw_stripped_event.get("state_key")
+        sender = raw_stripped_event.get("sender")
+        content = raw_stripped_event.get("content")
+        if (
+            isinstance(type, str)
+            and isinstance(state_key, str)
+            and isinstance(sender, str)
+            and isinstance(content, dict)
+        ):
+            return StrippedStateEvent(
+                type=type,
+                state_key=state_key,
+                sender=sender,
+                content=content,
+            )
+
+    return None

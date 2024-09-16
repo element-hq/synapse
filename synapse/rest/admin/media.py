@@ -315,23 +315,11 @@ class DeleteMediaByDateSize(RestServlet):
         size_gt = parse_integer(request, "size_gt", default=0)
         keep_profiles = parse_boolean(request, "keep_profiles", default=True)
 
-        if before_ts < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter before_ts must be a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-        elif before_ts < 30000000000:  # Dec 1970 in milliseconds, Aug 2920 in seconds
+        if before_ts < 30000000000:  # Dec 1970 in milliseconds, Aug 2920 in seconds
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST,
                 "Query parameter before_ts you provided is from the year 1970. "
                 + "Double check that you are providing a timestamp in milliseconds.",
-                errcode=Codes.INVALID_PARAM,
-            )
-        if size_gt < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter size_gt must be a string representing a positive integer.",
                 errcode=Codes.INVALID_PARAM,
             )
 
@@ -392,20 +380,6 @@ class UserMediaRestServlet(RestServlet):
         start = parse_integer(request, "from", default=0)
         limit = parse_integer(request, "limit", default=100)
 
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.
         if b"order_by" not in request.args and b"dir" not in request.args:
@@ -449,20 +423,6 @@ class UserMediaRestServlet(RestServlet):
 
         start = parse_integer(request, "from", default=0)
         limit = parse_integer(request, "limit", default=100)
-
-        if start < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter from must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
-
-        if limit < 0:
-            raise SynapseError(
-                HTTPStatus.BAD_REQUEST,
-                "Query parameter limit must be a string representing a positive integer.",
-                errcode=Codes.INVALID_PARAM,
-            )
 
         # If neither `order_by` nor `dir` is set, set the default order
         # to newest media is on top for backward compatibility.

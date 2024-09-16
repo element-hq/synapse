@@ -211,6 +211,8 @@ information.
     ^/_matrix/federation/v1/make_leave/
     ^/_matrix/federation/(v1|v2)/send_join/
     ^/_matrix/federation/(v1|v2)/send_leave/
+    ^/_matrix/federation/v1/make_knock/
+    ^/_matrix/federation/v1/send_knock/
     ^/_matrix/federation/(v1|v2)/invite/
     ^/_matrix/federation/v1/event_auth/
     ^/_matrix/federation/v1/timestamp_to_event/
@@ -232,7 +234,7 @@ information.
     ^/_matrix/client/v1/rooms/.*/hierarchy$
     ^/_matrix/client/(v1|unstable)/rooms/.*/relations/
     ^/_matrix/client/v1/rooms/.*/threads$
-    ^/_matrix/client/unstable/im.nheko.summary/rooms/.*/summary$
+    ^/_matrix/client/unstable/im.nheko.summary/summary/.*$
     ^/_matrix/client/(r0|v3|unstable)/account/3pid$
     ^/_matrix/client/(r0|v3|unstable)/account/whoami$
     ^/_matrix/client/(r0|v3|unstable)/devices$
@@ -535,7 +537,7 @@ the stream writer for the `presence` stream:
 ##### The `push_rules` stream
 
 The following endpoints should be routed directly to the worker configured as
-the stream writer for the `push` stream:
+the stream writer for the `push_rules` stream:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 
@@ -634,7 +636,7 @@ worker application type.
 
 #### Push Notifications
 
-You can designate generic worker to sending push notifications to
+You can designate generic workers to send push notifications to
 a [push gateway](https://spec.matrix.org/v1.5/push-gateway-api/) such as
 [sygnal](https://github.com/matrix-org/sygnal) and email.
 
@@ -737,6 +739,8 @@ An example for a federation sender instance:
 Handles the media repository. It can handle all endpoints starting with:
 
     /_matrix/media/
+    /_matrix/client/v1/media/
+    /_matrix/federation/v1/media/
 
 ... and the following regular expressions matching media-specific administration APIs:
 
