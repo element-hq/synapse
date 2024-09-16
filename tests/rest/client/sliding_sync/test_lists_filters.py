@@ -25,7 +25,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.events import StrippedStateEvent
-from synapse.rest.client import login, room, sync
+from synapse.rest.client import login, room, sync, tags
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
@@ -60,6 +60,7 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         login.register_servlets,
         room.register_servlets,
         sync.register_servlets,
+        tags.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -1148,6 +1149,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
             exact=True,
         )
 
+        # Just make sure we know what happens when you specify an empty list of room_types
+        # (we should find nothing)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "room_types": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
     def test_filters_not_room_types(self) -> None:
         """
         Test `filters.not_room_types` for different room types
@@ -1280,6 +1302,27 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             {space_room_id},
+            exact=True,
+        )
+
+        # Just make sure we know what happens when you specify an empty list of not_room_types
+        # (we should find all of the rooms)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_room_types": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id, foo_room_id, space_room_id},
             exact=True,
         )
 
@@ -1677,5 +1720,270 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             {space_room_id},
+            exact=True,
+        )
+
+    def _add_tag_to_room(
+        self, *, room_id: str, user_id: str, access_token: str, tag_name: str
+    ) -> None:
+        channel = self.make_request(
+            method="PUT",
+            path=f"/user/{user_id}/rooms/{room_id}/tags/{tag_name}",
+            content={},
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+    def test_filters_tags(self) -> None:
+        """
+        Test `filters.tags` for rooms with given tags
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room with no tags
+        self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create some rooms with tags
+        foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Create a room without multiple tags
+        foobar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Add the "foo" tag to the foo room
+        self._add_tag_to_room(
+            room_id=foo_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        # Add the "bar" tag to the bar room
+        self._add_tag_to_room(
+            room_id=bar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
+        # Add both "foo" and "bar" tags to the foobar room
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
+
+        # Try finding rooms with the "foo" tag
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["foo"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {foo_room_id, foobar_room_id},
+            exact=True,
+        )
+
+        # Try finding rooms with either "foo" or "bar" tags
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["foo", "bar"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {foo_room_id, bar_room_id, foobar_room_id},
+            exact=True,
+        )
+
+        # Try with a random tag we didn't add
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["flomp"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # No rooms should match
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
+        # Just make sure we know what happens when you specify an empty list of tags
+        # (we should find nothing)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
+    def test_filters_not_tags(self) -> None:
+        """
+        Test `filters.not_tags` for excluding rooms with given tags
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room with no tags
+        untagged_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create some rooms with tags
+        foo_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        bar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+        # Create a room without multiple tags
+        foobar_room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Add the "foo" tag to the foo room
+        self._add_tag_to_room(
+            room_id=foo_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        # Add the "bar" tag to the bar room
+        self._add_tag_to_room(
+            room_id=bar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
+        # Add both "foo" and "bar" tags to the foobar room
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="foo",
+        )
+        self._add_tag_to_room(
+            room_id=foobar_room_id,
+            user_id=user1_id,
+            access_token=user1_tok,
+            tag_name="bar",
+        )
+
+        # Try finding rooms without the "foo" tag
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_tags": ["foo"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {untagged_room_id, bar_room_id},
+            exact=True,
+        )
+
+        # Try finding rooms without either "foo" or "bar" tags
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_tags": ["foo", "bar"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {untagged_room_id},
+            exact=True,
+        )
+
+        # Test how it behaves when we have both `tags` and `not_tags`.
+        # `not_tags` should win.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "tags": ["foo"],
+                        "not_tags": ["foo"],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # Nothing matches because nothing is both tagged with "foo" and not tagged with "foo"
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            set(),
+            exact=True,
+        )
+
+        # Just make sure we know what happens when you specify an empty list of not_tags
+        # (we should find all of the rooms)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                    "filters": {
+                        "not_tags": [],
+                    },
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {untagged_room_id, foo_room_id, bar_room_id, foobar_room_id},
             exact=True,
         )
