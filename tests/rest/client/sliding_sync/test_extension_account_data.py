@@ -93,10 +93,6 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             {AccountDataTypes.PUSH_RULES},
             exact=True,
         )
-        logger.info(
-            "global_account_data_map[AccountDataTypes.PUSH_RULES] %s",
-            global_account_data_map[AccountDataTypes.PUSH_RULES],
-        )
         # Push rules are a giant chunk of JSON data so we will just assume the value is correct if they key is here.
         # global_account_data_map[AccountDataTypes.PUSH_RULES]
 
