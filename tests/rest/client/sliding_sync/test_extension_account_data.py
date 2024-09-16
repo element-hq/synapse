@@ -80,18 +80,27 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             # Even though we don't have any global account data set, Synapse saves some
             # default push rules for us.
             {AccountDataTypes.PUSH_RULES},
             exact=True,
         )
+        logger.info(
+            "global_account_data_map[AccountDataTypes.PUSH_RULES] %s",
+            global_account_data_map[AccountDataTypes.PUSH_RULES],
+        )
+        # Push rules are a giant chunk of JSON data so we will just assume the value is correct if they key is here.
+        # global_account_data_map[AccountDataTypes.PUSH_RULES]
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -121,16 +130,19 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
         # There has been no account data changes since the `from_token` so we shouldn't
         # see any account data here.
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             set(),
             exact=True,
         )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -165,16 +177,24 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # It should show us all of the global account data
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             {AccountDataTypes.PUSH_RULES, "org.matrix.foobarbaz"},
             exact=True,
         )
+        # Push rules are a giant chunk of JSON data so we will just assume the value is correct if they key is here.
+        # global_account_data_map[AccountDataTypes.PUSH_RULES]
+        self.assertEqual(
+            global_account_data_map["org.matrix.foobarbaz"], {"foo": "bar"}
+        )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -220,17 +240,23 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             # We should only see the new global account data that happened after the `from_token`
             {"org.matrix.doodardaz"},
             exact=True,
         )
+        self.assertEqual(
+            global_account_data_map["org.matrix.doodardaz"], {"doo": "dar"}
+        )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
