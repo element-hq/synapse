@@ -19,6 +19,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import tempfile
+
 import yaml
 
 from synapse.config import ConfigError
@@ -116,3 +118,36 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self.add_lines_to_config(["trust_identity_server_for_password_resets: true"])
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_secret_files_missing(self) -> None:
+        config_strings = [
+            "redis:\n" "  enabled: true\n" "  password_path: /does/not/exist",
+            "turn_shared_secret_path: /does/not/exist",
+            "registration_shared_secret_path: /does/not/exist",
+        ]
+        for c in config_strings:
+            self.generate_config()
+            self.add_lines_to_config(["", c])
+
+            with self.assertRaises(ConfigError):
+                HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    def test_secret_files_existing(self) -> None:
+        self.generate_config_and_remove_lines_containing("registration_shared_secret")
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            secret_file.write(b"53C237")
+
+            config_lines = [
+                "",
+                "redis:",
+                "  enabled: true",
+                f"  password_path: {secret_file.name}",
+                f"turn_shared_secret_path: {secret_file.name}",
+                f"registration_shared_secret_path: {secret_file.name}",
+            ]
+            self.add_lines_to_config(config_lines)
+            config = HomeServerConfig.load_config("", ["-c", self.config_file])
+
+            self.assertEqual(config.redis.redis_password, "53C237")
+            self.assertEqual(config.voip.turn_shared_secret, "53C237")
+            self.assertEqual(config.registration.registration_shared_secret, "53C237")
