@@ -177,7 +177,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_room_account_data_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, Dict[str, JsonDict]]:
+        ) -> Dict[str, Dict[str, JsonMapping]]:
             # The 'content != '{}' condition below prevents us from using
             # `simple_select_list_txn` here, as it doesn't support conditions
             # other than 'equals'.
@@ -194,7 +194,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
             txn.execute(sql, (user_id,))
 
-            by_room: Dict[str, Dict[str, JsonDict]] = {}
+            by_room: Dict[str, Dict[str, JsonMapping]] = {}
             for room_id, account_data_type, content in txn:
                 room_data = by_room.setdefault(room_id, {})
 
@@ -394,7 +394,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_global_account_data_for_user(
         self, user_id: str, stream_id: int
-    ) -> Mapping[str, JsonMapping]:
+    ) -> Dict[str, JsonMapping]:
         """Get all the global account_data that's changed for a user.
 
         Args:
@@ -407,7 +407,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_global_account_data_for_user(
             txn: LoggingTransaction,
-        ) -> Dict[str, JsonDict]:
+        ) -> Dict[str, JsonMapping]:
             sql = """
                 SELECT account_data_type, content FROM account_data
                 WHERE user_id = ? AND stream_id > ?
@@ -429,7 +429,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
     async def get_updated_room_account_data_for_user(
         self, user_id: str, stream_id: int
-    ) -> Dict[str, Dict[str, JsonDict]]:
+    ) -> Dict[str, Dict[str, JsonMapping]]:
         """Get all the room account_data that's changed for a user.
 
         Args:
@@ -442,14 +442,14 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
 
         def get_updated_room_account_data_for_user_txn(
             txn: LoggingTransaction,
-        ) -> Dict[str, Dict[str, JsonDict]]:
+        ) -> Dict[str, Dict[str, JsonMapping]]:
             sql = """
                 SELECT room_id, account_data_type, content FROM room_account_data
                 WHERE user_id = ? AND stream_id > ?
             """
             txn.execute(sql, (user_id, stream_id))
 
-            account_data_by_room: Dict[str, Dict[str, JsonDict]] = {}
+            account_data_by_room: Dict[str, Dict[str, JsonMapping]] = {}
             for row in txn:
                 room_account_data = account_data_by_room.setdefault(row[0], {})
                 room_account_data[row[1]] = db_to_json(row[2])
