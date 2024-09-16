@@ -24,7 +24,6 @@ class _UpdateDelayedEventAction(Enum):
     SEND = "send"
 
 
-# TODO: Needs unit testing
 class UpdateDelayedEventServlet(RestServlet):
     PATTERNS = client_patterns(
         r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)$",
@@ -70,7 +69,6 @@ class UpdateDelayedEventServlet(RestServlet):
         return 200, {}
 
 
-# TODO: Needs unit testing
 class DelayedEventsServlet(RestServlet):
     PATTERNS = client_patterns(
         r"/org\.matrix\.msc4140/delayed_events$",

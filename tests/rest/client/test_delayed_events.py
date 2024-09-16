@@ -3,14 +3,19 @@
 from http import HTTPStatus
 from typing import List
 
+from parameterized import parameterized
+
 from twisted.test.proto_helpers import MemoryReactor
 
+from synapse.api.errors import Codes
 from synapse.rest.client import delayed_events, room
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
+
+PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
 
 _HS_NAME = "red"
 _EVENT_TYPE = "com.example.test"
@@ -74,6 +79,206 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
+    def test_update_delayed_event_without_id(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/",
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+
+    def test_update_delayed_event_without_body(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.NOT_JSON,
+            channel.json_body["errcode"],
+        )
+
+    def test_update_delayed_event_without_action(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.MISSING_PARAM,
+            channel.json_body["errcode"],
+        )
+
+    def test_update_delayed_event_with_invalid_action(self) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+            {"action": "oops"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.INVALID_PARAM,
+            channel.json_body["errcode"],
+        )
+
+    @parameterized.expand(["cancel", "restart", "send"])
+    def test_update_delayed_event_without_match(self, action: str) -> None:
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/abc",
+            {"action": action},
+        )
+        self.assertEqual(HTTPStatus.NOT_FOUND, channel.code, channel.result)
+
+    def test_cancel_delayed_state_event(self) -> None:
+        state_key = "to_never_send"
+
+        setter_key = "setter"
+        setter_expected = "none"
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 1500),
+            {
+                setter_key: setter_expected,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        self.assertIsNotNone(delay_id)
+
+        self.reactor.advance(1)
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        content = self._get_delayed_event_content(events[0])
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/{delay_id}",
+            {"action": "cancel"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertListEqual([], self._get_delayed_events())
+
+        self.reactor.advance(1)
+        content = self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+    def test_send_delayed_state_event(self) -> None:
+        state_key = "to_send_on_request"
+
+        setter_key = "setter"
+        setter_expected = "on_send"
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 100000),
+            {
+                setter_key: setter_expected,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        self.assertIsNotNone(delay_id)
+
+        self.reactor.advance(1)
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        content = self._get_delayed_event_content(events[0])
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/{delay_id}",
+            {"action": "send"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        self.assertListEqual([], self._get_delayed_events())
+        content = self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+        )
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+
+    def test_restart_delayed_state_event(self) -> None:
+        state_key = "to_send_on_restarted_timeout"
+
+        setter_key = "setter"
+        setter_expected = "on_timeout"
+        channel = self.make_request(
+            "PUT",
+            _get_path_for_delayed_state(self.room_id, _EVENT_TYPE, state_key, 1500),
+            {
+                setter_key: setter_expected,
+            },
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+        delay_id = channel.json_body.get("delay_id")
+        self.assertIsNotNone(delay_id)
+
+        self.reactor.advance(1)
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        content = self._get_delayed_event_content(events[0])
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+        channel = self.make_request(
+            "POST",
+            f"{PATH_PREFIX}/{delay_id}",
+            {"action": "restart"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+        self.reactor.advance(1)
+        events = self._get_delayed_events()
+        self.assertEqual(1, len(events), events)
+        content = self._get_delayed_event_content(events[0])
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+        self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+            expect_code=HTTPStatus.NOT_FOUND,
+        )
+
+        self.reactor.advance(1)
+        self.assertListEqual([], self._get_delayed_events())
+        content = self.helper.get_state(
+            self.room_id,
+            _EVENT_TYPE,
+            "",
+            state_key=state_key,
+        )
+        self.assertEqual(setter_expected, content.get(setter_key), content)
+
     def test_delayed_state_events_are_cancelled_by_more_recent_state(self) -> None:
         state_key = "to_be_cancelled"
 
@@ -112,7 +317,8 @@ class DelayedEventsTestCase(HomeserverTestCase):
 
     def _get_delayed_events(self) -> List[JsonDict]:
         channel = self.make_request(
-            "GET", b"/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
+            "GET",
+            PATH_PREFIX,
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
