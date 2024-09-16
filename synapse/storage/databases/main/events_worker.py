@@ -61,7 +61,13 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.logging.opentracing import start_active_span, tag_args, trace
+from synapse.logging.opentracing import (
+    SynapseTags,
+    set_tag,
+    start_active_span,
+    tag_args,
+    trace,
+)
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -603,6 +609,10 @@ class EventsWorkerStore(SQLBaseStore):
             Note that the returned list may be smaller than the list of event
             IDs if not all events could be fetched.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
 
         if not event_ids:
             return []
@@ -723,6 +733,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return events
 
+    @trace
     @cancellable
     async def get_unredacted_events_from_cache_or_db(
         self,
@@ -748,6 +759,11 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             map from event id to result
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         # Shortcut: check if we have any events in the *in memory* cache - this function
         # may be called repeatedly for the same event so at this point we cannot reach
         # out to any external cache for performance reasons. The external cache is
@@ -946,6 +962,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
+    @trace
     async def _get_events_from_external_cache(
         self, events: Iterable[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
@@ -957,6 +974,10 @@ class EventsWorkerStore(SQLBaseStore):
             events: list of event_ids to fetch
             update_metrics: Whether to update the cache hit ratio metrics
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "events.length",
+            str(len(events)),
+        )
         event_map = {}
 
         for event_id in events:
@@ -1222,6 +1243,7 @@ class EventsWorkerStore(SQLBaseStore):
                 with PreserveLoggingContext():
                     self.hs.get_reactor().callFromThread(fire_errback, e)
 
+    @trace
     async def _get_events_from_db(
         self, event_ids: Collection[str]
     ) -> Dict[str, EventCacheEntry]:
@@ -1240,6 +1262,11 @@ class EventsWorkerStore(SQLBaseStore):
             map from event id to result. May return extra events which
             weren't asked for.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         fetched_event_ids: Set[str] = set()
         fetched_events: Dict[str, _EventRow] = {}
 

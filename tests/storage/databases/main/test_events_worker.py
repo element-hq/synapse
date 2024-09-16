@@ -295,6 +295,32 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
             self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 1)
 
 
+class GetEventsTestCase(unittest.HomeserverTestCase):
+    """Test `get_events(...)`/`get_events_as_list(...)`"""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store: EventsWorkerStore = hs.get_datastores().main
+
+    def test_get_lots_of_messages(self) -> None:
+        user_id = self.register_user("user", "pass")
+        user_tok = self.login(user_id, "pass")
+
+        room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+        event_ids = []
+        for _ in range(1000):
+            res = self.helper.send(room_id, tok=user_tok)
+            event_ids.append(res["event_id"])
+
+        self.get_success(self.store.get_events(event_ids))
+
+
 class DatabaseOutageTestCase(unittest.HomeserverTestCase):
     """Test event fetching during a database outage."""
 
