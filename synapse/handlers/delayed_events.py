@@ -1,8 +1,6 @@
 import logging
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
-import attr
-
 from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
@@ -333,10 +331,14 @@ class DelayedEventsHandler:
 
         await self._send_event(
             DelayedEventDetails(
-                # NOTE: mypy thinks that (*attr.astuple, ...) is too many args, so use kwargs instead
                 delay_id=DelayID(delay_id),
                 user_localpart=UserLocalpart(requester.user.localpart),
-                **attr.asdict(event),
+                room_id=event.room_id,
+                type=event.type,
+                state_key=event.state_key,
+                origin_server_ts=event.origin_server_ts,
+                content=event.content,
+                device_id=event.device_id,
             )
         )
 
