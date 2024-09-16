@@ -28,7 +28,7 @@ class EventDetails:
     room_id: RoomID
     type: EventType
     state_key: Optional[StateKey]
-    origin_server_ts: Timestamp
+    origin_server_ts: Optional[Timestamp]
     content: JsonDict
     device_id: Optional[DeviceID]
 
@@ -271,6 +271,7 @@ class DelayedEventsStore(SQLBaseStore):
                     RoomID.from_string(row[2]),
                     EventType(row[3]),
                     StateKey(row[4]) if row[4] is not None else None,
+                    # If no custom_origin_ts is set, use send_ts as the event's timestamp
                     Timestamp(row[5] if row[5] is not None else row[6]),
                     db_to_json(row[7]),
                     DeviceID(row[8]) if row[8] is not None else None,
@@ -322,7 +323,6 @@ class DelayedEventsStore(SQLBaseStore):
                     "event_type",
                     "state_key",
                     "origin_server_ts",
-                    "send_ts",
                     "content",
                     "device_id",
                 )
@@ -349,9 +349,9 @@ class DelayedEventsStore(SQLBaseStore):
                 RoomID.from_string(row[0]),
                 EventType(row[1]),
                 StateKey(row[2]) if row[2] is not None else None,
-                Timestamp(row[3]) if row[3] is not None else Timestamp(row[4]),
-                db_to_json(row[5]),
-                DeviceID(row[6]) if row[6] is not None else None,
+                Timestamp(row[3]) if row[3] is not None else None,
+                db_to_json(row[4]),
+                DeviceID(row[5]) if row[5] is not None else None,
             )
 
             return event, self._get_next_delayed_event_send_ts_txn(txn)

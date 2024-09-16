@@ -436,8 +436,10 @@ class DelayedEventsHandler:
                     "content": event.content,
                     "room_id": event.room_id.to_string(),
                     "sender": user_id_str,
-                    "origin_server_ts": event.origin_server_ts,
                 }
+
+                if event.origin_server_ts is not None:
+                    event_dict["origin_server_ts"] = event.origin_server_ts
 
                 if event.state_key is not None:
                     event_dict["state_key"] = event.state_key
