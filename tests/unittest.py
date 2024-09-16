@@ -395,6 +395,11 @@ class HomeserverTestCase(TestCase):
         self._hs_args = {"clock": self.clock, "reactor": self.reactor}
         self.hs = self.make_homeserver(self.reactor, self.clock)
 
+        from synapse.logging.opentracing import init_tracer
+
+        # Start the tracer
+        init_tracer(self.hs)  # noqa
+
         self.hs.get_datastores().main.tests_allow_no_chain_cover_index = False
 
         # Honour the `use_frozen_dicts` config option. We have to do this

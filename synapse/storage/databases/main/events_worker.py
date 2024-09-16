@@ -531,6 +531,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event
 
+    @trace
     async def get_events(
         self,
         event_ids: Collection[str],
@@ -562,6 +563,11 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             A mapping from event_id to event.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         events = await self.get_events_as_list(
             event_ids,
             redact_behaviour=redact_behaviour,
@@ -737,7 +743,7 @@ class EventsWorkerStore(SQLBaseStore):
     @cancellable
     async def get_unredacted_events_from_cache_or_db(
         self,
-        event_ids: Iterable[str],
+        event_ids: Collection[str],
         allow_rejected: bool = False,
     ) -> Dict[str, EventCacheEntry]:
         """Fetch a bunch of events from the cache or the database.
@@ -952,7 +958,7 @@ class EventsWorkerStore(SQLBaseStore):
             events, update_metrics=update_metrics
         )
 
-        missing_event_ids = (e for e in events if e not in event_map)
+        missing_event_ids = [e for e in events if e not in event_map]
         event_map.update(
             await self._get_events_from_external_cache(
                 events=missing_event_ids,
@@ -964,7 +970,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     @trace
     async def _get_events_from_external_cache(
-        self, events: Iterable[str], update_metrics: bool = True
+        self, events: Collection[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
         """Fetch events from any configured external cache.
 

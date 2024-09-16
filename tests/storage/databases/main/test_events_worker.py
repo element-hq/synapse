@@ -19,8 +19,9 @@
 #
 #
 import json
+import time
 from contextlib import contextmanager
-from typing import Generator, List, Tuple
+from typing import Dict, Generator, List, Set, Tuple
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
@@ -28,8 +29,12 @@ from twisted.internet.defer import CancelledError, Deferred, ensureDeferred
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.room_versions import EventFormatVersions, RoomVersions
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.logging.context import LoggingContext
+from synapse.logging.opentracing import (
+    set_tag,
+    start_active_span,
+)
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -38,6 +43,7 @@ from synapse.storage.databases.main.events_worker import (
     EventsWorkerStore,
 )
 from synapse.storage.types import Connection
+from synapse.types import JsonDict
 from synapse.util import Clock
 from synapse.util.async_helpers import yieldable_gather_results
 
@@ -304,21 +310,64 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         login.register_servlets,
     ]
 
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["opentracing"] = {
+            "enabled": True,
+            "jaeger_config": {
+                "sampler": {"type": "const", "param": 1},
+                "logging": False,
+            },
+        }
+        return config
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store: EventsWorkerStore = hs.get_datastores().main
 
     def test_get_lots_of_messages(self) -> None:
+        num_events = 10000
+
         user_id = self.register_user("user", "pass")
         user_tok = self.login(user_id, "pass")
 
         room_id = self.helper.create_room_as(user_id, tok=user_tok)
 
-        event_ids = []
-        for _ in range(1000):
-            res = self.helper.send(room_id, tok=user_tok)
-            event_ids.append(res["event_id"])
+        setup_start_ts = time.time()
+        event_ids: Set[str] = set()
+        for i in range(num_events):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=room_id,
+                    type="m.room.message",
+                    sender=user_id,
+                    content={
+                        "body": f"foo{i}",
+                        "msgtype": "m.text",
+                    },
+                )
+            )
+            event_ids.add(event.event_id)
 
-        self.get_success(self.store.get_events(event_ids))
+        setup_end_ts = time.time()
+        # Sanity check that we actually created the events
+        self.assertEqual(len(event_ids), num_events)
+
+        fetched_event_map: Dict[str, EventBase] = {}
+        with LoggingContext("test") as _ctx:
+            with start_active_span("test_get_lots_of_messages"):
+                set_tag("num_events", num_events)
+                set_tag("setup_time", setup_end_ts - setup_start_ts)
+
+                # This is the function under test
+                fetched_event_map = self.get_success(self.store.get_events(event_ids))
+
+        # Sanity check that we go the events back
+        self.assertIncludes(fetched_event_map.keys(), event_ids, exact=True)
+
+        # Sleep so the traces get flushed
+        # TODO: Remove
+        time.sleep(6)
 
 
 class DatabaseOutageTestCase(unittest.HomeserverTestCase):
