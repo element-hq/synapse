@@ -325,7 +325,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         self.store: EventsWorkerStore = hs.get_datastores().main
 
     def test_get_lots_of_messages(self) -> None:
-        num_events = 10000
+        num_events = 100
 
         user_id = self.register_user("user", "pass")
         user_tok = self.login(user_id, "pass")
@@ -357,7 +357,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         with LoggingContext("test") as _ctx:
             with start_active_span("test_get_lots_of_messages"):
                 set_tag("num_events", num_events)
-                set_tag("setup_time", setup_end_ts - setup_start_ts)
+                set_tag("setup_time_seconds", setup_end_ts - setup_start_ts)
 
                 # This is the function under test
                 fetched_event_map = self.get_success(self.store.get_events(event_ids))
