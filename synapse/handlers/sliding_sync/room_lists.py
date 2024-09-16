@@ -27,6 +27,7 @@ from typing import (
     Set,
     Tuple,
     Union,
+    cast,
 )
 
 import attr
@@ -245,6 +246,7 @@ class SlidingSyncRoomLists:
                         event_pos=change.event_pos,
                         room_version_id=change.room_version_id,
                         # We keep the current state of the room though
+                        has_known_state=existing_room.has_known_state,
                         room_type=existing_room.room_type,
                         is_encrypted=existing_room.is_encrypted,
                     )
@@ -269,6 +271,7 @@ class SlidingSyncRoomLists:
                         event_id=change.event_id,
                         event_pos=change.event_pos,
                         room_version_id=change.room_version_id,
+                        has_known_state=True,
                         room_type=room_type,
                         is_encrypted=is_encrypted,
                     )
@@ -304,6 +307,7 @@ class SlidingSyncRoomLists:
                     event_id=None,
                     event_pos=newly_left_room_map[room_id],
                     room_version_id=await self.store.get_room_version_id(room_id),
+                    has_known_state=True,
                     room_type=room_type,
                     is_encrypted=is_encrypted,
                 )
@@ -355,11 +359,18 @@ class SlidingSyncRoomLists:
                     if list_config.ranges:
                         if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
                             # If we are asking for the full range, we don't need to sort the list.
-                            sorted_room_info = list(filtered_sync_room_map.values())
+                            sorted_room_info: List[RoomsForUserType] = list(
+                                filtered_sync_room_map.values()
+                            )
                         else:
                             # Sort the list
-                            sorted_room_info = await self.sort_rooms_using_tables(
-                                filtered_sync_room_map, to_token
+                            sorted_room_info = await self.sort_rooms(
+                                # Cast is safe because RoomsForUserSlidingSync is part
+                                # of the `RoomsForUserType` union. Why can't it detect this?
+                                cast(
+                                    Dict[str, RoomsForUserType], filtered_sync_room_map
+                                ),
+                                to_token,
                             )
 
                         for range in list_config.ranges:
@@ -1513,6 +1524,8 @@ class SlidingSyncRoomLists:
             A filtered dictionary of room IDs along with membership information in the
             room at the time of `to_token`.
         """
+        user_id = user.to_string()
+
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
         ] = {}
@@ -1622,12 +1635,14 @@ class SlidingSyncRoomLists:
                         and room_type not in filters.room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
                     if (
                         filters.not_room_types is not None
                         and room_type in filters.not_room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
         if filters.room_name_like is not None:
             with start_active_span("filters.room_name_like"):
@@ -1644,9 +1659,36 @@ class SlidingSyncRoomLists:
                 # )
                 raise NotImplementedError()
 
+        # Filter by room tags according to the users account data
         if filters.tags is not None or filters.not_tags is not None:
             with start_active_span("filters.tags"):
-                raise NotImplementedError()
+                # Fetch the user tags for their rooms
+                room_tags = await self.store.get_tags_for_user(user_id)
+                room_id_to_tag_name_set: Dict[str, Set[str]] = {
+                    room_id: set(tags.keys()) for room_id, tags in room_tags.items()
+                }
+
+                if filters.tags is not None:
+                    tags_set = set(filters.tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms that don't have one of the tags in the filter
+                        if room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            tags_set
+                        )
+                    }
+
+                if filters.not_tags is not None:
+                    not_tags_set = set(filters.not_tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms if they have any of the tags in the filter
+                        if not room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            not_tags_set
+                        )
+                    }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
@@ -1670,6 +1712,7 @@ class SlidingSyncRoomLists:
             filters: Filters to apply
             to_token: We filter based on the state of the room at this token
             dm_room_ids: Set of room IDs which are DMs
+            room_tags: Mapping of room ID to tags
 
         Returns:
             A filtered dictionary of room IDs along with membership information in the
@@ -1697,7 +1740,10 @@ class SlidingSyncRoomLists:
             filtered_room_id_set = {
                 room_id
                 for room_id in filtered_room_id_set
-                if sync_room_map[room_id].is_encrypted == filters.is_encrypted
+                # Remove rooms if we can't figure out what the encryption status is
+                if sync_room_map[room_id].has_known_state
+                # Or remove if it doesn't match the filter
+                and sync_room_map[room_id].is_encrypted == filters.is_encrypted
             }
 
         # Filter for rooms that the user has been invited to
@@ -1726,6 +1772,11 @@ class SlidingSyncRoomLists:
                 # Make a copy so we don't run into an error: `Set changed size during
                 # iteration`, when we filter out and remove items
                 for room_id in filtered_room_id_set.copy():
+                    # Remove rooms if we can't figure out what room type it is
+                    if not sync_room_map[room_id].has_known_state:
+                        filtered_room_id_set.remove(room_id)
+                        continue
+
                     room_type = sync_room_map[room_id].room_type
 
                     if (
@@ -1733,12 +1784,14 @@ class SlidingSyncRoomLists:
                         and room_type not in filters.room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
                     if (
                         filters.not_room_types is not None
                         and room_type in filters.not_room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
         if filters.room_name_like is not None:
             with start_active_span("filters.room_name_like"):
@@ -1755,69 +1808,39 @@ class SlidingSyncRoomLists:
                 # )
                 raise NotImplementedError()
 
+        # Filter by room tags according to the users account data
         if filters.tags is not None or filters.not_tags is not None:
             with start_active_span("filters.tags"):
-                raise NotImplementedError()
+                # Fetch the user tags for their rooms
+                room_tags = await self.store.get_tags_for_user(user_id)
+                room_id_to_tag_name_set: Dict[str, Set[str]] = {
+                    room_id: set(tags.keys()) for room_id, tags in room_tags.items()
+                }
+
+                if filters.tags is not None:
+                    tags_set = set(filters.tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms that don't have one of the tags in the filter
+                        if room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            tags_set
+                        )
+                    }
+
+                if filters.not_tags is not None:
+                    not_tags_set = set(filters.not_tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms if they have any of the tags in the filter
+                        if not room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            not_tags_set
+                        )
+                    }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
         return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
-
-    @trace
-    async def sort_rooms_using_tables(
-        self,
-        sync_room_map: Mapping[str, RoomsForUserSlidingSync],
-        to_token: StreamToken,
-    ) -> List[RoomsForUserSlidingSync]:
-        """
-        Sort by `stream_ordering` of the last event that the user should see in the
-        room. `stream_ordering` is unique so we get a stable sort.
-
-        Args:
-            sync_room_map: Dictionary of room IDs to sort along with membership
-                information in the room at the time of `to_token`.
-            to_token: We sort based on the events in the room at this token (<= `to_token`)
-
-        Returns:
-            A sorted list of room IDs by `stream_ordering` along with membership information.
-        """
-
-        # Assemble a map of room ID to the `stream_ordering` of the last activity that the
-        # user should see in the room (<= `to_token`)
-        last_activity_in_room_map: Dict[str, int] = {}
-
-        for room_id, room_for_user in sync_room_map.items():
-            if room_for_user.membership != Membership.JOIN:
-                # If the user has left/been invited/knocked/been banned from a
-                # room, they shouldn't see anything past that point.
-                #
-                # FIXME: It's possible that people should see beyond this point
-                # in invited/knocked cases if for example the room has
-                # `invite`/`world_readable` history visibility, see
-                # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
-                last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
-
-        # For fully-joined rooms, we find the latest activity at/before the
-        # `to_token`.
-        joined_room_positions = (
-            await self.store.bulk_get_last_event_pos_in_room_before_stream_ordering(
-                [
-                    room_id
-                    for room_id, room_for_user in sync_room_map.items()
-                    if room_for_user.membership == Membership.JOIN
-                ],
-                to_token.room_key,
-            )
-        )
-
-        last_activity_in_room_map.update(joined_room_positions)
-
-        return sorted(
-            sync_room_map.values(),
-            # Sort by the last activity (stream_ordering) in the room
-            key=lambda room_info: last_activity_in_room_map[room_info.room_id],
-            # We want descending order
-            reverse=True,
-        )
 
     @trace
     async def sort_rooms(

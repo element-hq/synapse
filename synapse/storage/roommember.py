@@ -48,6 +48,7 @@ class RoomsForUserSlidingSync:
     event_pos: PersistedEventPosition
     room_version_id: str
 
+    has_known_state: bool
     room_type: Optional[str]
     is_encrypted: bool
 
