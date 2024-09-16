@@ -27,7 +27,7 @@ class _UpdateDelayedEventAction(Enum):
 # TODO: Needs unit testing
 class UpdateDelayedEventServlet(RestServlet):
     PATTERNS = client_patterns(
-        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]*)$",
+        r"/org\.matrix\.msc4140/delayed_events/(?P<delay_id>[^/]+)$",
         releases=(),
     )
     CATEGORY = "Delayed event management requests"
