@@ -397,6 +397,7 @@ class SlidingSyncExtensionHandler:
                 user_id, from_token.stream_token.push_rules_key
             )
             if have_push_rules_changed:
+                # TODO: This should take into account the `from_token` and `to_token`
                 global_account_data_map[
                     AccountDataTypes.PUSH_RULES
                 ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
