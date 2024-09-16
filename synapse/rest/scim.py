@@ -72,7 +72,7 @@ except ImportError:
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-SCIM_PREFIX = "_matrix/client/unstable/coop.yaal/scim"
+SCIM_PREFIX = "/_matrix/client/unstable/coop.yaal/scim"
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class SCIMServlet(RestServlet):
                 resource_type="User",
                 created=creation_datetime,
                 last_modified=creation_datetime,
-                location=f"{self.config.server.public_baseurl}{SCIM_PREFIX}/Users/{user_id}",
+                location=f"{self.config.server.public_baseurl}{SCIM_PREFIX[1:]}/Users/{user_id}",
             ),
             id=user_id,
             external_id=user_id,
@@ -187,7 +187,7 @@ class SCIMServlet(RestServlet):
 
 
 class UserServlet(SCIMServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/Users/(?P<user_id>[^/]*)")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Users/(?P<user_id>[^/]*)")]
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -291,7 +291,7 @@ class UserServlet(SCIMServlet):
 
 
 class UserListServlet(SCIMServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/Users/?$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Users/?$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         try:
@@ -378,7 +378,7 @@ class UserListServlet(SCIMServlet):
 
 
 class ServiceProviderConfigServlet(SCIMServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/ServiceProviderConfig$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/ServiceProviderConfig$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         spc = ServiceProviderConfig(
@@ -386,7 +386,7 @@ class ServiceProviderConfigServlet(SCIMServlet):
                 resource_type="ServiceProviderConfig",
                 location=(
                     self.config.server.public_baseurl
-                    + SCIM_PREFIX
+                    + SCIM_PREFIX[1:]
                     + "/ServiceProviderConfig"
                 ),
             ),
@@ -435,7 +435,7 @@ class BaseSchemaServlet(SCIMServlet):
                 resource_type=schema_name,
                 location=(
                     self.config.server.public_baseurl
-                    + SCIM_PREFIX
+                    + SCIM_PREFIX[1:]
                     + "/Schemas/"
                     + schema_id
                 ),
@@ -443,7 +443,7 @@ class BaseSchemaServlet(SCIMServlet):
 
 
 class SchemaListServlet(BaseSchemaServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/Schemas$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Schemas$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         """Return the list of schemas provided by the synapse SCIM implementation."""
@@ -464,7 +464,7 @@ class SchemaListServlet(BaseSchemaServlet):
 
 
 class SchemaServlet(BaseSchemaServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/Schemas/(?P<schema_id>[^/]*)$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Schemas/(?P<schema_id>[^/]*)$")]
 
     async def on_GET(
         self, request: SynapseRequest, schema_id: str
@@ -494,7 +494,7 @@ class BaseResourceTypeServlet(SCIMServlet):
                 resource_type="ResourceType",
                 location=(
                     self.config.server.public_baseurl
-                    + SCIM_PREFIX
+                    + SCIM_PREFIX[1:]
                     + "/ResourceTypes/User"
                 ),
             ),
@@ -502,7 +502,7 @@ class BaseResourceTypeServlet(SCIMServlet):
 
 
 class ResourceTypeListServlet(BaseResourceTypeServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/ResourceTypes$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/ResourceTypes$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         req = self.parse_search_request(request)
@@ -523,7 +523,7 @@ class ResourceTypeListServlet(BaseResourceTypeServlet):
 
 
 class ResourceTypeServlet(BaseResourceTypeServlet):
-    PATTERNS = [re.compile(f"^/{SCIM_PREFIX}/ResourceTypes/(?P<resource_type>[^/]*)$")]
+    PATTERNS = [re.compile(f"^{SCIM_PREFIX}/ResourceTypes/(?P<resource_type>[^/]*)$")]
 
     async def on_GET(
         self, request: SynapseRequest, resource_type: str
