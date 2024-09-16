@@ -332,7 +332,7 @@ class DelayedEventsStore(SQLBaseStore):
             sql_args = (delay_id, user_localpart)
             txn.execute(
                 (
-                    f"{sql_update} RETURNING {sql_cols}"
+                    f"{sql_update} {sql_where} RETURNING {sql_cols}"
                     if self.database_engine.supports_returning
                     else f"SELECT {sql_cols} FROM delayed_events {sql_where}"
                 ),
