@@ -312,15 +312,20 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             {room_id1},
             exact=True,
         )
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id1)
+        }
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
+            account_data_map.keys(),
             {"org.matrix.roorarraz", AccountDataTypes.TAG},
             exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG], {"tags": {"m.favourite": {}}}
         )
 
     def test_room_account_data_incremental_sync(self) -> None:
@@ -436,15 +441,21 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         # We should only see the new room account data that happened after the `from_token`
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id1)
+        }
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
+            account_data_map.keys(),
             {"org.matrix.roorarraz2", AccountDataTypes.TAG},
             exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG],
+            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
         )
 
     def test_wait_for_new_data(self) -> None:
