@@ -37,23 +37,20 @@ from typing import (
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import Extra
 from synapse.api.constants import EventTypes
-from synapse.types import MultiWriterStreamToken, RoomStreamToken, StrCollection, UserID
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra
-else:
-    from pydantic import Extra
-
 from synapse.events import EventBase
 from synapse.types import (
     DeviceListUpdates,
     JsonDict,
     JsonMapping,
+    MultiWriterStreamToken,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
+    StrCollection,
     StreamToken,
+    UserID,
 )
 from synapse.types.rest.client import SlidingSyncBody
 
@@ -317,8 +314,8 @@ class SlidingSyncResult:
             """The Account Data extension (MSC3959)
 
             Attributes:
-                global_account_data_map: Mapping from `type` to `content` of global account
-                    data events.
+                global_account_data_map: Mapping from `type` to `content` of global
+                    account data events.
                 account_data_by_room_map: Mapping from room_id to mapping of `type` to
                     `content` of room account data events.
             """

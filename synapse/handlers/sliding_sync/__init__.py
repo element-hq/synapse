@@ -267,7 +267,7 @@ class SlidingSyncHandler:
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
-                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
+                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
 
         extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
@@ -784,32 +784,10 @@ class SlidingSyncHandler:
                 ):
                     avatar_changed = True
 
+        # We only need the room summary for calculating heroes, however if we do
+        # fetch it then we can use it to calculate `joined_count` and
+        # `invited_count`.
         room_membership_summary: Optional[Mapping[str, MemberSummary]] = None
-        empty_membership_summary = MemberSummary([], 0)
-        # We need the room summary for:
-        #  - Always for initial syncs (or the first time we send down the room)
-        #  - When the room has no name, we need `heroes`
-        #  - When the membership has changed so we need to give updated `heroes` and
-        #    `joined_count`/`invited_count`.
-        #
-        # Ideally, instead of just looking at `name_changed`, we'd check if the room
-        # name is not set but this is a good enough approximation that saves us from
-        # having to pull out the full event. This just means, we're generating the
-        # summary whenever the room name changes instead of only when it changes to
-        # `None`.
-        if initial or name_changed or membership_changed:
-            # We can't trace the function directly because it's cached and the `@cached`
-            # decorator doesn't mix with `@trace` yet.
-            with start_active_span("get_room_summary"):
-                if room_membership_for_user_at_to_token.membership in (
-                    Membership.LEAVE,
-                    Membership.BAN,
-                ):
-                    # TODO: Figure out how to get the membership summary for left/banned rooms
-                    room_membership_summary = {}
-                else:
-                    room_membership_summary = await self.store.get_room_summary(room_id)
-                    # TODO: Reverse/rewind back to the `to_token`
 
         # `heroes` are required if the room name is not set.
         #
@@ -828,10 +806,44 @@ class SlidingSyncHandler:
         # get them on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
         if name_event_id is None and (initial or (not initial and membership_changed)):
-            assert room_membership_summary is not None
+            # We need the room summary to extract the heroes from
+            if room_membership_for_user_at_to_token.membership != Membership.JOIN:
+                # TODO: Figure out how to get the membership summary for left/banned rooms
+                # For invite/knock rooms we don't include the information.
+                room_membership_summary = {}
+            else:
+                room_membership_summary = await self.store.get_room_summary(room_id)
+                # TODO: Reverse/rewind back to the `to_token`
+
             hero_user_ids = extract_heroes_from_room_summary(
                 room_membership_summary, me=user.to_string()
             )
+
+        # Fetch the membership counts for rooms we're joined to.
+        #
+        # Similarly to other metadata, we only need to calculate the member
+        # counts if this is an initial sync or the memberships have changed.
+        joined_count: Optional[int] = None
+        invited_count: Optional[int] = None
+        if (
+            initial or membership_changed
+        ) and room_membership_for_user_at_to_token.membership == Membership.JOIN:
+            # If we have the room summary (because we calculated heroes above)
+            # then we can simply pull the counts from there.
+            if room_membership_summary is not None:
+                empty_membership_summary = MemberSummary([], 0)
+
+                joined_count = room_membership_summary.get(
+                    Membership.JOIN, empty_membership_summary
+                ).count
+
+                invited_count = room_membership_summary.get(
+                    Membership.INVITE, empty_membership_summary
+                ).count
+            else:
+                member_counts = await self.store.get_member_counts(room_id)
+                joined_count = member_counts.get(Membership.JOIN, 0)
+                invited_count = member_counts.get(Membership.INVITE, 0)
 
         # Fetch the `required_state` for the room
         #
@@ -1089,20 +1101,6 @@ class SlidingSyncHandler:
             new_connection_state.room_configs[room_id] = room_sync_config
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
-
-        joined_count: Optional[int] = None
-        if initial or membership_changed:
-            assert room_membership_summary is not None
-            joined_count = room_membership_summary.get(
-                Membership.JOIN, empty_membership_summary
-            ).count
-
-        invited_count: Optional[int] = None
-        if initial or membership_changed:
-            assert room_membership_summary is not None
-            invited_count = room_membership_summary.get(
-                Membership.INVITE, empty_membership_summary
-            ).count
 
         return SlidingSyncResult.RoomResult(
             name=room_name,

@@ -83,6 +83,7 @@ from synapse.storage.util.id_generators import (
 from synapse.storage.util.sequence import build_sequence_generator
 from synapse.types import JsonDict, get_domain_from_id
 from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import ObservableDeferred, delay_cancellation
 from synapse.util.caches.descriptors import cached, cachedList
@@ -2465,3 +2466,14 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
+
+    async def have_finished_sliding_sync_background_jobs(self) -> bool:
+        """Return if it's safe to use the sliding sync membership tables."""
+
+        return await self.db_pool.updates.have_completed_background_updates(
+            (
+                _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+            )
+        )

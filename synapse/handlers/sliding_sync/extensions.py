@@ -14,7 +14,19 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, AbstractSet, Dict, Mapping, Optional, Sequence, Set
+from typing import (
+    TYPE_CHECKING,
+    AbstractSet,
+    ChainMap,
+    Dict,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    cast,
+)
 
 from typing_extensions import assert_never
 
@@ -385,29 +397,47 @@ class SlidingSyncExtensionHandler:
                 )
             )
 
+            # TODO: This should take into account the `from_token` and `to_token`
             have_push_rules_changed = await self.store.have_push_rules_changed_for_user(
                 user_id, from_token.stream_token.push_rules_key
             )
             if have_push_rules_changed:
-                global_account_data_map = dict(global_account_data_map)
                 # TODO: This should take into account the `from_token` and `to_token`
                 global_account_data_map[
                     AccountDataTypes.PUSH_RULES
                 ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
         else:
             # TODO: This should take into account the `to_token`
-            all_global_account_data = await self.store.get_global_account_data_for_user(
-                user_id
+            immutable_global_account_data_map = (
+                await self.store.get_global_account_data_for_user(user_id)
             )
 
-            global_account_data_map = dict(all_global_account_data)
-            # TODO: This should take into account the  `to_token`
-            global_account_data_map[
-                AccountDataTypes.PUSH_RULES
-            ] = await self.push_rules_handler.push_rules_for_user(sync_config.user)
+            # Use a `ChainMap` to avoid copying the immutable data from the cache
+            global_account_data_map = ChainMap(
+                {
+                    # TODO: This should take into account the `to_token`
+                    AccountDataTypes.PUSH_RULES: await self.push_rules_handler.push_rules_for_user(
+                        sync_config.user
+                    )
+                },
+                # Cast is safe because `ChainMap` only mutates the top-most map,
+                # see https://github.com/python/typeshed/issues/8430
+                cast(
+                    MutableMapping[str, JsonMapping], immutable_global_account_data_map
+                ),
+            )
 
         # Fetch room account data
-        account_data_by_room_map: Dict[str, Mapping[str, JsonMapping]] = {}
+        #
+        # List of -> Mapping from room_id to mapping of `type` to `content` of room
+        # account data events.
+        #
+        # This is is a list so we can avoid making copies of immutable data and instead
+        # just provide multiple maps that need to be combined. Normally, we could
+        # reach for `ChainMap` in this scenario, but this is a nested map and accessing
+        # the ChainMap by room_id won't combine the two maps for that room (we would
+        # need a new `NestedChainMap` type class).
+        account_data_by_room_maps: List[Mapping[str, Mapping[str, JsonMapping]]] = []
         relevant_room_ids = self.find_relevant_room_ids_for_extension(
             requested_lists=account_data_request.lists,
             requested_room_ids=account_data_request.rooms,
@@ -440,24 +470,53 @@ class SlidingSyncExtensionHandler:
                 else:
                     assert_never(room_status.status)
 
-            # We fetch all room account data since the from token. This is so
+            # We fetch all room account data since the from_token. This is so
             # that we can record which rooms have updates that haven't been sent
             # down.
+            #
+            # Mapping from room_id to mapping of `type` to `content` of room account
+            # data events.
+            all_updates_since_the_from_token: Mapping[
+                str, Mapping[str, JsonMapping]
+            ] = {}
             if from_token is not None:
-                all_updates = await self.store.get_updated_room_account_data_for_user(
+                # TODO: This should take into account the `from_token` and `to_token`
+                all_updates_since_the_from_token = (
+                    await self.store.get_updated_room_account_data_for_user(
+                        user_id, from_token.stream_token.account_data_key
+                    )
+                )
+
+                # Add room tags
+                #
+                # TODO: This should take into account the `from_token` and `to_token`
+                tags_by_room = await self.store.get_updated_tags(
                     user_id, from_token.stream_token.account_data_key
                 )
-            else:
-                all_updates = {}
+                for room_id, tags in tags_by_room.items():
+                    all_updates_since_the_from_token.setdefault(room_id, {})[
+                        AccountDataTypes.TAG
+                    ] = {"tags": tags}
 
-            # For live rooms we just get the updates from `all_updates`
+            # For live rooms we just get the updates from `all_updates_since_the_from_token`
             if live_rooms:
-                for room_id in all_updates.keys() & live_rooms:
-                    account_data_by_room_map[room_id] = all_updates[room_id]
+                # Mapping from room_id to mapping of `type` to `content` of room account
+                # data events.
+                live_account_data_by_room_map: Dict[str, Mapping[str, JsonMapping]] = {}
+                for room_id in all_updates_since_the_from_token.keys() & live_rooms:
+                    live_account_data_by_room_map[room_id] = (
+                        all_updates_since_the_from_token[room_id]
+                    )
+
+                account_data_by_room_maps.append(live_account_data_by_room_map)
 
             # For previously and initial rooms we query each room individually.
             if previously_rooms or initial_rooms:
-                # We handle these rooms concurrently to speed it up.
+                # Mapping from room_id to mapping of `type` to `content` of room account
+                # data events.
+                historic_account_data_by_room_map: MutableMapping[
+                    str, MutableMapping[str, JsonMapping]
+                ] = {}
 
                 async def handle_previously(room_id: str) -> None:
                     # Either get updates or all account data in the room
@@ -472,35 +531,89 @@ class SlidingSyncExtensionHandler:
 
                         # Only add an entry if there were any updates.
                         if room_account_data:
-                            account_data_by_room_map[room_id] = room_account_data
+                            historic_account_data_by_room_map[room_id] = (
+                                room_account_data
+                            )
+
+                        # Add room tags
+                        changed = await self.store.has_tags_changed_for_room(
+                            user_id=user_id,
+                            room_id=room_id,
+                            from_stream_id=previous_token,
+                            to_stream_id=to_token.account_data_key,
+                        )
+                        if changed:
+                            immutable_tag_map = await self.store.get_tags_for_room(
+                                user_id, room_id
+                            )
+                            if immutable_tag_map:
+                                historic_account_data_by_room_map.setdefault(
+                                    room_id, {}
+                                )[AccountDataTypes.TAG] = {"tags": immutable_tag_map}
                     else:
-                        room_account_data = await self.store.get_account_data_for_room(
-                            user_id, room_id
+                        # TODO: This should take into account the `to_token`
+                        immutable_room_account_data = (
+                            await self.store.get_account_data_for_room(user_id, room_id)
+                        )
+                        historic_account_data_by_room_map[room_id] = ChainMap(
+                            {},
+                            # Cast is safe because `ChainMap` only mutates the top-most map,
+                            # see https://github.com/python/typeshed/issues/8430
+                            cast(
+                                MutableMapping[str, JsonMapping],
+                                immutable_room_account_data,
+                            ),
                         )
 
-                        account_data_by_room_map[room_id] = room_account_data
+                        # Add room tags
+                        #
+                        # TODO: This should take into account the `to_token`
+                        immutable_tag_map = await self.store.get_tags_for_room(
+                            user_id, room_id
+                        )
+                        if immutable_tag_map:
+                            historic_account_data_by_room_map.setdefault(room_id, {})[
+                                AccountDataTypes.TAG
+                            ] = {"tags": immutable_tag_map}
 
+                # We handle these rooms concurrently to speed it up.
                 await concurrently_execute(
                     handle_previously,
                     previously_rooms.keys() | initial_rooms,
                     limit=20,
                 )
 
-            # Now record which rooms are now up to data, and which rooms have
-            # pending updates to send.
-            new_connection_state.account_data.record_sent_rooms(relevant_room_ids)
-            missing_updates = all_updates.keys() - relevant_room_ids
-            if missing_updates:
-                # If we have missing updates then we must have had a from token.
-                assert from_token is not None
+                account_data_by_room_maps.append(historic_account_data_by_room_map)
 
-                new_connection_state.account_data.record_unsent_rooms(
-                    missing_updates, from_token.stream_token.account_data_key
+        # Filter down to the relevant rooms ... and combine the maps
+        relevant_account_data_by_room_map: MutableMapping[
+            str, Mapping[str, JsonMapping]
+        ] = {}
+        for room_id in relevant_room_ids:
+            # We want to avoid adding empty maps for relevant rooms that have no room
+            # account data so do a quick check to see if it's in any of the maps.
+            is_room_in_maps = False
+            for room_map in account_data_by_room_maps:
+                if room_id in room_map:
+                    is_room_in_maps = True
+                    break
+
+            # If we found the room in any of the maps, combine the maps for that room
+            if is_room_in_maps:
+                relevant_account_data_by_room_map[room_id] = ChainMap(
+                    {},
+                    *(
+                        # Cast is safe because `ChainMap` only mutates the top-most map,
+                        # see https://github.com/python/typeshed/issues/8430
+                        cast(MutableMapping[str, JsonMapping], room_map[room_id])
+                        for room_map in account_data_by_room_maps
+                        if room_map.get(room_id)
+                    ),
                 )
 
         return SlidingSyncResult.Extensions.AccountDataExtension(
             global_account_data_map=global_account_data_map,
-            account_data_by_room_map=account_data_by_room_map,
+            account_data_by_room_map=relevant_account_data_by_room_map,
         )
 
     @trace
@@ -602,7 +715,10 @@ class SlidingSyncExtensionHandler:
             # For rooms we've previously sent down, but aren't up to date, we
             # need to use the from token from the room status.
             if previously_rooms:
-                for room_id, receipt_token in previously_rooms.items():
+                # Fetch any missing rooms concurrently.
+
+                async def handle_previously_room(room_id: str) -> None:
+                    receipt_token = previously_rooms[room_id]
                     # TODO: Limit the number of receipts we're about to send down
                     # for the room, if its too many we should TODO
                     previously_receipts = (
@@ -613,6 +729,10 @@ class SlidingSyncExtensionHandler:
                         )
                     )
                     fetched_receipts.extend(previously_receipts)
+
+                await concurrently_execute(
+                    handle_previously_room, previously_rooms.keys(), 20
+                )
 
             if initial_rooms:
                 # We also always send down receipts for the current user.
