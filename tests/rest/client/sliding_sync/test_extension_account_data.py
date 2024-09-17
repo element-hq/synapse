@@ -354,6 +354,8 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         """
         On incremental sync, we return all account data for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
+
+        (HaveSentRoomFlag.LIVE)
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -468,6 +470,337 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             for event in response_body["extensions"]["account_data"]
             .get("rooms")
             .get(room_id1)
+        }
+        self.assertIncludes(
+            account_data_map.keys(),
+            {"org.matrix.roorarraz2", AccountDataTypes.TAG},
+            exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG],
+            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
+        )
+
+    def test_room_account_data_incremental_sync_out_of_range_never(self) -> None:
+        """Tests that we don't return account data for rooms that fall out of
+        range, but then do send all account data once they're back in range.
+
+        (initial/HaveSentRoomFlag.NEVER)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
+            )
+        )
+
+        # Now send a message into room1 so that it is at the top of the list
+        self.helper.send(room_id1, body="new event", tok=user1_tok)
+
+        # Make a SS request for only the top room.
+        sync_body = {
+            "lists": {
+                "main": {
+                    "ranges": [[0, 0]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "lists": ["main"],
+                }
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Only room1 should be in the response since it's the latest room with activity
+        # and our range only includes 1 room.
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+
+        # Add some other room account data
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        # Add another room tag
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+
+        # Move room2 into range.
+        self.helper.send(room_id2, body="new event", tok=user1_tok)
+
+        # Make an incremental Sliding Sync request with the account_data extension enabled
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # We expect to see the account data of room2, as that has the most
+        # recent update.
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id2},
+            exact=True,
+        )
+        # Since this is the first time we're seeing room2 down sync, we should see all
+        # room account data for it.
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id2)
+        }
+        self.assertIncludes(
+            account_data_map.keys(),
+            {"org.matrix.roorarraz", "org.matrix.roorarraz2", AccountDataTypes.TAG},
+            exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz"], {"roo": "rar"})
+        self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG],
+            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
+        )
+
+    def test_room_account_data_incremental_sync_out_of_range_previously(self) -> None:
+        """Tests that we don't return account data for rooms that fall out of
+        range, but then do send all account data that has changed they're back in range.
+
+        (HaveSentRoomFlag.PREVIOUSLY)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a room and add some room account data
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
+
+        # Create another room with some room account data
+        room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz",
+                content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
+            )
+        )
+
+        # Make an initial Sliding Sync request for only room1 and room2.
+        sync_body = {
+            "lists": {},
+            "room_subscriptions": {
+                room_id1: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+                room_id2: {
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            },
+            "extensions": {
+                "account_data": {
+                    "enabled": True,
+                    "rooms": [room_id1, room_id2],
+                }
+            },
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Both rooms show up because we have a room subscription for each and they're
+        # requested in the `account_data` extension.
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1, room_id2},
+            exact=True,
+        )
+
+        # Add some other room account data
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_account_data_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                account_data_type="org.matrix.roorarraz2",
+                content={"roo": "rar"},
+            )
+        )
+        # Add another room tag
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+
+        # Make an incremental Sliding Sync request for just room1
+        response_body, from_token = self.do_sync(
+            {
+                **sync_body,
+                "room_subscriptions": {
+                    room_id1: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+            },
+            since=from_token,
+            tok=user1_tok,
+        )
+
+        # Only room1 shows up because we only have a room subscription for room1 now.
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id1},
+            exact=True,
+        )
+
+        # Make an incremental Sliding Sync request for just room2 now
+        response_body, from_token = self.do_sync(
+            {
+                **sync_body,
+                "room_subscriptions": {
+                    room_id2: {
+                        "required_state": [],
+                        "timeline_limit": 0,
+                    },
+                },
+            },
+            since=from_token,
+            tok=user1_tok,
+        )
+
+        # Only room2 shows up because we only have a room subscription for room2 now.
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id2},
+            exact=True,
+        )
+
+        self.assertIsNotNone(response_body["extensions"]["account_data"].get("global"))
+        # Check for room account data for room2
+        self.assertIncludes(
+            response_body["extensions"]["account_data"].get("rooms").keys(),
+            {room_id2},
+            exact=True,
+        )
+        # We should see any room account data updates for room2 since the last
+        # time we saw it down sync
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id2)
         }
         self.assertIncludes(
             account_data_map.keys(),
