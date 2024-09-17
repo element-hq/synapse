@@ -1,0 +1,1 @@
+Don't exclude MSC3266 from the "unstable_features" section of the response to `GET /_matrix/client/versions`.
