@@ -308,6 +308,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         self.store: EventsWorkerStore = hs.get_datastores().main
 
     def test_get_lots_of_messages(self) -> None:
+        """Sanity check that `get_events(...)`/`get_events_as_list(...)` works"""
         num_events = 100
 
         user_id = self.register_user("user", "pass")
