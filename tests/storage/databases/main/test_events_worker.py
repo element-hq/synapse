@@ -362,7 +362,7 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
                 # This is the function under test
                 fetched_event_map = self.get_success(self.store.get_events(event_ids))
 
-        # Sanity check that we go the events back
+        # Sanity check that we got the events back
         self.assertIncludes(fetched_event_map.keys(), event_ids, exact=True)
 
 
