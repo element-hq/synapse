@@ -181,6 +181,9 @@ class SynapseHomeServer(HomeServer):
             if compress:
                 client_resource = gz_wrap(client_resource)
 
+            if HAS_SCIM2:
+                resources[SCIM_PREFIX] = SCIMResource(self)
+
             resources.update(
                 {
                     CLIENT_API_PREFIX: client_resource,
@@ -189,9 +192,6 @@ class SynapseHomeServer(HomeServer):
                     **build_synapse_client_resource_tree(self),
                 }
             )
-
-            if HAS_SCIM2:
-                resources[SCIM_PREFIX] = SCIMResource(self)
 
             if self.config.email.can_verify_email:
                 from synapse.rest.synapse.client.password_reset import (
