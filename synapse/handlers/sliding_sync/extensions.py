@@ -521,6 +521,10 @@ class SlidingSyncExtensionHandler:
                             to_stream_id=to_token.account_data_key,
                         )
                         if changed:
+                            # XXX: Ideally, this should take into account the `to_token`
+                            # and return the set of tags at that time but we don't track
+                            # changes to tags so we just have to return all tags for the
+                            # room.
                             immutable_tag_map = await self.store.get_tags_for_room(
                                 user_id, room_id
                             )
@@ -540,7 +544,10 @@ class SlidingSyncExtensionHandler:
 
                         # Add room tags
                         #
-                        # TODO: This should take into account the `to_token`
+                        # XXX: Ideally, this should take into account the `to_token`
+                        # and return the set of tags at that time but we don't track
+                        # changes to tags so we just have to return all tags for the
+                        # room.
                         immutable_tag_map = await self.store.get_tags_for_room(
                             user_id, room_id
                         )
