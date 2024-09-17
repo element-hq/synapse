@@ -468,14 +468,24 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         )
 
     async def get_updated_room_account_data_for_user_for_room(
-        self, user_id: str, room_id: str, stream_id: int
+        self,
+        # Since there are multiple arguments with the same type, force keyword arguments
+        # so people don't accidentally swap the order
+        *,
+        user_id: str,
+        room_id: str,
+        from_stream_id: int,
+        to_stream_id: int,
     ) -> Dict[str, JsonMapping]:
         """Get the room account_data that's changed for a user in a room.
+
+        (> `from_stream_id` and <= `to_stream_id`)
 
         Args:
             user_id: The user to get the account_data for.
             room_id: The room to check
-            stream_id: The point in the stream since which to get updates
+            from_stream_id: The point in the stream to fetch from
+            to_stream_id: The point in the stream to fetch to
 
         Returns:
             A dict of the room account data.
@@ -486,9 +496,9 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
         ) -> Dict[str, JsonMapping]:
             sql = """
                 SELECT account_data_type, content FROM room_account_data
-                WHERE user_id = ? AND room_id = ? AND stream_id > ?
+                WHERE user_id = ? AND room_id = ? AND stream_id > ? AND stream_id <= ?
             """
-            txn.execute(sql, (user_id, room_id, stream_id))
+            txn.execute(sql, (user_id, room_id, from_stream_id, to_stream_id))
 
             room_account_data: Dict[str, JsonMapping] = {}
             for row in txn:
@@ -497,7 +507,7 @@ class AccountDataWorkerStore(PushRulesWorkerStore, CacheInvalidationWorkerStore)
             return room_account_data
 
         changed = self._account_data_stream_cache.has_entity_changed(
-            user_id, int(stream_id)
+            user_id, int(from_stream_id)
         )
         if not changed:
             return {}

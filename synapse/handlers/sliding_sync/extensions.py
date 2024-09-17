@@ -506,7 +506,10 @@ class SlidingSyncExtensionHandler:
                     if previous_token is not None:
                         room_account_data = await (
                             self.store.get_updated_room_account_data_for_user_for_room(
-                                user_id, room_id, previous_token
+                                user_id=user_id,
+                                room_id=room_id,
+                                from_stream_id=previous_token,
+                                to_stream_id=to_token.account_data_key,
                             )
                         )
 

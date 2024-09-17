@@ -160,8 +160,8 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
     async def has_tags_changed_for_room(
         self,
-        # Since these are both strings, force keyword arguments so people don't
-        # accidentally swap the order
+        # Since there are multiple arguments with the same type, force keyword arguments
+        # so people don't accidentally swap the order
         *,
         user_id: str,
         room_id: str,
