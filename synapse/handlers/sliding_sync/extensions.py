@@ -585,6 +585,20 @@ class SlidingSyncExtensionHandler:
 
                 account_data_by_room_maps.append(historic_account_data_by_room_map)
 
+            # Now record which rooms are now up to data, and which rooms have
+            # pending updates to send.
+            new_connection_state.account_data.record_sent_rooms(relevant_room_ids)
+            missing_updates = (
+                all_updates_since_the_from_token.keys() - relevant_room_ids
+            )
+            if missing_updates:
+                # If we have missing updates then we must have had a from_token.
+                assert from_token is not None
+
+                new_connection_state.account_data.record_unsent_rooms(
+                    missing_updates, from_token.stream_token.account_data_key
+                )
+
         # Filter down to the relevant rooms ... and combine the maps
         relevant_account_data_by_room_map: MutableMapping[
             str, Mapping[str, JsonMapping]
