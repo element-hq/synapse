@@ -576,7 +576,8 @@ Also make sure that <code>metrics</code> is not included in <code>resources</cod
 <p>Valid resource names are:</p>
 <ul>
 <li>
-<p><code>client</code>: the client-server API (/_matrix/client), and the synapse admin API (/_synapse/admin). Also implies <code>media</code> and <code>static</code>.</p>
+<p><code>client</code>: the client-server API (/_matrix/client). Also implies <code>media</code> and <code>static</code>.
+If configuring the main process, the Synapse Admin API (/_synapse/admin) is also implied.</p>
 </li>
 <li>
 <p><code>consent</code>: user consent forms (/_matrix/consent). See <a href="../../consent_tracking.html">here</a> for more.</p>
@@ -1682,7 +1683,7 @@ Defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>.</p>
 <h3 id="rc_invites"><a class="header" href="#rc_invites"><code>rc_invites</code></a></h3>
 <p>This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. <code>per_room</code> defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>,
-<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>, and <code>per_issuer</code> 
+<code>per_user</code> defaults to <code>per_second: 0.003</code>, <code>burst_count: 5</code>, and <code>per_issuer</code>
 defaults to <code>per_second: 0.3</code>, <code>burst_count: 10</code>.</p>
 <p>Client requests that invite user(s) when <a href="https://spec.matrix.org/v1.2/client-server-api/#post_matrixclientv3createroom">creating a
 room</a>
@@ -2888,8 +2889,8 @@ the IdP to use an ACS location of
     contact_person:
       - given_name: Bob
         sur_name: &quot;the Sysadmin&quot;
-        email_address&quot;: [&quot;admin@example.com&quot;]
-        contact_type&quot;: technical
+        email_address: [&quot;admin@example.com&quot;]
+        contact_type: technical
 
   saml_session_lifetime: 5m
 
