@@ -2517,7 +2517,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         offset = 0
         batch_size = 100
-        if batch_size < limit:
+        if batch_size > limit:
             batch_size = limit
 
         selected_ids: List[str] = []

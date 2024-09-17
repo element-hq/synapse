@@ -1400,8 +1400,8 @@ _Added in Synapse 1.114.0._
 
 The following JSON body parameters are optional:
 
-- `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc
-- `limit` - a limit on the number of events to redact (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
+- `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in the each redaction event, and be visible to users.
+- `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
 
 
 ## Check the status of a redaction process
@@ -1429,15 +1429,15 @@ A response body like the following is returned:
 
 The following parameters should be set in the URL:
 
-* `redact_id` - The ID for this redaction, provided when the redaction was requested.
+* `redact_id` - string - The ID for this redaction process, provided when the redaction was requested.
 
 
 **Response**
 
 The following fields are returned in the JSON response body:
 
-- status: one of scheduled/active/completed/failed, indicating the status of the redaction job
-- failed_redactions: a dict where the keys are event ids the process was unable to redact, if any, and the values are 
+- `status` - string - one of scheduled/active/completed/failed, indicating the status of the redaction job
+- `failed_redactions` - dictionary - the keys of the dict are event ids the process was unable to redact, if any, and the values are 
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._

@@ -5113,23 +5113,24 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
 
         self.spam_checker = hs.get_module_api_callbacks().spam_checker
 
+        # create rooms - room versions 11+ store the `redacts` key in content while
+        # earlier ones don't so we use a mix of room versions
+        self.rm1 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="7"
+        )
+        self.rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+        self.rm3 = self.helper.create_room_as(
+            self.admin, tok=self.admin_tok, room_version="11"
+        )
+
     def test_redact_messages_all_rooms(self) -> None:
         """
         Test that request to redact events in all rooms user is member of is successful
         """
-        # create rooms - room versions 11+ store the `redacts` key in content while
-        # earlier ones don't so we use a mix of room versions
-        rm1 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="7"
-        )
-        rm2 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="11"
-        )
-        rm3 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
 
         # join rooms, send some messages
         originals = []
-        for rm in [rm1, rm2, rm3]:
+        for rm in [self.rm1, self.rm2, self.rm3]:
             join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
             originals.append(join["event_id"])
             for i in range(15):
@@ -5149,7 +5150,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
 
         matched = []
-        for rm in [rm1, rm2, rm3]:
+        for rm in [self.rm1, self.rm2, self.rm3]:
             filter = json.dumps({"types": [EventTypes.Redaction]})
             channel = self.make_request(
                 "GET",
@@ -5171,16 +5172,9 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         """
         Test that request to redact events in specified rooms user is member of is successful
         """
-        rm1 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="7"
-        )
-        rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
-        rm3 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="11"
-        )
 
         originals = []
-        for rm in [rm1, rm2, rm3]:
+        for rm in [self.rm1, self.rm2, self.rm3]:
             join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
             originals.append(join["event_id"])
             for i in range(15):
@@ -5194,13 +5188,13 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             f"/_synapse/admin/v1/user/{self.bad_user}/redact",
-            content={"rooms": [rm1, rm3]},
+            content={"rooms": [self.rm1, self.rm3]},
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
 
         # messages in requested rooms are redacted
-        for rm in [rm1, rm3]:
+        for rm in [self.rm1, self.rm3]:
             filter = json.dumps({"types": [EventTypes.Redaction]})
             channel = self.make_request(
                 "GET",
@@ -5221,7 +5215,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
             self.assertEqual(len(matches), 16)
 
         channel = self.make_request(
-            "GET", f"rooms/{rm2}/messages?limit=50", access_token=self.admin_tok
+            "GET", f"rooms/{self.rm2}/messages?limit=50", access_token=self.admin_tok
         )
         self.assertEqual(channel.code, 200)
 
@@ -5231,32 +5225,24 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                 self.fail("found redaction in room 2")
 
     def test_redact_status(self) -> None:
-        rm1 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="7"
-        )
-        rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
-        rm3 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="11"
-        )
-
-        originals = []
-        for rm in [rm1, rm2, rm3]:
+        rm2_originals = []
+        for rm in [self.rm1, self.rm2, self.rm3]:
             join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
-            if rm == rm2:
-                originals.append(join["event_id"])
+            if rm == self.rm2:
+                rm2_originals.append(join["event_id"])
             for i in range(5):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
                     rm, "m.room.message", event, tok=self.bad_user_tok
                 )
-                if rm == rm2:
-                    originals.append(res["event_id"])
+                if rm == self.rm2:
+                    rm2_originals.append(res["event_id"])
 
         # redact messages in rooms 1 and 3
         channel = self.make_request(
             "POST",
             f"/_synapse/admin/v1/user/{self.bad_user}/redact",
-            content={"rooms": [rm1, rm3]},
+            content={"rooms": [self.rm1, self.rm3]},
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5280,7 +5266,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         channel3 = self.make_request(
             "POST",
             f"/_synapse/admin/v1/user/{self.bad_user}/redact",
-            content={"rooms": [rm2]},
+            content={"rooms": [self.rm2]},
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5296,22 +5282,14 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         failed_redactions = channel4.json_body.get("failed_redactions")
         assert failed_redactions is not None
         matched = []
-        for original in originals:
+        for original in rm2_originals:
             if failed_redactions.get(original) is not None:
                 matched.append(original)
-        self.assertEqual(len(matched), len(originals))
+        self.assertEqual(len(matched), len(rm2_originals))
 
     def test_admin_redact_works_if_user_kicked_or_banned(self) -> None:
-        rm1 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="7"
-        )
-        rm2 = self.helper.create_room_as(self.admin, tok=self.admin_tok)
-        rm3 = self.helper.create_room_as(
-            self.admin, tok=self.admin_tok, room_version="11"
-        )
-
         originals = []
-        for rm in [rm1, rm2, rm3]:
+        for rm in [self.rm1, self.rm2, self.rm3]:
             join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
             originals.append(join["event_id"])
             for i in range(5):
@@ -5322,7 +5300,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                 originals.append(res["event_id"])
 
         # kick user from rooms 1 and 3
-        for r in [rm1, rm2]:
+        for r in [self.rm1, self.rm2]:
             channel = self.make_request(
                 "POST",
                 f"/_matrix/client/r0/rooms/{r}/kick",
@@ -5335,7 +5313,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         channel1 = self.make_request(
             "POST",
             f"/_synapse/admin/v1/user/{self.bad_user}/redact",
-            content={"rooms": [rm1, rm3]},
+            content={"rooms": [self.rm1, self.rm3]},
             access_token=self.admin_tok,
         )
         self.assertEqual(channel1.code, 200)
@@ -5355,7 +5333,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         # ban user
         channel3 = self.make_request(
             "POST",
-            f"/_matrix/client/r0/rooms/{rm2}/ban",
+            f"/_matrix/client/r0/rooms/{self.rm2}/ban",
             content={"reason": "being a bummer", "user_id": self.bad_user},
             access_token=self.admin_tok,
         )
@@ -5365,7 +5343,7 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         channel4 = self.make_request(
             "POST",
             f"/_synapse/admin/v1/user/{self.bad_user}/redact",
-            content={"rooms": [rm2]},
+            content={"rooms": [self.rm2]},
             access_token=self.admin_tok,
         )
         self.assertEqual(channel4.code, 200)

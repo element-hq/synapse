@@ -1435,7 +1435,20 @@ class RedactUser(RestServlet):
             )
 
         reason = body.get("reason")
+        if reason:
+            if not isinstance(reason, str):
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "If a reason is provided it must be a string.",
+                )
+
         limit = body.get("limit")
+        if limit:
+            if not isinstance(limit, int) or limit <= 0:
+                raise SynapseError(
+                    HTTPStatus.BAD_REQUEST,
+                    "If limit is provided it must be a non-negative integer greater than 0.",
+                )
 
         if not rooms:
             rooms = await self._store.get_rooms_for_user(user_id)

@@ -382,6 +382,9 @@ class AdminHandler:
                 400, "Redact already in progress for user %s" % (user_id,)
             )
 
+        if not limit:
+            limit = 1000
+
         redact_id = await self._task_scheduler.schedule_task(
             REDACT_ALL_EVENTS_ACTION_NAME,
             resource_id=user_id,
@@ -426,9 +429,7 @@ class AdminHandler:
 
         reason = task.params.get("reason")
         limit = task.params.get("limit")
-
-        if not limit:
-            limit = 1000
+        assert limit is not None
 
         result: Mapping[str, Any] = (
             task.result if task.result else {"failed_redactions": {}}
@@ -451,7 +452,7 @@ class AdminHandler:
                 if event.type == "m.room.member":
                     content = event.content
                     if content:
-                        if content.get("membership") == "join":
+                        if content.get("membership") == Membership.JOIN:
                             pass
                         else:
                             continue
