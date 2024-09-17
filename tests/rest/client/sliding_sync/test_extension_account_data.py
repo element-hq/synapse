@@ -80,18 +80,23 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             # Even though we don't have any global account data set, Synapse saves some
             # default push rules for us.
             {AccountDataTypes.PUSH_RULES},
             exact=True,
         )
+        # Push rules are a giant chunk of JSON data so we will just assume the value is correct if they key is here.
+        # global_account_data_map[AccountDataTypes.PUSH_RULES]
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -121,16 +126,19 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
 
         # There has been no account data changes since the `from_token` so we shouldn't
         # see any account data here.
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             set(),
             exact=True,
         )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -165,16 +173,24 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # It should show us all of the global account data
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             {AccountDataTypes.PUSH_RULES, "org.matrix.foobarbaz"},
             exact=True,
         )
+        # Push rules are a giant chunk of JSON data so we will just assume the value is correct if they key is here.
+        # global_account_data_map[AccountDataTypes.PUSH_RULES]
+        self.assertEqual(
+            global_account_data_map["org.matrix.foobarbaz"], {"foo": "bar"}
+        )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -220,17 +236,23 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
+        global_account_data_map = {
+            global_event["type"]: global_event["content"]
+            for global_event in response_body["extensions"]["account_data"].get(
+                "global"
+            )
+        }
         self.assertIncludes(
-            {
-                global_event["type"]
-                for global_event in response_body["extensions"]["account_data"].get(
-                    "global"
-                )
-            },
+            global_account_data_map.keys(),
             # We should only see the new global account data that happened after the `from_token`
             {"org.matrix.doodardaz"},
             exact=True,
         )
+        self.assertEqual(
+            global_account_data_map["org.matrix.doodardaz"], {"doo": "dar"}
+        )
+
+        # No room account data for this test
         self.assertIncludes(
             response_body["extensions"]["account_data"].get("rooms").keys(),
             set(),
@@ -255,6 +277,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
 
         # Create another room with some room account data
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
@@ -264,6 +295,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 room_id=room_id2,
                 account_data_type="org.matrix.roorarraz",
                 content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
             )
         )
 
@@ -294,15 +334,20 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             {room_id1},
             exact=True,
         )
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id1)
+        }
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
-            {"org.matrix.roorarraz"},
+            account_data_map.keys(),
+            {"org.matrix.roorarraz", AccountDataTypes.TAG},
             exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG], {"tags": {"m.favourite": {}}}
         )
 
     def test_room_account_data_incremental_sync(self) -> None:
@@ -323,6 +368,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.favourite",
+                content={},
+            )
+        )
 
         # Create another room with some room account data
         room_id2 = self.helper.create_room_as(user1_id, tok=user1_tok)
@@ -332,6 +386,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 room_id=room_id2,
                 account_data_type="org.matrix.roorarraz",
                 content={"roo": "rar"},
+            )
+        )
+        # Add a room tag to mark the room as a favourite
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.favourite",
+                content={},
             )
         )
 
@@ -369,6 +432,23 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
+        # Add another room tag
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id1,
+                tag="m.server_notice",
+                content={},
+            )
+        )
+        self.get_success(
+            self.account_data_handler.add_tag_to_room(
+                user_id=user1_id,
+                room_id=room_id2,
+                tag="m.server_notice",
+                content={},
+            )
+        )
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -383,15 +463,21 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         # We should only see the new room account data that happened after the `from_token`
+        account_data_map = {
+            event["type"]: event["content"]
+            for event in response_body["extensions"]["account_data"]
+            .get("rooms")
+            .get(room_id1)
+        }
         self.assertIncludes(
-            {
-                event["type"]
-                for event in response_body["extensions"]["account_data"]
-                .get("rooms")
-                .get(room_id1)
-            },
-            {"org.matrix.roorarraz2"},
+            account_data_map.keys(),
+            {"org.matrix.roorarraz2", AccountDataTypes.TAG},
             exact=True,
+        )
+        self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
+        self.assertEqual(
+            account_data_map[AccountDataTypes.TAG],
+            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
         )
 
     def test_wait_for_new_data(self) -> None:
