@@ -365,10 +365,6 @@ class GetEventsTestCase(unittest.HomeserverTestCase):
         # Sanity check that we go the events back
         self.assertIncludes(fetched_event_map.keys(), event_ids, exact=True)
 
-        # Sleep so the traces get flushed
-        # TODO: Remove
-        time.sleep(6)
-
 
 class DatabaseOutageTestCase(unittest.HomeserverTestCase):
     """Test event fetching during a database outage."""
