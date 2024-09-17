@@ -314,8 +314,8 @@ class SlidingSyncResult:
             """The Account Data extension (MSC3959)
 
             Attributes:
-                global_account_data_map: Mapping from `type` to `content` of global account
-                    data events.
+                global_account_data_map: Mapping from `type` to `content` of global
+                    account data events.
                 account_data_by_room_map: Mapping from room_id to mapping of `type` to
                     `content` of room account data events.
             """
