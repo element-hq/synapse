@@ -465,9 +465,19 @@ class SlidingSyncRoomLists:
                     room_id,
                     room_subscription,
                 ) in sync_config.room_subscriptions.items():
-                    if room_id not in room_membership_for_user_map:
+                    # Check if we have a membership for the room, but didn't pull it out
+                    # above. This could be e.g. a leave that we don't pull out by
+                    # default.
+                    current_room_entry = (
+                        await self.store.get_sliding_sync_room_for_user(
+                            user_id, room_id
+                        )
+                    )
+                    if not current_room_entry:
                         # TODO: Handle rooms the user isn't in.
                         continue
+
+                    room_membership_for_user_map[room_id] = current_room_entry
 
                     all_rooms.add(room_id)
 
@@ -481,8 +491,6 @@ class SlidingSyncRoomLists:
                     if room_sync_config.must_await_full_state(self.is_mine_id):
                         if room_id in partial_state_rooms:
                             continue
-
-                    all_rooms.add(room_id)
 
                     # Update our `relevant_room_map` with the room we're going to display
                     # and need to fetch more info about.
@@ -1003,14 +1011,7 @@ class SlidingSyncRoomLists:
             assert newly_left_room_for_user.event_id is None
             assert newly_left_room_for_user.sender is None
 
-            rooms_for_user[room_id] = RoomsForUserStateReset(
-                room_id=room_id,
-                event_id=None,
-                event_pos=newly_left_room_for_user.event_pos,
-                membership=Membership.LEAVE,
-                sender=None,
-                room_version_id=newly_left_room_for_user.room_version_id,
-            )
+            rooms_for_user[room_id] = newly_left_room_for_user
 
         return rooms_for_user, newly_joined_room_ids, set(newly_left_room_ids)
 
