@@ -941,6 +941,11 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         Returns:
             All membership changes to the current state in the token range. Events are
             sorted by `stream_ordering` ascending.
+
+            `event_id`/`sender` can be `None` when the server leaves a room (meaning
+            everyone locally left) or a state reset which removed the person from the
+            room. We can't tell the difference between the two cases with what's
+            availabe in the `current_state_delta_stream` table.
         """
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
@@ -1052,6 +1057,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         membership=(
                             membership if membership is not None else Membership.LEAVE
                         ),
+                        # This will also be null for the same reasons if `s.event_id = null`
                         sender=sender,
                         # Prev event
                         prev_event_id=prev_event_id,

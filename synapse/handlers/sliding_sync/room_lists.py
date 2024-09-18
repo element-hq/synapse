@@ -273,6 +273,9 @@ class SlidingSyncRoomLists:
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
+                logger.info(
+                    "asdf newly_left_room_for_user: %s", newly_left_room_for_user
+                )
                 # This should be a given
                 assert newly_left_room_for_user.membership == Membership.LEAVE
 
@@ -1027,9 +1030,7 @@ class SlidingSyncRoomLists:
         user_id: str,
         to_token: StreamToken,
         from_token: Optional[StreamToken],
-    ) -> Tuple[
-        AbstractSet[str], Mapping[str, Union[RoomsForUser, RoomsForUserStateReset]]
-    ]:
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
         """Fetch the sets of rooms that the user newly joined or left in the
         given token range.
 
@@ -1038,11 +1039,18 @@ class SlidingSyncRoomLists:
         "current memberships" of the user.
 
         Returns:
-            A 2-tuple of newly joined room IDs and a map of newly left room
-            IDs to the event position the leave happened at.
+            A 2-tuple of newly joined room IDs and a map of newly_left room
+            IDs to the `RoomsForUserStateReset` entry.
+
+            We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
+            user was state reset of the rooms. It's just that the `event_id`/`sender`
+            are optional and we can't tell the difference between the server leaving the
+            room when the user was the last person participating in the room and left or
+            was state reset out of the room. To actually check for a state reset, you
+            need to check if a membership still exists in the room.
         """
         newly_joined_room_ids: Set[str] = set()
-        newly_left_room_map: Dict[str, Union[RoomsForUser, RoomsForUserStateReset]] = {}
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
 
         # We need to figure out the
         #
@@ -1094,6 +1102,10 @@ class SlidingSyncRoomLists:
             if membership_change.membership != Membership.JOIN:
                 has_non_join_event_by_room_id_in_from_to_range[room_id] = True
 
+        logger.info(
+            "asdf last_membership_change_by_room_id_in_from_to_range %s",
+            last_membership_change_by_room_id_in_from_to_range,
+        )
         # 1) Fixup
         #
         # 2) We also want to assemble a list of possibly newly joined rooms. Someone
@@ -1113,27 +1125,14 @@ class SlidingSyncRoomLists:
             # 1) Figure out newly_left rooms (> `from_token` and <= `to_token`).
             if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
                 # 1) Mark this room as `newly_left`
-                if last_membership_change_in_from_to_range.event_id is not None:
-                    # This is a normal leave event so this should exist
-                    assert last_membership_change_in_from_to_range.sender is not None
-
-                    newly_left_room_map[room_id] = RoomsForUser(
-                        room_id=room_id,
-                        sender=last_membership_change_in_from_to_range.sender,
-                        membership=Membership.LEAVE,
-                        event_id=last_membership_change_in_from_to_range.event_id,
-                        event_pos=last_membership_change_in_from_to_range.event_pos,
-                        room_version_id=await self.store.get_room_version_id(room_id),
-                    )
-                else:
-                    newly_left_room_map[room_id] = RoomsForUserStateReset(
-                        room_id=room_id,
-                        sender=last_membership_change_in_from_to_range.sender,
-                        membership=Membership.LEAVE,
-                        event_id=last_membership_change_in_from_to_range.event_id,
-                        event_pos=last_membership_change_in_from_to_range.event_pos,
-                        room_version_id=await self.store.get_room_version_id(room_id),
-                    )
+                newly_left_room_map[room_id] = RoomsForUserStateReset(
+                    room_id=room_id,
+                    sender=last_membership_change_in_from_to_range.sender,
+                    membership=Membership.LEAVE,
+                    event_id=last_membership_change_in_from_to_range.event_id,
+                    event_pos=last_membership_change_in_from_to_range.event_pos,
+                    room_version_id=await self.store.get_room_version_id(room_id),
+                )
 
         # 2) Figure out `newly_joined`
         for room_id in possibly_newly_joined_room_ids:
