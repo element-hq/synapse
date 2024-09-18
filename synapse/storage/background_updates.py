@@ -490,6 +490,12 @@ class BackgroundUpdater:
         if self._all_done:
             return True
 
+        # We now check if we have completed all pending background updates. We
+        # do this as once this returns True then it will set `self._all_done`
+        # and we can skip checking the database in future.
+        if await self.has_completed_background_updates():
+            return True
+
         rows = await self.db_pool.simple_select_many_batch(
             table="background_updates",
             column="update_name",
