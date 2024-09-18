@@ -889,6 +889,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # Make the Sliding Sync request
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # Make sure we see room1
+        self.assertIncludes(set(response_body["rooms"].keys()), {room_id1}, exact=True)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
 
         # Trigger a state reset
@@ -1017,6 +1019,8 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # Make the Sliding Sync request
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # Make sure we see room1
+        self.assertIncludes(set(response_body["rooms"].keys()), {room_id1}, exact=True)
         self.assertEqual(response_body["rooms"][space_room_id]["initial"], True)
 
         # Trigger a state reset

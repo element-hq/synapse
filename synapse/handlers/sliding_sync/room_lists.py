@@ -277,12 +277,6 @@ class SlidingSyncRoomLists:
             # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
-                # The type here is `RoomsForUserStateReset` but that's just because
-                # `event_id`/`sender` are optional and we can't tell the difference
-                # between the server leaving the room when the user was the last person
-                # participating in the room and left or was state reset out of the room.
-                # To actually check for a state reset, we need to check if a membership
-                # still exists in the room.
                 newly_left_room_for_user = newly_left_room_map[room_id]
                 logger.info(
                     "asdf newly_left_room_for_user: %s", newly_left_room_for_user
@@ -552,6 +546,10 @@ class SlidingSyncRoomLists:
             newly_left_room_ids,
         ) = await self.get_room_membership_for_user_at_to_token(
             sync_config.user, to_token, from_token
+        )
+        logger.info(
+            "asdf _compute_interested_rooms_fallback room_membership_for_user_map: %s",
+            room_membership_for_user_map,
         )
 
         dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
@@ -989,8 +987,18 @@ class SlidingSyncRoomLists:
             excluded_rooms=self.rooms_to_exclude_globally,
         )
 
-        # If the user has never joined any rooms before, we can just return an empty list
-        if not room_for_user_list:
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, to_token=to_token, from_token=from_token
+        )
+        logger.info("asdf newly_left_room_map: %s", newly_left_room_map.keys())
+
+        # If the user has never joined any rooms before, we can just return an empty
+        # list. We also have to check the `newly_left_room_map` in case someone was
+        # state reset out of all of the rooms they were in.
+        if not room_for_user_list and not newly_left_room_map:
             return {}, set(), set()
 
         # Since we fetched the users room list at some point in time after the
@@ -1008,17 +1016,10 @@ class SlidingSyncRoomLists:
             else:
                 rooms_for_user[room_id] = change_room_for_user
 
-        (
-            newly_joined_room_ids,
-            newly_left_room_ids,
-        ) = await self._get_newly_joined_and_left_rooms(
-            user_id, to_token=to_token, from_token=from_token
-        )
-
         # Ensure we have entries for rooms that the user has been "state reset"
         # out of. These are rooms appear in the `newly_left_rooms` map but
         # aren't in the `rooms_for_user` map.
-        for room_id, newly_left_room_for_user in newly_left_room_ids.items():
+        for room_id, newly_left_room_for_user in newly_left_room_map.items():
             # If we already know about the room, it's not a state reset
             if room_id in rooms_for_user:
                 continue
@@ -1030,7 +1031,7 @@ class SlidingSyncRoomLists:
 
             rooms_for_user[room_id] = newly_left_room_for_user
 
-        return rooms_for_user, newly_joined_room_ids, set(newly_left_room_ids)
+        return rooms_for_user, newly_joined_room_ids, set(newly_left_room_map)
 
     @trace
     async def _get_newly_joined_and_left_rooms(
