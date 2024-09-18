@@ -424,6 +424,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.event_sources = hs.get_event_sources()
         self.storage_controllers = hs.get_storage_controllers()
         self.account_data_handler = hs.get_account_data_handler()
+        persistence = self.hs.get_storage_controllers().persistence
+        assert persistence is not None
+        self.persistence = persistence
 
         super().prepare(reactor, clock, hs)
 
@@ -902,9 +905,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             )
         )
         _, join_rule_event_pos, _ = self.get_success(
-            self.hs.get_storage_controllers().persistence.persist_event(
-                join_rule_event, join_rule_context
-            )
+            self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
         # FIXME: We're manually busting the cache since
@@ -1034,9 +1035,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             )
         )
         _, join_rule_event_pos, _ = self.get_success(
-            self.hs.get_storage_controllers().persistence.persist_event(
-                join_rule_event, join_rule_context
-            )
+            self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
         # FIXME: We're manually busting the cache since
@@ -1048,6 +1047,10 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # Ensure that the state reset worked and only user2 is in the room now
         users_in_room = self.get_success(self.store.get_users_in_room(space_room_id))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
+
+        # User2 also leaves the room so the server is no longer participating in the room
+        # and we don't have access to current state
+        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
 
         # Make another Sliding Sync request (incremental)
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)

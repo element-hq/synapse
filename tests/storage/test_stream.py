@@ -30,8 +30,8 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.constants import (
     Direction,
     EventTypes,
-    Membership,
     JoinRules,
+    Membership,
     RelationTypes,
 )
 from synapse.api.filtering import Filter
@@ -1206,9 +1206,7 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
             )
         )
         _, join_rule_event_pos, _ = self.get_success(
-            self.hs.get_storage_controllers().persistence.persist_event(
-                join_rule_event, join_rule_context
-            )
+            self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
         # FIXME: We're manually busting the cache since

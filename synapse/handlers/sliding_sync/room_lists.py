@@ -363,6 +363,7 @@ class SlidingSyncRoomLists:
                     newly_left=room_id in newly_left_room_map,
                 )
             }
+            logger.info("asdf sync_room_map: %s", sync_room_map)
             with start_active_span("assemble_sliding_window_lists"):
                 for list_key, list_config in sync_config.lists.items():
                     # Apply filters
@@ -371,9 +372,13 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map = await self.filter_rooms_using_tables(
                             user_id,
                             sync_room_map,
+                            previous_connection_state,
                             list_config.filters,
                             to_token,
                             dm_room_ids,
+                        )
+                        logger.info(
+                            "asdf filtered_sync_room_map: %s", filtered_sync_room_map
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
@@ -574,6 +579,7 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map = await self.filter_rooms(
                             sync_config.user,
                             sync_room_map,
+                            previous_connection_state,
                             list_config.filters,
                             to_token,
                             dm_room_ids,
@@ -1573,6 +1579,7 @@ class SlidingSyncRoomLists:
         self,
         user: UserID,
         sync_room_map: Dict[str, RoomsForUserType],
+        previous_connection_state: PerConnectionState,
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
         dm_room_ids: AbstractSet[str],
@@ -1758,14 +1765,33 @@ class SlidingSyncRoomLists:
                         )
                     }
 
+        # Keep rooms if the user has been state reset out of it but we previously sent
+        # down the connection before. We want to make sure that we send these down to
+        # the client regardless of filters so they find out about the state reset.
+        #
+        # We don't always have access to the state in a room after being state reset if
+        # no one else locally on the server is participating in the room so we patch
+        # these back in manually.
+        state_reset_out_of_room_id_set = {
+            room_id
+            for room_id in sync_room_map.keys()
+            if sync_room_map[room_id].event_id is None
+            and previous_connection_state.rooms.have_sent_room(room_id).status
+            != HaveSentRoomFlag.NEVER
+        }
+
         # Assemble a new sync room map but only with the `filtered_room_id_set`
-        return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
+        return {
+            room_id: sync_room_map[room_id]
+            for room_id in filtered_room_id_set | state_reset_out_of_room_id_set
+        }
 
     @trace
     async def filter_rooms_using_tables(
         self,
         user_id: str,
         sync_room_map: Mapping[str, RoomsForUserSlidingSync],
+        previous_connection_state: PerConnectionState,
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
         dm_room_ids: AbstractSet[str],
@@ -1907,8 +1933,26 @@ class SlidingSyncRoomLists:
                         )
                     }
 
+        # Keep rooms if the user has been state reset out of it but we previously sent
+        # down the connection before. We want to make sure that we send these down to
+        # the client regardless of filters so they find out about the state reset.
+        #
+        # We don't always have access to the state in a room after being state reset if
+        # no one else locally on the server is participating in the room so we patch
+        # these back in manually.
+        state_reset_out_of_room_id_set = {
+            room_id
+            for room_id in sync_room_map.keys()
+            if sync_room_map[room_id].event_id is None
+            and previous_connection_state.rooms.have_sent_room(room_id).status
+            != HaveSentRoomFlag.NEVER
+        }
+
         # Assemble a new sync room map but only with the `filtered_room_id_set`
-        return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
+        return {
+            room_id: sync_room_map[room_id]
+            for room_id in filtered_room_id_set | state_reset_out_of_room_id_set
+        }
 
     @trace
     async def sort_rooms(
