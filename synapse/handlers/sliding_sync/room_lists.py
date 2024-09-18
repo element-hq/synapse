@@ -342,16 +342,7 @@ class SlidingSyncRoomLists:
                     )
 
         if sync_config.lists:
-            sync_room_map = {
-                room_id: room_membership_for_user
-                for room_id, room_membership_for_user in room_membership_for_user_map.items()
-                # TODO: Do we need to do this anymore?
-                if filter_membership_for_sync(
-                    user_id=user_id,
-                    room_membership_for_user=room_membership_for_user,
-                    newly_left=room_id in newly_left_room_map,
-                )
-            }
+            sync_room_map = room_membership_for_user_map
             with start_active_span("assemble_sliding_window_lists"):
                 for list_key, list_config in sync_config.lists.items():
                     # Apply filters
