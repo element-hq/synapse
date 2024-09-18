@@ -1499,7 +1499,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="_get_max_event_pos", list_name="room_ids")
     async def _bulk_get_max_event_pos(
         self, room_ids: StrCollection
-    ) -> Mapping[str, int]:
+    ) -> Mapping[str, Optional[int]]:
         """Fetch the max position of a persisted event in the room."""
 
         # We need to be careful not to return positions ahead of the current
