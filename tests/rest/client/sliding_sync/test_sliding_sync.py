@@ -32,6 +32,7 @@ from synapse.api.constants import (
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
+from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
@@ -881,7 +882,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 1]],
-                    "required_state": [],
+                    "required_state": [
+                        # Request all state just to see what we get back when we are
+                        # state reset out of the room
+                        [StateValues.WILDCARD, StateValues.WILDCARD]
+                    ],
                     "timeline_limit": 1,
                 }
             }
@@ -920,6 +925,18 @@ class SlidingSyncTestCase(SlidingSyncBase):
         users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
 
+        state_map_at_reset = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Update the state after user1 was state reset out of the room
+        self.helper.send_state(
+            room_id1,
+            EventTypes.Name,
+            {EventContentFields.ROOM_NAME: "my super duper room"},
+            tok=user2_tok,
+        )
+
         # Make another Sliding Sync request (incremental)
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
@@ -930,13 +947,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We set `initial=True` to indicate that the client should reset the state they
         # have about the room
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
-        # Empty `required_state` to indicate that the client should clear their state
-        # (as the user is no longer in the room)
-        self.assertIsNone(
-            response_body["rooms"][room_id1].get("required_state"),
-            response_body["rooms"][room_id1],
+        # They shouldn't see anything past the state reset
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            # We should see all the state events in the room
+            state_map_at_reset.values(),
+            exact=True,
         )
-        # Where the state reset happened
+        # The position where the state reset happened
         self.assertEqual(
             response_body["rooms"][room_id1]["bump_stamp"],
             join_rule_event_pos.stream,
@@ -995,7 +1013,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             tok=user2_tok,
             extra_content={
                 "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
-                "name": "my super room",
+                "name": "my super space",
             },
         )
 
@@ -1008,7 +1026,11 @@ class SlidingSyncTestCase(SlidingSyncBase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 1]],
-                    "required_state": [],
+                    "required_state": [
+                        # Request all state just to see what we get back when we are
+                        # state reset out of the room
+                        [StateValues.WILDCARD, StateValues.WILDCARD]
+                    ],
                     "timeline_limit": 1,
                     "filters": {
                         "room_types": [RoomTypes.SPACE],
@@ -1054,6 +1076,18 @@ class SlidingSyncTestCase(SlidingSyncBase):
         users_in_room = self.get_success(self.store.get_users_in_room(space_room_id))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
 
+        state_map_at_reset = self.get_success(
+            self.storage_controllers.state.get_current_state(space_room_id)
+        )
+
+        # Update the state after user1 was state reset out of the room
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {EventContentFields.ROOM_NAME: "my super duper space"},
+            tok=user2_tok,
+        )
+
         # User2 also leaves the room so the server is no longer participating in the room
         # and we don't have access to current state
         self.helper.leave(space_room_id, user2_id, tok=user2_tok)
@@ -1070,13 +1104,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # We set `initial=True` to indicate that the client should reset the state they
         # have about the room
         self.assertEqual(response_body["rooms"][space_room_id]["initial"], True)
-        # Empty `required_state` to indicate that the client should clear their state
-        # (as the user is no longer in the room)
-        self.assertIsNone(
-            response_body["rooms"][space_room_id].get("required_state"),
-            response_body["rooms"][space_room_id],
+        # They shouldn't see anything past the state reset
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][space_room_id]["required_state"],
+            # We should see all the state events in the room
+            state_map_at_reset.values(),
+            exact=True,
         )
-        # Where the state reset happened
+        # The position where the state reset happened
         self.assertEqual(
             response_body["rooms"][space_room_id]["bump_stamp"],
             join_rule_event_pos.stream,
@@ -1088,7 +1123,9 @@ class SlidingSyncTestCase(SlidingSyncBase):
         #
         # Room name was set at the time of the state reset so we should still be able to
         # see it.
-        self.assertEqual(response_body["rooms"][space_room_id]["name"], "my super room")
+        self.assertEqual(
+            response_body["rooms"][space_room_id]["name"], "my super space"
+        )
         # Could be set but there is no avatar for this room
         self.assertIsNone(
             response_body["rooms"][space_room_id].get("avatar"),

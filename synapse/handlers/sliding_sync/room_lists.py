@@ -219,7 +219,7 @@ class SlidingSyncRoomLists:
         # include rooms that are outside the list ranges.
         all_rooms: Set[str] = set()
 
-        # Note: this won't include rooms the user have left themselves. We add back
+        # Note: this won't include rooms the user has left themselves. We add back
         # `newly_left` rooms below. This is more efficient than fetching all rooms and
         # then filtering out the old left rooms.
         room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
