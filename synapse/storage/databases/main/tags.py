@@ -158,6 +158,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
         return results
 
+    @cached(num_args=2, tree=True)
     async def get_tags_for_room(
         self, user_id: str, room_id: str
     ) -> Dict[str, JsonDict]:
@@ -213,6 +214,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             await self.db_pool.runInteraction("add_tag", add_tag_txn, next_id)
 
         self.get_tags_for_user.invalidate((user_id,))
+        self.get_tags_for_room.invalidate((user_id, room_id))
 
         return self._account_data_id_gen.get_current_token()
 
@@ -237,6 +239,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             await self.db_pool.runInteraction("remove_tag", remove_tag_txn, next_id)
 
         self.get_tags_for_user.invalidate((user_id,))
+        self.get_tags_for_room.invalidate((user_id, room_id))
 
         return self._account_data_id_gen.get_current_token()
 
@@ -290,9 +293,19 @@ class TagsWorkerStore(AccountDataWorkerStore):
         rows: Iterable[Any],
     ) -> None:
         if stream_name == AccountDataStream.NAME:
+            # Cast is safe because the `AccountDataStream` should only be giving us
+            # `AccountDataStreamRow`
+            rows: List[AccountDataStream.AccountDataStreamRow] = cast(
+                List[AccountDataStream.AccountDataStreamRow], rows
+            )
+
             for row in rows:
                 if row.data_type == AccountDataTypes.TAG:
                     self.get_tags_for_user.invalidate((row.user_id,))
+                    if row.room_id:
+                        self.get_tags_for_room.invalidate((row.user_id, row.room_id))
+                    else:
+                        self.get_tags_for_room.invalidate((row.user_id,))
                     self._account_data_stream_cache.entity_has_changed(
                         row.user_id, token
                     )
