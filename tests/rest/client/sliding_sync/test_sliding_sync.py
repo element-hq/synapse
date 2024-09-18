@@ -686,7 +686,38 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.send(room_id1, "activity in room1", tok=user1_tok)
         self.helper.send(room_id2, "activity in room2", tok=user1_tok)
 
-        # Make the Sliding Sync request
+        # Make the Sliding Sync request where the range includes *some* of the rooms
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make sure it has the foo-list we requested
+        self.assertIncludes(
+            response_body["lists"].keys(),
+            {"foo-list"},
+        )
+        # Make sure the list is sorted in the way we expect (we only sort when the range
+        # doesn't include all of the room)
+        self.assertListEqual(
+            list(response_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    "room_ids": [room_id2, room_id1],
+                }
+            ],
+            response_body["lists"]["foo-list"],
+        )
+
+        # Make the Sliding Sync request where the range includes *all* of the rooms
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -699,23 +730,23 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Make sure it has the foo-list we requested
-        self.assertListEqual(
-            list(response_body["lists"].keys()),
-            ["foo-list"],
+        self.assertIncludes(
             response_body["lists"].keys(),
+            {"foo-list"},
         )
-
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [room_id2, room_id1, room_id3],
-                }
-            ],
+        # Since the range includes all of the rooms, we don't sort the list
+        self.assertEqual(
+            len(response_body["lists"]["foo-list"]["ops"]),
+            1,
             response_body["lists"]["foo-list"],
+        )
+        op = response_body["lists"]["foo-list"]["ops"][0]
+        self.assertEqual(op["op"], "SYNC")
+        self.assertEqual(op["range"], [0, 99])
+        # Note that we don't sort the rooms when the range includes all of the rooms, so
+        # we just assert that the rooms are included
+        self.assertIncludes(
+            set(op["room_ids"]), {room_id1, room_id2, room_id3}, exact=True
         )
 
     def test_sliced_windows(self) -> None:
