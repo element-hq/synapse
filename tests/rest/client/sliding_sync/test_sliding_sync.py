@@ -873,6 +873,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             },
         )
 
+        # Create an event for us to point back to for the state reset
         event_response = self.helper.send(room_id1, "test", tok=user2_tok)
         event_id = event_response["event_id"]
 
@@ -996,11 +997,12 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1],
         )
 
-    def test_state_reset_room_comes_down_incremental_sync_with_filters(self) -> None:
+    def test_state_reset_previously_room_comes_down_incremental_sync_with_filters(
+        self,
+    ) -> None:
         """
-        Test that a room that we were state reset out of comes down incremental sync
-        even if we are using filters (as long as it has been sent down the connection
-        before).
+        Test that a room that we were state reset out of should always be sent down
+        regardless of the filters if it has been sent down the connection before.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -1017,6 +1019,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
             },
         )
 
+        # Create an event for us to point back to for the state reset
         event_response = self.helper.send(space_room_id, "test", tok=user2_tok)
         event_id = event_response["event_id"]
 
@@ -1154,3 +1157,152 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"][space_room_id].get("invited_count"),
             response_body["rooms"][space_room_id],
         )
+
+    def test_state_reset_never_room_incremental_sync_with_filters(
+        self,
+    ) -> None:
+        """
+        Test that a room that we were state reset out of should be sent down if we can
+        figure out the state or if it was sent down the connection before.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+                "name": "my super space",
+            },
+        )
+
+        # Create another space room
+        space_room_id2 = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+            },
+        )
+
+        # Create an event for us to point back to for the state reset
+        event_response = self.helper.send(space_room_id, "test", tok=user2_tok)
+        event_id = event_response["event_id"]
+
+        # User1 joins the rooms
+        #
+        self.helper.join(space_room_id, user1_id, tok=user1_tok)
+        # Join space_room_id2 so that it is at the top of the list
+        self.helper.join(space_room_id2, user1_id, tok=user1_tok)
+
+        # Make a SS request for only the top room.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 0]],
+                    "required_state": [
+                        # Request all state just to see what we get back when we are
+                        # state reset out of the room
+                        [StateValues.WILDCARD, StateValues.WILDCARD]
+                    ],
+                    "timeline_limit": 1,
+                    "filters": {
+                        "room_types": [RoomTypes.SPACE],
+                    },
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # Make sure we only see space_room_id2
+        self.assertIncludes(
+            set(response_body["rooms"].keys()), {space_room_id2}, exact=True
+        )
+        self.assertEqual(response_body["rooms"][space_room_id2]["initial"], True)
+
+        # Just create some activity in space_room_id2 so it appears when we incremental sync again
+        self.helper.send(space_room_id2, "test", tok=user2_tok)
+
+        # Trigger a state reset
+        join_rule_event, join_rule_context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[event_id],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=user2_id,
+                room_id=space_room_id,
+                room_version=self.get_success(
+                    self.store.get_room_version_id(space_room_id)
+                ),
+            )
+        )
+        _, join_rule_event_pos, _ = self.get_success(
+            self.persistence.persist_event(join_rule_event, join_rule_context)
+        )
+
+        # FIXME: We're manually busting the cache since
+        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, join_rule_event_pos.stream
+        )
+
+        # Ensure that the state reset worked and only user2 is in the room now
+        users_in_room = self.get_success(self.store.get_users_in_room(space_room_id))
+        self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
+
+        # Update the state after user1 was state reset out of the room.
+        # This will also bump it to the top of the list.
+        self.helper.send_state(
+            space_room_id,
+            EventTypes.Name,
+            {EventContentFields.ROOM_NAME: "my super duper space"},
+            tok=user2_tok,
+        )
+
+        # User2 also leaves the room so the server is no longer participating in the room
+        # and we don't have access to current state
+        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
+
+        # Make another Sliding Sync request (incremental)
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    # Expand the range to include all rooms
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        # Request all state just to see what we get back when we are
+                        # state reset out of the room
+                        [StateValues.WILDCARD, StateValues.WILDCARD]
+                    ],
+                    "timeline_limit": 1,
+                    "filters": {
+                        "room_types": [RoomTypes.SPACE],
+                    },
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        if self.use_new_tables:
+            # We still only expect to see space_room_id2 because even though we were state
+            # reset out of space_room_id, it was never sent down the connection before so we
+            # don't need to bother the client with it.
+            self.assertIncludes(
+                set(response_body["rooms"].keys()), {space_room_id2}, exact=True
+            )
+        else:
+            # Both rooms show up because we can actually take the time to figure out the
+            # state for the `filters.room_types` in the fallback path (we look at
+            # historical state for `LEAVE` membership).
+            self.assertIncludes(
+                set(response_body["rooms"].keys()),
+                {space_room_id, space_room_id2},
+                exact=True,
+            )
