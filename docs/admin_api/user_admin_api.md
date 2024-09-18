@@ -1396,11 +1396,11 @@ The following JSON body parameter must be provided:
 -  `rooms` - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
   the user is a member of will be redacted
 
-_Added in Synapse 1.114.0._
+_Added in Synapse 1.116.0._
 
 The following JSON body parameters are optional:
 
-- `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in the each redaction event, and be visible to users.
+- `reason` - Reason the redaction is being requested, ie "spam", "abuse", etc. This will be included in each redaction event, and be visible to users.
 - `limit` - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided
 
 
