@@ -223,12 +223,12 @@ class SlidingSyncRoomLists:
         room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
             user_id
         )
-        # TODO: It would be nice to avoid these copies
-        room_membership_for_user_map = dict(room_membership_for_user_map)
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
         if ignored_users:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
             # Make a copy so we don't run into an error: `dictionary changed size during
             # iteration`, when we remove items
             for room_id in list(room_membership_for_user_map.keys()):
@@ -243,6 +243,8 @@ class SlidingSyncRoomLists:
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
         if changes:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
