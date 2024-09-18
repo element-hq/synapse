@@ -29,7 +29,7 @@ from synapse.api.constants import (
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.rest.client import devices, login, receipts, room, sync
+from synapse.rest.client import account_data, devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
@@ -413,6 +413,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         sync.register_servlets,
         devices.register_servlets,
         receipts.register_servlets,
+        account_data.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -667,6 +668,116 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             set(),
+            exact=True,
+        )
+
+    def test_ignored_user_invites_initial_sync(self) -> None:
+        """
+        Make sure we ignore invites if they are from one of the `m.ignored_user_list` on
+        initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room that user1 is already in
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a room that user2 is already in
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to room_id2
+        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Sync once before we ignore to make sure the rooms can show up
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # room_id2 shows up because we haven't ignored the user yet
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1, room_id2},
+            exact=True,
+        )
+
+        # User1 ignores user2
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/user/{user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {user2_id: {}}},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Sync again (initial sync)
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # The invite for room_id2 should no longer show up because user2 is ignored
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
+            exact=True,
+        )
+
+    def test_ignored_user_invites_incremental_sync(self) -> None:
+        """
+        Make sure we ignore invites if they are from one of the `m.ignored_user_list` on
+        incremental sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room that user1 is already in
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a room that user2 is already in
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 ignores user2
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/user/{user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {user2_id: {}}},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Initial sync
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # User1 only has membership in room_id1 at this point
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
+            exact=True,
+        )
+
+        # User1 is invited to room_id2 after the initial sync
+        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Sync again (incremental sync)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        # The invite for room_id2 doesn't show up because user2 is ignored
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
             exact=True,
         )
 
