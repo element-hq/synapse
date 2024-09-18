@@ -15550,6 +15550,64 @@ for more information.</p>
 }
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
+<h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<p>The API is </p>
+<pre><code>POST /_synapse/admin/v1/user/$user_id/redact
+
+{
+  &quot;rooms&quot;: [&quot;!roomid1&quot;, &quot;!roomid2&quot;]
+}
+</code></pre>
+<p>If an empty list is provided as the key for <code>rooms</code>, all events in all the rooms the user is member of will be redacted, 
+otherwise all the events in the rooms provided in the request will be redacted. </p>
+<p>The API starts redaction process running, and returns immediately with a JSON body with
+a redact id which can be used to query the status of the redaction process:</p>
+<pre><code class="language-json">{
+    &quot;redact_id&quot;: &quot;&lt;opaque id&gt;&quot;
+}
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code> - The fully qualified MXID of the user: for example, <code>@user:server.com</code>.</li>
+</ul>
+<p>The following JSON body parameter must be provided:</p>
+<ul>
+<li><code>rooms</code> - A list of rooms to redact the user's events in. If an empty list is provided all events in all rooms
+the user is a member of will be redacted</li>
+</ul>
+<p><em>Added in Synapse 1.116.0.</em></p>
+<p>The following JSON body parameters are optional:</p>
+<ul>
+<li><code>reason</code> - Reason the redaction is being requested, ie &quot;spam&quot;, &quot;abuse&quot;, etc. This will be included in each redaction event, and be visible to users.</li>
+<li><code>limit</code> - a limit on the number of the user's events to search for ones that can be redacted (events are redacted newest to oldest) in each room, defaults to 1000 if not provided</li>
+</ul>
+<h2 id="check-the-status-of-a-redaction-process"><a class="header" href="#check-the-status-of-a-redaction-process">Check the status of a redaction process</a></h2>
+<p>It is possible to query the status of the background task for redacting a user's events.
+The status can be queried up to 24 hours after completion of the task,
+or until Synapse is restarted (whichever happens first).</p>
+<p>The API is:</p>
+<pre><code>GET /_synapse/admin/v1/user/redact_status/$redact_id
+</code></pre>
+<p>A response body like the following is returned:</p>
+<pre><code>{
+  &quot;status&quot;: &quot;active&quot;,
+  &quot;failed_redactions&quot;: [],
+}
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>redact_id</code> - string - The ID for this redaction process, provided when the redaction was requested.</li>
+</ul>
+<p><strong>Response</strong></p>
+<p>The following fields are returned in the JSON response body:</p>
+<ul>
+<li><code>status</code> - string - one of scheduled/active/completed/failed, indicating the status of the redaction job</li>
+<li><code>failed_redactions</code> - dictionary - the keys of the dict are event ids the process was unable to redact, if any, and the values are 
+the corresponding error that caused the redaction to fail</li>
+</ul>
+<p><em>Added in Synapse 1.116.0.</em></p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="version-api"><a class="header" href="#version-api">Version API</a></h1>
 <p>This API returns the running Synapse version.
 This is useful when a Synapse instance
