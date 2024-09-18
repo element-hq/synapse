@@ -261,13 +261,6 @@ class SlidingSyncHandler:
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
-            logger.info(
-                "asdf handle_room room_sync_result %s %s %s",
-                room_id,
-                bool(room_sync_result),
-                room_sync_result,
-            )
-
             # Filter out empty room results during incremental sync
             if room_sync_result or not from_token:
                 rooms[room_id] = room_sync_result

@@ -271,16 +271,11 @@ class SlidingSyncRoomLists:
         missing_newly_left_rooms = (
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
-        logger.info("asdf newly_left_room_map: %s", newly_left_room_map.keys())
-        logger.info("asdf missing_newly_left_rooms: %s", missing_newly_left_rooms)
         if missing_newly_left_rooms:
             # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 newly_left_room_for_user = newly_left_room_map[room_id]
-                logger.info(
-                    "asdf newly_left_room_for_user: %s", newly_left_room_for_user
-                )
                 # This should be a given
                 assert newly_left_room_for_user.membership == Membership.LEAVE
 
@@ -357,7 +352,6 @@ class SlidingSyncRoomLists:
                     newly_left=room_id in newly_left_room_map,
                 )
             }
-            logger.info("asdf sync_room_map: %s", sync_room_map)
             with start_active_span("assemble_sliding_window_lists"):
                 for list_key, list_config in sync_config.lists.items():
                     # Apply filters
@@ -370,9 +364,6 @@ class SlidingSyncRoomLists:
                             list_config.filters,
                             to_token,
                             dm_room_ids,
-                        )
-                        logger.info(
-                            "asdf filtered_sync_room_map: %s", filtered_sync_room_map
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
@@ -515,11 +506,6 @@ class SlidingSyncRoomLists:
             previous_connection_state, from_token, relevant_room_map
         )
 
-        logger.info(
-            "asdf room_membership_for_user_map: %s", room_membership_for_user_map
-        )
-
-        logger.info("asdf relevant_rooms_to_send_map: %s", relevant_rooms_to_send_map)
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
@@ -546,10 +532,6 @@ class SlidingSyncRoomLists:
             newly_left_room_ids,
         ) = await self.get_room_membership_for_user_at_to_token(
             sync_config.user, to_token, from_token
-        )
-        logger.info(
-            "asdf _compute_interested_rooms_fallback room_membership_for_user_map: %s",
-            room_membership_for_user_map,
         )
 
         dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
@@ -993,7 +975,6 @@ class SlidingSyncRoomLists:
         ) = await self._get_newly_joined_and_left_rooms(
             user_id, to_token=to_token, from_token=from_token
         )
-        logger.info("asdf newly_left_room_map: %s", newly_left_room_map.keys())
 
         # If the user has never joined any rooms before, we can just return an empty
         # list. We also have to check the `newly_left_room_map` in case someone was
