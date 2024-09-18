@@ -689,6 +689,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # User1 is invited to room_id2
         self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
 
+        # Sync once before we ignore to make sure the rooms can show up
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -717,7 +718,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
 
         # Sync again (initial sync)
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-        # The invite for room_id2 should no longer show up
+        # The invite for room_id2 should no longer show up because user2 is ignored
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             {room_id1},
