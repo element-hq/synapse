@@ -1469,6 +1469,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         recheck_rooms: Set[str] = set()
         min_token = end_token.stream
         for room_id, stream in uncapped_results.items():
+            if stream is None:
+                # Despite the function not directly setting None, the cache can!
+                # See: https://github.com/element-hq/synapse/issues/17726
+                continue
             if stream <= min_token:
                 results[room_id] = stream
             else:
