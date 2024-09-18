@@ -261,10 +261,12 @@ class SlidingSyncRoomLists:
         )
         dm_room_ids = await self._get_dm_rooms_for_user(user_id)
 
-        # Add back `newly_left` rooms (rooms left in the from -> to token range). We do
-        # this because `get_sliding_sync_rooms_for_user(...)` doesn't include rooms that
-        # the user left themselves and it's more efficient to add them back here than to
-        # fetch all rooms and then filter out the old left rooms.
+        # Add back `newly_left` rooms (rooms left in the from -> to token range).
+        #
+        # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
+        # rooms that the user left themselves as it's more efficient to add them back
+        # here than to fetch all rooms and then filter out the old left rooms. The user
+        # only leaves a room once in a blue moon so this barely needs to run.
         #
         missing_newly_left_rooms = (
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
@@ -272,6 +274,12 @@ class SlidingSyncRoomLists:
         if missing_newly_left_rooms:
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
+                # The type here is `RoomsForUserStateReset` but that's just because
+                # `event_id`/`sender` are optional and we can't tell the difference
+                # between the server leaving the room when the user was the last person
+                # participating in the room and left or was state reset out of the room.
+                # To actually check for a state reset, we need to check if a membership
+                # still exists in the room.
                 newly_left_room_for_user = newly_left_room_map[room_id]
                 logger.info(
                     "asdf newly_left_room_for_user: %s", newly_left_room_for_user
@@ -279,29 +287,16 @@ class SlidingSyncRoomLists:
                 # This should be a given
                 assert newly_left_room_for_user.membership == Membership.LEAVE
 
-                room_type = None
-                has_known_state = False
-                is_encrypted = False
                 # Add back `newly_left` rooms
                 #
-                # Normal user left the room
-                if newly_left_room_for_user.event_id is not None:
-                    # We fetch from the Sliding Sync tables as it's just another membership
-                    newly_left_room_for_user_sliding_sync = (
-                        await self.store.get_sliding_sync_room_for_user(
-                            user_id, room_id
-                        )
-                    )
-                    # The only reason this would happen is if the user was state reset
-                    # out of the room while we were working on the response (between
-                    # when we checked for newly_left rooms and now).
-                    #
-                    # TODO: We should handle this as a state reset case like below
-                    if newly_left_room_for_user_sliding_sync is None:
-                        raise AssertionError(
-                            f"Can't find newly left room for user in the Sliding Sync tables: {user_id} / {room_id}",
-                        )
-
+                # Check for membership and state in the Sliding Sync tables as it's just
+                # another membership
+                newly_left_room_for_user_sliding_sync = (
+                    await self.store.get_sliding_sync_room_for_user(user_id, room_id)
+                )
+                # If the membership exists, it's just a normal user left the room on
+                # their own
+                if newly_left_room_for_user_sliding_sync is not None:
                     room_membership_for_user_map[room_id] = (
                         newly_left_room_for_user_sliding_sync
                     )
@@ -322,13 +317,8 @@ class SlidingSyncRoomLists:
                             is_encrypted=newly_left_room_for_user_sliding_sync.is_encrypted,
                         )
 
-                    # They should match at this point
-                    assert (
-                        room_membership_for_user_map[room_id].event_id
-                        == newly_left_room_for_user.event_id
-                    )
-
-                # "state reset" out of the room
+                # If we are `newly_left` from the room but can't find any membership,
+                # then we have been "state reset" out of the room
                 else:
                     # Get the state at the time. We can't read from the Sliding Sync
                     # tables because the user has no membership in the room according to
