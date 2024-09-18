@@ -219,6 +219,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     members_changed = set(row.keys[1:])
                     self._invalidate_state_caches(room_id, members_changed)
+                    for user_id in members_changed:
+                        self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
                     if row.keys is None:
                         raise Exception(
@@ -236,6 +238,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     self._invalidate_caches_for_room_events(room_id)
                     self._invalidate_caches_for_room(room_id)
+                    self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
@@ -275,6 +278,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                 self._attempt_to_invalidate_cache(
                     "get_sliding_sync_rooms_for_user", None
                 )
+                self._membership_stream_cache.entity_has_changed(data.state_key, token)  # type: ignore[attr-defined]
             elif data.type == EventTypes.RoomEncryption:
                 self._attempt_to_invalidate_cache(
                     "get_room_encryption", (data.room_id,)
@@ -291,6 +295,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
             # Similar to the above, but the entire caches are invalidated. This is
             # unfortunate for the membership caches, but should recover quickly.
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
+            self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
             self._attempt_to_invalidate_cache("get_rooms_for_user", None)
             self._attempt_to_invalidate_cache("get_room_type", (data.room_id,))
             self._attempt_to_invalidate_cache("get_room_encryption", (data.room_id,))

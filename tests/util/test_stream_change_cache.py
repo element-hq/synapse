@@ -251,3 +251,19 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
 
         # Unknown entities will return None
         self.assertEqual(cache.get_max_pos_of_last_change("not@here.website"), None)
+
+    def test_all_entities_changed(self) -> None:
+        """
+        `StreamChangeCache.all_entities_changed(...)` will mark all entites as changed.
+        """
+        cache = StreamChangeCache("#test", 1, max_size=10)
+
+        cache.entity_has_changed("user@foo.com", 2)
+        cache.entity_has_changed("bar@baz.net", 3)
+        cache.entity_has_changed("user@elsewhere.org", 4)
+
+        cache.all_entities_changed(5)
+
+        self.assertEqual(cache.get_max_pos_of_last_change("user@foo.com"), 5)
+        self.assertEqual(cache.get_max_pos_of_last_change("bar@baz.net"), 5)
+        self.assertEqual(cache.get_max_pos_of_last_change("user@elsewhere.org"), 5)
