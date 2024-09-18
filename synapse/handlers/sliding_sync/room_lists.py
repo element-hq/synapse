@@ -79,6 +79,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Sentinel(enum.Enum):
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    UNSET_SENTINEL = object()
+
+
 # Helper definition for the types that we might return. We do this to avoid
 # copying data between types (which can be expensive for many rooms).
 RoomsForUserType = Union[RoomsForUserStateReset, RoomsForUser, RoomsForUserSlidingSync]
@@ -115,12 +121,6 @@ class SlidingSyncInterestedRooms:
     newly_joined_rooms: AbstractSet[str]
     newly_left_rooms: AbstractSet[str]
     dm_room_ids: AbstractSet[str]
-
-
-class Sentinel(enum.Enum):
-    # defining a sentinel in this way allows mypy to correctly handle the
-    # type of a dictionary lookup and subsequent type narrowing.
-    UNSET_SENTINEL = object()
 
 
 def filter_membership_for_sync(
@@ -234,7 +234,7 @@ class SlidingSyncRoomLists:
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
-                    room_membership_for_user_map.pop(room_id)
+                    room_membership_for_user_map.pop(room_id, None)
                     continue
 
                 existing_room = room_membership_for_user_map.get(room_id)
@@ -272,6 +272,7 @@ class SlidingSyncRoomLists:
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
         if missing_newly_left_rooms:
+            # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id in missing_newly_left_rooms:
                 # The type here is `RoomsForUserStateReset` but that's just because
@@ -457,6 +458,9 @@ class SlidingSyncRoomLists:
 
         if sync_config.room_subscriptions:
             with start_active_span("assemble_room_subscriptions"):
+                # TODO: It would be nice to avoid these copies
+                room_membership_for_user_map = dict(room_membership_for_user_map)
+
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
                 partial_state_rooms = await self.store.get_partial_rooms()
