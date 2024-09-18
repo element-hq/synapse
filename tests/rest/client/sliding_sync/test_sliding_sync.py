@@ -751,7 +751,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
         self.assertEqual(channel.code, 200, channel.result)
 
-        # Sync once before we ignore to make sure the rooms can show up
+        # Initial sync
         sync_body = {
             "lists": {
                 "foo-list": {
