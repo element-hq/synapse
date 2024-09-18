@@ -512,7 +512,7 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_room_to_send(
+        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
             previous_connection_state, from_token, relevant_room_map
         )
 
@@ -520,6 +520,7 @@ class SlidingSyncRoomLists:
             "asdf room_membership_for_user_map: %s", room_membership_for_user_map
         )
 
+        logger.info("asdf relevant_rooms_to_send_map: %s", relevant_rooms_to_send_map)
         return SlidingSyncInterestedRooms(
             lists=lists,
             relevant_room_map=relevant_room_map,
@@ -703,7 +704,7 @@ class SlidingSyncRoomLists:
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
-        relevant_rooms_to_send_map = await self._filter_relevant_room_to_send(
+        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
             previous_connection_state, from_token, relevant_room_map
         )
 
@@ -718,7 +719,7 @@ class SlidingSyncRoomLists:
             dm_room_ids=dm_room_ids,
         )
 
-    async def _filter_relevant_room_to_send(
+    async def _filter_relevant_rooms_to_send(
         self,
         previous_connection_state: PerConnectionState,
         from_token: Optional[StreamToken],

@@ -261,6 +261,13 @@ class SlidingSyncHandler:
                 is_dm=room_id in interested_rooms.dm_room_ids,
             )
 
+            logger.info(
+                "asdf handle_room room_sync_result %s %s %s",
+                room_id,
+                bool(room_sync_result),
+                room_sync_result,
+            )
+
             # Filter out empty room results during incremental sync
             if room_sync_result or not from_token:
                 rooms[room_id] = room_sync_result
@@ -495,6 +502,24 @@ class SlidingSyncHandler:
             room_sync_config.timeline_limit,
         )
 
+        # Handle state resets. For example, if we see
+        # `room_membership_for_user_at_to_token.event_id=None and
+        # room_membership_for_user_at_to_token.membership is not None`, we should
+        # indicate to the client that a state reset happened. Perhaps we should indicate
+        # this by setting `initial: True` and empty `required_state: []`.
+        state_reset_out_of_room = False
+        if (
+            room_membership_for_user_at_to_token.event_id is None
+            and room_membership_for_user_at_to_token.membership is not None
+        ):
+            # We only expect the `event_id` to be `None` if you've been state reset out
+            # of the room (meaning you're no longer in the room). We could put this as
+            # part of the if-statement above but we want to handle every case where
+            # `event_id` is `None`.
+            assert room_membership_for_user_at_to_token.membership is Membership.LEAVE
+
+            state_reset_out_of_room = True
+
         # Determine whether we should limit the timeline to the token range.
         #
         # We should return historical messages (before token range) in the
@@ -527,7 +552,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         ignore_timeline_bound = False
-        if from_token and not newly_joined:
+        if from_token and not newly_joined and not state_reset_out_of_room:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
@@ -731,12 +756,6 @@ class SlidingSyncHandler:
                 )
 
             stripped_state.append(strip_event(invite_or_knock_event))
-
-        # TODO: Handle state resets. For example, if we see
-        # `room_membership_for_user_at_to_token.event_id=None and
-        # room_membership_for_user_at_to_token.membership is not None`, we should
-        # indicate to the client that a state reset happened. Perhaps we should indicate
-        # this by setting `initial: True` and empty `required_state`.
 
         # Get the changes to current state in the token range from the
         # `current_state_delta_stream` table.

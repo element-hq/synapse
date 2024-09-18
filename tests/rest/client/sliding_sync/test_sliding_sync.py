@@ -23,9 +23,11 @@ from twisted.test.proto_helpers import MemoryReactor
 import synapse.rest.admin
 from synapse.api.constants import (
     AccountDataTypes,
+    EventContentFields,
     EventTypes,
     JoinRules,
     Membership,
+    RoomTypes,
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
@@ -858,7 +860,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
         user2_id = self.register_user("user2", "pass")
         user2_tok = self.login(user2_id, "pass")
 
-        room_id1 = self.helper.create_room_as(user2_id, is_public=True, tok=user2_tok)
+        room_id1 = self.helper.create_room_as(
+            user2_id,
+            is_public=True,
+            tok=user2_tok,
+            extra_content={
+                "name": "my super room",
+            },
+        )
 
         event_response = self.helper.send(room_id1, "test", tok=user2_tok)
         event_id = event_response["event_id"]
@@ -904,12 +913,198 @@ class SlidingSyncTestCase(SlidingSyncBase):
             user1_id, join_rule_event_pos.stream
         )
 
+        # Ensure that the state reset worked and only user2 is in the room now
         users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
 
         # Make another Sliding Sync request (incremental)
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # TODO: What should we expect here? Probably at least *something*?
-        print(response_body["rooms"].keys())
-        print(response_body["rooms"][room_id1])
+        # Expect to see room1 because it is `newly_left` thanks to being state reset out
+        # of it since the last time we synced. We need to let the client know that
+        # something happened and that they are no longer in the room.
+        self.assertIncludes(set(response_body["rooms"].keys()), {room_id1}, exact=True)
+        # We set `initial=True` to indicate that the client should reset the state they
+        # have about the room
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+        # Empty `required_state` to indicate that the client should clear their state
+        # (as the user is no longer in the room)
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("required_state"),
+            response_body["rooms"][room_id1],
+        )
+        # Where the state reset happened
+        self.assertEqual(
+            response_body["rooms"][room_id1]["bump_stamp"],
+            join_rule_event_pos.stream,
+            response_body["rooms"][room_id1],
+        )
+
+        # Other non-important things. We just want to check what these are so we know
+        # what happens in a state reset scenario.
+        #
+        # Room name was set at the time of the state reset so we should still be able to
+        # see it.
+        self.assertEqual(response_body["rooms"][room_id1]["name"], "my super room")
+        # Could be set but there is no avatar for this room
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("avatar"),
+            response_body["rooms"][room_id1],
+        )
+        # Could be set but this room isn't marked as a DM
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("is_dm"),
+            response_body["rooms"][room_id1],
+        )
+        # Empty timeline because we are not in the room at all (they are all being
+        # filtered out)
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("timeline"),
+            response_body["rooms"][room_id1],
+        )
+        # `limited` since we're not providing any timeline events but there are some in
+        # the room.
+        self.assertEqual(response_body["rooms"][room_id1]["limited"], True)
+        # User is no longer in the room so they can't see this info
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("joined_count"),
+            response_body["rooms"][room_id1],
+        )
+        self.assertIsNone(
+            response_body["rooms"][room_id1].get("invited_count"),
+            response_body["rooms"][room_id1],
+        )
+
+    def test_state_reset_room_comes_down_incremental_sync_with_filters(self) -> None:
+        """
+        Test that a room that we were state reset out of comes down incremental sync
+        even if we are using filters (as long as it has been sent down the connection
+        before).
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a space room
+        space_room_id = self.helper.create_room_as(
+            user2_id,
+            tok=user2_tok,
+            extra_content={
+                "creation_content": {EventContentFields.ROOM_TYPE: RoomTypes.SPACE},
+                "name": "my super room",
+            },
+        )
+
+        event_response = self.helper.send(space_room_id, "test", tok=user2_tok)
+        event_id = event_response["event_id"]
+
+        self.helper.join(space_room_id, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                    "filters": {
+                        "room_types": [RoomTypes.SPACE],
+                    },
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(response_body["rooms"][space_room_id]["initial"], True)
+
+        # Trigger a state reset
+        join_rule_event, join_rule_context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[event_id],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=user2_id,
+                room_id=space_room_id,
+                room_version=self.get_success(
+                    self.store.get_room_version_id(space_room_id)
+                ),
+            )
+        )
+        _, join_rule_event_pos, _ = self.get_success(
+            self.hs.get_storage_controllers().persistence.persist_event(
+                join_rule_event, join_rule_context
+            )
+        )
+
+        # FIXME: We're manually busting the cache since
+        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, join_rule_event_pos.stream
+        )
+
+        # Ensure that the state reset worked and only user2 is in the room now
+        users_in_room = self.get_success(self.store.get_users_in_room(space_room_id))
+        self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
+
+        # Make another Sliding Sync request (incremental)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Expect to see room1 because it is `newly_left` thanks to being state reset out
+        # of it since the last time we synced. We need to let the client know that
+        # something happened and that they are no longer in the room.
+        self.assertIncludes(
+            set(response_body["rooms"].keys()), {space_room_id}, exact=True
+        )
+        # We set `initial=True` to indicate that the client should reset the state they
+        # have about the room
+        self.assertEqual(response_body["rooms"][space_room_id]["initial"], True)
+        # Empty `required_state` to indicate that the client should clear their state
+        # (as the user is no longer in the room)
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("required_state"),
+            response_body["rooms"][space_room_id],
+        )
+        # Where the state reset happened
+        self.assertEqual(
+            response_body["rooms"][space_room_id]["bump_stamp"],
+            join_rule_event_pos.stream,
+            response_body["rooms"][space_room_id],
+        )
+
+        # Other non-important things. We just want to check what these are so we know
+        # what happens in a state reset scenario.
+        #
+        # Room name was set at the time of the state reset so we should still be able to
+        # see it.
+        self.assertEqual(response_body["rooms"][space_room_id]["name"], "my super room")
+        # Could be set but there is no avatar for this room
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("avatar"),
+            response_body["rooms"][space_room_id],
+        )
+        # Could be set but this room isn't marked as a DM
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("is_dm"),
+            response_body["rooms"][space_room_id],
+        )
+        # Empty timeline because we are not in the room at all (they are all being
+        # filtered out)
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("timeline"),
+            response_body["rooms"][space_room_id],
+        )
+        # `limited` since we're not providing any timeline events but there are some in
+        # the room.
+        self.assertEqual(response_body["rooms"][space_room_id]["limited"], True)
+        # User is no longer in the room so they can't see this info
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("joined_count"),
+            response_body["rooms"][space_room_id],
+        )
+        self.assertIsNone(
+            response_body["rooms"][space_room_id].get("invited_count"),
+            response_body["rooms"][space_room_id],
+        )
