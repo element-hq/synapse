@@ -24,6 +24,7 @@ import synapse.rest.admin
 from synapse.api.constants import (
     AccountDataTypes,
     EventTypes,
+    JoinRules,
     Membership,
 )
 from synapse.api.room_versions import RoomVersions
@@ -43,6 +44,7 @@ from synapse.util.stringutils import random_string
 
 from tests import unittest
 from tests.server import TimedOutException
+from tests.test_utils.event_injection import create_event
 
 logger = logging.getLogger(__name__)
 
@@ -846,3 +848,68 @@ class SlidingSyncTestCase(SlidingSyncBase):
         # Make the Sliding Sync request
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
         self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+    def test_state_reset_room_comes_down_incremental_sync(self) -> None:
+        """Test that a room that we were state reset out of comes down
+        incremental sync"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, is_public=True, tok=user2_tok)
+
+        event_response = self.helper.send(room_id1, "test", tok=user2_tok)
+        event_id = event_response["event_id"]
+
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+
+        # Make the Sliding Sync request
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        self.assertEqual(response_body["rooms"][room_id1]["initial"], True)
+
+        # Trigger a state reset
+        join_rule_event, join_rule_context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[event_id],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=user2_id,
+                room_id=room_id1,
+                room_version=self.get_success(self.store.get_room_version_id(room_id1)),
+            )
+        )
+        _, join_rule_event_pos, _ = self.get_success(
+            self.hs.get_storage_controllers().persistence.persist_event(
+                join_rule_event, join_rule_context
+            )
+        )
+
+        # FIXME: We're manually busting the cache since
+        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, join_rule_event_pos.stream
+        )
+
+        users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
+        self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
+
+        # Make another Sliding Sync request (incremental)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # TODO: What should we expect here? Probably at least *something*?
+        print(response_body["rooms"].keys())
+        print(response_body["rooms"][room_id1])

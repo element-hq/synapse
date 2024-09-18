@@ -271,6 +271,8 @@ class SlidingSyncRoomLists:
         missing_newly_left_rooms = (
             newly_left_room_map.keys() - room_membership_for_user_map.keys()
         )
+        logger.info("asdf newly_left_room_map: %s", newly_left_room_map.keys())
+        logger.info("asdf missing_newly_left_rooms: %s", missing_newly_left_rooms)
         if missing_newly_left_rooms:
             # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
@@ -512,6 +514,10 @@ class SlidingSyncRoomLists:
         # (in the event stream)
         relevant_rooms_to_send_map = await self._filter_relevant_room_to_send(
             previous_connection_state, from_token, relevant_room_map
+        )
+
+        logger.info(
+            "asdf room_membership_for_user_map: %s", room_membership_for_user_map
         )
 
         return SlidingSyncInterestedRooms(
@@ -1097,10 +1103,6 @@ class SlidingSyncRoomLists:
             if membership_change.membership != Membership.JOIN:
                 has_non_join_event_by_room_id_in_from_to_range[room_id] = True
 
-        logger.info(
-            "asdf last_membership_change_by_room_id_in_from_to_range %s",
-            last_membership_change_by_room_id_in_from_to_range,
-        )
         # 1) Fixup
         #
         # 2) We also want to assemble a list of possibly newly joined rooms. Someone
