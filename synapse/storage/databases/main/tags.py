@@ -161,7 +161,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
     @cached(num_args=2, tree=True)
     async def get_tags_for_room(
         self, user_id: str, room_id: str
-    ) -> Dict[str, JsonDict]:
+    ) -> Mapping[str, JsonMapping]:
         """Get all the tags for the given room
 
         Args:
@@ -183,7 +183,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
         return {tag: db_to_json(content) for tag, content in rows}
 
     async def add_tag_to_room(
-        self, user_id: str, room_id: str, tag: str, content: JsonDict
+        self, user_id: str, room_id: str, tag: str, content: JsonMapping
     ) -> int:
         """Add a tag to a room for a user.
 
