@@ -15,7 +15,7 @@ import logging
 from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 from unittest.mock import AsyncMock
 
-from parameterized import parameterized_class
+from parameterized import parameterized, parameterized_class
 from typing_extensions import assert_never
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -1158,8 +1158,14 @@ class SlidingSyncTestCase(SlidingSyncBase):
             response_body["rooms"][space_room_id],
         )
 
+    @parameterized.expand(
+        [
+            ("server_leaves_room", True),
+            ("server_participating_in_room", False),
+        ]
+    )
     def test_state_reset_never_room_incremental_sync_with_filters(
-        self,
+        self, test_description: str, server_leaves_room: bool
     ) -> None:
         """
         Test that a room that we were state reset out of should be sent down if we can
@@ -1266,9 +1272,10 @@ class SlidingSyncTestCase(SlidingSyncBase):
             tok=user2_tok,
         )
 
-        # User2 also leaves the room so the server is no longer participating in the room
-        # and we don't have access to current state
-        self.helper.leave(space_room_id, user2_id, tok=user2_tok)
+        if server_leaves_room:
+            # User2 also leaves the room so the server is no longer participating in the room
+            # and we don't have access to current state
+            self.helper.leave(space_room_id, user2_id, tok=user2_tok)
 
         # Make another Sliding Sync request (incremental)
         sync_body = {
@@ -1291,12 +1298,22 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
         if self.use_new_tables:
-            # We still only expect to see space_room_id2 because even though we were state
-            # reset out of space_room_id, it was never sent down the connection before so we
-            # don't need to bother the client with it.
-            self.assertIncludes(
-                set(response_body["rooms"].keys()), {space_room_id2}, exact=True
-            )
+            if server_leaves_room:
+                # We still only expect to see space_room_id2 because even though we were state
+                # reset out of space_room_id, it was never sent down the connection before so we
+                # don't need to bother the client with it.
+                self.assertIncludes(
+                    set(response_body["rooms"].keys()), {space_room_id2}, exact=True
+                )
+            else:
+                # Both rooms show up because we can figure out the state for the
+                # `filters.room_types` if someone is still in the room (we look at the
+                # current state because `room_type` never changes).
+                self.assertIncludes(
+                    set(response_body["rooms"].keys()),
+                    {space_room_id, space_room_id2},
+                    exact=True,
+                )
         else:
             # Both rooms show up because we can actually take the time to figure out the
             # state for the `filters.room_types` in the fallback path (we look at
