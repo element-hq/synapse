@@ -357,7 +357,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             account_data_map[AccountDataTypes.TAG], {"tags": {"m.favourite": {}}}
         )
 
-    def test_room_account_data_incremental_sync(self) -> None:
+    @parameterized.expand(
+        [
+            ("add tags", TagAction.ADD),
+            ("remove tags", TagAction.REMOVE),
+        ]
+    )
+    def test_room_account_data_incremental_sync(
+        self, test_description: str, tag_action: TagAction
+    ) -> None:
         """
         On incremental sync, we return all account data for a given room but only for
         rooms that we request and are being returned in the Sliding Sync response.
@@ -441,23 +449,42 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
-        # Add another room tag
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                tag="m.server_notice",
-                content={},
+        if tag_action == TagAction.ADD:
+            # Add another room tag
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                tag="m.server_notice",
-                content={},
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
+        elif tag_action == TagAction.REMOVE:
+            # Remove the room tag
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.favourite",
+                )
+            )
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.favourite",
+                )
+            )
+        else:
+            assert_never(tag_action)
 
         # Make an incremental Sliding Sync request with the account_data extension enabled
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -484,10 +511,20 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
-        self.assertEqual(
-            account_data_map[AccountDataTypes.TAG],
-            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
-        )
+        if tag_action == TagAction.ADD:
+            self.assertEqual(
+                account_data_map[AccountDataTypes.TAG],
+                {"tags": {"m.favourite": {}, "m.server_notice": {}}},
+            )
+        elif tag_action == TagAction.REMOVE:
+            # If we previously showed the client that the room has tags, when it no
+            # longer has tags, we need to show them an empty map.
+            self.assertEqual(
+                account_data_map[AccountDataTypes.TAG],
+                {"tags": {}},
+            )
+        else:
+            assert_never(tag_action)
 
     @parameterized.expand(
         [
