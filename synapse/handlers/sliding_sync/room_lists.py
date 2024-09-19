@@ -224,15 +224,31 @@ class SlidingSyncRoomLists:
             user_id
         )
 
+        # Remove invites from ignored users
+        ignored_users = await self.store.ignored_users(user_id)
+        if ignored_users:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            # Make a copy so we don't run into an error: `dictionary changed size during
+            # iteration`, when we remove items
+            for room_id in list(room_membership_for_user_map.keys()):
+                room_for_user_sliding_sync = room_membership_for_user_map[room_id]
+                if (
+                    room_for_user_sliding_sync.membership == Membership.INVITE
+                    and room_for_user_sliding_sync.sender in ignored_users
+                ):
+                    room_membership_for_user_map.pop(room_id, None)
+
         changes = await self._get_rewind_changes_to_current_membership_to_token(
             sync_config.user, room_membership_for_user_map, to_token=to_token
         )
         if changes:
+            # TODO: It would be nice to avoid these copies
             room_membership_for_user_map = dict(room_membership_for_user_map)
             for room_id, change in changes.items():
                 if change is None:
                     # Remove rooms that the user joined after the `to_token`
-                    room_membership_for_user_map.pop(room_id)
+                    room_membership_for_user_map.pop(room_id, None)
                     continue
 
                 existing_room = room_membership_for_user_map.get(room_id)
@@ -357,8 +373,18 @@ class SlidingSyncRoomLists:
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
 
                     if list_config.ranges:
-                        if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
-                            # If we are asking for the full range, we don't need to sort the list.
+                        # Optimization: If we are asking for the full range, we don't
+                        # need to sort the list.
+                        if (
+                            # We're looking for a single range that covers the entire list
+                            len(list_config.ranges) == 1
+                            # Range starts at 0
+                            and list_config.ranges[0][0] == 0
+                            # And the range extends to the end of the list or more. Each
+                            # side is inclusive.
+                            and list_config.ranges[0][1]
+                            >= len(filtered_sync_room_map) - 1
+                        ):
                             sorted_room_info: List[RoomsForUserType] = list(
                                 filtered_sync_room_map.values()
                             )
@@ -925,6 +951,18 @@ class SlidingSyncRoomLists:
             membership_list=Membership.LIST,
             excluded_rooms=self.rooms_to_exclude_globally,
         )
+
+        # Remove invites from ignored users
+        ignored_users = await self.store.ignored_users(user_id)
+        if ignored_users:
+            room_for_user_list = [
+                room_for_user
+                for room_for_user in room_for_user_list
+                if not (
+                    room_for_user.membership == Membership.INVITE
+                    and room_for_user.sender in ignored_users
+                )
+            ]
 
         # If the user has never joined any rooms before, we can just return an empty list
         if not room_for_user_list:

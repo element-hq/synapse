@@ -29,7 +29,7 @@ from synapse.api.constants import (
 from synapse.api.room_versions import RoomVersions
 from synapse.events import EventBase, StrippedStateEvent, make_event_from_dict
 from synapse.events.snapshot import EventContext
-from synapse.rest.client import devices, login, receipts, room, sync
+from synapse.rest.client import account_data, devices, login, receipts, room, sync
 from synapse.server import HomeServer
 from synapse.types import (
     JsonDict,
@@ -413,6 +413,7 @@ class SlidingSyncTestCase(SlidingSyncBase):
         sync.register_servlets,
         devices.register_servlets,
         receipts.register_servlets,
+        account_data.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -670,6 +671,116 @@ class SlidingSyncTestCase(SlidingSyncBase):
             exact=True,
         )
 
+    def test_ignored_user_invites_initial_sync(self) -> None:
+        """
+        Make sure we ignore invites if they are from one of the `m.ignored_user_list` on
+        initial sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room that user1 is already in
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a room that user2 is already in
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 is invited to room_id2
+        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Sync once before we ignore to make sure the rooms can show up
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # room_id2 shows up because we haven't ignored the user yet
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1, room_id2},
+            exact=True,
+        )
+
+        # User1 ignores user2
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/user/{user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {user2_id: {}}},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Sync again (initial sync)
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+        # The invite for room_id2 should no longer show up because user2 is ignored
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
+            exact=True,
+        )
+
+    def test_ignored_user_invites_incremental_sync(self) -> None:
+        """
+        Make sure we ignore invites if they are from one of the `m.ignored_user_list` on
+        incremental sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a room that user1 is already in
+        room_id1 = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Create a room that user2 is already in
+        room_id2 = self.helper.create_room_as(user2_id, tok=user2_tok)
+
+        # User1 ignores user2
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/v3/user/{user1_id}/account_data/{AccountDataTypes.IGNORED_USER_LIST}",
+            content={"ignored_users": {user2_id: {}}},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Initial sync
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                },
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # User1 only has membership in room_id1 at this point
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
+            exact=True,
+        )
+
+        # User1 is invited to room_id2 after the initial sync
+        self.helper.invite(room_id2, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Sync again (incremental sync)
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        # The invite for room_id2 doesn't show up because user2 is ignored
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id1},
+            exact=True,
+        )
+
     def test_sort_list(self) -> None:
         """
         Test that the `lists` are sorted by `stream_ordering`
@@ -686,7 +797,38 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.helper.send(room_id1, "activity in room1", tok=user1_tok)
         self.helper.send(room_id2, "activity in room2", tok=user1_tok)
 
-        # Make the Sliding Sync request
+        # Make the Sliding Sync request where the range includes *some* of the rooms
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 1,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Make sure it has the foo-list we requested
+        self.assertIncludes(
+            response_body["lists"].keys(),
+            {"foo-list"},
+        )
+        # Make sure the list is sorted in the way we expect (we only sort when the range
+        # doesn't include all of the room)
+        self.assertListEqual(
+            list(response_body["lists"]["foo-list"]["ops"]),
+            [
+                {
+                    "op": "SYNC",
+                    "range": [0, 1],
+                    "room_ids": [room_id2, room_id1],
+                }
+            ],
+            response_body["lists"]["foo-list"],
+        )
+
+        # Make the Sliding Sync request where the range includes *all* of the rooms
         sync_body = {
             "lists": {
                 "foo-list": {
@@ -699,23 +841,23 @@ class SlidingSyncTestCase(SlidingSyncBase):
         response_body, _ = self.do_sync(sync_body, tok=user1_tok)
 
         # Make sure it has the foo-list we requested
-        self.assertListEqual(
-            list(response_body["lists"].keys()),
-            ["foo-list"],
+        self.assertIncludes(
             response_body["lists"].keys(),
+            {"foo-list"},
         )
-
-        # Make sure the list is sorted in the way we expect
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [room_id2, room_id1, room_id3],
-                }
-            ],
+        # Since the range includes all of the rooms, we don't sort the list
+        self.assertEqual(
+            len(response_body["lists"]["foo-list"]["ops"]),
+            1,
             response_body["lists"]["foo-list"],
+        )
+        op = response_body["lists"]["foo-list"]["ops"][0]
+        self.assertEqual(op["op"], "SYNC")
+        self.assertEqual(op["range"], [0, 99])
+        # Note that we don't sort the rooms when the range includes all of the rooms, so
+        # we just assert that the rooms are included
+        self.assertIncludes(
+            set(op["room_ids"]), {room_id1, room_id2, room_id3}, exact=True
         )
 
     def test_sliced_windows(self) -> None:
