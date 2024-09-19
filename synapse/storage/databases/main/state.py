@@ -308,8 +308,24 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return create_event
 
     @cached(max_entries=10000)
-    async def get_room_type(self, room_id: str) -> Optional[str]:
-        raise NotImplementedError()
+    async def get_room_type(self, room_id: str) -> Union[Optional[str], Sentinel]:
+        """Fetch room type for given room.
+
+        Since this function is cached, any missing values would be cached as
+        `None`. In order to distinguish between an unencrypted room that has
+        `None` encryption and a room that is unknown to the server where we
+        might want to omit the value (which would make it cached as `None`),
+        instead we use the sentinel value `ROOM_UNKNOWN_SENTINEL`.
+        """
+
+        try:
+            create_event = await self.get_create_event_for_room(room_id)
+            return create_event.content.get(EventContentFields.ROOM_TYPE)
+        except NotFoundError:
+            # We use the sentinel value to distinguish between `None` which is a
+            # valid room type and a room that is unknown to the server so the value
+            # is just unset.
+            return ROOM_UNKNOWN_SENTINEL
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(

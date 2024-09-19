@@ -935,7 +935,8 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         op = response_body["lists"]["foo-list"]["ops"][0]
         self.assertEqual(op["op"], "SYNC")
         self.assertEqual(op["range"], [0, 1])
-        # Note that we don't order the ops anymore, so we need to compare sets.
+        # Note that we don't sort the rooms when the range includes all of the rooms, so
+        # we just assert that the rooms are included
         self.assertIncludes(set(op["room_ids"]), {room_id1, room_id2}, exact=True)
 
         # The `bump_stamp` for room1 should point at the latest message (not the
@@ -1197,3 +1198,55 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
                 joined_dm_room_id: True,
             },
         )
+
+    def test_old_room_with_unknown_room_version(self) -> None:
+        """Test that an old room with unknown room version does not break
+        sync."""
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # We first create a standard room, then we'll change the room version in
+        # the DB.
+        room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Poke the database and update the room version to an unknown one.
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_update(
+                "rooms",
+                keyvalues={"room_id": room_id},
+                updatevalues={"room_version": "unknown-room-version"},
+                desc="updated-room-version",
+            )
+        )
+
+        # Invalidate method so that it returns the currently updated version
+        # instead of the cached version.
+        self.hs.get_datastores().main.get_room_version_id.invalidate((room_id,))
+
+        # For old unknown room versions we won't have an entry in this table
+        # (due to us skipping unknown room versions in the background update).
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                desc="delete_sliding_room",
+            )
+        )
+
+        # Also invalidate some caches to ensure we pull things from the DB.
+        self.store._events_stream_cache._entity_to_key.pop(room_id)
+        self.store._get_max_event_pos.invalidate((room_id,))
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
