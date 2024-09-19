@@ -935,7 +935,8 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         op = response_body["lists"]["foo-list"]["ops"][0]
         self.assertEqual(op["op"], "SYNC")
         self.assertEqual(op["range"], [0, 1])
-        # Note that we don't order the ops anymore, so we need to compare sets.
+        # Note that we don't sort the rooms when the range includes all of the rooms, so
+        # we just assert that the rooms are included
         self.assertIncludes(set(op["room_ids"]), {room_id1, room_id2}, exact=True)
 
         # The `bump_stamp` for room1 should point at the latest message (not the

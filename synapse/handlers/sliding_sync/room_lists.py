@@ -373,8 +373,18 @@ class SlidingSyncRoomLists:
                     ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
 
                     if list_config.ranges:
-                        if list_config.ranges == [(0, len(filtered_sync_room_map) - 1)]:
-                            # If we are asking for the full range, we don't need to sort the list.
+                        # Optimization: If we are asking for the full range, we don't
+                        # need to sort the list.
+                        if (
+                            # We're looking for a single range that covers the entire list
+                            len(list_config.ranges) == 1
+                            # Range starts at 0
+                            and list_config.ranges[0][0] == 0
+                            # And the range extends to the end of the list or more. Each
+                            # side is inclusive.
+                            and list_config.ranges[0][1]
+                            >= len(filtered_sync_room_map) - 1
+                        ):
                             sorted_room_info: List[RoomsForUserType] = list(
                                 filtered_sync_room_map.values()
                             )
