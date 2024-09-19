@@ -41,6 +41,7 @@ import attr
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import Codes, SynapseError
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.logging.opentracing import trace
 from synapse.metrics import LaterGauge
 from synapse.metrics.background_process_metrics import wrap_as_background_process
@@ -1443,6 +1444,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     is_encrypted=bool(row[9]),
                 )
                 for row in txn
+                # We filter out unknown room versions proactively. They
+                # shouldn't go down sync and their metadata may be in a broken
+                # state (causing errors).
+                if row[4] in KNOWN_ROOM_VERSIONS
             }
 
         return await self.db_pool.runInteraction(

@@ -40,6 +40,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import start_active_span, trace
@@ -951,6 +952,15 @@ class SlidingSyncRoomLists:
             membership_list=Membership.LIST,
             excluded_rooms=self.rooms_to_exclude_globally,
         )
+
+        # We filter out unknown room versions before we try and load any
+        # metadata about the room. They shouldn't go down sync anyway, and their
+        # metadata may be in a broken state.
+        room_for_user_list = [
+            room_for_user
+            for room_for_user in room_for_user_list
+            if room_for_user.room_version_id in KNOWN_ROOM_VERSIONS
+        ]
 
         # Remove invites from ignored users
         ignored_users = await self.store.ignored_users(user_id)
