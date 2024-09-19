@@ -1476,6 +1476,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         recheck_rooms: Set[str] = set()
         min_token = end_token.stream
         for room_id, stream in uncapped_results.items():
+            if stream is None:
+                # Despite the function not directly setting None, the cache can!
+                # See: https://github.com/element-hq/synapse/issues/17726
+                continue
             if stream <= min_token:
                 results[room_id] = stream
             else:
@@ -1502,7 +1506,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="_get_max_event_pos", list_name="room_ids")
     async def _bulk_get_max_event_pos(
         self, room_ids: StrCollection
-    ) -> Mapping[str, int]:
+    ) -> Mapping[str, Optional[int]]:
         """Fetch the max position of a persisted event in the room."""
 
         # We need to be careful not to return positions ahead of the current
@@ -1587,7 +1591,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 )
             for room_id, stream_ordering in batch_results.items():
                 if stream_ordering <= now_token.stream:
-                    results.update(batch_results)
+                    results[room_id] = stream_ordering
                 else:
                     recheck_rooms.add(room_id)
 
