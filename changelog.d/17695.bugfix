@@ -1,0 +1,1 @@
+Fix bug where room account data would not correctly be sent down sliding sync for old rooms.

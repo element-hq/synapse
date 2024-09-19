@@ -158,6 +158,52 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
         return results
 
+    async def has_tags_changed_for_room(
+        self,
+        # Since there are multiple arguments with the same type, force keyword arguments
+        # so people don't accidentally swap the order
+        *,
+        user_id: str,
+        room_id: str,
+        from_stream_id: int,
+        to_stream_id: int,
+    ) -> bool:
+        """Check if the users tags for a room have been updated in the token range
+
+        (> `from_stream_id` and <= `to_stream_id`)
+
+        Args:
+            user_id: The user to get tags for
+            room_id: The room to get tags for
+            from_stream_id: The point in the stream to fetch from
+            to_stream_id: The point in the stream to fetch to
+
+        Returns:
+            A mapping of tags to tag content.
+        """
+
+        # Shortcut if no room has changed for the user
+        changed = self._account_data_stream_cache.has_entity_changed(
+            user_id, int(from_stream_id)
+        )
+        if not changed:
+            return False
+
+        last_change_position_for_room = await self.db_pool.simple_select_one_onecol(
+            table="room_tags_revisions",
+            keyvalues={"user_id": user_id, "room_id": room_id},
+            retcol="stream_id",
+            allow_none=True,
+        )
+
+        if last_change_position_for_room is None:
+            return False
+
+        return (
+            last_change_position_for_room > from_stream_id
+            and last_change_position_for_room <= to_stream_id
+        )
+
     @cached(num_args=2, tree=True)
     async def get_tags_for_room(
         self, user_id: str, room_id: str
