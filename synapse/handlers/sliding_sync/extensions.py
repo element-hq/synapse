@@ -528,10 +528,9 @@ class SlidingSyncExtensionHandler:
                             immutable_tag_map = await self.store.get_tags_for_room(
                                 user_id, room_id
                             )
-                            if immutable_tag_map:
-                                room_account_data[AccountDataTypes.TAG] = {
-                                    "tags": immutable_tag_map
-                                }
+                            room_account_data[AccountDataTypes.TAG] = {
+                                "tags": immutable_tag_map
+                            }
 
                         # Only add an entry if there were any updates.
                         if room_account_data:

@@ -11,9 +11,11 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
+import enum
 import logging
 
-from parameterized import parameterized_class
+from parameterized import parameterized, parameterized_class
+from typing_extensions import assert_never
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -28,6 +30,11 @@ from tests.rest.client.sliding_sync.test_sliding_sync import SlidingSyncBase
 from tests.server import TimedOutException
 
 logger = logging.getLogger(__name__)
+
+
+class TagAction(enum.Enum):
+    ADD = enum.auto()
+    REMOVE = enum.auto()
 
 
 # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
@@ -482,7 +489,15 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             {"tags": {"m.favourite": {}, "m.server_notice": {}}},
         )
 
-    def test_room_account_data_incremental_sync_out_of_range_never(self) -> None:
+    @parameterized.expand(
+        [
+            ("add tags", TagAction.ADD),
+            ("remove tags", TagAction.REMOVE),
+        ]
+    )
+    def test_room_account_data_incremental_sync_out_of_range_never(
+        self, test_description: str, tag_action: TagAction
+    ) -> None:
         """Tests that we don't return account data for rooms that are out of
         range, but then do send all account data once they're in range.
 
@@ -577,23 +592,42 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
-        # Add another room tag
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                tag="m.server_notice",
-                content={},
+        if tag_action == TagAction.ADD:
+            # Add another room tag
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                tag="m.server_notice",
-                content={},
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
+        elif tag_action == TagAction.REMOVE:
+            # Remove the room tag
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.favourite",
+                )
+            )
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.favourite",
+                )
+            )
+        else:
+            assert_never(tag_action)
 
         # Move room2 into range.
         self.helper.send(room_id2, body="new event", tok=user1_tok)
@@ -617,19 +651,43 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             .get("rooms")
             .get(room_id2)
         }
+        expected_account_data_keys = {
+            "org.matrix.roorarraz",
+            "org.matrix.roorarraz2",
+        }
+        if tag_action == TagAction.ADD:
+            expected_account_data_keys.add(AccountDataTypes.TAG)
         self.assertIncludes(
             account_data_map.keys(),
-            {"org.matrix.roorarraz", "org.matrix.roorarraz2", AccountDataTypes.TAG},
+            expected_account_data_keys,
             exact=True,
         )
         self.assertEqual(account_data_map["org.matrix.roorarraz"], {"roo": "rar"})
         self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
-        self.assertEqual(
-            account_data_map[AccountDataTypes.TAG],
-            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
-        )
+        if tag_action == TagAction.ADD:
+            self.assertEqual(
+                account_data_map[AccountDataTypes.TAG],
+                {"tags": {"m.favourite": {}, "m.server_notice": {}}},
+            )
+        elif tag_action == TagAction.REMOVE:
+            # Since we never told the client about the room tags, we don't need to say
+            # anything if there are no tags now (the client doesn't need an update).
+            self.assertIsNone(
+                account_data_map.get(AccountDataTypes.TAG),
+                account_data_map,
+            )
+        else:
+            assert_never(tag_action)
 
-    def test_room_account_data_incremental_sync_out_of_range_previously(self) -> None:
+    @parameterized.expand(
+        [
+            ("add tags", TagAction.ADD),
+            ("remove tags", TagAction.REMOVE),
+        ]
+    )
+    def test_room_account_data_incremental_sync_out_of_range_previously(
+        self, test_description: str, tag_action: TagAction
+    ) -> None:
         """Tests that we don't return account data for rooms that fall out of
         range, but then do send all account data that has changed they're back in range.
 
@@ -725,23 +783,42 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
                 content={"roo": "rar"},
             )
         )
-        # Add another room tag
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id1,
-                tag="m.server_notice",
-                content={},
+        if tag_action == TagAction.ADD:
+            # Add another room tag
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
-        self.get_success(
-            self.account_data_handler.add_tag_to_room(
-                user_id=user1_id,
-                room_id=room_id2,
-                tag="m.server_notice",
-                content={},
+            self.get_success(
+                self.account_data_handler.add_tag_to_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.server_notice",
+                    content={},
+                )
             )
-        )
+        elif tag_action == TagAction.REMOVE:
+            # Remove the room tag
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id1,
+                    tag="m.favourite",
+                )
+            )
+            self.get_success(
+                self.account_data_handler.remove_tag_from_room(
+                    user_id=user1_id,
+                    room_id=room_id2,
+                    tag="m.favourite",
+                )
+            )
+        else:
+            assert_never(tag_action)
 
         # Make an incremental Sliding Sync request for just room1
         response_body, from_token = self.do_sync(
@@ -808,10 +885,20 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
             exact=True,
         )
         self.assertEqual(account_data_map["org.matrix.roorarraz2"], {"roo": "rar"})
-        self.assertEqual(
-            account_data_map[AccountDataTypes.TAG],
-            {"tags": {"m.favourite": {}, "m.server_notice": {}}},
-        )
+        if tag_action == TagAction.ADD:
+            self.assertEqual(
+                account_data_map[AccountDataTypes.TAG],
+                {"tags": {"m.favourite": {}, "m.server_notice": {}}},
+            )
+        elif tag_action == TagAction.REMOVE:
+            # If we previously showed the client that the room has tags, when it no
+            # longer has tags, we need to show them an empty map.
+            self.assertEqual(
+                account_data_map[AccountDataTypes.TAG],
+                {"tags": {}},
+            )
+        else:
+            assert_never(tag_action)
 
     def test_wait_for_new_data(self) -> None:
         """
