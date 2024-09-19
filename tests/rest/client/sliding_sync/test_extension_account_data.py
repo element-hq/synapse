@@ -483,8 +483,8 @@ class SlidingSyncAccountDataExtensionTestCase(SlidingSyncBase):
         )
 
     def test_room_account_data_incremental_sync_out_of_range_never(self) -> None:
-        """Tests that we don't return account data for rooms that fall out of
-        range, but then do send all account data once they're back in range.
+        """Tests that we don't return account data for rooms that are out of
+        range, but then do send all account data once they're in range.
 
         (initial/HaveSentRoomFlag.NEVER)
         """
