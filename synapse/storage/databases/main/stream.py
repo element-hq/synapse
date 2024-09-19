@@ -1584,7 +1584,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 )
             for room_id, stream_ordering in batch_results.items():
                 if stream_ordering <= now_token.stream:
-                    results.update(batch_results)
+                    results[room_id] = stream_ordering
                 else:
                     recheck_rooms.add(room_id)
 
