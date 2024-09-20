@@ -33,7 +33,7 @@ from synapse.replication.http.account_data import (
     ReplicationRemoveUserAccountDataRestServlet,
 )
 from synapse.streams import EventSource
-from synapse.types import JsonDict, StrCollection, StreamKeyType, UserID
+from synapse.types import JsonDict, JsonMapping, StrCollection, StreamKeyType, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -253,7 +253,7 @@ class AccountDataHandler:
             return response["max_stream_id"]
 
     async def add_tag_to_room(
-        self, user_id: str, room_id: str, tag: str, content: JsonDict
+        self, user_id: str, room_id: str, tag: str, content: JsonMapping
     ) -> int:
         """Add a tag to a room for a user.
 
