@@ -2044,7 +2044,7 @@ class SlidingSyncRoomLists:
         # is because the cache must include all entries above
         # `.get_earliest_known_position()`.
         if limit is not None and len(cached_positions) >= limit:
-            # ... but first we need to make handle the case where the cached max
+            # ... but first we need to handle the case where the cached max
             # position is greater than the to_token, in which case we do
             # actually query the DB. This should happen rarely, so can do it in
             # a loop.
