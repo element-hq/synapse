@@ -19,12 +19,12 @@
 #
 #
 import abc
-import cgi
 import codecs
 import logging
 import random
 import sys
 import urllib.parse
+from email.message import EmailMessage
 from http import HTTPStatus
 from io import BytesIO, StringIO
 from typing import (
@@ -1813,8 +1813,12 @@ def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
         )
 
     c_type = content_type_headers[0].decode("ascii")  # only the first header
-    val, options = cgi.parse_header(c_type)
-    if val != expected_content_type:
+
+    msg = EmailMessage()
+    msg["content-type"] = c_type
+    c_type_parsed = msg.get_content_type()
+
+    if c_type_parsed != expected_content_type:
         raise RequestSendFailed(
             RuntimeError(
                 f"Remote server sent Content-Type header of '{c_type}', not '{expected_content_type}'",
