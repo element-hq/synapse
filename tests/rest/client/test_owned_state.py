@@ -176,7 +176,7 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
-            state_key=f"{self.user2_user_id}",
+            state_key=f"{self.user2_user_id}{_STATE_KEY_SUFFIX}",
             tok=self.user1_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
         )
