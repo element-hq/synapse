@@ -5,7 +5,7 @@ from parameterized import parameterized_class
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -52,6 +52,11 @@ class OwnedStateBase(HomeserverTestCase):
 
 
 class WithoutOwnedStateTestCase(OwnedStateBase):
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["default_room_version"] = RoomVersions.V10.identifier
+        return config
+
     def test_user_can_set_state_with_own_userid_key(self) -> None:
         self.helper.send_state(
             self.room_id,
