@@ -196,6 +196,17 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+    def test_user_cannot_set_state_with_misplaced_userid_in_key(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            _STATE_EVENT_TEST_TYPE,
+            {},
+            # Still put @ at start of state key, because without it, there is no write protection at all
+            state_key=f"@prefix_{self.user1_user_id}{_STATE_KEY_SUFFIX}",
+            tok=self.user1_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+
     def test_admin_cannot_set_state_with_malformed_userid_key(self) -> None:
         body = self.helper.send_state(
             self.room_id,
