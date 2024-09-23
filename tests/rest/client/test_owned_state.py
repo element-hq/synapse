@@ -181,6 +181,16 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+    def test_user_cannot_set_state_with_unseparated_suffixed_key(self) -> None:
+        self.helper.send_state(
+            self.room_id,
+            _STATE_EVENT_TEST_TYPE,
+            {},
+            state_key=f"{self.user1_user_id}{_STATE_KEY_SUFFIX[1:]}",
+            tok=self.user1_access_token,
+            expect_code=HTTPStatus.FORBIDDEN,
+        )
+
     def test_admin_cannot_set_state_with_malformed_userid_key(self) -> None:
         body = self.helper.send_state(
             self.room_id,
