@@ -792,7 +792,7 @@ class MatrixFederationHttpClient:
                                 url_str,
                                 _flatten_response_never_received(e),
                             )
-                            body = b''
+                            body = b""
 
                         exc = HttpResponseException(
                             response.code, response_phrase, body
