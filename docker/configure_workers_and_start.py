@@ -177,6 +177,7 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         ],
         "shared_extra_conf": {},
         "worker_extra_conf": "",
+        "nginx_upstream_extra_conf": "hash $http_authorization consistent;",
     },
     "sliding_sync": {
         "app": "synapse.app.generic_worker",
