@@ -198,8 +198,9 @@ class RoomSummaryHandler:
             )
 
         if not local_room:
+            destination = requested_room_id.split(":", 1)[-1]
             room_hierarchy = await self._summarize_remote_room_hierarchy(
-                _RoomQueueEntry(requested_room_id, ()),
+                _RoomQueueEntry(requested_room_id, (destination)),
                 False,
             )
             root_room_entry = room_hierarchy[0]
@@ -240,7 +241,8 @@ class RoomSummaryHandler:
             processed_rooms = set(pagination_session["processed_rooms"])
         else:
             # The queue of rooms to process, the next room is last on the stack.
-            room_queue = [_RoomQueueEntry(requested_room_id, ())]
+            destination = requested_room_id.split(":", 1)[-1]
+            room_queue = [_RoomQueueEntry(requested_room_id, (destination))]
 
             # Rooms we have already processed.
             processed_rooms = set()
