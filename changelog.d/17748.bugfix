@@ -1,1 +1,0 @@
-Fix bug in sliding sync where the server would incorrectly return a negative bump stamp, which caused Element X apps to stop syncing.

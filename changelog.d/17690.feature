@@ -1,1 +1,0 @@
-Add config option `turn_shared_secret_path`.
