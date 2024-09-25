@@ -24,7 +24,6 @@ import logging
 import random
 import sys
 import urllib.parse
-from email.message import EmailMessage
 from http import HTTPStatus
 from io import BytesIO, StringIO
 from typing import (
