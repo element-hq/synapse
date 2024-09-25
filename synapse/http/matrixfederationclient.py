@@ -19,7 +19,6 @@
 #
 #
 import abc
-import cgi
 import codecs
 import logging
 import random
@@ -1813,8 +1812,9 @@ def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
         )
 
     c_type = content_type_headers[0].decode("ascii")  # only the first header
-    val, options = cgi.parse_header(c_type)
-    if val != expected_content_type:
+    # Extract the 'essence' of the mimetype, removing any parameter
+    c_type_parsed = c_type.split(";", 1)[0].strip()
+    if c_type_parsed != expected_content_type:
         raise RequestSendFailed(
             RuntimeError(
                 f"Remote server sent Content-Type header of '{c_type}', not '{expected_content_type}'",
