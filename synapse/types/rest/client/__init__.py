@@ -313,7 +313,7 @@ class SlidingSyncBody(RequestBodyModel):
                     int(value)
                 except ValueError:
                     raise ValueError(
-                        "'extensions.to_device.since' is invalid (should look like an int)"
+                        f"'extensions.to_device.since' is invalid (found '{value}', expected to be able to parse an int)"
                     )
 
                 return value
