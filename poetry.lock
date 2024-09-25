@@ -2587,13 +2587,13 @@ dev = ["furo (>=2024.05.06)", "nox", "packaging", "sphinx (>=5)", "twisted"]
 
 [[package]]
 name = "treq"
-version = "23.11.0"
+version = "24.9.1"
 description = "High-level Twisted HTTP Client API"
 optional = false
-python-versions = ">=3.6"
+python-versions = ">=3.7"
 files = [
-    {file = "treq-23.11.0-py3-none-any.whl", hash = "sha256:f494c2218d61cab2cabbee37cd6606d3eea9d16cf14190323095c95d22c467e9"},
-    {file = "treq-23.11.0.tar.gz", hash = "sha256:0914ff929fd1632ce16797235260f8bc19d20ff7c459c1deabd65b8c68cbeac5"},
+    {file = "treq-24.9.1-py3-none-any.whl", hash = "sha256:eee4756fd9a857c77f180fd5202b52c518f2d3e2826dce28b89066c03bfc45d0"},
+    {file = "treq-24.9.1.tar.gz", hash = "sha256:15da7fc404f3e4ed59d0abe5f8eef4966fabbe618039a2a23bc7c15305cefea8"},
 ]
 
 [package.dependencies]
@@ -2602,6 +2602,7 @@ hyperlink = ">=21.0.0"
 incremental = "*"
 requests = ">=2.1.0"
 Twisted = {version = ">=22.10.0", extras = ["tls"]}
+typing-extensions = ">=3.10.0"
 
 [package.extras]
 dev = ["httpbin (==0.7.0)", "pep8", "pyflakes", "werkzeug (==2.0.3)"]
