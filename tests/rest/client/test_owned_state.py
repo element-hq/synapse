@@ -28,14 +28,14 @@ class OwnedStateBase(HomeserverTestCase):
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.admin_user_id = self.register_user("admin", "pass")
-        self.admin_access_token = self.login("admin", "pass")
+        self.creator_user_id = self.register_user("creator", "pass")
+        self.creator_access_token = self.login("creator", "pass")
         self.user1_user_id = self.register_user("user1", "pass")
         self.user1_access_token = self.login("user1", "pass")
 
         self.room_id = self.helper.create_room_as(
-            self.admin_user_id,
-            tok=self.admin_access_token,
+            self.creator_user_id,
+            tok=self.creator_access_token,
             is_public=True,
             extra_content={
                 "power_level_content_override": {
@@ -67,43 +67,43 @@ class WithoutOwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.OK,
         )
 
-    def test_admin_cannot_set_state_with_own_suffixed_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_own_suffixed_key(self) -> None:
         self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
-            state_key=f"{self.admin_user_id}{_STATE_KEY_SUFFIX}",
-            tok=self.admin_access_token,
+            state_key=f"{self.creator_user_id}{_STATE_KEY_SUFFIX}",
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
-    def test_admin_cannot_set_state_with_other_userid_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_other_userid_key(self) -> None:
         self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key=f"{self.user1_user_id}",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
-    def test_admin_cannot_set_state_with_other_suffixed_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_other_suffixed_key(self) -> None:
         self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key=f"{self.user1_user_id}{_STATE_KEY_SUFFIX}",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
-    def test_admin_cannot_set_state_with_malformed_userid_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_malformed_userid_key(self) -> None:
         body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key="@oops",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
@@ -146,23 +146,23 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.OK,
         )
 
-    def test_admin_can_set_state_with_other_userid_key(self) -> None:
+    def test_room_creator_can_set_state_with_other_userid_key(self) -> None:
         self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key=f"{self.user1_user_id}",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.OK,
         )
 
-    def test_admin_can_set_state_with_other_suffixed_key(self) -> None:
+    def test_room_creator_can_set_state_with_other_suffixed_key(self) -> None:
         self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key=f"{self.user1_user_id}{_STATE_KEY_SUFFIX}",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.OK,
         )
 
@@ -207,13 +207,13 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
-    def test_admin_cannot_set_state_with_malformed_userid_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_malformed_userid_key(self) -> None:
         body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key="@oops",
-            tok=self.admin_access_token,
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.BAD_REQUEST,
         )
 
@@ -223,13 +223,13 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             body,
         )
 
-    def test_admin_cannot_set_state_with_improperly_suffixed_key(self) -> None:
+    def test_room_creator_cannot_set_state_with_improperly_suffixed_key(self) -> None:
         body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
-            state_key=f"{self.admin_user_id}@{_STATE_KEY_SUFFIX[1:]}",
-            tok=self.admin_access_token,
+            state_key=f"{self.creator_user_id}@{_STATE_KEY_SUFFIX[1:]}",
+            tok=self.creator_access_token,
             expect_code=HTTPStatus.BAD_REQUEST,
         )
 
