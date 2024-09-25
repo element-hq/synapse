@@ -1,1 +1,1 @@
-Remove the deprecated cgi module.
+Remove usage of the deprecated cgi module.
