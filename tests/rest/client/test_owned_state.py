@@ -68,7 +68,7 @@ class WithoutOwnedStateTestCase(OwnedStateBase):
         )
 
     def test_room_creator_cannot_set_state_with_own_suffixed_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -77,8 +77,14 @@ class WithoutOwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
+        )
+
     def test_room_creator_cannot_set_state_with_other_userid_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -87,14 +93,26 @@ class WithoutOwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
+        )
+
     def test_room_creator_cannot_set_state_with_other_suffixed_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
             state_key=f"{self.user1_user_id}{_STATE_KEY_SUFFIX}",
             tok=self.creator_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
+        )
+
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
         )
 
     def test_room_creator_cannot_set_state_with_nonmember_userid_key(self) -> None:
@@ -183,7 +201,7 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
         )
 
     def test_user_cannot_set_state_with_other_userid_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -192,8 +210,14 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
+        )
+
     def test_user_cannot_set_state_with_other_suffixed_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -202,8 +226,14 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
+        )
+
     def test_user_cannot_set_state_with_unseparated_suffixed_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -212,8 +242,14 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             expect_code=HTTPStatus.FORBIDDEN,
         )
 
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
+        )
+
     def test_user_cannot_set_state_with_misplaced_userid_in_key(self) -> None:
-        self.helper.send_state(
+        body = self.helper.send_state(
             self.room_id,
             _STATE_EVENT_TEST_TYPE,
             {},
@@ -221,6 +257,12 @@ class MSC3757OwnedStateTestCase(OwnedStateBase):
             state_key=f"@prefix_{self.user1_user_id}{_STATE_KEY_SUFFIX}",
             tok=self.user1_access_token,
             expect_code=HTTPStatus.FORBIDDEN,
+        )
+
+        self.assertEqual(
+            body["errcode"],
+            Codes.FORBIDDEN,
+            body,
         )
 
     def test_room_creator_can_set_state_with_nonmember_userid_key(self) -> None:
