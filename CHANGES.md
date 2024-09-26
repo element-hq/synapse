@@ -1,3 +1,12 @@
+# Synapse 1.116.0rc2 (2024-09-26)
+
+### Features
+
+- Add implementation of restricting who can overwrite a state event as proposed by [MSC3757](https://github.com/matrix-org/matrix-spec-proposals/pull/3757). ([\#17513](https://github.com/element-hq/synapse/issues/17513))
+
+
+
+
 # Synapse 1.116.0rc1 (2024-09-25)
 
 ### Features
