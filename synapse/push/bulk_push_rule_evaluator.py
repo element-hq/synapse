@@ -304,9 +304,9 @@ class BulkPushRuleEvaluator:
                     if relation_type == "m.thread" and event.content.get(
                         "m.relates_to", {}
                     ).get("is_falling_back", False):
-                        related_events["m.in_reply_to"][
-                            "im.vector.is_falling_back"
-                        ] = ""
+                        related_events["m.in_reply_to"]["im.vector.is_falling_back"] = (
+                            ""
+                        )
 
         return related_events
 
@@ -372,7 +372,8 @@ class BulkPushRuleEvaluator:
                 gather_results(
                     (
                         run_in_background(  # type: ignore[call-arg]
-                            self.store.get_number_joined_users_in_room, event.room_id  # type: ignore[arg-type]
+                            self.store.get_number_joined_users_in_room,
+                            event.room_id,  # type: ignore[arg-type]
                         ),
                         run_in_background(
                             self._get_power_levels_and_sender_level,

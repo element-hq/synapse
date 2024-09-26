@@ -308,8 +308,24 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         return create_event
 
     @cached(max_entries=10000)
-    async def get_room_type(self, room_id: str) -> Optional[str]:
-        raise NotImplementedError()
+    async def get_room_type(self, room_id: str) -> Union[Optional[str], Sentinel]:
+        """Fetch room type for given room.
+
+        Since this function is cached, any missing values would be cached as
+        `None`. In order to distinguish between an unencrypted room that has
+        `None` encryption and a room that is unknown to the server where we
+        might want to omit the value (which would make it cached as `None`),
+        instead we use the sentinel value `ROOM_UNKNOWN_SENTINEL`.
+        """
+
+        try:
+            create_event = await self.get_create_event_for_room(room_id)
+            return create_event.content.get(EventContentFields.ROOM_TYPE)
+        except NotFoundError:
+            # We use the sentinel value to distinguish between `None` which is a
+            # valid room type and a room that is unknown to the server so the value
+            # is just unset.
+            return ROOM_UNKNOWN_SENTINEL
 
     @cachedList(cached_method_name="get_room_type", list_name="room_ids")
     async def bulk_get_room_type(
@@ -535,7 +551,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             desc="check_if_events_in_current_state",
         )
 
-        return frozenset(event_id for event_id, in rows)
+        return frozenset(event_id for (event_id,) in rows)
 
     # FIXME: how should this be cached?
     @cancellable
@@ -736,6 +752,7 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
     CURRENT_STATE_INDEX_UPDATE_NAME = "current_state_members_idx"
     EVENT_STATE_GROUP_INDEX_UPDATE_NAME = "event_to_state_groups_sg_index"
     DELETE_CURRENT_STATE_UPDATE_NAME = "delete_old_current_state_events"
+    MEMBERS_CURRENT_STATE_UPDATE_NAME = "current_state_events_members_room_index"
 
     def __init__(
         self,
@@ -763,6 +780,13 @@ class MainStateBackgroundUpdateStore(RoomMemberWorkerStore):
         self.db_pool.updates.register_background_update_handler(
             self.DELETE_CURRENT_STATE_UPDATE_NAME,
             self._background_remove_left_rooms,
+        )
+        self.db_pool.updates.register_background_index_update(
+            self.MEMBERS_CURRENT_STATE_UPDATE_NAME,
+            index_name="current_state_events_members_room_index",
+            table="current_state_events",
+            columns=["room_id", "membership"],
+            where_clause="type='m.room.member'",
         )
 
     async def _background_remove_left_rooms(

@@ -23,6 +23,7 @@
 This migration handles the process of changing the type of `room_depth.min_depth` to
 a BIGINT.
 """
+
 from synapse.storage.database import LoggingTransaction
 from synapse.storage.engines import BaseDatabaseEngine, PostgresEngine
 

@@ -23,10 +23,13 @@
 import logging
 import re
 from collections import Counter
-from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple, cast
 
-from synapse.api.errors import Codes, InvalidAPICallError, SynapseError
+from synapse.api.errors import (
+    InteractiveAuthIncompleteError,
+    InvalidAPICallError,
+    SynapseError,
+)
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -403,17 +406,36 @@ class SigningKeyUploadServlet(RestServlet):
             # explicitly mark the master key as replaceable.
             if self.hs.config.experimental.msc3861.enabled:
                 if not master_key_updatable_without_uia:
-                    config = self.hs.config.experimental.msc3861
-                    if config.account_management_url is not None:
-                        url = f"{config.account_management_url}?action=org.matrix.cross_signing_reset"
-                    else:
-                        url = config.issuer
+                    # If MSC3861 is enabled, we can assume self.auth is an instance of MSC3861DelegatedAuth
+                    # We import lazily here because of the authlib requirement
+                    from synapse.api.auth.msc3861_delegated import MSC3861DelegatedAuth
 
-                    raise SynapseError(
-                        HTTPStatus.NOT_IMPLEMENTED,
-                        "To reset your end-to-end encryption cross-signing identity, "
-                        f"you first need to approve it at {url} and then try again.",
-                        Codes.UNRECOGNIZED,
+                    auth = cast(MSC3861DelegatedAuth, self.auth)
+
+                    uri = await auth.account_management_url()
+                    if uri is not None:
+                        url = f"{uri}?action=org.matrix.cross_signing_reset"
+                    else:
+                        url = await auth.issuer()
+
+                    # We use a dummy session ID as this isn't really a UIA flow, but we
+                    # reuse the same API shape for better client compatibility.
+                    raise InteractiveAuthIncompleteError(
+                        "dummy",
+                        {
+                            "session": "dummy",
+                            "flows": [
+                                {"stages": ["org.matrix.cross_signing_reset"]},
+                            ],
+                            "params": {
+                                "org.matrix.cross_signing_reset": {
+                                    "url": url,
+                                },
+                            },
+                            "msg": "To reset your end-to-end encryption cross-signing "
+                            f"identity, you first need to approve it at {url} and "
+                            "then try again.",
+                        },
                     )
             else:
                 # Without MSC3861, we require UIA.

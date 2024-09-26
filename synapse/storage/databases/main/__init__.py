@@ -3,7 +3,7 @@
 #
 # Copyright 2019-2021 The Matrix.org Foundation C.I.C.
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -33,6 +33,7 @@ from synapse.storage.database import (
     LoggingDatabaseConnection,
     LoggingTransaction,
 )
+from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.stats import UserSortOrder
 from synapse.storage.engines import BaseDatabaseEngine
 from synapse.storage.types import Cursor
@@ -43,6 +44,7 @@ from .appservice import ApplicationServiceStore, ApplicationServiceTransactionSt
 from .cache import CacheInvalidationWorkerStore
 from .censor_events import CensorEventsStore
 from .client_ips import ClientIpWorkerStore
+from .delayed_events import DelayedEventsStore
 from .deviceinbox import DeviceInboxStore
 from .devices import DeviceStore
 from .directory import DirectoryStore
@@ -156,6 +158,8 @@ class DataStore(
     LockStore,
     SessionStore,
     TaskSchedulerWorkerStore,
+    SlidingSyncStore,
+    DelayedEventsStore,
 ):
     def __init__(
         self,

@@ -24,9 +24,9 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
 
 import attr
 
-from synapse.api.constants import EventContentFields, RelationTypes
+from synapse.api.constants import EventContentFields, Membership, RelationTypes
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
 from synapse.storage.database import (
     DatabasePool,
@@ -34,9 +34,27 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_tuple_comparison_clause,
 )
-from synapse.storage.databases.main.events import PersistEventsStore
+from synapse.storage.databases.main.events import (
+    SLIDING_SYNC_RELEVANT_STATE_SET,
+    PersistEventsStore,
+    SlidingSyncMembershipInfoWithEventPos,
+    SlidingSyncMembershipSnapshotSharedInsertValues,
+    SlidingSyncStateInsertValues,
+)
+from synapse.storage.databases.main.events_worker import (
+    DatabaseCorruptionError,
+    InvalidEventError,
+)
+from synapse.storage.databases.main.state_deltas import StateDeltasStore
+from synapse.storage.databases.main.stream import StreamWorkerStore
+from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
-from synapse.types import JsonDict, StrCollection
+from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
+from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+from synapse.types.state import StateFilter
+from synapse.types.storage import _BackgroundUpdates
+from synapse.util import json_encoder
+from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -59,26 +77,6 @@ _REPLACE_STREAM_ORDERING_SQL_COMMANDS = (
 )
 
 
-class _BackgroundUpdates:
-    EVENT_ORIGIN_SERVER_TS_NAME = "event_origin_server_ts"
-    EVENT_FIELDS_SENDER_URL_UPDATE_NAME = "event_fields_sender_url"
-    DELETE_SOFT_FAILED_EXTREMITIES = "delete_soft_failed_extremities"
-    POPULATE_STREAM_ORDERING2 = "populate_stream_ordering2"
-    INDEX_STREAM_ORDERING2 = "index_stream_ordering2"
-    INDEX_STREAM_ORDERING2_CONTAINS_URL = "index_stream_ordering2_contains_url"
-    INDEX_STREAM_ORDERING2_ROOM_ORDER = "index_stream_ordering2_room_order"
-    INDEX_STREAM_ORDERING2_ROOM_STREAM = "index_stream_ordering2_room_stream"
-    INDEX_STREAM_ORDERING2_TS = "index_stream_ordering2_ts"
-    REPLACE_STREAM_ORDERING_COLUMN = "replace_stream_ordering_column"
-
-    EVENT_EDGES_DROP_INVALID_ROWS = "event_edges_drop_invalid_rows"
-    EVENT_EDGES_REPLACE_INDEX = "event_edges_replace_index"
-
-    EVENTS_POPULATE_STATE_KEY_REJECTIONS = "events_populate_state_key_rejections"
-
-    EVENTS_JUMP_TO_DATE_INDEX = "events_jump_to_date_index"
-
-
 @attr.s(slots=True, frozen=True, auto_attribs=True)
 class _CalculateChainCover:
     """Return value for _calculate_chain_cover_txn."""
@@ -97,7 +95,19 @@ class _CalculateChainCover:
     finished_room_map: Dict[str, Tuple[int, int]]
 
 
-class EventsBackgroundUpdatesStore(SQLBaseStore):
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class _JoinedRoomStreamOrderingUpdate:
+    """
+    Intermediate container class used in `SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE`
+    """
+
+    # The most recent event stream_ordering for the room
+    most_recent_event_stream_ordering: int
+    # The most recent event `bump_stamp` for the room
+    most_recent_bump_stamp: Optional[int]
+
+
+class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseStore):
     def __init__(
         self,
         database: DatabasePool,
@@ -278,6 +288,34 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
             columns=["room_id", "origin_server_ts"],
             where_clause="NOT outlier",
         )
+
+        # Handle background updates for Sliding Sync tables
+        #
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE,
+            self._sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update,
+        )
+        # Add some background updates to populate the sliding sync tables
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
+            self._sliding_sync_joined_rooms_bg_update,
+        )
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+            self._sliding_sync_membership_snapshots_bg_update,
+        )
+
+        # We want this to run on the main database at startup before we start processing
+        # events.
+        #
+        # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+        # foreground update for
+        # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+        # https://github.com/element-hq/synapse/issues/17623)
+        with db_conn.cursor(txn_name="resolve_sliding_sync") as txn:
+            _resolve_stale_data_in_sliding_sync_tables(
+                txn=txn,
+            )
 
     async def _background_reindex_fields_sender(
         self, progress: JsonDict, batch_size: int
@@ -586,7 +624,8 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
                 room_ids = {row[0] for row in rows}
                 for room_id in room_ids:
                     txn.call_after(
-                        self.get_latest_event_ids_in_room.invalidate, (room_id,)  # type: ignore[attr-defined]
+                        self.get_latest_event_ids_in_room.invalidate,  # type: ignore[attr-defined]
+                        (room_id,),
                     )
 
             self.db_pool.simple_delete_many_txn(
@@ -1073,7 +1112,7 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
         PersistEventsStore._add_chain_cover_index(
             txn,
             self.db_pool,
-            self.event_chain_id_gen,  # type: ignore[attr-defined]
+            self.event_chain_id_gen,
             event_to_room_id,
             event_to_types,
             cast(Dict[str, StrCollection], event_to_auth_chain),
@@ -1516,3 +1555,1137 @@ class EventsBackgroundUpdatesStore(SQLBaseStore):
             )
 
         return batch_size
+
+    async def _sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update(
+        self, progress: JsonDict, _batch_size: int
+    ) -> int:
+        """
+        Prefill `sliding_sync_joined_rooms_to_recalculate` table with all rooms we know about already.
+        """
+
+        def _txn(txn: LoggingTransaction) -> None:
+            # We do this as one big bulk insert. This has been tested on a bigger
+            # homeserver with ~10M rooms and took 60s. There is potential for this to
+            # starve disk usage while this goes on.
+            #
+            # We upsert in case we have to run this multiple times.
+            txn.execute(
+                """
+                INSERT INTO sliding_sync_joined_rooms_to_recalculate
+                    (room_id)
+                SELECT DISTINCT room_id FROM local_current_membership
+                WHERE membership = 'join'
+                ON CONFLICT (room_id)
+                DO NOTHING;
+                """,
+            )
+
+        await self.db_pool.runInteraction(
+            "_sliding_sync_prefill_joined_rooms_to_recalculate_table_bg_update",
+            _txn,
+        )
+
+        # Background update is done.
+        await self.db_pool.updates._end_background_update(
+            _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+        )
+        return 0
+
+    async def _sliding_sync_joined_rooms_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Background update to populate the `sliding_sync_joined_rooms` table.
+        """
+        # We don't need to fetch any progress state because we just grab the next N
+        # events in `sliding_sync_joined_rooms_to_recalculate`
+
+        def _get_rooms_to_update_txn(txn: LoggingTransaction) -> List[Tuple[str]]:
+            """
+            Returns:
+                A list of room ID's to update along with the progress value
+                (event_stream_ordering) indicating the continuation point in the
+                `current_state_events` table for the next batch.
+            """
+            # Fetch the set of room IDs that we want to update
+            #
+            # We use `current_state_events` table as the barometer for whether the
+            # server is still participating in the room because if we're
+            # `no_longer_in_room`, this table would be cleared out for the given
+            # `room_id`.
+            txn.execute(
+                """
+                SELECT room_id
+                FROM sliding_sync_joined_rooms_to_recalculate
+                LIMIT ?
+                """,
+                (batch_size,),
+            )
+
+            rooms_to_update_rows = cast(List[Tuple[str]], txn.fetchall())
+
+            return rooms_to_update_rows
+
+        rooms_to_update = await self.db_pool.runInteraction(
+            "_sliding_sync_joined_rooms_bg_update._get_rooms_to_update_txn",
+            _get_rooms_to_update_txn,
+        )
+
+        if not rooms_to_update:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
+            )
+            return 0
+
+        # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
+        joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
+        # Map from room_id to stream_ordering/bump_stamp, etc values
+        joined_room_stream_ordering_updates: Dict[
+            str, _JoinedRoomStreamOrderingUpdate
+        ] = {}
+        # As long as we get this value before we fetch the current state, we can use it
+        # to check if something has changed since that point.
+        most_recent_current_state_delta_stream_id = (
+            await self.get_max_stream_id_in_current_state_deltas()
+        )
+        for (room_id,) in rooms_to_update:
+            current_state_ids_map = await self.db_pool.runInteraction(
+                "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
+                PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
+                room_id,
+            )
+
+            # If we're not joined to the room a) it doesn't belong in the
+            # `sliding_sync_joined_rooms` table so we should skip and b) we won't have
+            # any `current_state_events` for the room.
+            if not current_state_ids_map:
+                continue
+
+            try:
+                fetched_events = await self.get_events(current_state_ids_map.values())
+            except (DatabaseCorruptionError, InvalidEventError) as e:
+                logger.warning(
+                    "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                    room_id,
+                    e,
+                )
+                continue
+
+            current_state_map: StateMap[EventBase] = {
+                state_key: fetched_events[event_id]
+                for state_key, event_id in current_state_ids_map.items()
+                # `get_events(...)` will filter out events for unknown room versions
+                if event_id in fetched_events
+            }
+
+            # Even if we are joined to the room, this can happen for unknown room
+            # versions (old room versions that aren't known anymore) since
+            # `get_events(...)` will filter out events for unknown room versions
+            if not current_state_map:
+                continue
+
+            state_insert_values = (
+                PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                    current_state_map
+                )
+            )
+            # We should have some insert values for each room, even if they are `None`
+            assert state_insert_values
+            joined_room_updates[room_id] = state_insert_values
+
+            # Figure out the stream_ordering of the latest event in the room
+            most_recent_event_pos_results = await self.get_last_event_pos_in_room(
+                room_id, event_types=None
+            )
+            assert most_recent_event_pos_results is not None, (
+                f"We should not be seeing `None` here because the room ({room_id}) should at-least have a create event "
+                + "given we pulled the room out of `current_state_events`"
+            )
+            most_recent_event_stream_ordering = most_recent_event_pos_results[1].stream
+
+            # The `most_recent_event_stream_ordering` should be positive,
+            # however there are (very rare) rooms where that is not the case in
+            # the matrix.org database. It's not clear how they got into that
+            # state, but does mean that we cannot assert that the stream
+            # ordering is indeed positive.
+
+            # Figure out the latest `bump_stamp` in the room. This could be `None` for a
+            # federated room you just joined where all of events are still `outliers` or
+            # backfilled history. In the Sliding Sync API, we default to the user's
+            # membership event `stream_ordering` if we don't have a `bump_stamp` so
+            # having it as `None` in this table is fine.
+            bump_stamp_event_pos_results = await self.get_last_event_pos_in_room(
+                room_id, event_types=SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
+            )
+            most_recent_bump_stamp = None
+            if (
+                bump_stamp_event_pos_results is not None
+                and bump_stamp_event_pos_results[1].stream > 0
+            ):
+                most_recent_bump_stamp = bump_stamp_event_pos_results[1].stream
+
+            joined_room_stream_ordering_updates[room_id] = (
+                _JoinedRoomStreamOrderingUpdate(
+                    most_recent_event_stream_ordering=most_recent_event_stream_ordering,
+                    most_recent_bump_stamp=most_recent_bump_stamp,
+                )
+            )
+
+        def _fill_table_txn(txn: LoggingTransaction) -> None:
+            # Handle updating the `sliding_sync_joined_rooms` table
+            #
+            for (
+                room_id,
+                update_map,
+            ) in joined_room_updates.items():
+                joined_room_stream_ordering_update = (
+                    joined_room_stream_ordering_updates[room_id]
+                )
+                event_stream_ordering = (
+                    joined_room_stream_ordering_update.most_recent_event_stream_ordering
+                )
+                bump_stamp = joined_room_stream_ordering_update.most_recent_bump_stamp
+
+                # Check if the current state has been updated since we gathered it.
+                # We're being careful not to insert/overwrite with stale data.
+                state_deltas_since_we_gathered_current_state = (
+                    self.get_current_state_deltas_for_room_txn(
+                        txn,
+                        room_id,
+                        from_token=RoomStreamToken(
+                            stream=most_recent_current_state_delta_stream_id
+                        ),
+                        to_token=None,
+                    )
+                )
+                for state_delta in state_deltas_since_we_gathered_current_state:
+                    # We only need to check for the state is relevant to the
+                    # `sliding_sync_joined_rooms` table.
+                    if (
+                        state_delta.event_type,
+                        state_delta.state_key,
+                    ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                        # Raising exception so we can just exit and try again. It would
+                        # be hard to resolve this within the transaction because we need
+                        # to get full events out that take redactions into account. We
+                        # could add some retry logic here, but it's easier to just let
+                        # the background update try again.
+                        raise Exception(
+                            "Current state was updated after we gathered it to update "
+                            + "`sliding_sync_joined_rooms` in the background update. "
+                            + "Raising exception so we can just try again."
+                        )
+
+                # Since we fully insert rows into `sliding_sync_joined_rooms`, we can
+                # just do everything on insert and `ON CONFLICT DO NOTHING`.
+                #
+                self.db_pool.simple_upsert_txn(
+                    txn,
+                    table="sliding_sync_joined_rooms",
+                    keyvalues={"room_id": room_id},
+                    values={},
+                    insertion_values={
+                        **update_map,
+                        # The reason we're only *inserting* (not *updating*) `event_stream_ordering`
+                        # and `bump_stamp` is because if they are present, that means they are already
+                        # up-to-date.
+                        "event_stream_ordering": event_stream_ordering,
+                        "bump_stamp": bump_stamp,
+                    },
+                )
+
+            # Now that we've processed all the room, we can remove them from the
+            # queue.
+            #
+            # Note: we need to remove all the rooms from the queue we pulled out
+            # from the DB, not just the ones we've processed above. Otherwise
+            # we'll simply keep pulling out the same rooms over and over again.
+            self.db_pool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_joined_rooms_to_recalculate",
+                keys=("room_id",),
+                values=rooms_to_update,
+            )
+
+        await self.db_pool.runInteraction(
+            "sliding_sync_joined_rooms_bg_update", _fill_table_txn
+        )
+
+        return len(rooms_to_update)
+
+    async def _sliding_sync_membership_snapshots_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Background update to populate the `sliding_sync_membership_snapshots` table.
+        """
+        # We do this in two phases: a) the initial phase where we go through all
+        # room memberships, and then b) a second phase where we look at new
+        # memberships (this is to handle the case where we downgrade and then
+        # upgrade again).
+        #
+        # We have to do this as two phases (rather than just the second phase
+        # where we iterate on event_stream_ordering), as the
+        # `event_stream_ordering` column may have null values for old rows.
+        # Therefore we first do the set of historic rooms and *then* look at any
+        # new rows (which will have a non-null `event_stream_ordering`).
+        initial_phase = progress.get("initial_phase")
+        if initial_phase is None:
+            # If this is the first run, store the current max stream position.
+            # We know we will go through all memberships less than the current
+            # max in the initial phase.
+            progress = {
+                "initial_phase": True,
+                "last_event_stream_ordering": self.get_room_max_stream_ordering(),
+            }
+            await self.db_pool.updates._background_update_progress(
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+                progress,
+            )
+            initial_phase = True
+
+        last_room_id = progress.get("last_room_id", "")
+        last_user_id = progress.get("last_user_id", "")
+        last_event_stream_ordering = progress["last_event_stream_ordering"]
+
+        def _find_memberships_to_update_txn(
+            txn: LoggingTransaction,
+        ) -> List[
+            Tuple[
+                str,
+                Optional[str],
+                Optional[str],
+                str,
+                str,
+                str,
+                str,
+                int,
+                Optional[str],
+                bool,
+            ]
+        ]:
+            # Fetch the set of event IDs that we want to update
+            #
+            # We skip over rows which we've already handled, i.e. have a
+            # matching row in `sliding_sync_membership_snapshots` with the same
+            # room, user and event ID.
+            #
+            # We also ignore rooms that the user has left themselves (i.e. not
+            # kicked). This is to avoid having to port lots of old rooms that we
+            # will never send down sliding sync (as we exclude such rooms from
+            # initial syncs).
+
+            if initial_phase:
+                # There are some old out-of-band memberships (before
+                # https://github.com/matrix-org/synapse/issues/6983) where we don't have
+                # the corresponding room stored in the `rooms` table`. We use `LEFT JOIN
+                # rooms AS r USING (room_id)` to find the rooms missing from `rooms` and
+                # insert a row for them below.
+                txn.execute(
+                    """
+                    SELECT
+                        c.room_id,
+                        r.room_id,
+                        r.room_version,
+                        c.user_id,
+                        e.sender,
+                        c.event_id,
+                        c.membership,
+                        e.stream_ordering,
+                        e.instance_name,
+                        e.outlier
+                    FROM local_current_membership AS c
+                    LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
+                    INNER JOIN events AS e USING (event_id)
+                    LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
+                    WHERE (c.room_id, c.user_id) > (?, ?)
+                        AND (m.user_id IS NULL OR c.event_id != m.membership_event_id)
+                    ORDER BY c.room_id ASC, c.user_id ASC
+                    LIMIT ?
+                    """,
+                    (last_room_id, last_user_id, batch_size),
+                )
+            elif last_event_stream_ordering is not None:
+                # It's important to sort by `event_stream_ordering` *ascending* (oldest to
+                # newest) so that if we see that this background update in progress and want
+                # to start the catch-up process, we can safely assume that it will
+                # eventually get to the rooms we want to catch-up on anyway (see
+                # `_resolve_stale_data_in_sliding_sync_tables()`).
+                #
+                # `c.room_id` is duplicated to make it match what we're doing in the
+                # `initial_phase`. But we can avoid doing the extra `rooms` table join
+                # because we can assume all of these new events won't have this problem.
+                txn.execute(
+                    """
+                    SELECT
+                        c.room_id,
+                        r.room_id,
+                        r.room_version,
+                        c.user_id,
+                        e.sender,
+                        c.event_id,
+                        c.membership,
+                        c.event_stream_ordering,
+                        e.instance_name,
+                        e.outlier
+                    FROM local_current_membership AS c
+                    LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
+                    INNER JOIN events AS e USING (event_id)
+                    LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
+                    WHERE c.event_stream_ordering > ?
+                        AND (m.user_id IS NULL OR c.event_id != m.membership_event_id)
+                    ORDER BY c.event_stream_ordering ASC
+                    LIMIT ?
+                    """,
+                    (last_event_stream_ordering, batch_size),
+                )
+            else:
+                raise Exception("last_event_stream_ordering should not be None")
+
+            memberships_to_update_rows = cast(
+                List[
+                    Tuple[
+                        str,
+                        Optional[str],
+                        Optional[str],
+                        str,
+                        str,
+                        str,
+                        str,
+                        int,
+                        Optional[str],
+                        bool,
+                    ]
+                ],
+                txn.fetchall(),
+            )
+
+            return memberships_to_update_rows
+
+        memberships_to_update_rows = await self.db_pool.runInteraction(
+            "sliding_sync_membership_snapshots_bg_update._find_memberships_to_update_txn",
+            _find_memberships_to_update_txn,
+        )
+
+        if not memberships_to_update_rows:
+            if initial_phase:
+                # Move onto the next phase.
+                await self.db_pool.updates._background_update_progress(
+                    _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+                    {
+                        "initial_phase": False,
+                        "last_event_stream_ordering": last_event_stream_ordering,
+                    },
+                )
+                return 0
+            else:
+                # We've finished both phases, we're done.
+                await self.db_pool.updates._end_background_update(
+                    _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE
+                )
+                return 0
+
+        def _find_previous_invite_or_knock_membership_txn(
+            txn: LoggingTransaction, room_id: str, user_id: str, event_id: str
+        ) -> Optional[Tuple[str, str]]:
+            # Find the previous invite/knock event before the leave event
+            #
+            # Here are some notes on how we landed on this query:
+            #
+            # We're using `topological_ordering` instead of `stream_ordering` because
+            # somehow it's possible to have your `leave` event backfilled with a
+            # negative `stream_ordering` and your previous `invite` event with a
+            # positive `stream_ordering` so we wouldn't have a chance of finding the
+            # previous membership with a naive `event_stream_ordering < ?` comparison.
+            #
+            # Also be careful because `room_memberships.event_stream_ordering` is
+            # nullable and not always filled in. You would need to join on `events` to
+            # rely on `events.stream_ordering` instead. Even though the
+            # `events.stream_ordering` also doesn't have a `NOT NULL` constraint, it
+            # doesn't have any rows where this is the case (checked on `matrix.org`).
+            # The fact the `events.stream_ordering` is a nullable column is a holdover
+            # from a rename of the column.
+            #
+            # You might also consider using the `event_auth` table to find the previous
+            # membership, but there are cases where somehow a membership event doesn't
+            # point back to the previous membership event in the auth events (unknown
+            # cause).
+            txn.execute(
+                """
+                SELECT event_id, membership
+                FROM room_memberships AS m
+                INNER JOIN events AS e USING (room_id, event_id)
+                WHERE
+                    room_id = ?
+                    AND m.user_id = ?
+                    AND (m.membership = ? OR m.membership = ?)
+                    AND e.event_id != ?
+                ORDER BY e.topological_ordering DESC
+                LIMIT 1
+                """,
+                (
+                    room_id,
+                    user_id,
+                    # We look explicitly for `invite` and `knock` events instead of
+                    # just their previous membership as someone could have been `invite`
+                    # -> `ban` -> unbanned (`leave`) and we want to find the `invite`
+                    # event where the stripped state is.
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                    event_id,
+                ),
+            )
+            row = txn.fetchone()
+
+            if row is None:
+                # Generally we should have an invite or knock event for leaves
+                # that are outliers, however this may not always be the case
+                # (e.g. a local user got kicked but the kick event got pulled in
+                # as an outlier).
+                return None
+
+            event_id, membership = row
+
+            return event_id, membership
+
+        # Map from (room_id, user_id) to ...
+        to_insert_membership_snapshots: Dict[
+            Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
+        ] = {}
+        to_insert_membership_infos: Dict[
+            Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
+        ] = {}
+        for (
+            room_id,
+            room_id_from_rooms_table,
+            room_version_id,
+            user_id,
+            sender,
+            membership_event_id,
+            membership,
+            membership_event_stream_ordering,
+            membership_event_instance_name,
+            is_outlier,
+        ) in memberships_to_update_rows:
+            # We don't know how to handle `membership` values other than these. The
+            # code below would need to be updated.
+            assert membership in (
+                Membership.JOIN,
+                Membership.INVITE,
+                Membership.KNOCK,
+                Membership.LEAVE,
+                Membership.BAN,
+            )
+
+            if (
+                room_version_id is not None
+                and room_version_id not in KNOWN_ROOM_VERSIONS
+            ):
+                # Ignore rooms with unknown room versions (these were
+                # experimental rooms, that we no longer support).
+                continue
+
+            # There are some old out-of-band memberships (before
+            # https://github.com/matrix-org/synapse/issues/6983) where we don't have the
+            # corresponding room stored in the `rooms` table`. We have a `FOREIGN KEY`
+            # constraint on the `sliding_sync_membership_snapshots` table so we have to
+            # fix-up these memberships by adding the room to the `rooms` table.
+            if room_id_from_rooms_table is None:
+                await self.db_pool.simple_insert(
+                    table="rooms",
+                    values={
+                        "room_id": room_id,
+                        # Only out-of-band memberships are missing from the `rooms`
+                        # table so that is the only type of membership we're dealing
+                        # with here. Since we don't calculate the "chain cover" for
+                        # out-of-band memberships, we can just set this to `True` as if
+                        # the user ever joins the room, we will end up calculating the
+                        # "chain cover" anyway.
+                        "has_auth_chain_index": True,
+                    },
+                )
+
+            # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+            sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
+            if membership == Membership.JOIN:
+                # If we're still joined, we can pull from current state.
+                current_state_ids_map: StateMap[
+                    str
+                ] = await self.hs.get_storage_controllers().state.get_current_state_ids(
+                    room_id,
+                    state_filter=StateFilter.from_types(
+                        SLIDING_SYNC_RELEVANT_STATE_SET
+                    ),
+                    # Partially-stated rooms should have all state events except for
+                    # remote membership events so we don't need to wait at all because
+                    # we only want some non-membership state
+                    await_full_state=False,
+                )
+                # We're iterating over rooms that we are joined to so they should
+                # have `current_state_events` and we should have some current state
+                # for each room
+                if current_state_ids_map:
+                    try:
+                        fetched_events = await self.get_events(
+                            current_state_ids_map.values()
+                        )
+                    except (DatabaseCorruptionError, InvalidEventError) as e:
+                        logger.warning(
+                            "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                            room_id,
+                            e,
+                        )
+                        continue
+
+                    current_state_map: StateMap[EventBase] = {
+                        state_key: fetched_events[event_id]
+                        for state_key, event_id in current_state_ids_map.items()
+                        # `get_events(...)` will filter out events for unknown room versions
+                        if event_id in fetched_events
+                    }
+
+                    # Can happen for unknown room versions (old room versions that aren't known
+                    # anymore) since `get_events(...)` will filter out events for unknown room
+                    # versions
+                    if not current_state_map:
+                        continue
+
+                    state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                        current_state_map
+                    )
+                    sliding_sync_membership_snapshots_insert_map.update(
+                        state_insert_values
+                    )
+                    # We should have some insert values for each room, even if they are `None`
+                    assert sliding_sync_membership_snapshots_insert_map
+
+                    # We have current state to work from
+                    sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
+                        True
+                    )
+                else:
+                    # Although we expect every room to have a create event (even
+                    # past unknown room versions since we haven't supported one
+                    # without it), there seem to be some corrupted rooms in
+                    # practice that don't have the create event in the
+                    # `current_state_events` table. The create event does exist
+                    # in the events table though. We'll just say that we don't
+                    # know the state for these rooms and continue on with our
+                    # day.
+                    sliding_sync_membership_snapshots_insert_map = {
+                        "has_known_state": False,
+                        "room_type": None,
+                        "room_name": None,
+                        "is_encrypted": False,
+                    }
+            elif membership in (Membership.INVITE, Membership.KNOCK) or (
+                membership in (Membership.LEAVE, Membership.BAN) and is_outlier
+            ):
+                invite_or_knock_event_id = None
+                invite_or_knock_membership = None
+
+                # If the event is an `out_of_band_membership` (special case of
+                # `outlier`), we never had historical state so we have to pull from
+                # the stripped state on the previous invite/knock event. This gives
+                # us a consistent view of the room state regardless of your
+                # membership (i.e. the room shouldn't disappear if your using the
+                # `is_encrypted` filter and you leave).
+                if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
+                    previous_membership = await self.db_pool.runInteraction(
+                        "sliding_sync_membership_snapshots_bg_update._find_previous_invite_or_knock_membership_txn",
+                        _find_previous_invite_or_knock_membership_txn,
+                        room_id,
+                        user_id,
+                        membership_event_id,
+                    )
+                    if previous_membership is not None:
+                        (
+                            invite_or_knock_event_id,
+                            invite_or_knock_membership,
+                        ) = previous_membership
+                else:
+                    invite_or_knock_event_id = membership_event_id
+                    invite_or_knock_membership = membership
+
+                if (
+                    invite_or_knock_event_id is not None
+                    and invite_or_knock_membership is not None
+                ):
+                    # Pull from the stripped state on the invite/knock event
+                    invite_or_knock_event = await self.get_event(
+                        invite_or_knock_event_id
+                    )
+
+                    raw_stripped_state_events = None
+                    if invite_or_knock_membership == Membership.INVITE:
+                        invite_room_state = invite_or_knock_event.unsigned.get(
+                            "invite_room_state"
+                        )
+                        raw_stripped_state_events = invite_room_state
+                    elif invite_or_knock_membership == Membership.KNOCK:
+                        knock_room_state = invite_or_knock_event.unsigned.get(
+                            "knock_room_state"
+                        )
+                        raw_stripped_state_events = knock_room_state
+
+                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
+                        raw_stripped_state_events
+                    )
+                else:
+                    # We couldn't find any state for the membership, so we just have to
+                    # leave it as empty.
+                    sliding_sync_membership_snapshots_insert_map = {
+                        "has_known_state": False,
+                        "room_type": None,
+                        "room_name": None,
+                        "is_encrypted": False,
+                    }
+
+                # We should have some insert values for each room, even if no
+                # stripped state is on the event because we still want to record
+                # that we have no known state
+                assert sliding_sync_membership_snapshots_insert_map
+            elif membership in (Membership.LEAVE, Membership.BAN):
+                # Pull from historical state
+                state_ids_map = await self.hs.get_storage_controllers().state.get_state_ids_for_event(
+                    membership_event_id,
+                    state_filter=StateFilter.from_types(
+                        SLIDING_SYNC_RELEVANT_STATE_SET
+                    ),
+                    # Partially-stated rooms should have all state events except for
+                    # remote membership events so we don't need to wait at all because
+                    # we only want some non-membership state
+                    await_full_state=False,
+                )
+
+                try:
+                    fetched_events = await self.get_events(state_ids_map.values())
+                except (DatabaseCorruptionError, InvalidEventError) as e:
+                    logger.warning(
+                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                        room_id,
+                        e,
+                    )
+                    continue
+
+                state_map: StateMap[EventBase] = {
+                    state_key: fetched_events[event_id]
+                    for state_key, event_id in state_ids_map.items()
+                    # `get_events(...)` will filter out events for unknown room versions
+                    if event_id in fetched_events
+                }
+
+                # Can happen for unknown room versions (old room versions that aren't known
+                # anymore) since `get_events(...)` will filter out events for unknown room
+                # versions
+                if not state_map:
+                    continue
+
+                state_insert_values = (
+                    PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                        state_map
+                    )
+                )
+                sliding_sync_membership_snapshots_insert_map.update(state_insert_values)
+                # We should have some insert values for each room, even if they are `None`
+                assert sliding_sync_membership_snapshots_insert_map
+
+                # We have historical state to work from
+                sliding_sync_membership_snapshots_insert_map["has_known_state"] = True
+            else:
+                # We don't know how to handle this type of membership yet
+                #
+                # FIXME: We should use `assert_never` here but for some reason
+                # the exhaustive matching doesn't recognize the `Never` here.
+                # assert_never(membership)
+                raise AssertionError(
+                    f"Unexpected membership {membership} ({membership_event_id}) that we don't know how to handle yet"
+                )
+
+            to_insert_membership_snapshots[(room_id, user_id)] = (
+                sliding_sync_membership_snapshots_insert_map
+            )
+            to_insert_membership_infos[(room_id, user_id)] = (
+                SlidingSyncMembershipInfoWithEventPos(
+                    user_id=user_id,
+                    sender=sender,
+                    membership_event_id=membership_event_id,
+                    membership=membership,
+                    membership_event_stream_ordering=membership_event_stream_ordering,
+                    # If instance_name is null we default to "master"
+                    membership_event_instance_name=membership_event_instance_name
+                    or "master",
+                )
+            )
+
+        def _fill_table_txn(txn: LoggingTransaction) -> None:
+            # Handle updating the `sliding_sync_membership_snapshots` table
+            #
+            for key, insert_map in to_insert_membership_snapshots.items():
+                room_id, user_id = key
+                membership_info = to_insert_membership_infos[key]
+                sender = membership_info.sender
+                membership_event_id = membership_info.membership_event_id
+                membership = membership_info.membership
+                membership_event_stream_ordering = (
+                    membership_info.membership_event_stream_ordering
+                )
+                membership_event_instance_name = (
+                    membership_info.membership_event_instance_name
+                )
+
+                # We don't need to upsert the state because we never partially
+                # insert/update the snapshots and anything already there is up-to-date
+                # EXCEPT for the `forgotten` field since that is updated out-of-band
+                # from the membership changes.
+                #
+                # Even though we're only doing insertions, we're using
+                # `simple_upsert_txn()` here to avoid unique violation errors that would
+                # happen from `simple_insert_txn()`
+                self.db_pool.simple_upsert_txn(
+                    txn,
+                    table="sliding_sync_membership_snapshots",
+                    keyvalues={"room_id": room_id, "user_id": user_id},
+                    values={},
+                    insertion_values={
+                        **insert_map,
+                        "sender": sender,
+                        "membership_event_id": membership_event_id,
+                        "membership": membership,
+                        "event_stream_ordering": membership_event_stream_ordering,
+                        "event_instance_name": membership_event_instance_name,
+                    },
+                )
+                # We need to find the `forgotten` value during the transaction because
+                # we can't risk inserting stale data.
+                if isinstance(txn.database_engine, PostgresEngine):
+                    txn.execute(
+                        """
+                        UPDATE sliding_sync_membership_snapshots
+                        SET
+                            forgotten = m.forgotten
+                        FROM room_memberships AS m
+                        WHERE sliding_sync_membership_snapshots.room_id = ?
+                            AND sliding_sync_membership_snapshots.user_id = ?
+                            AND membership_event_id = ?
+                            AND membership_event_id = m.event_id
+                            AND m.event_id IS NOT NULL
+                        """,
+                        (
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                        ),
+                    )
+                else:
+                    # SQLite doesn't support UPDATE FROM before 3.33.0, so we do
+                    # this via sub-selects.
+                    txn.execute(
+                        """
+                        UPDATE sliding_sync_membership_snapshots
+                        SET
+                            forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
+                        WHERE room_id = ? and user_id = ? AND membership_event_id = ?
+                        """,
+                        (
+                            membership_event_id,
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                        ),
+                    )
+
+        await self.db_pool.runInteraction(
+            "sliding_sync_membership_snapshots_bg_update", _fill_table_txn
+        )
+
+        # Update the progress
+        (
+            room_id,
+            _room_id_from_rooms_table,
+            _room_version_id,
+            user_id,
+            _sender,
+            _membership_event_id,
+            _membership,
+            membership_event_stream_ordering,
+            _membership_event_instance_name,
+            _is_outlier,
+        ) = memberships_to_update_rows[-1]
+
+        progress = {
+            "initial_phase": initial_phase,
+            "last_room_id": room_id,
+            "last_user_id": user_id,
+            "last_event_stream_ordering": last_event_stream_ordering,
+        }
+        if not initial_phase:
+            progress["last_event_stream_ordering"] = membership_event_stream_ordering
+
+        await self.db_pool.updates._background_update_progress(
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
+            progress,
+        )
+
+        return len(memberships_to_update_rows)
+
+
+def _resolve_stale_data_in_sliding_sync_tables(
+    txn: LoggingTransaction,
+) -> None:
+    """
+    Clears stale/out-of-date entries from the
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables.
+
+    This accounts for when someone downgrades their Synapse version and then upgrades it
+    again. This will ensure that we don't have any stale/out-of-date data in the
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` tables since any new
+    events sent in rooms would have also needed to be written to the sliding sync
+    tables. For example a new event needs to bump `event_stream_ordering` in
+    `sliding_sync_joined_rooms` table or some state in the room changing (like the room
+    name). Or another example of someone's membership changing in a room affecting
+    `sliding_sync_membership_snapshots`.
+
+    This way, if a row exists in the sliding sync tables, we are able to rely on it
+    (accurate data). And if a row doesn't exist, we use a fallback to get the same info
+    until the background updates fill in the rows or a new event comes in triggering it
+    to be fully inserted.
+
+    FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+    foreground update for
+    `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+    https://github.com/element-hq/synapse/issues/17623)
+    """
+
+    _resolve_stale_data_in_sliding_sync_joined_rooms_table(txn)
+    _resolve_stale_data_in_sliding_sync_membership_snapshots_table(txn)
+
+
+def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
+    txn: LoggingTransaction,
+) -> None:
+    """
+    Clears stale/out-of-date entries from the `sliding_sync_joined_rooms` table and
+    kicks-off the background update to catch-up with what we missed while Synapse was
+    downgraded.
+
+    See `_resolve_stale_data_in_sliding_sync_tables()` description above for more
+    context.
+    """
+
+    # Find the point when we stopped writing to the `sliding_sync_joined_rooms` table
+    txn.execute(
+        """
+        SELECT event_stream_ordering
+        FROM sliding_sync_joined_rooms
+        ORDER BY event_stream_ordering DESC
+        LIMIT 1
+        """,
+    )
+
+    # If we have nothing written to the `sliding_sync_joined_rooms` table, there is
+    # nothing to clean up
+    row = cast(Optional[Tuple[int]], txn.fetchone())
+    max_stream_ordering_sliding_sync_joined_rooms_table = None
+    depends_on = None
+    if row is not None:
+        (max_stream_ordering_sliding_sync_joined_rooms_table,) = row
+
+        txn.execute(
+            """
+            SELECT room_id
+            FROM events
+            WHERE stream_ordering > ?
+            GROUP BY room_id
+            ORDER BY MAX(stream_ordering) ASC
+            """,
+            (max_stream_ordering_sliding_sync_joined_rooms_table,),
+        )
+
+        room_rows = txn.fetchall()
+        # No new events have been written to the `events` table since the last time we wrote
+        # to the `sliding_sync_joined_rooms` table so there is nothing to clean up. This is
+        # the expected normal scenario for people who have not downgraded their Synapse
+        # version.
+        if not room_rows:
+            return
+
+        # 1000 is an arbitrary batch size with no testing
+        for chunk in batch_iter(room_rows, 1000):
+            # Handle updating the `sliding_sync_joined_rooms` table
+            #
+            # Clear out the stale data
+            DatabasePool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_joined_rooms",
+                keys=("room_id",),
+                values=chunk,
+            )
+
+            # Update the `sliding_sync_joined_rooms_to_recalculate` table with the rooms
+            # that went stale and now need to be recalculated.
+            DatabasePool.simple_upsert_many_txn_native_upsert(
+                txn,
+                table="sliding_sync_joined_rooms_to_recalculate",
+                key_names=("room_id",),
+                key_values=chunk,
+                value_names=(),
+                # No value columns, therefore make a blank list so that the following
+                # zip() works correctly.
+                value_values=[() for x in range(len(chunk))],
+            )
+    else:
+        # Avoid adding the background updates when there is no data to run them on (if
+        # the homeserver has no rooms). The portdb script refuses to run with pending
+        # background updates and since we potentially add them every time the server
+        # starts, we add this check for to allow the script to breath.
+        txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
+        row = txn.fetchone()
+        if row is None:
+            # There are no rooms, so don't schedule the bg update.
+            return
+
+        # Re-run the `sliding_sync_joined_rooms_to_recalculate` prefill if there is
+        # nothing in the `sliding_sync_joined_rooms` table
+        DatabasePool.simple_upsert_txn_native_upsert(
+            txn,
+            table="background_updates",
+            keyvalues={
+                "update_name": _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+            },
+            values={},
+            # Only insert the row if it doesn't already exist. If it already exists,
+            # we're already working on it
+            insertion_values={
+                "progress_json": "{}",
+            },
+        )
+        depends_on = _BackgroundUpdates.SLIDING_SYNC_PREFILL_JOINED_ROOMS_TO_RECALCULATE_TABLE_BG_UPDATE
+
+    # Now kick-off the background update to catch-up with what we missed while Synapse
+    # was downgraded.
+    #
+    # We may need to catch-up on everything if we have nothing written to the
+    # `sliding_sync_joined_rooms` table yet. This could happen if someone had zero rooms
+    # on their server (so the normal background update completes), downgrade Synapse
+    # versions, join and create some new rooms, and upgrade again.
+    DatabasePool.simple_upsert_txn_native_upsert(
+        txn,
+        table="background_updates",
+        keyvalues={
+            "update_name": _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
+        },
+        values={},
+        # Only insert the row if it doesn't already exist. If it already exists, we will
+        # eventually fill in the rows we're trying to populate.
+        insertion_values={
+            # Empty progress is expected since it's not used for this background update.
+            "progress_json": "{}",
+            # Wait for the prefill to finish
+            "depends_on": depends_on,
+        },
+    )
+
+
+def _resolve_stale_data_in_sliding_sync_membership_snapshots_table(
+    txn: LoggingTransaction,
+) -> None:
+    """
+    Clears stale/out-of-date entries from the `sliding_sync_membership_snapshots` table
+    and kicks-off the background update to catch-up with what we missed while Synapse
+    was downgraded.
+
+    See `_resolve_stale_data_in_sliding_sync_tables()` description above for more
+    context.
+    """
+
+    # Find the point when we stopped writing to the `sliding_sync_membership_snapshots` table
+    txn.execute(
+        """
+        SELECT event_stream_ordering
+        FROM sliding_sync_membership_snapshots
+        ORDER BY event_stream_ordering DESC
+        LIMIT 1
+        """,
+    )
+
+    # If we have nothing written to the `sliding_sync_membership_snapshots` table,
+    # there is nothing to clean up
+    row = cast(Optional[Tuple[int]], txn.fetchone())
+    max_stream_ordering_sliding_sync_membership_snapshots_table = None
+    if row is not None:
+        (max_stream_ordering_sliding_sync_membership_snapshots_table,) = row
+
+        # XXX: Since `forgotten` is simply a flag on the `room_memberships` table that is
+        # set out-of-band, there is no way to tell whether it was set while Synapse was
+        # downgraded. The only thing the user can do is `/forget` again if they run into
+        # this.
+        #
+        # This only picks up changes to memberships.
+        txn.execute(
+            """
+            SELECT user_id, room_id
+            FROM local_current_membership
+            WHERE event_stream_ordering > ?
+            ORDER BY event_stream_ordering ASC
+            """,
+            (max_stream_ordering_sliding_sync_membership_snapshots_table,),
+        )
+
+        membership_rows = txn.fetchall()
+        # No new events have been written to the `events` table since the last time we wrote
+        # to the `sliding_sync_membership_snapshots` table so there is nothing to clean up.
+        # This is the expected normal scenario for people who have not downgraded their
+        # Synapse version.
+        if not membership_rows:
+            return
+
+        # 1000 is an arbitrary batch size with no testing
+        for chunk in batch_iter(membership_rows, 1000):
+            # Handle updating the `sliding_sync_membership_snapshots` table
+            #
+            DatabasePool.simple_delete_many_batch_txn(
+                txn,
+                table="sliding_sync_membership_snapshots",
+                keys=("user_id", "room_id"),
+                values=chunk,
+            )
+    else:
+        # Avoid adding the background updates when there is no data to run them on (if
+        # the homeserver has no rooms). The portdb script refuses to run with pending
+        # background updates and since we potentially add them every time the server
+        # starts, we add this check for to allow the script to breath.
+        txn.execute("SELECT 1 FROM local_current_membership LIMIT 1")
+        row = txn.fetchone()
+        if row is None:
+            # There are no rooms, so don't schedule the bg update.
+            return
+
+    # Now kick-off the background update to catch-up with what we missed while Synapse
+    # was downgraded.
+    #
+    # We may need to catch-up on everything if we have nothing written to the
+    # `sliding_sync_membership_snapshots` table yet. This could happen if someone had
+    # zero rooms on their server (so the normal background update completes), downgrade
+    # Synapse versions, join and create some new rooms, and upgrade again.
+    #
+    progress_json: JsonDict = {}
+    if max_stream_ordering_sliding_sync_membership_snapshots_table is not None:
+        progress_json["initial_phase"] = False
+        progress_json["last_event_stream_ordering"] = (
+            max_stream_ordering_sliding_sync_membership_snapshots_table
+        )
+
+    DatabasePool.simple_upsert_txn_native_upsert(
+        txn,
+        table="background_updates",
+        keyvalues={
+            "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE
+        },
+        values={},
+        # Only insert the row if it doesn't already exist. If it already exists, we will
+        # eventually fill in the rows we're trying to populate.
+        insertion_values={
+            "progress_json": json_encoder.encode(progress_json),
+        },
+    )

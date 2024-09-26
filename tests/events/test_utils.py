@@ -756,7 +756,8 @@ class SerializeEventTestCase(stdlib_unittest.TestCase):
     def test_event_fields_fail_if_fields_not_str(self) -> None:
         with self.assertRaises(TypeError):
             self.serialize(
-                MockEvent(room_id="!foo:bar", content={"foo": "bar"}), ["room_id", 4]  # type: ignore[list-item]
+                MockEvent(room_id="!foo:bar", content={"foo": "bar"}),
+                ["room_id", 4],  # type: ignore[list-item]
             )
 
 

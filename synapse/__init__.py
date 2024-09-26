@@ -20,8 +20,7 @@
 #
 #
 
-""" This is an implementation of a Matrix homeserver.
-"""
+"""This is an implementation of a Matrix homeserver."""
 
 import os
 import sys

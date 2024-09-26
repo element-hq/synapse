@@ -27,7 +27,13 @@ from immutabledict import immutabledict
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.constants import Direction, EventTypes, Membership, RelationTypes
+from synapse.api.constants import (
+    Direction,
+    EventTypes,
+    JoinRules,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.filtering import Filter
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import FrozenEventV3
@@ -147,8 +153,8 @@ class PaginationTestCase(HomeserverTestCase):
     def _filter_messages(self, filter: JsonDict) -> List[str]:
         """Make a request to /messages with a filter, returns the chunk of events."""
 
-        events, next_key = self.get_success(
-            self.hs.get_datastores().main.paginate_room_events(
+        events, next_key, _ = self.get_success(
+            self.hs.get_datastores().main.paginate_room_events_by_topological_ordering(
                 room_id=self.room_id,
                 from_key=self.from_token.room_key,
                 to_key=None,
@@ -1154,10 +1160,85 @@ class GetCurrentStateDeltaMembershipChangesForUserTestCase(HomeserverTestCase):
                     room_id=room_id1,
                     event_id=None,
                     event_pos=dummy_state_pos,
-                    membership="leave",
+                    membership=Membership.LEAVE,
                     sender=None,  # user1_id,
                     prev_event_id=join_response1["event_id"],
                     prev_event_pos=join_pos1,
+                    prev_membership="join",
+                    prev_sender=user1_id,
+                ),
+            ],
+        )
+
+    def test_state_reset2(self) -> None:
+        """
+        Test a state reset scenario where the user gets removed from the room (when
+        there is no corresponding leave event)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, is_public=True, tok=user2_tok)
+
+        event_response = self.helper.send(room_id1, "test", tok=user2_tok)
+        event_id = event_response["event_id"]
+
+        user1_join_response = self.helper.join(room_id1, user1_id, tok=user1_tok)
+        user1_join_pos = self.get_success(
+            self.store.get_position_for_event(user1_join_response["event_id"])
+        )
+
+        before_reset_token = self.event_sources.get_current_token()
+
+        # Trigger a state reset
+        join_rule_event, join_rule_context = self.get_success(
+            create_event(
+                self.hs,
+                prev_event_ids=[event_id],
+                type=EventTypes.JoinRules,
+                state_key="",
+                content={"join_rule": JoinRules.INVITE},
+                sender=user2_id,
+                room_id=room_id1,
+                room_version=self.get_success(self.store.get_room_version_id(room_id1)),
+            )
+        )
+        _, join_rule_event_pos, _ = self.get_success(
+            self.persistence.persist_event(join_rule_event, join_rule_context)
+        )
+
+        # FIXME: We're manually busting the cache since
+        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
+        self.store._membership_stream_cache.entity_has_changed(
+            user1_id, join_rule_event_pos.stream
+        )
+
+        after_reset_token = self.event_sources.get_current_token()
+
+        membership_changes = self.get_success(
+            self.store.get_current_state_delta_membership_changes_for_user(
+                user1_id,
+                from_key=before_reset_token.room_key,
+                to_key=after_reset_token.room_key,
+            )
+        )
+
+        # Let the whole diff show on failure
+        self.maxDiff = None
+        self.assertEqual(
+            membership_changes,
+            [
+                CurrentStateDeltaMembership(
+                    room_id=room_id1,
+                    event_id=None,
+                    # The position where the state reset happened
+                    event_pos=join_rule_event_pos,
+                    membership=Membership.LEAVE,
+                    sender=None,
+                    prev_event_id=user1_join_response["event_id"],
+                    prev_event_pos=user1_join_pos,
                     prev_membership="join",
                     prev_sender=user1_id,
                 ),

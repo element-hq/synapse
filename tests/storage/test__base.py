@@ -112,6 +112,24 @@ class UpdateUpsertManyTests(unittest.HomeserverTestCase):
             {(1, "user1", "hello"), (2, "user2", "bleb")},
         )
 
+        self.get_success(
+            self.storage.db_pool.runInteraction(
+                "test",
+                self.storage.db_pool.simple_upsert_many_txn,
+                self.table_name,
+                key_names=key_names,
+                key_values=[[2, "user2"]],
+                value_names=[],
+                value_values=[],
+            )
+        )
+
+        # Check results are what we expect
+        self.assertEqual(
+            set(self._dump_table_to_tuple()),
+            {(1, "user1", "hello"), (2, "user2", "bleb")},
+        )
+
     def test_simple_update_many(self) -> None:
         """
         simple_update_many performs many updates at once.

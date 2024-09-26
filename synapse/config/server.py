@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -780,6 +780,17 @@ class ServerConfig(Config):
         else:
             self.delete_stale_devices_after = None
 
+        # The maximum allowed delay duration for delayed events (MSC4140).
+        max_event_delay_duration = config.get("max_event_delay_duration")
+        if max_event_delay_duration is not None:
+            self.max_event_delay_ms: Optional[int] = self.parse_duration(
+                max_event_delay_duration
+            )
+            if self.max_event_delay_ms <= 0:
+                raise ConfigError("max_event_delay_duration must be a positive value")
+        else:
+            self.max_event_delay_ms = None
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
@@ -828,13 +839,10 @@ class ServerConfig(Config):
             ).lstrip()
 
         if not unsecure_listeners:
-            unsecure_http_bindings = (
-                """- port: %(unsecure_port)s
+            unsecure_http_bindings = """- port: %(unsecure_port)s
             tls: false
             type: http
-            x_forwarded: true"""
-                % locals()
-            )
+            x_forwarded: true""" % locals()
 
             if not open_private_ports:
                 unsecure_http_bindings += (
@@ -853,16 +861,13 @@ class ServerConfig(Config):
         if not secure_listeners:
             secure_http_bindings = ""
 
-        return (
-            """\
+        return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
           %(secure_http_bindings)s
           %(unsecure_http_bindings)s
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.manhole is not None:

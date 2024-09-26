@@ -224,9 +224,7 @@ class UserDirectoryBackgroundUpdateStore(StateDeltasStore):
                 SELECT room_id, events FROM %s
                 ORDER BY events DESC
                 LIMIT 250
-            """ % (
-                TEMP_TABLE + "_rooms",
-            )
+            """ % (TEMP_TABLE + "_rooms",)
             txn.execute(sql)
             rooms_to_work_on = cast(List[Tuple[str, int]], txn.fetchall())
 

@@ -54,6 +54,7 @@ UP & quit           +---------- YES                       SUCCESS
 This is all tied together by the AppServiceScheduler which DIs the required
 components.
 """
+
 import logging
 from typing import (
     TYPE_CHECKING,

@@ -80,7 +80,7 @@ def load_legacy_presence_router(hs: "HomeServer") -> None:
     # All methods that the module provides should be async, but this wasn't enforced
     # in the old module system, so we wrap them if needed
     def async_wrapper(
-        f: Optional[Callable[P, R]]
+        f: Optional[Callable[P, R]],
     ) -> Optional[Callable[P, Awaitable[R]]]:
         # f might be None if the callback isn't implemented by the module. In this
         # case we don't want to register a callback at all so we return None.

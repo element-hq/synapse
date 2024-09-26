@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -34,6 +34,7 @@ from typing_extensions import TypeAlias
 
 from twisted.internet.interfaces import IOpenSSLContextFactory
 from twisted.internet.tcp import Port
+from twisted.python.threadpool import ThreadPool
 from twisted.web.iweb import IPolicyForHTTPS
 from twisted.web.resource import Resource
 
@@ -67,6 +68,7 @@ from synapse.handlers.appservice import ApplicationServicesHandler
 from synapse.handlers.auth import AuthHandler, PasswordAuthProvider
 from synapse.handlers.cas import CasHandler
 from synapse.handlers.deactivate_account import DeactivateAccountHandler
+from synapse.handlers.delayed_events import DelayedEventsHandler
 from synapse.handlers.device import DeviceHandler, DeviceWorkerHandler
 from synapse.handlers.devicemessage import DeviceMessageHandler
 from synapse.handlers.directory import DirectoryHandler
@@ -123,6 +125,7 @@ from synapse.http.client import (
 )
 from synapse.http.matrixfederationclient import MatrixFederationHttpClient
 from synapse.media.media_repository import MediaRepository
+from synapse.metrics import register_threadpool
 from synapse.metrics.common_usage_metrics import CommonUsageMetricsManager
 from synapse.module_api import ModuleApi
 from synapse.module_api.callbacks import ModuleApiCallbacks
@@ -249,6 +252,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         "account_validity",
         "auth",
         "deactivate_account",
+        "delayed_events",
         "message",
         "pagination",
         "profile",
@@ -941,3 +945,28 @@ class HomeServer(metaclass=abc.ABCMeta):
     @cache_in_self
     def get_task_scheduler(self) -> TaskScheduler:
         return TaskScheduler(self)
+
+    @cache_in_self
+    def get_media_sender_thread_pool(self) -> ThreadPool:
+        """Fetch the threadpool used to read files when responding to media
+        download requests."""
+
+        # We can choose a large threadpool size as these threads predominately
+        # do IO rather than CPU work.
+        media_threadpool = ThreadPool(
+            name="media_threadpool", minthreads=1, maxthreads=50
+        )
+
+        media_threadpool.start()
+        self.get_reactor().addSystemEventTrigger(
+            "during", "shutdown", media_threadpool.stop
+        )
+
+        # Register the threadpool with our metrics.
+        register_threadpool("media", media_threadpool)
+
+        return media_threadpool
+
+    @cache_in_self
+    def get_delayed_events_handler(self) -> DelayedEventsHandler:
+        return DelayedEventsHandler(self)

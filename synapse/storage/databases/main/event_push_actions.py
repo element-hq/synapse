@@ -1860,9 +1860,7 @@ class EventPushActionsWorkerStore(ReceiptsWorkerStore, StreamWorkerStore, SQLBas
                     AND epa.notif = 1
                 ORDER BY epa.stream_ordering DESC
                 LIMIT ?
-            """ % (
-                before_clause,
-            )
+            """ % (before_clause,)
             txn.execute(sql, args)
             return cast(
                 List[Tuple[str, str, int, int, str, bool, str, int]], txn.fetchall()

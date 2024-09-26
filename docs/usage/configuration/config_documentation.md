@@ -509,7 +509,8 @@ Unix socket support (_Added in Synapse 1.89.0_):
 
 Valid resource names are:
 
-* `client`: the client-server API (/_matrix/client), and the synapse admin API (/_synapse/admin). Also implies `media` and `static`.
+* `client`: the client-server API (/_matrix/client). Also implies `media` and `static`.
+  If configuring the main process, the Synapse Admin API (/_synapse/admin) is also implied.
 
 * `consent`: user consent forms (/_matrix/consent). See [here](../../consent_tracking.md) for more.
 
@@ -759,6 +760,19 @@ email:
     invite_from_person: "[%(app)s] %(person)s has invited you to chat on %(app)s..."
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
+```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+Must be a positive value if set.
+
+Defaults to no duration (`null`), which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
 ```
 
 ## Homeserver blocking
@@ -1765,7 +1779,7 @@ rc_3pid_validation:
 
 This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer`
 defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
@@ -1966,7 +1980,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.
 
 Example configuration:
 ```yaml
@@ -2314,6 +2328,22 @@ Example configuration:
 ```yaml
 turn_shared_secret: "YOUR_SHARED_SECRET"
 ```
+---
+### `turn_shared_secret_path`
+
+An alternative to [`turn_shared_secret`](#turn_shared_secret):
+allows the shared secret to be specified in an external file.
+
+The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.
+
+Example configuration:
+```yaml
+turn_shared_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.116.0._
+
 ---
 ### `turn_username` and `turn_password`
 
@@ -3302,8 +3332,8 @@ saml2_config:
     contact_person:
       - given_name: Bob
         sur_name: "the Sysadmin"
-        email_address": ["admin@example.com"]
-        contact_type": technical
+        email_address: ["admin@example.com"]
+        contact_type: technical
 
   saml_session_lifetime: 5m
 
@@ -4685,7 +4715,9 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match the "worker_name".
+* `worker_to_run_on`: Which worker to run this module on. This must match 
+  the "worker_name". If not set or `null`, invites will be accepted on the
+  main process.
 
 NOTE: Care should be taken not to enable this setting if the `synapse_auto_accept_invite` module is enabled and installed.
 The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join
