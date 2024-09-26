@@ -1,3 +1,92 @@
+# Synapse 1.116.0rc2 (2024-09-26)
+
+### Features
+
+- Add implementation of restricting who can overwrite a state event as proposed by [MSC3757](https://github.com/matrix-org/matrix-spec-proposals/pull/3757). ([\#17513](https://github.com/element-hq/synapse/issues/17513))
+
+
+
+
+# Synapse 1.116.0rc1 (2024-09-25)
+
+### Features
+
+- Add initial implementation of delayed events as proposed by [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140). ([\#17326](https://github.com/element-hq/synapse/issues/17326))
+- Add an asynchronous Admin API endpoint [to redact all a user's events](https://element-hq.github.io/synapse/v1.116/admin_api/user_admin_api.html#redact-all-the-events-of-a-user),
+  and [an endpoint to check on the status of that redaction task](https://element-hq.github.io/synapse/v1.116/admin_api/user_admin_api.html#check-the-status-of-a-redaction-process). ([\#17506](https://github.com/element-hq/synapse/issues/17506))
+- Add support for the `tags` and `not_tags` filters for [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync. ([\#17662](https://github.com/element-hq/synapse/issues/17662))
+- Guests can use the new media endpoints to download media, as described by [MSC4189](https://github.com/matrix-org/matrix-spec-proposals/pull/4189). ([\#17675](https://github.com/element-hq/synapse/issues/17675))
+- Add config option `turn_shared_secret_path`. ([\#17690](https://github.com/element-hq/synapse/issues/17690))
+- Return room tags in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync account data extension. ([\#17707](https://github.com/element-hq/synapse/issues/17707))
+
+### Bugfixes
+
+- Make sure we get up-to-date state information when using the new [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync tables to derive room membership. ([\#17692](https://github.com/element-hq/synapse/issues/17692))
+- Fix bug where room account data would not correctly be sent down [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync for old rooms. ([\#17695](https://github.com/element-hq/synapse/issues/17695))
+- Fix a bug in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync which could prevent /sync from working for certain user accounts. ([\#17727](https://github.com/element-hq/synapse/issues/17727), [\#17733](https://github.com/element-hq/synapse/issues/17733))
+- Ignore invites from ignored users in Sliding Sync. ([\#17729](https://github.com/element-hq/synapse/issues/17729))
+- Fix bug in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync where the server would incorrectly return a negative bump stamp, which caused Element X apps to stop syncing. ([\#17748](https://github.com/element-hq/synapse/issues/17748))
+
+### Internal Changes
+
+- Import pydantic objects from the `_pydantic_compat` module.
+  This allows `check_pydantic_models.py` to mock those pydantic objects
+  only in the synapse module, and not interfere with pydantic objects in
+  external dependencies. ([\#17667](https://github.com/element-hq/synapse/issues/17667))
+- Use [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync tables as a bulk shortcut for getting the max `event_stream_ordering` of rooms. ([\#17693](https://github.com/element-hq/synapse/issues/17693))
+- Speed up [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) sliding sync requests a bit where there are many room changes. ([\#17696](https://github.com/element-hq/synapse/issues/17696))
+- Refactor [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) sliding sync filter unit tests so the sliding sync API has better test coverage. ([\#17703](https://github.com/element-hq/synapse/issues/17703))
+- Fetch `bump_stamp`s more efficiently in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync. ([\#17723](https://github.com/element-hq/synapse/issues/17723))
+- Shortcut for checking if certain background updates have completed (utilized in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync). ([\#17724](https://github.com/element-hq/synapse/issues/17724))
+- More efficiently fetch rooms for [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync. ([\#17725](https://github.com/element-hq/synapse/issues/17725))
+- Fix `_bulk_get_max_event_pos` being inefficient. ([\#17728](https://github.com/element-hq/synapse/issues/17728))
+- Add cache to `get_tags_for_room(...)`. ([\#17730](https://github.com/element-hq/synapse/issues/17730))
+- Small performance improvement in speeding up [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync. ([\#17731](https://github.com/element-hq/synapse/issues/17731))
+- Minor speed up of initial [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) sliding sync requests. ([\#17734](https://github.com/element-hq/synapse/issues/17734))
+- Remove usage of the deprecated `cgi` module, deprecated in Python 3.11 and removed in Python 3.13. ([\#17741](https://github.com/element-hq/synapse/issues/17741))
+- Fix typing of a variable that is not `Unknown` anymore after updating `treq`. ([\#17744](https://github.com/element-hq/synapse/issues/17744))
+
+
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.86 to 1.0.89. ([\#17685](https://github.com/element-hq/synapse/issues/17685), [\#17716](https://github.com/element-hq/synapse/issues/17716))
+* Bump bytes from 1.7.1 to 1.7.2. ([\#17743](https://github.com/element-hq/synapse/issues/17743))
+* Bump cryptography from 43.0.0 to 43.0.1. ([\#17689](https://github.com/element-hq/synapse/issues/17689))
+* Bump idna from 3.8 to 3.10. ([\#17758](https://github.com/element-hq/synapse/issues/17758))
+* Bump msgpack from 1.0.8 to 1.1.0. ([\#17759](https://github.com/element-hq/synapse/issues/17759))
+* Bump phonenumbers from 8.13.44 to 8.13.45. ([\#17762](https://github.com/element-hq/synapse/issues/17762))
+* Bump prometheus-client from 0.20.0 to 0.21.0. ([\#17746](https://github.com/element-hq/synapse/issues/17746))
+* Bump pyasn1 from 0.6.0 to 0.6.1. ([\#17714](https://github.com/element-hq/synapse/issues/17714))
+* Bump pyasn1-modules from 0.4.0 to 0.4.1. ([\#17747](https://github.com/element-hq/synapse/issues/17747))
+* Bump pydantic from 2.8.2 to 2.9.2. ([\#17756](https://github.com/element-hq/synapse/issues/17756))
+* Bump python-multipart from 0.0.9 to 0.0.10. ([\#17745](https://github.com/element-hq/synapse/issues/17745))
+* Bump ruff from 0.6.4 to 0.6.7. ([\#17715](https://github.com/element-hq/synapse/issues/17715), [\#17760](https://github.com/element-hq/synapse/issues/17760))
+* Bump sentry-sdk from 2.13.0 to 2.14.0. ([\#17712](https://github.com/element-hq/synapse/issues/17712))
+* Bump serde from 1.0.209 to 1.0.210. ([\#17686](https://github.com/element-hq/synapse/issues/17686))
+* Bump serde_json from 1.0.127 to 1.0.128. ([\#17687](https://github.com/element-hq/synapse/issues/17687))
+* Bump treq from 23.11.0 to 24.9.1. ([\#17744](https://github.com/element-hq/synapse/issues/17744))
+* Bump types-pyyaml from 6.0.12.20240808 to 6.0.12.20240917. ([\#17755](https://github.com/element-hq/synapse/issues/17755))
+* Bump types-requests from 2.32.0.20240712 to 2.32.0.20240914. ([\#17713](https://github.com/element-hq/synapse/issues/17713))
+* Bump types-setuptools from 74.1.0.20240907 to 75.1.0.20240917. ([\#17757](https://github.com/element-hq/synapse/issues/17757))
+
+# Synapse 1.115.0 (2024-09-17)
+
+No significant changes since 1.115.0rc2.
+
+
+
+
+# Synapse 1.115.0rc2 (2024-09-12)
+
+### Internal Changes
+
+- Pre-populate room data used in experimental [MSC3575](https://github.com/matrix-org/matrix-spec-proposals/pull/3575) Sliding Sync `/sync` endpoint for quick filtering/sorting. ([\#17652](https://github.com/element-hq/synapse/issues/17652))
+- Speed up sliding sync by reducing amount of data pulled out of the database for large rooms. ([\#17683](https://github.com/element-hq/synapse/issues/17683))
+
+
+
+
 # Synapse 1.115.0rc1 (2024-09-10)
 
 ### Features
