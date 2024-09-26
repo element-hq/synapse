@@ -63,6 +63,7 @@ from synapse.types import (
 )
 from synapse.util.async_helpers import ObservableDeferred, timeout_deferred
 from synapse.util.metrics import Measure
+from synapse.util.stringutils import shortstr
 from synapse.visibility import filter_events_for_client
 
 if TYPE_CHECKING:
@@ -151,17 +152,6 @@ class _NotifierUserStream:
         self.last_notified_token = self.current_token
         self.last_notified_ms = time_now_ms
         notify_deferred = self.notify_deferred
-
-        log_kv(
-            {
-                "notify": self.user_id,
-                "stream": stream_key,
-                "stream_id": stream_id,
-                "listeners": self.count_listeners(),
-            }
-        )
-
-        users_woken_by_stream_counter.labels(stream_key).inc()
 
         with PreserveLoggingContext():
             self.notify_deferred = ObservableDeferred(defer.Deferred())
@@ -350,6 +340,10 @@ class Notifier:
             except Exception:
                 logger.exception("Failed to notify listener")
 
+        users_woken_by_stream_counter.labels(StreamKeyType.UN_PARTIAL_STATED_ROOMS).inc(
+            len(user_streams)
+        )
+
         # Poke the replication so that other workers also see the write to
         # the un-partial-stated rooms stream.
         self.notify_replication()
@@ -519,12 +513,16 @@ class Notifier:
         rooms = rooms or []
 
         with Measure(self.clock, "on_new_event"):
-            user_streams = set()
+            user_streams: Set[_NotifierUserStream] = set()
 
             log_kv(
                 {
                     "waking_up_explicit_users": len(users),
                     "waking_up_explicit_rooms": len(rooms),
+                    "users": shortstr(users),
+                    "rooms": shortstr(rooms),
+                    "stream": stream_key,
+                    "stream_id": new_token,
                 }
             )
 
@@ -549,6 +547,8 @@ class Notifier:
                     user_stream.notify(stream_key, new_token, time_now_ms)
                 except Exception:
                     logger.exception("Failed to notify listener")
+
+            users_woken_by_stream_counter.labels(stream_key).inc(len(user_streams))
 
             self.notify_replication()
 
