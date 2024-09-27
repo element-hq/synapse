@@ -123,6 +123,19 @@ class SlidingSyncInterestedRooms:
     newly_left_rooms: AbstractSet[str]
     dm_room_ids: AbstractSet[str]
 
+    @staticmethod
+    def empty() -> "SlidingSyncInterestedRooms":
+        return SlidingSyncInterestedRooms(
+            lists={},
+            relevant_room_map={},
+            relevant_rooms_to_send_map={},
+            all_rooms=set(),
+            room_membership_for_user_map={},
+            newly_joined_rooms=set(),
+            newly_left_rooms=set(),
+            dm_room_ids=set(),
+        )
+
 
 def filter_membership_for_sync(
     *,
@@ -181,6 +194,14 @@ class SlidingSyncRoomLists:
         from_token: Optional[StreamToken],
     ) -> SlidingSyncInterestedRooms:
         """Fetch the set of rooms that match the request"""
+        has_lists = sync_config.lists is not None and len(sync_config.lists) > 0
+        has_room_subscriptions = (
+            sync_config.room_subscriptions is not None
+            and len(sync_config.room_subscriptions) > 0
+        )
+
+        if not has_lists and not has_room_subscriptions:
+            return SlidingSyncInterestedRooms.empty()
 
         if await self.store.have_finished_sliding_sync_background_jobs():
             return await self._compute_interested_rooms_new_tables(
