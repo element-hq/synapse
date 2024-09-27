@@ -26,7 +26,6 @@ from synapse.handlers.relations import BundledAggregations
 from synapse.handlers.sliding_sync.extensions import SlidingSyncExtensionHandler
 from synapse.handlers.sliding_sync.room_lists import (
     RoomsForUserType,
-    SlidingSyncInterestedRooms,
     SlidingSyncRoomLists,
 )
 from synapse.handlers.sliding_sync.store import SlidingSyncConnectionStore
