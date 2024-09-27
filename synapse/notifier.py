@@ -142,8 +142,7 @@ class _NotifierUserStream:
         """Notify any listeners for this user of a new event from an
         event source.
         Args:
-            stream_key: The stream the event came from.
-            stream_id: The new id for the stream the event came from.
+            current_token: The new current token.
             time_now_ms: The current time in milliseconds.
         """
         self.current_token = current_token
