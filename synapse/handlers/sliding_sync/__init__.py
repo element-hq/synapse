@@ -341,6 +341,38 @@ class SlidingSyncHandler:
             extensions=extensions,
         )
 
+        if rooms:
+            live_rooms = 0
+            previously_rooms = 0
+            never_rooms = 0
+            initial_rooms = 0
+            limited_rooms = 0
+            for room_id, room in rooms.items():
+                if room.initial:
+                    initial_rooms += 1
+
+                if room.limited:
+                    limited_rooms += 1
+
+                status = previous_connection_state.rooms.have_sent_room(room_id)
+                if status.status == HaveSentRoomFlag.LIVE:
+                    live_rooms += 1
+                elif status.status == HaveSentRoomFlag.PREVIOUSLY:
+                    previously_rooms += 1
+                elif status.status == HaveSentRoomFlag.NEVER:
+                    never_rooms += 1
+                else:
+                    assert_never(status.status)
+
+            logger.info(
+                "Room results: live: %s, previously: %s, never: %s, initial: %s, limited: %s",
+                live_rooms,
+                previously_rooms,
+                never_rooms,
+                initial_rooms,
+                limited_rooms,
+            )
+
         # Make it easy to find traces for syncs that aren't empty
         set_tag(SynapseTags.RESULT_PREFIX + "result", bool(sliding_sync_result))
         set_tag(SynapseTags.FUNC_ARG_PREFIX + "sync_config.user", user_id)
