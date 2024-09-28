@@ -6,8 +6,10 @@
 
 server {
     # Listen on an unoccupied port number
-    listen 8008;
-    listen [::]:8008;
+    {% for port in range(8008, 8008 + num_inbound_ports) %}
+    listen {{ port }};
+    listen [::]:{{ port }};
+    {% endfor %}
 
     {% if tls_cert_path is not none and tls_key_path is not none %}
         listen 8448 ssl;

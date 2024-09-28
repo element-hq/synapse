@@ -1070,6 +1070,7 @@ def generate_worker_files(
         tls_cert_path=os.environ.get("SYNAPSE_TLS_CERT"),
         tls_key_path=os.environ.get("SYNAPSE_TLS_KEY"),
         using_unix_sockets=using_unix_sockets,
+        num_inbound_ports=int(os.environ.get("NGINX_INBOUND_PORTS", "1"))
     )
 
     # Supervisord config
