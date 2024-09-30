@@ -1,1 +1,0 @@
-Fix `_bulk_get_max_event_pos` being inefficient.

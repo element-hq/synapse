@@ -1063,6 +1063,22 @@ class SlidingSyncHandler:
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
+        if bump_stamp < 0:
+            # We never want to send down negative stream orderings, as you can't
+            # sensibly compare positive and negative stream orderings (they have
+            # different meanings).
+            #
+            # A negative bump stamp here can only happen if the stream ordering
+            # of the membership event is negative (and there are no further bump
+            # stamps), which can happen if the server leaves and deletes a room,
+            # and then rejoins it.
+            #
+            # To deal with this, we just set the bump stamp to zero, which will
+            # shove this room to the bottom of the list. This is OK as the
+            # moment a new message happens in the room it will get put into a
+            # sensible order again.
+            bump_stamp = 0
+
         unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
