@@ -47,6 +47,7 @@ from synapse.logging.context import make_deferred_yieldable
 from synapse.types import Requester, UserID, create_requester
 from synapse.util import json_decoder
 from synapse.util.caches.cached_call import RetryOnExceptionCachedCall
+from synapse.util.caches.expiringcache import ExpiringCache
 
 if TYPE_CHECKING:
     from synapse.rest.admin.experimental_features import ExperimentalFeature
@@ -120,6 +121,13 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
         self._admin_token = self._config.admin_token
+        self._introspection_cache = ExpiringCache(
+            "introspection_cache",
+            self._clock,
+            max_len=50000,
+            expiry_ms=120_000,
+            reset_expiry_on_get=False,
+        )
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
             self._load_metadata
@@ -202,6 +210,9 @@ class MSC3861DelegatedAuth(BaseAuth):
         Returns:
             The introspection response
         """
+        cached_response = self._introspection_cache.get(token, None)
+        if cached_response is not None:
+            return cached_response
         introspection_endpoint = await self._introspection_endpoint()
         raw_headers: Dict[str, str] = {
             "Content-Type": "application/x-www-form-urlencoded",
@@ -256,7 +267,11 @@ class MSC3861DelegatedAuth(BaseAuth):
                 "The introspection endpoint returned an invalid JSON response."
             )
 
-        return IntrospectionToken(**resp)
+        out = IntrospectionToken(**resp)
+
+        # Cache the response for a short time
+        self._introspection_cache[token] = out
+        return out
 
     async def is_server_admin(self, requester: Requester) -> bool:
         return "urn:synapse:admin:*" in requester.scope
