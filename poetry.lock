@@ -1447,13 +1447,13 @@ dev = ["jinja2"]
 
 [[package]]
 name = "phonenumbers"
-version = "8.13.45"
+version = "8.13.46"
 description = "Python version of Google's common library for parsing, formatting, storing and validating international phone numbers."
 optional = false
 python-versions = "*"
 files = [
-    {file = "phonenumbers-8.13.45-py2.py3-none-any.whl", hash = "sha256:bf05ec20fcd13f0d53e43a34ed7bd1c8be26a72b88fce4b8c64fca5b4641987a"},
-    {file = "phonenumbers-8.13.45.tar.gz", hash = "sha256:53679a95b6060fd5e15467759252c87933d8566d6a5be00995a579eb0e02435b"},
+    {file = "phonenumbers-8.13.46-py2.py3-none-any.whl", hash = "sha256:519422d407af066fdbf98e179ea2e214487060f26526d67871f817eefbbb2134"},
+    {file = "phonenumbers-8.13.46.tar.gz", hash = "sha256:94bf18ba9725bb6868d29473b13f78ef01e2585c5cb561ec0200be7676e77452"},
 ]
 
 [[package]]
