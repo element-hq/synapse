@@ -338,7 +338,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.exception("Failed to introspect token")
             raise SynapseError(503, "Unable to introspect the access token")
 
-        logger.info(f"Introspection result: {introspection_result!r}")
+        logger.debug("Introspection result: %r", introspection_result)
 
         # TODO: introspection verification should be more extensive, especially:
         #   - verify the audience
