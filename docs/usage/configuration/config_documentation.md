@@ -4368,7 +4368,10 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.
+balanced across them. The way that the load balancing works is any outbound PDUs will be
+assigned to a federation sender worker based on the hash of the destination server name.
+So all events being sent to the same destination will be processed by the same worker instance.
+Multiple `federation_sender_instances` are useful if there is a federation with multiple servers.
 
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
