@@ -616,6 +616,11 @@ class StateFilter:
 
         return False
 
+    def __bool__(self) -> bool:
+        if self.include_others:
+            return True
+        return bool(self.types)
+
 
 _ALL_STATE_FILTER = StateFilter(types=immutabledict(), include_others=True)
 _ALL_NON_MEMBER_STATE_FILTER = StateFilter(
