@@ -20,8 +20,8 @@
 #
 
 import argparse
-import cgi
 import datetime
+import html
 import json
 import urllib.request
 from typing import List
@@ -85,7 +85,7 @@ def make_graph(pdus: List[dict], filename_prefix: str) -> None:
             "name": name,
             "type": pdu.get("pdu_type"),
             "state_key": pdu.get("state_key"),
-            "content": cgi.escape(json.dumps(pdu.get("content")), quote=True),
+            "content": html.escape(json.dumps(pdu.get("content")), quote=True),
             "time": t,
             "depth": pdu.get("depth"),
         }

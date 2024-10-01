@@ -495,6 +495,24 @@ class SlidingSyncHandler:
             room_sync_config.timeline_limit,
         )
 
+        # Handle state resets. For example, if we see
+        # `room_membership_for_user_at_to_token.event_id=None and
+        # room_membership_for_user_at_to_token.membership is not None`, we should
+        # indicate to the client that a state reset happened. Perhaps we should indicate
+        # this by setting `initial: True` and empty `required_state: []`.
+        state_reset_out_of_room = False
+        if (
+            room_membership_for_user_at_to_token.event_id is None
+            and room_membership_for_user_at_to_token.membership is not None
+        ):
+            # We only expect the `event_id` to be `None` if you've been state reset out
+            # of the room (meaning you're no longer in the room). We could put this as
+            # part of the if-statement above but we want to handle every case where
+            # `event_id` is `None`.
+            assert room_membership_for_user_at_to_token.membership is Membership.LEAVE
+
+            state_reset_out_of_room = True
+
         # Determine whether we should limit the timeline to the token range.
         #
         # We should return historical messages (before token range) in the
@@ -527,7 +545,7 @@ class SlidingSyncHandler:
         from_bound = None
         initial = True
         ignore_timeline_bound = False
-        if from_token and not newly_joined:
+        if from_token and not newly_joined and not state_reset_out_of_room:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
@@ -731,12 +749,6 @@ class SlidingSyncHandler:
                 )
 
             stripped_state.append(strip_event(invite_or_knock_event))
-
-        # TODO: Handle state resets. For example, if we see
-        # `room_membership_for_user_at_to_token.event_id=None and
-        # room_membership_for_user_at_to_token.membership is not None`, we should
-        # indicate to the client that a state reset happened. Perhaps we should indicate
-        # this by setting `initial: True` and empty `required_state`.
 
         # Get the changes to current state in the token range from the
         # `current_state_delta_stream` table.
@@ -1051,6 +1063,22 @@ class SlidingSyncHandler:
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
+        if bump_stamp < 0:
+            # We never want to send down negative stream orderings, as you can't
+            # sensibly compare positive and negative stream orderings (they have
+            # different meanings).
+            #
+            # A negative bump stamp here can only happen if the stream ordering
+            # of the membership event is negative (and there are no further bump
+            # stamps), which can happen if the server leaves and deletes a room,
+            # and then rejoins it.
+            #
+            # To deal with this, we just set the bump stamp to zero, which will
+            # shove this room to the bottom of the list. This is OK as the
+            # moment a new message happens in the room it will get put into a
+            # sensible order again.
+            bump_stamp = 0
+
         unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
@@ -1171,8 +1199,8 @@ class SlidingSyncHandler:
             # `SCHEMA_COMPAT_VERSION` and run the foreground update for
             # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
             # (tracked by https://github.com/element-hq/synapse/issues/17623)
-            await self.store.have_finished_sliding_sync_background_jobs()
-            and latest_room_bump_stamp is None
+            latest_room_bump_stamp is None
+            and await self.store.have_finished_sliding_sync_background_jobs()
         ):
             return None
 

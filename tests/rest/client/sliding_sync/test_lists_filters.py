@@ -230,32 +230,21 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
 
         # Make sure the response has the lists we requested
-        self.assertListEqual(
-            list(response_body["lists"].keys()),
-            ["all-list", "foo-list"],
+        self.assertIncludes(
             response_body["lists"].keys(),
+            {"all-list", "foo-list"},
         )
 
         # Make sure the lists have the correct rooms
-        self.assertListEqual(
-            list(response_body["lists"]["all-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id, room_id],
-                }
-            ],
+        self.assertIncludes(
+            set(response_body["lists"]["all-list"]["ops"][0]["room_ids"]),
+            {space_room_id, room_id},
+            exact=True,
         )
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id],
-                }
-            ],
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {space_room_id},
+            exact=True,
         )
 
         # Everyone leaves the encrypted space room
@@ -284,26 +273,23 @@ class SlidingSyncFiltersTestCase(SlidingSyncBase):
         }
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # Make sure the lists have the correct rooms even though we `newly_left`
-        self.assertListEqual(
-            list(response_body["lists"]["all-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id, room_id],
-                }
-            ],
+        # Make sure the response has the lists we requested
+        self.assertIncludes(
+            response_body["lists"].keys(),
+            {"all-list", "foo-list"},
+            exact=True,
         )
-        self.assertListEqual(
-            list(response_body["lists"]["foo-list"]["ops"]),
-            [
-                {
-                    "op": "SYNC",
-                    "range": [0, 99],
-                    "room_ids": [space_room_id],
-                }
-            ],
+
+        # Make sure the lists have the correct rooms even though we `newly_left`
+        self.assertIncludes(
+            set(response_body["lists"]["all-list"]["ops"][0]["room_ids"]),
+            {space_room_id, room_id},
+            exact=True,
+        )
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {space_room_id},
+            exact=True,
         )
 
     def test_filters_is_dm(self) -> None:

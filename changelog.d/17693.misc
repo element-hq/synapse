@@ -1,1 +1,0 @@
-Use Sliding Sync tables as a bulk shortcut for getting the max `event_stream_ordering` of rooms.
