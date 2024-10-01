@@ -572,7 +572,8 @@ class SlidingSyncExtensionHandler:
 
             # Now record which rooms are now up to data, and which rooms have
             # pending updates to send.
-            new_connection_state.account_data.record_sent_rooms(relevant_room_ids)
+            new_connection_state.account_data.record_sent_rooms(previously_rooms.keys())
+            new_connection_state.account_data.record_sent_rooms(initial_rooms)
             missing_updates = (
                 all_updates_since_the_from_token.keys() - relevant_room_ids
             )
@@ -763,9 +764,10 @@ class SlidingSyncExtensionHandler:
 
                 room_id_to_receipt_map[room_id] = {"type": type, "content": content}
 
-        # Now we update the per-connection state to track which receipts we have
-        # and haven't sent down.
-        new_connection_state.receipts.record_sent_rooms(relevant_room_ids)
+            # Update the per-connection state to track which rooms we have sent
+            # all the receipts for.
+            new_connection_state.receipts.record_sent_rooms(previously_rooms.keys())
+            new_connection_state.receipts.record_sent_rooms(initial_rooms)
 
         if from_token:
             # Now find the set of rooms that may have receipts that we're not sending
