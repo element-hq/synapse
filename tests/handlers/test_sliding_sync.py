@@ -18,7 +18,7 @@
 #
 #
 import logging
-from typing import AbstractSet, Dict, Optional, Tuple
+from typing import AbstractSet, Dict, Optional, Set, Tuple
 from unittest.mock import patch
 
 from parameterized import parameterized
@@ -35,6 +35,7 @@ from synapse.handlers.sliding_sync import (
     RoomsForUserType,
     RoomSyncConfig,
     StateValues,
+    _required_state_changes,
 )
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
@@ -42,8 +43,10 @@ from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, StreamToken, UserID
 from synapse.types.handlers.sliding_sync import SlidingSyncConfig
+from synapse.types.state import StateFilter
 from synapse.util import Clock
 
+from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.unittest import HomeserverTestCase, TestCase
 
@@ -3213,3 +3216,402 @@ class SortRoomsTestCase(HomeserverTestCase):
             # We only care about the *latest* event in the room.
             [room_id1, room_id2],
         )
+
+
+class RequiredStateChangesTestCase(unittest.TestCase):
+    """Test cases for `_required_state_changes`"""
+
+    def test_simple_no_change(self) -> None:
+        """Test no change to required state"""
+        previous_required_state_map = {"type1": {"state_key"}}
+        request_required_state_map = previous_required_state_map
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # No changes
+        self.assertIsNone(to_persist)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_simple_add_type(self) -> None:
+        """Test adding a type to the config"""
+        previous_required_state_map = {"type1": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added a type so we should persist the changed required state
+        # config.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+
+        # We should see the new type added
+        self.assertEqual(added, StateFilter.from_types([("type2", "state_key")]))
+
+    def test_simple_add_state_key(self) -> None:
+        """Test adding a state key to the config"""
+        previous_required_state_map = {"type": {"state_key1"}}
+        request_required_state_map = {"type": {"state_key1", "state_key2"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added a type so we should persist the changed required state
+        # config.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.from_types([("type", "state_key2")]))
+
+    def test_simple_add_state_key_with_change(self) -> None:
+        """Test adding a state key to the config, and see some changed state"""
+        previous_required_state_map = {"type": {"state_key1"}}
+        request_required_state_map = {"type": {"state_key1", "state_key2"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type", "state_key"): "$event_id"},
+        )
+
+        # We've added a type so we should persist the changed required state
+        # config.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.from_types([("type", "state_key2")]))
+
+    def test_simple_remove_type_no_change(self) -> None:
+        """Test removing a type from the config when there are no matching state
+        deltas not cause the persisted required state config to change"""
+
+        previous_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've removed a type without a change, so nothing should change.
+        self.assertIsNone(to_persist)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_simple_remove_type_change(self) -> None:
+        """Test removing a type from the config when there are is a matching
+        state delta does cause the persisted required state config to change"""
+
+        previous_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type2", "state_key"): "$event_id"},
+        )
+
+        # We've removed a type and there's been a change to that state, so we
+        # persist the change to required state.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_type_wildcards_add(self) -> None:
+        """Test that changing the wildcard type"""
+
+        previous_required_state_map = {"type1": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}, "*": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added a wildcard, so we persist the change and request everything
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.all())
+
+    def test_type_wildcards_remove(self) -> None:
+        """Test that changing the wildcard type"""
+
+        previous_required_state_map = {"type1": {"state_key"}, "*": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added a wildcard, so we persist the change but don't request anything
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_wildcards_add(self) -> None:
+        """Test that adding a wildcard to a type works"""
+
+        previous_required_state_map = {"type1": {"state_key"}}
+        request_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added a wildcard, so we persist the change and request the state
+        # for that type
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.from_types([("type2", None)]))
+
+    def test_state_key_wildcards_remove(self) -> None:
+        """Test that removing a wildcard to a type works"""
+
+        previous_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
+        request_required_state_map = {"type1": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type2", "state_key"): "$event_id"},
+        )
+
+        # We've removed a wildcard, so we persist the change and request nothing
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_wildcards_remove_no_change(self) -> None:
+        """Test that removing a wildcard to a type works"""
+
+        previous_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
+        request_required_state_map = {"type1": {"state_key"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've removed a wildcard but there have been no matching state
+        # changes, so we don't persist anything.
+        self.assertIsNone(to_persist)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_remove_change_some(self) -> None:
+        """Test that removing state keys work when only some of the state keys
+        have changed"""
+
+        previous_required_state_map = {
+            "type1": {"state_key1", "state_key2", "state_key3"}
+        }
+        request_required_state_map = {"type1": {"state_key1"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type1", "state_key3"): "$event_id"},
+        )
+
+        # We've removed some state keys from the type, but only state_key3 was
+        # changed so only that one should be removed.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, {"type1": {"state_key1", "state_key2"}})
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_added_me(self) -> None:
+        """Test that adding state keys work when using "$ME"""
+
+        previous_required_state_map: Dict[str, Set[str]] = {}
+        request_required_state_map = {"type1": {"$ME"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added the $ME state key, so we should see a persist for that
+        # change.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.from_types([("type1", "@user:test")]))
+
+    def test_state_key_remove_me(self) -> None:
+        """Test that removing state keys work when using "$ME"""
+
+        previous_required_state_map = {"type1": {"$ME"}}
+        request_required_state_map: Dict[str, Set[str]] = {}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type1", "@user:test"): "$event_id"},
+        )
+
+        # We've removed the $ME state key and seen a state change for the user,
+        # so we should see a persist for that change.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_added_lazy(self) -> None:
+        """Test that adding state keys work when using "$LAZY"""
+
+        previous_required_state_map: Dict[str, Set[str]] = {}
+        request_required_state_map = {"type1": {"$LAZY"}}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={},
+        )
+
+        # We've added the $LAZY state key, but that gets handled separately so
+        # it should not appear in `added`
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
+
+    def test_state_key_remove_lazy(self) -> None:
+        """Test that removing state keys work when using "$LAZY"""
+
+        previous_required_state_map = {"type1": {"$LAZY"}}
+        request_required_state_map: Dict[str, Set[str]] = {}
+
+        to_persist, added = _required_state_changes(
+            user_id="@user:test",
+            previous_room_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=previous_required_state_map,
+            ),
+            room_sync_config=RoomSyncConfig(
+                timeline_limit=0,
+                required_state_map=request_required_state_map,
+            ),
+            state_deltas={("type1", "@user:test"): "$event_id"},
+        )
+
+        # We've removed the $LAZY state key so we persist it when there has been
+        # any state delta for the type.
+        assert to_persist is not None
+        self.assertDictEqual(to_persist, request_required_state_map)
+        self.assertEqual(added, StateFilter.none())
