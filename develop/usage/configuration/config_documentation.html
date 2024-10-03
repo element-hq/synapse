@@ -3898,7 +3898,12 @@ Defaults to <code>true</code>.</p>
 by running a <a href="../../workers.html#synapseappgeneric_worker"><code>generic_worker</code></a> and adding it's <a href="#worker_name"><code>worker_name</code></a> to
 a <code>federation_sender_instances</code> map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.</p>
+balanced across them. </p>
+<p>The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple <code>federation_sender_instances</code> are useful if there is a federation
+with multiple servers.</p>
 <p>This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
 and then started, to ensure that all instances are running with the same config (otherwise
