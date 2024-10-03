@@ -1504,6 +1504,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
     ) -> Dict[str, RoomsForUserSlidingSync]:
         """Get the sliding sync room entry for the given user and rooms."""
 
+        if not room_ids:
+            return {}
+
         def get_sliding_sync_room_for_user_batch_txn(
             txn: LoggingTransaction,
         ) -> Dict[str, RoomsForUserSlidingSync]:
