@@ -467,8 +467,10 @@ async def gather_optional_coroutines(
             )
         )
 
-        i = 0
-        return tuple(results[i] if coroutine else None for coroutine in coroutines)
+        results_iter = iter(results)
+        return tuple(
+            next(results_iter) if coroutine else None for coroutine in coroutines
+        )
     except defer.FirstError as dfe:
         # unwrap the error from defer.gatherResults.
 
