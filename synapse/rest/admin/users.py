@@ -1427,12 +1427,19 @@ class RedactUser(RestServlet):
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
+        if not user_id:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, f"Must provide a valid username: {user_id}"
+            )
+
         body = parse_json_object_from_request(request, allow_empty_body=True)
         rooms = body.get("rooms")
         if rooms is None:
             raise SynapseError(
                 HTTPStatus.BAD_REQUEST, "Must provide a value for rooms."
             )
+        if not isinstance(rooms, list):
+            raise SynapseError(HTTPStatus.BAD_REQUEST, "Rooms must be a list.")
 
         reason = body.get("reason")
         if reason:
@@ -1451,10 +1458,14 @@ class RedactUser(RestServlet):
                 )
 
         if not rooms:
-            rooms = await self._store.get_rooms_for_user(user_id)
+            current_rooms = list(await self._store.get_rooms_for_user(user_id))
+            banned_rooms = list(
+                await self._store.get_rooms_user_currently_banned_from(user_id)
+            )
+            rooms = current_rooms + banned_rooms
 
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, list(rooms), requester.serialize(), reason, limit
+            user_id, rooms, requester.serialize(), reason, limit
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
