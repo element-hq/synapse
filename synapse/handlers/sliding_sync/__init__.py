@@ -297,7 +297,13 @@ class SlidingSyncHandler:
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
-                missing_rooms = all_rooms - relevant_room_map.keys()
+                missing_rooms = {
+                    room_id
+                    for room_id in all_rooms - relevant_room_map.keys()
+                    # We only care about updates to *joined* rooms
+                    if room_membership_for_user_map[room_id].membership
+                    == Membership.JOIN
+                }
 
                 # We now just go and try fetching any events in the above rooms
                 # to see if anything has happened since the `from_token`.
