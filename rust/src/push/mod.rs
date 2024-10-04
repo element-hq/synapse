@@ -602,7 +602,8 @@ impl FilteredPushRules {
                 if self.msc4210_enabled
                     && (rule.rule_id == "global/override/.m.rule.contains_display_name"
                         || rule.rule_id == "global/content/.m.rule.contains_user_name"
-                        || rule.rule_id == "global/override/.m.rule.roomnotif") {
+                        || rule.rule_id == "global/override/.m.rule.roomnotif")
+                {
                     return false;
                 }
 
