@@ -51,7 +51,7 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Concatenate, Literal, ParamSpec
+from typing_extensions import Concatenate, Literal, ParamSpec, Unpack
 
 from twisted.internet import defer
 from twisted.internet.defer import CancelledError
@@ -406,54 +406,62 @@ def gather_results(  # type: ignore[misc]
 
 @overload
 async def gather_optional_coroutines(
-    coroutines: Tuple[Optional[Coroutine[Any, Any, T1]]],
+    *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]]]],
 ) -> Tuple[Optional[T1]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
-    coroutines: Tuple[
-        Optional[Coroutine[Any, Any, T1]],
-        Optional[Coroutine[Any, Any, T2]],
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+        ]
     ],
 ) -> Tuple[Optional[T1], Optional[T2]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
-    coroutines: Tuple[
-        Optional[Coroutine[Any, Any, T1]],
-        Optional[Coroutine[Any, Any, T2]],
-        Optional[Coroutine[Any, Any, T3]],
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+            Optional[Coroutine[Any, Any, T3]],
+        ]
     ],
 ) -> Tuple[Optional[T1], Optional[T2], Optional[T3]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
-    coroutines: Tuple[
-        Optional[Coroutine[Any, Any, T1]],
-        Optional[Coroutine[Any, Any, T2]],
-        Optional[Coroutine[Any, Any, T3]],
-        Optional[Coroutine[Any, Any, T4]],
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+            Optional[Coroutine[Any, Any, T3]],
+            Optional[Coroutine[Any, Any, T4]],
+        ]
     ],
 ) -> Tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4]]: ...
 
 
 @overload
 async def gather_optional_coroutines(
-    coroutines: Tuple[
-        Optional[Coroutine[Any, Any, T1]],
-        Optional[Coroutine[Any, Any, T2]],
-        Optional[Coroutine[Any, Any, T3]],
-        Optional[Coroutine[Any, Any, T4]],
-        Optional[Coroutine[Any, Any, T5]],
+    *coroutines: Unpack[
+        Tuple[
+            Optional[Coroutine[Any, Any, T1]],
+            Optional[Coroutine[Any, Any, T2]],
+            Optional[Coroutine[Any, Any, T3]],
+            Optional[Coroutine[Any, Any, T4]],
+            Optional[Coroutine[Any, Any, T5]],
+        ]
     ],
 ) -> Tuple[Optional[T1], Optional[T2], Optional[T3], Optional[T4], Optional[T5]]: ...
 
 
 async def gather_optional_coroutines(
-    coroutines: Tuple[Optional[Coroutine[Any, Any, T1]], ...],
+    *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]], ...]],
 ) -> Tuple[Optional[T1], ...]:
     try:
         results = await make_deferred_yieldable(

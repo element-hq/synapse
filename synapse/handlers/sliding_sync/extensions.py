@@ -163,13 +163,11 @@ class SlidingSyncExtensionHandler:
             receipts_response,
             typing_response,
         ) = await gather_optional_coroutines(
-            (
-                to_device_coro,
-                e2ee_coro,
-                account_data_coro,
-                receipts_coro,
-                typing_coro,
-            )
+            to_device_coro,
+            e2ee_coro,
+            account_data_coro,
+            receipts_coro,
+            typing_coro,
         )
 
         return SlidingSyncResult.Extensions(
