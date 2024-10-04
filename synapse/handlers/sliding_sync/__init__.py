@@ -49,6 +49,7 @@ from synapse.types import (
     Requester,
     SlidingSyncStreamToken,
     StateMap,
+    StrCollection,
     StreamKeyType,
     StreamToken,
 )
@@ -293,7 +294,6 @@ class SlidingSyncHandler:
             # to record rooms as having updates even if there might not actually
             # be anything new for the user (e.g. due to event filters, events
             # having happened after the user left, etc).
-            unsent_room_ids = []
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
@@ -305,15 +305,24 @@ class SlidingSyncHandler:
                 # TODO: Replace this with something faster. When we land the
                 # sliding sync tables that record the most recent event
                 # positions we can use that.
-                missing_event_map_by_room = (
-                    await self.store.get_room_events_stream_for_rooms(
-                        room_ids=missing_rooms,
-                        from_key=to_token.room_key,
-                        to_key=from_token.stream_token.room_key,
-                        limit=1,
+                unsent_room_ids: StrCollection
+                if await self.store.have_finished_sliding_sync_background_jobs():
+                    unsent_room_ids = await (
+                        self.store.get_rooms_that_have_updates_since_sliding_sync_table(
+                            room_ids=missing_rooms,
+                            from_key=from_token.stream_token.room_key,
+                        )
                     )
-                )
-                unsent_room_ids = list(missing_event_map_by_room)
+                else:
+                    missing_event_map_by_room = (
+                        await self.store.get_room_events_stream_for_rooms(
+                            room_ids=missing_rooms,
+                            from_key=to_token.room_key,
+                            to_key=from_token.stream_token.room_key,
+                            limit=1,
+                        )
+                    )
+                    unsent_room_ids = list(missing_event_map_by_room)
 
                 new_connection_state.rooms.record_unsent_rooms(
                     unsent_room_ids, from_token.stream_token.room_key
