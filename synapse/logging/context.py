@@ -37,6 +37,7 @@ import warnings
 from types import TracebackType
 from typing import (
     TYPE_CHECKING,
+    Any,
     Awaitable,
     Callable,
     Optional,
@@ -829,6 +830,32 @@ def run_in_background(
         # The function should have maintained the logcontext, so we can
         # optimise out the messing about
         return d
+
+    # The function may have reset the context before returning, so
+    # we need to restore it now.
+    ctx = set_current_context(current)
+
+    # The original context will be restored when the deferred
+    # completes, but there is nothing waiting for it, so it will
+    # get leaked into the reactor or some other function which
+    # wasn't expecting it. We therefore need to reset the context
+    # here.
+    #
+    # (If this feels asymmetric, consider it this way: we are
+    # effectively forking a new thread of execution. We are
+    # probably currently within a ``with LoggingContext()`` block,
+    # which is supposed to have a single entry and exit point. But
+    # by spawning off another deferred, we are effectively
+    # adding a new exit point.)
+    d.addBoth(_set_context_cb, ctx)
+    return d
+
+
+def run_coroutine_in_background(
+    coroutine: typing.Coroutine[Any, Any, R],
+) -> "defer.Deferred[R]":
+    current = current_context()
+    d = defer.ensureDeferred(coroutine)
 
     # The function may have reset the context before returning, so
     # we need to restore it now.
