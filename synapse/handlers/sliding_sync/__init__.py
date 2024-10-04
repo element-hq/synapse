@@ -1048,22 +1048,34 @@ class SlidingSyncHandler:
                     )
                 )
 
-        # Figure out the last bump event in the room
-        #
-        # By default, just choose the membership event position for any non-join membership
-        bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+        # Figure out the last bump event in the room. If the bump stamp hasn't
+        # changed we omit it from the response.
+        bump_stamp = None
+
+        always_return_bump_stamp = (
+            room_membership_for_user_at_to_token.membership != Membership.JOIN
+            or limited is not False
+            or initial
+        )
+
         # If we're joined to the room, we need to find the last bump event before the
         # `to_token`
         if room_membership_for_user_at_to_token.membership == Membership.JOIN:
-            # Try and get a bump stamp, if not we just fall back to the
-            # membership token.
+            # Try and get a bump stamp
             new_bump_stamp = await self._get_bump_stamp(
-                room_id, to_token, timeline_events
+                room_id,
+                to_token,
+                timeline_events,
+                check_non_timeline=always_return_bump_stamp,
             )
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
-        if bump_stamp < 0:
+        if bump_stamp is None and always_return_bump_stamp:
+            # By default, just choose the membership event position for any non-join membership
+            bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+
+        if bump_stamp is not None and bump_stamp < 0:
             # We never want to send down negative stream orderings, as you can't
             # sensibly compare positive and negative stream orderings (they have
             # different meanings).
@@ -1156,14 +1168,22 @@ class SlidingSyncHandler:
 
     @trace
     async def _get_bump_stamp(
-        self, room_id: str, to_token: StreamToken, timeline: List[EventBase]
+        self,
+        room_id: str,
+        to_token: StreamToken,
+        timeline: List[EventBase],
+        check_non_timeline: bool,
     ) -> Optional[int]:
-        """Get a bump stamp for the room, if we have a bump event
+        """Get a bump stamp for the room, if we have a bump event and it has
+        changed.
 
         Args:
-            room_id
-            to_token: The upper bound of token to return
-            timeline: The list of events we have fetched.
+            room_id to_token: The upper bound of token to return timeline: The
+                list of events we have fetched. limited: If the timeline was
+                limited.
+            check_non_timeline: Whether we need to check for bump stamp for
+                events before the timeline if we didn't find a bump stamp in
+                the timeline events.
         """
 
         # First check the timeline events we're returning to see if one of
@@ -1182,6 +1202,11 @@ class SlidingSyncHandler:
                 # instead we use the membership event position.
                 if new_bump_stamp > 0:
                     return new_bump_stamp
+
+        if not check_non_timeline:
+            # If we are not a limited sync, then we know the bump stamp can't
+            # have changed.
+            return None
 
         # We can quickly query for the latest bump event in the room using the
         # sliding sync tables.

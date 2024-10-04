@@ -158,6 +158,7 @@ class SlidingSyncResult:
                 name changes to mark the room as unread and bump it to the top. For
                 encrypted rooms, we just have to consider any activity as a bump because we
                 can't see the content and the client has to figure it out for themselves.
+                This is only included if there has been a change.
             joined_count: The number of users with membership of join, including the client's
                 own user ID. (same as sync `v2 m.joined_member_count`)
             invited_count: The number of users with membership of invite. (same as sync v2
@@ -193,7 +194,7 @@ class SlidingSyncResult:
         limited: Optional[bool]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         num_live: Optional[int]
-        bump_stamp: int
+        bump_stamp: Optional[int]
         joined_count: Optional[int]
         invited_count: Optional[int]
         notification_count: int
