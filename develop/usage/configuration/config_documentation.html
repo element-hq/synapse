@@ -4025,6 +4025,11 @@ localhost and 6379</p>
 <p><code>password</code>: Optional password if configured on the Redis instance.</p>
 </li>
 <li>
+<p><code>password_path</code>: Alternative to <code>password</code>, reading the password from an
+external file. The file should be a plain text file, containing only the
+password. Synapse reads the password from the given file once at startup.</p>
+</li>
+<li>
 <p><code>dbid</code>: Optional redis dbid if needs to connect to specific redis logical db.</p>
 </li>
 <li>
@@ -4044,6 +4049,7 @@ localhost and 6379</p>
 <p><em>Added in Synapse 1.78.0.</em></p>
 <p><em>Changed in Synapse 1.84.0: Added use_tls, certificate_file, private_key_file, ca_file and ca_path attributes</em></p>
 <p><em>Changed in Synapse 1.85.0: Added path option to use a local Unix socket</em></p>
+<p><em>Changed in Synapse 1.116.0: Added password_path</em></p>
 </li>
 </ul>
 <p>Example configuration:</p>
@@ -4051,7 +4057,8 @@ localhost and 6379</p>
   enabled: true
   host: localhost
   port: 6379
-  password: &lt;secret_password&gt;
+  password_path: &lt;path_to_the_password_file&gt;
+  # OR password: &lt;secret_password&gt;
   dbid: &lt;dbid&gt;
   #use_tls: True
   #certificate_file: &lt;path_to_the_certificate_file&gt;
