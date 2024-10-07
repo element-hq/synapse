@@ -1097,14 +1097,12 @@ class _MultipartParserProtocol(protocol.Protocol):
                         self.deferred.errback()
                     self.file_length += end - start
 
-            self.parser = multipart.MultipartParser(
-                boundary=self.boundary,
-                callbacks={
-                    "on_header_field": on_header_field,
-                    "on_header_value": on_header_value,
-                    "on_part_data": on_part_data,
-                },
-            )
+            callbacks: "multipart.multipart.MultipartCallbacks" = {
+                "on_header_field": on_header_field,
+                "on_header_value": on_header_value,
+                "on_part_data": on_part_data,
+            }
+            self.parser = multipart.MultipartParser(self.boundary, callbacks)
 
         self.total_length += len(incoming_data)
         if self.max_length is not None and self.total_length >= self.max_length:
