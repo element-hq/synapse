@@ -156,58 +156,31 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         self.room_id = self.helper.create_room_as(
             self.other_user, tok=self.other_user_tok, is_public=True
         )
-        self.report_path = (
-            f"/_matrix/client/unstable/org.matrix.msc4151/rooms/{self.room_id}/report"
-        )
+        self.report_path = f"/_matrix/client/v3/rooms/{self.room_id}/report"
 
-    @unittest.override_config(
-        {
-            "experimental_features": {"msc4151_enabled": True},
-        }
-    )
     def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
 
-    @unittest.override_config(
-        {
-            "experimental_features": {"msc4151_enabled": True},
-        }
-    )
     def test_no_reason(self) -> None:
         data = {"not_reason": "for typechecking"}
         self._assert_status(400, data)
 
-    @unittest.override_config(
-        {
-            "experimental_features": {"msc4151_enabled": True},
-        }
-    )
     def test_reason_nonstring(self) -> None:
         data = {"reason": 42}
         self._assert_status(400, data)
 
-    @unittest.override_config(
-        {
-            "experimental_features": {"msc4151_enabled": True},
-        }
-    )
     def test_reason_null(self) -> None:
         data = {"reason": None}
         self._assert_status(400, data)
 
-    @unittest.override_config(
-        {
-            "experimental_features": {"msc4151_enabled": True},
-        }
-    )
     def test_cannot_report_nonexistent_room(self) -> None:
         """
         Tests that we don't accept event reports for rooms which do not exist.
         """
         channel = self.make_request(
             "POST",
-            "/_matrix/client/unstable/org.matrix.msc4151/rooms/!bloop:example.org/report",
+            "/_matrix/client/v3/rooms/!bloop:example.org/report",
             {"reason": "i am very sad"},
             access_token=self.other_user_tok,
             shorthand=False,
