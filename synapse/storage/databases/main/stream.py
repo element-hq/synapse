@@ -751,6 +751,48 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if self._events_stream_cache.has_entity_changed(room_id, from_id)
         }
 
+    async def get_rooms_that_have_updates_since_sliding_sync_table(
+        self,
+        room_ids: StrCollection,
+        from_key: RoomStreamToken,
+    ) -> StrCollection:
+        """Return the rooms that probably have had updates since the given
+        token (changes that are > `from_key`)."""
+        # If the stream change cache is valid for the stream token, we can just
+        # use the result of that.
+        if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
+            return self._events_stream_cache.get_entities_changed(
+                room_ids, from_key.stream
+            )
+
+        def get_rooms_that_have_updates_since_sliding_sync_table_txn(
+            txn: LoggingTransaction,
+        ) -> StrCollection:
+            sql = """
+                SELECT room_id
+                FROM sliding_sync_joined_rooms
+                WHERE {clause}
+                    AND event_stream_ordering > ?
+            """
+
+            results: Set[str] = set()
+            for batch in batch_iter(room_ids, 1000):
+                clause, args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", batch
+                )
+
+                args.append(from_key.stream)
+                txn.execute(sql.format(clause=clause), args)
+
+                results.update(row[0] for row in txn)
+
+            return results
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_that_have_updates_since_sliding_sync_table",
+            get_rooms_that_have_updates_since_sliding_sync_table_txn,
+        )
+
     async def paginate_room_events_by_stream_ordering(
         self,
         *,
