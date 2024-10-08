@@ -1053,8 +1053,16 @@ class SlidingSyncHandler:
         bump_stamp = None
 
         always_return_bump_stamp = (
+            # We use the membership event position for any non-join
             room_membership_for_user_at_to_token.membership != Membership.JOIN
-            or limited is not False
+            # We didn't fetch any timeline events but we should still check for
+            # a bump_stamp that might be somewhere
+            or limited is None
+            # There might be a bump event somewhere before the timeline events
+            # that we fetched, that we didn't previously send down
+            or limited is True
+            # Always give the client some frame of reference if this is the
+            # first time they are seeing the room down the connection
             or initial
         )
 
