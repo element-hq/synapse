@@ -18,12 +18,10 @@
 #
 #
 import logging
-from typing import AbstractSet, Dict, Optional, Set, Tuple, Mapping
-from typing_extensions import TypedDict
+from typing import AbstractSet, Dict, Mapping, Optional, Set, Tuple
 from unittest.mock import patch
 
 import attr
-
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -44,7 +42,7 @@ from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, StreamToken, UserID, StateMap
+from synapse.types import JsonDict, StateMap, StreamToken, UserID
 from synapse.types.handlers.sliding_sync import SlidingSyncConfig
 from synapse.types.state import StateFilter
 from synapse.util import Clock
