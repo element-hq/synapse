@@ -1,1 +1,0 @@
-Improve performance of sliding sync connections that do not ask for any rooms.

@@ -1,1 +1,0 @@
-Sliding sync minor performance improvement by omitting unchanged data from incremental responses.

@@ -1,1 +1,0 @@
-In the response to `GET /_matrix/client/versions`, set the `unstable_features` flag for MSC4140 to `false` when server configuration disables support for delayed events.
