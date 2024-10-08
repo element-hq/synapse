@@ -1178,9 +1178,10 @@ class SlidingSyncHandler:
         changed.
 
         Args:
-            room_id to_token: The upper bound of token to return timeline: The
-                list of events we have fetched. limited: If the timeline was
-                limited.
+            room_id
+            to_token: The upper bound of token to return
+            timeline: The list of events we have fetched.
+            limited: If the timeline was limited.
             check_non_timeline: Whether we need to check for bump stamp for
                 events before the timeline if we didn't find a bump stamp in
                 the timeline events.
