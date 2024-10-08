@@ -757,7 +757,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         from_key: RoomStreamToken,
     ) -> StrCollection:
         """Return the rooms that probably have had updates since the given
-        token."""
+        token (changes that are > `from_key`)."""
         # If the stream change cache is valid for the stream token, we can just
         # use the result of that.
         if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
