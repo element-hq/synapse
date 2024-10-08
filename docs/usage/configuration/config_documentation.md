@@ -4368,7 +4368,13 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.
+balanced across them. 
+
+The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple `federation_sender_instances` are useful if there is a federation
+with multiple servers.
 
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
@@ -4518,6 +4524,9 @@ This setting has the following sub-options:
 * `path`: The full path to a local Unix socket file. **If this is used, `host` and
  `port` are ignored.** Defaults to `/tmp/redis.sock'
 * `password`: Optional password if configured on the Redis instance.
+* `password_path`: Alternative to `password`, reading the password from an
+   external file. The file should be a plain text file, containing only the
+   password. Synapse reads the password from the given file once at startup.
 * `dbid`: Optional redis dbid if needs to connect to specific redis logical db.
 * `use_tls`: Whether to use tls connection. Defaults to false.
 * `certificate_file`: Optional path to the certificate file
@@ -4531,13 +4540,16 @@ This setting has the following sub-options:
 
   _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
+  _Changed in Synapse 1.116.0: Added password\_path_
+
 Example configuration:
 ```yaml
 redis:
   enabled: true
   host: localhost
   port: 6379
-  password: <secret_password>
+  password_path: <path_to_the_password_file>
+  # OR password: <secret_password>
   dbid: <dbid>
   #use_tls: True
   #certificate_file: <path_to_the_certificate_file>

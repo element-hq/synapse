@@ -380,7 +380,7 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         )
 
     def test_forget_when_not_left(self) -> None:
-        """Tests that a user cannot not forgets a room that has not left."""
+        """Tests that a user cannot forget a room that they are still in."""
         self.get_failure(self.handler.forget(self.alice_ID, self.room_id), SynapseError)
 
     def test_nonlocal_room_user_action(self) -> None:

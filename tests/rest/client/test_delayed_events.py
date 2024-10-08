@@ -8,17 +8,33 @@ from parameterized import parameterized
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
-from synapse.rest.client import delayed_events, room
+from synapse.rest.client import delayed_events, room, versions
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
 
+from tests import unittest
 from tests.unittest import HomeserverTestCase
 
 PATH_PREFIX = "/_matrix/client/unstable/org.matrix.msc4140/delayed_events"
 
 _HS_NAME = "red"
 _EVENT_TYPE = "com.example.test"
+
+
+class DelayedEventsUnstableSupportTestCase(HomeserverTestCase):
+    servlets = [versions.register_servlets]
+
+    def test_false_by_default(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertFalse(channel.json_body["unstable_features"]["org.matrix.msc4140"])
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_true_if_enabled(self) -> None:
+        channel = self.make_request("GET", "/_matrix/client/versions")
+        self.assertEqual(channel.code, 200, channel.result)
+        self.assertTrue(channel.json_body["unstable_features"]["org.matrix.msc4140"])
 
 
 class DelayedEventsTestCase(HomeserverTestCase):

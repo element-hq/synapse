@@ -1,0 +1,1 @@
+Fix a rare bug introduced in v1.29.0 where invalidating a user's access token from a worker could raise an error.

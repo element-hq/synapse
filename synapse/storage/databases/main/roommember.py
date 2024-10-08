@@ -1499,6 +1499,57 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             "get_sliding_sync_room_for_user", get_sliding_sync_room_for_user_txn
         )
 
+    async def get_sliding_sync_room_for_user_batch(
+        self, user_id: str, room_ids: StrCollection
+    ) -> Dict[str, RoomsForUserSlidingSync]:
+        """Get the sliding sync room entry for the given user and rooms."""
+
+        if not room_ids:
+            return {}
+
+        def get_sliding_sync_room_for_user_batch_txn(
+            txn: LoggingTransaction,
+        ) -> Dict[str, RoomsForUserSlidingSync]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "m.room_id", room_ids
+            )
+            sql = f"""
+                SELECT m.room_id, m.sender, m.membership, m.membership_event_id,
+                    r.room_version,
+                    m.event_instance_name, m.event_stream_ordering,
+                    m.has_known_state,
+                    COALESCE(j.room_type, m.room_type),
+                    COALESCE(j.is_encrypted, m.is_encrypted)
+                FROM sliding_sync_membership_snapshots AS m
+                INNER JOIN rooms AS r USING (room_id)
+                LEFT JOIN sliding_sync_joined_rooms AS j ON (j.room_id = m.room_id AND m.membership = 'join')
+                WHERE m.forgotten = 0
+                    AND {clause}
+                    AND user_id = ?
+            """
+            args.append(user_id)
+            txn.execute(sql, args)
+
+            return {
+                row[0]: RoomsForUserSlidingSync(
+                    room_id=row[0],
+                    sender=row[1],
+                    membership=row[2],
+                    event_id=row[3],
+                    room_version_id=row[4],
+                    event_pos=PersistedEventPosition(row[5], row[6]),
+                    has_known_state=bool(row[7]),
+                    room_type=row[8],
+                    is_encrypted=row[9],
+                )
+                for row in txn
+            }
+
+        return await self.db_pool.runInteraction(
+            "get_sliding_sync_room_for_user_batch",
+            get_sliding_sync_room_for_user_batch_txn,
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(
