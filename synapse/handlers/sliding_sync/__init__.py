@@ -1066,7 +1066,7 @@ class SlidingSyncHandler:
                 room_id,
                 to_token,
                 timeline_events,
-                check_non_timeline=always_return_bump_stamp,
+                check_outside_timeline=always_return_bump_stamp,
             )
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
@@ -1172,7 +1172,7 @@ class SlidingSyncHandler:
         room_id: str,
         to_token: StreamToken,
         timeline: List[EventBase],
-        check_non_timeline: bool,
+        check_outside_timeline: bool,
     ) -> Optional[int]:
         """Get a bump stamp for the room, if we have a bump event and it has
         changed.
@@ -1182,7 +1182,7 @@ class SlidingSyncHandler:
             to_token: The upper bound of token to return
             timeline: The list of events we have fetched.
             limited: If the timeline was limited.
-            check_non_timeline: Whether we need to check for bump stamp for
+            check_outside_timeline: Whether we need to check for bump stamp for
                 events before the timeline if we didn't find a bump stamp in
                 the timeline events.
         """
@@ -1204,7 +1204,7 @@ class SlidingSyncHandler:
                 if new_bump_stamp > 0:
                     return new_bump_stamp
 
-        if not check_non_timeline:
+        if not check_outside_timeline:
             # If we are not a limited sync, then we know the bump stamp can't
             # have changed.
             return None
