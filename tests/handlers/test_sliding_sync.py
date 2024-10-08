@@ -3628,17 +3628,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 "state_key_lazy_add",
                 """
                 Test adding state keys work when using "$LAZY"
-
-                If a "$LAZY" has been added or removed we always update the
-                required state to what was requested for simplicity.
                 """,
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={},
                     request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
-                    # We've added the $LAZY state key, but that gets handled separately so
-                    # it should not appear in `added`
                     expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
                         {EventTypes.Member: {StateValues.LAZY}},
                         StateFilter.none(),
                     ),
@@ -3652,21 +3649,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 "state_key_lazy_remove",
                 """
                 Test removing state keys work when using "$LAZY"
-
-                If a "$LAZY" has been added or removed we always update the
-                required state to what was requested for simplicity.
                 """,
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
                     request_required_state_map={},
                     state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
                     expected_with_state_deltas=(
-                        # Remove `EventTypes.Member` since there's been a change to that
-                        # state, (persist the change to required state). That way next
-                        # time, they request `EventTypes.Member`, we see that we haven't
-                        # sent it before and send the new state. (if we were tracking
-                        # that we sent any other state, we should still keep track
-                        # that).
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
                         {},
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -3683,9 +3673,131 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     ),
                 ),
             ),
+            (
+                "type_wildcard_with_state_key_wildcard_to_explicit_state_keys",
+                """
+                Test switching from a wildcard ("*", "*") to explicit state keys
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If we were previously fetching everything ("*", "*"), always update the effective
+                    # room required state config to match the request. And since we we're previously
+                    # already fetching everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcard_with_explicit_state_keys_to_wildcard_state_key",
+                """
+                Test switching from explicit to wildcard state keys ("*", "*")
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # We've added a wildcard, so we persist the change and request everything
+                    expected_with_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                    expected_without_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcard_to_explicit_state_keys",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {StateValues.WILDCARD}},
+                    request_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And since we we're previously already fetching
+                    # everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcard_to_explicit_state_keys",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={"type1": {StateValues.WILDCARD}},
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And we need to request all of the state for that type
+                    # because we previously, only sent down a few keys.
+                    expected_with_state_deltas=(
+                        {"type1": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                ),
+            ),
         ]
     )
-    def test_required_state_changes(
+    def test_xxx(
         self,
         _test_label: str,
         _test_description: str,

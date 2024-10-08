@@ -1313,6 +1313,13 @@ def _required_state_changes(
     prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
     request_wildcard = request_required_state_map.get(StateValues.WILDCARD, set())
 
+    # If we were previously fetching everything ("*", "*"), always update the effective
+    # room required state config to match the request. And since we we're previously
+    # already fetching everything, we don't have to fetch anything now that they've
+    # narrowed.
+    if StateValues.WILDCARD in prev_wildcard:
+        return request_required_state_map, StateFilter.none()
+
     # If a event type wildcard has been added or removed we don't try and do
     # anything fancy, and instead always update the effective room required
     # state config to match the request.
@@ -1349,6 +1356,11 @@ def _required_state_changes(
         # Always update changes to include the newly added keys
         changes[event_type] = request_state_keys
 
+        if StateValues.WILDCARD in old_state_keys:
+            # We were previously fetching everything for this type, so we don't need to
+            # fetch anything new.
+            continue
+
         # Record the new state keys to fetch for this type.
         if StateValues.WILDCARD in request_state_keys:
             # If we have added a wildcard then we always just fetch everything.
@@ -1358,8 +1370,8 @@ def _required_state_changes(
                 if state_key == StateValues.ME:
                     added.append((event_type, user_id))
                 elif state_key == StateValues.LAZY:
-                    # We handle lazy loading separately, so don't need to
-                    # explicitly add anything here.
+                    # We handle lazy loading separately (outside this function), so
+                    # don't need to explicitly add anything here.
                     pass
                 else:
                     added.append((event_type, state_key))
@@ -1397,8 +1409,8 @@ def _required_state_changes(
         request_state_key_wildcard = StateValues.WILDCARD in request_state_keys
 
         if old_state_key_wildcard != request_state_key_wildcard:
-            # If a wildcard has been added or removed we always update the
-            # required state when any state with the same type has changed.
+            # If a state_key wildcard has been added or removed, we always update the
+            # effective room required state config to match the request.
             changes[event_type] = request_state_keys
             continue
 
@@ -1406,8 +1418,8 @@ def _required_state_changes(
         request_state_key_lazy = StateValues.LAZY in request_state_keys
 
         if old_state_key_lazy != request_state_key_lazy:
-            # If a "$LAZY" has been added or removed we always update the
-            # required state for simplicity.
+            # If a "$LAZY" has been added or removed we always update the effective room
+            # required state config to match the request.
             changes[event_type] = request_state_keys
             continue
 
