@@ -869,9 +869,6 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
-        # Extra membership that we need pull out of the current state because of
-        # lazy-loading room members.
-        added_membership_state_filter = StateFilter.none()
         # The requested `required_state_map` with the any lazy membership expanded and
         # `$ME` replaced with the user's ID. This allows us to see what membership we've
         # sent down to the client in the next request.
@@ -965,37 +962,12 @@ class SlidingSyncHandler:
                                 ).union(timeline_membership)
                             )
 
-                            # TODO
+                            # Update the required state filter so we pick up the new
+                            # membership
                             for user_id in timeline_membership:
                                 required_state_types.append(
                                     (EventTypes.Member, user_id)
                                 )
-
-                            # TODO
-                            if prev_room_sync_config is not None:
-                                previous_memberships_given_to_client = (
-                                    prev_room_sync_config.required_state_map.get(
-                                        EventTypes.Member, set()
-                                    )
-                                )
-
-                                # Find what new memberships we need to send down
-                                added_membership_user_ids: List[str] = []
-                                for user_id in (
-                                    timeline_membership
-                                    - previous_memberships_given_to_client
-                                ):
-                                    added_membership_user_ids.append(user_id)
-
-                                if added_membership_user_ids:
-                                    added_membership_state_filter = (
-                                        StateFilter.from_types(
-                                            [
-                                                (EventTypes.Member, user_id)
-                                                for user_id in added_membership_user_ids
-                                            ]
-                                        )
-                                    )
                         elif state_key == StateValues.ME:
                             num_others += 1
                             required_state_types.append((state_type, user.to_string()))
@@ -1068,18 +1040,6 @@ class SlidingSyncHandler:
             )
         else:
             assert from_bound is not None
-
-            # If we're lazy-loading membership, we need to fetch the current state for
-            # the new members we haven't seen before in the timeline. If we don't do
-            # this we'd only send down membership when it changes.
-            if added_membership_state_filter != StateFilter.none():
-                state_ids = await self.get_current_state_ids_at(
-                    room_id=room_id,
-                    room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                    state_filter=added_membership_state_filter,
-                    to_token=to_token,
-                )
-                room_state_delta_id_map.update(state_ids)
 
             if prev_room_sync_config is not None:
                 # Check if there are any changes to the required state config
@@ -1182,10 +1142,9 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        logger.info("asdf expanded_required_state_map %s", expanded_required_state_map)
-        logger.info("asdf changed_required_state_map %s", changed_required_state_map)
-
-        room_sync_required_state_map_to_persist = expanded_required_state_map
+        room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
+            expanded_required_state_map
+        )
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
 

@@ -546,7 +546,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             [EventTypes.Create, ""],
             [EventTypes.Member, StateValues.LAZY],
         ]
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
@@ -566,7 +568,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
         # Send a message so the room comes down sync.
-        self.helper.send(room_id1, "4", tok=user2_tok)
+        self.helper.send(room_id1, "7", tok=user2_tok)
+        self.helper.send(room_id1, "8", tok=user4_tok)
+        self.helper.send(room_id1, "9", tok=user4_tok)
 
         # Make another incremental Sliding Sync request
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
@@ -575,7 +579,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         # but since we've seen both memberships in the last sync, they shouldn't appear
         # again.
         self._assertRequiredStateIncludes(
-            response_body["rooms"][room_id1]["required_state"],
+            response_body["rooms"][room_id1].get("required_state", []),
             set(),
             exact=True,
         )
@@ -631,7 +635,9 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             [EventTypes.Create, ""],
             [EventTypes.Member, StateValues.LAZY],
         ]
-        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
 
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
