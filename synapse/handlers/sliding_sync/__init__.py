@@ -1103,14 +1103,15 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        unstable_expanded_timeline = False
         prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
-        # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
-        # that the `timeline_limit` has increased)
+
         room_sync_required_state_map_to_persist = room_sync_config.required_state_map
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
 
+        # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
+        # that the `timeline_limit` has increased)
+        unstable_expanded_timeline = False
         if ignore_timeline_bound:
             # FIXME: We signal the fact that we're sending down more events to
             # the client by setting `unstable_expanded_timeline` to true (see
