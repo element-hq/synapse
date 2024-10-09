@@ -484,12 +484,15 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             self.storage_controllers.state.get_current_state(room_id1)
         )
 
-        # Only user2 and user4 sent events in the last 3 events we see in the `timeline`
-        # but since we've seen user2 in the last sync (and their membership hasn't
-        # changed), we should only see user4 here.
+        # Only user2 and user4 sent events in the last 3 events we see in the `timeline`.
+        #
+        # FIXME: Ideally since we've seen user2 in the last sync (and their membership
+        # hasn't changed), we should only see user4 here but that is only an
+        # optimization.
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
+                state_map[(EventTypes.Member, user2_id)],
                 state_map[(EventTypes.Member, user4_id)],
             },
             exact=True,

@@ -872,14 +872,6 @@ class SlidingSyncHandler:
         # Extra membership that we need pull out of the current state because of
         # lazy-loading room members.
         added_membership_state_filter = StateFilter.none()
-        # The requested `required_state_map` with the any lazy membership expanded and
-        # `$ME` replaced with the user's ID. This allows us to see what membership we've
-        # sent down to the client in the next request.
-        #
-        # Make a copy so we can modify it. Still need to be careful to make a copy of
-        # the state key sets if we want to add/remove from them. We could make a deep
-        # copy but this saves us some work.
-        expanded_required_state_map = dict(room_sync_config.required_state_map)
         if room_membership_for_user_at_to_token.membership not in (
             Membership.INVITE,
             Membership.KNOCK,
@@ -954,17 +946,6 @@ class SlidingSyncHandler:
                                 for timeline_event in timeline_events:
                                     timeline_membership.add(timeline_event.sender)
 
-                            # Add an explicit entry for each user in the timeline
-                            expanded_required_state_map[EventTypes.Member] = (
-                                # Make a copy of the state key set so we can modify it
-                                # without affecting the original `required_state_map`
-                                set(
-                                    expanded_required_state_map.get(
-                                        EventTypes.Member, set()
-                                    )
-                                ).union(timeline_membership)
-                            )
-
                             # Update the required state filter so we pick up the new
                             # membership
                             for user_id in timeline_membership:
@@ -1001,18 +982,6 @@ class SlidingSyncHandler:
                         elif state_key == StateValues.ME:
                             num_others += 1
                             required_state_types.append((state_type, user.to_string()))
-                            # Replace `$ME` with the user's ID so we can deduplicate
-                            # when someone requests the same state with `$ME` or with
-                            # their user ID.
-                            expanded_required_state_map[EventTypes.Member] = (
-                                # Make a copy of the state key set so we can modify it
-                                # without affecting the original `required_state_map`
-                                set(
-                                    expanded_required_state_map.get(
-                                        EventTypes.Member, set()
-                                    )
-                                ).union({user.to_string()})
-                            )
                         else:
                             num_others += 1
                             required_state_types.append((state_type, state_key))
@@ -1183,9 +1152,7 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
-            expanded_required_state_map
-        )
+        room_sync_required_state_map_to_persist = room_sync_config.required_state_map
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
 
