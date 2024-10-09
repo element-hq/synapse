@@ -1439,8 +1439,9 @@ def _required_state_changes(
             # No change.
             continue
 
-        # Handle "$ME" values by adding "$ME" if the state key matches the user
-        # ID.
+        # If we see the `user_id`` as a state_key, also add "$ME" to the list of state
+        # that has changed to account for people requesting `required_state` with `$ME`
+        # or their user ID.
         if user_id in changed_state_keys:
             changed_state_keys.add(StateValues.ME)
 
