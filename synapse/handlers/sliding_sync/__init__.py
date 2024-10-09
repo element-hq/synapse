@@ -513,6 +513,8 @@ class SlidingSyncHandler:
 
             state_reset_out_of_room = True
 
+        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+
         # Determine whether we should limit the timeline to the token range.
         #
         # We should return historical messages (before token range) in the
@@ -561,7 +563,6 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-            prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
             if prev_room_sync_config is not None:
                 # Check if the timeline limit has increased, if so ignore the
                 # timeline bound and record the change (see "XXX: Odd behavior"
@@ -1102,8 +1103,6 @@ class SlidingSyncHandler:
             # moment a new message happens in the room it will get put into a
             # sensible order again.
             bump_stamp = 0
-
-        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
 
         room_sync_required_state_map_to_persist = room_sync_config.required_state_map
         if changed_required_state_map:
