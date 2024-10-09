@@ -3722,6 +3722,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3736,6 +3738,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"
