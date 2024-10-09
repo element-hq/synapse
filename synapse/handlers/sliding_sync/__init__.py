@@ -1004,7 +1004,6 @@ class SlidingSyncHandler:
                             # Replace `$ME` with the user's ID so we can deduplicate
                             # when someone requests the same state with `$ME` or with
                             # their user ID.
-                            # without affecting the original `required_state_map`
                             expanded_required_state_map[EventTypes.Member] = (
                                 # Make a copy of the state key set so we can modify it
                                 # without affecting the original `required_state_map`
