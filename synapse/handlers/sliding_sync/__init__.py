@@ -1087,9 +1087,9 @@ class SlidingSyncHandler:
                 changed_required_state_map, added_state_filter = (
                     _required_state_changes(
                         user.to_string(),
-                        prev_required_state_map=prev_room_sync_config.required_state_map,
-                        request_required_state_map=expanded_required_state_map,
-                        state_deltas=room_state_delta_id_map,
+                        prev_room_sync_config,
+                        room_sync_config,
+                        room_state_delta_id_map,
                     )
                 )
 
@@ -1182,7 +1182,9 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
-        room_sync_required_state_map_to_persist = expanded_required_state_map
+        room_sync_required_state_map_to_persist: Mapping[str, AbstractSet[str]] = (
+            expanded_required_state_map
+        )
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
 
@@ -1359,9 +1361,8 @@ class SlidingSyncHandler:
 
 def _required_state_changes(
     user_id: str,
-    *,
-    prev_required_state_map: Mapping[str, AbstractSet[str]],
-    request_required_state_map: Mapping[str, AbstractSet[str]],
+    previous_room_config: "RoomSyncConfig",
+    room_sync_config: RoomSyncConfig,
     state_deltas: StateMap[str],
 ) -> Tuple[Optional[Mapping[str, AbstractSet[str]]], StateFilter]:
     """Calculates the changes between the required state room config from the
@@ -1381,6 +1382,10 @@ def _required_state_changes(
         A 2-tuple of updated required state config and the state filter to use
         to fetch extra current state that we need to return.
     """
+
+    prev_required_state_map = previous_room_config.required_state_map
+    request_required_state_map = room_sync_config.required_state_map
+
     if prev_required_state_map == request_required_state_map:
         # There has been no change. Return immediately.
         return None, StateFilter.none()
