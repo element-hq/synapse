@@ -219,9 +219,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     members_changed = set(row.keys[1:])
                     self._invalidate_state_caches(room_id, members_changed)
-                    self._curr_state_delta_stream_cache.entity_has_changed(
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
                         room_id, token
-                    )  # type: ignore[attr-defined]
+                    )
                     for user_id in members_changed:
                         self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
@@ -241,9 +241,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     self._invalidate_caches_for_room_events(room_id)
                     self._invalidate_caches_for_room(room_id)
-                    self._curr_state_delta_stream_cache.entity_has_changed(
+                    self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
                         room_id, token
-                    )  # type: ignore[attr-defined]
+                    )
                     self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
