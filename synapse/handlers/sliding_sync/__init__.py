@@ -865,7 +865,7 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
-        # The requested `required_state_map` with the any lazy membership expanded and
+        # The requested `required_state_map` with the lazy membership expanded and
         # `$ME` replaced with the user's ID. This allows us to see what membership we've
         # sent down to the client in the next request.
         #
