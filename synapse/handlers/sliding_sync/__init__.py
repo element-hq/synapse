@@ -541,7 +541,6 @@ class SlidingSyncHandler:
         # or `limited` mean for clients that interpret them correctly. In future this
         # behavior is almost certainly going to change.
         #
-        # TODO: Also handle changes to `required_state`
         from_bound = None
         initial = True
         ignore_timeline_bound = False
@@ -572,8 +571,6 @@ class SlidingSyncHandler:
                     < room_sync_config.timeline_limit
                 ):
                     ignore_timeline_bound = True
-
-                # TODO: Check for changes in `required_state``
 
         log_kv(
             {
