@@ -1479,13 +1479,21 @@ def _required_state_changes(
     # config.
     for event_type, changed_state_keys in changed_types_to_state_keys.items():
         if event_type in new_required_state_map:
+            old_state_keys = prev_required_state_map.get(event_type, set())
+            request_state_keys = request_required_state_map.get(event_type, set())
+
             # We only remove state keys from the effective state if they've been
             # removed from the request *and* the state has changed. This ensures
-            # that if a client removes and then readds a state key, we only send
+            # that if a client removes and then re-adds a state key, we only send
             # down the associated current state event if its changed (rather than
             # sending down the same event twice).
+            invalidated = (
+                old_state_keys
+                - request_state_keys
+                - {StateValues.WILDCARD, StateValues.LAZY}
+            ) & changed_state_keys
             new_required_state_map[event_type] = (
-                new_required_state_map[event_type] - changed_state_keys
+                new_required_state_map[event_type] - invalidated
             )
 
     return new_required_state_map, added_state_filter
