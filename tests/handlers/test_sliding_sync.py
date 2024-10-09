@@ -3672,6 +3672,127 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "state_key_lazy_keep_previous_memberships_and_no_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response without any timeline events.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_keep_previous_memberships_with_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response with a new event from user4.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={
+                        EventTypes.Member: {StateValues.LAZY, "@user4:test"}
+                    },
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_expand_lazy_keep_previous_memberships",
+                """
+                Test TODO
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {"@user2:test", "@user3:test"}
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
                 "type_wildcard_with_state_key_wildcard_to_explicit_state_keys",
                 """
                 Test switching from a wildcard ("*", "*") to explicit state keys
@@ -3784,11 +3905,18 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # request. And we need to request all of the state for that type
                     # because we previously, only sent down a few keys.
                     expected_with_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
                         StateFilter.from_types([("type1", None)]),
                     ),
                     expected_without_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {
+                            "type1": {
+                                StateValues.WILDCARD,
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
                         StateFilter.from_types([("type1", None)]),
                     ),
                 ),
@@ -3804,14 +3932,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         # Without `state_deltas`
         changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.request_required_state_map,
-            ),
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
             state_deltas={},
         )
 
@@ -3829,14 +3951,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         # With `state_deltas`
         changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.request_required_state_map,
-            ),
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
             state_deltas=test_parameters.state_deltas,
         )
 

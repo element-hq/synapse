@@ -869,6 +869,8 @@ class SlidingSyncHandler:
         #
         # Calculate the `StateFilter` based on the `required_state` for the room
         required_state_filter = StateFilter.none()
+        # Extra membership that we need pull out of the current state because of
+        # lazy-loading room members.
         added_membership_state_filter = StateFilter.none()
         # The requested `required_state_map` with the any lazy membership expanded and
         # `$ME` replaced with the user's ID. This allows us to see what membership we've
@@ -1180,6 +1182,9 @@ class SlidingSyncHandler:
             # sensible order again.
             bump_stamp = 0
 
+        logger.info("asdf expanded_required_state_map %s", expanded_required_state_map)
+        logger.info("asdf changed_required_state_map %s", changed_required_state_map)
+
         room_sync_required_state_map_to_persist = expanded_required_state_map
         if changed_required_state_map:
             room_sync_required_state_map_to_persist = changed_required_state_map
@@ -1379,9 +1384,35 @@ def _required_state_changes(
         A 2-tuple of updated required state config and the state filter to use
         to fetch extra current state that we need to return.
     """
+
     if prev_required_state_map == request_required_state_map:
         # There has been no change. Return immediately.
         return None, StateFilter.none()
+
+    # Convert the list of state_deltas to map from type to state_keys that have
+    # changed.
+    changed_types_to_state_keys: Dict[str, Set[str]] = {}
+    for event_type, state_key in state_deltas:
+        changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
+
+    new_required_state_map: Dict[str, Set[str]] = {}
+    for event_type in (
+        prev_required_state_map.keys() | request_required_state_map.keys()
+    ):
+        old_state_keys = prev_required_state_map.get(event_type, set())
+        changed_state_keys = changed_types_to_state_keys.get(event_type, set())
+
+        # We keep entries from the previous required state where the state hasn't
+        # changed. This way we can still keep track that we've already sent down
+        # the state to the client.
+        new_required_state_map[event_type] = request_required_state_map.get(
+            event_type, set()
+        ) | {
+            old_state_key
+            for old_state_key in old_state_keys
+            if old_state_key not in changed_state_keys
+            and old_state_key not in {StateValues.WILDCARD, StateValues.LAZY}
+        }
 
     prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
     request_wildcard = request_required_state_map.get(StateValues.WILDCARD, set())
@@ -1403,10 +1434,6 @@ def _required_state_changes(
         # Keys were only removed, so we don't have to fetch everything.
         return request_required_state_map, StateFilter.none()
 
-    # Contains updates to the required state map compared with the previous room
-    # config. This has the same format as `RoomSyncConfig.required_state`
-    changes: Dict[str, AbstractSet[str]] = {}
-
     # The set of types/state keys that we need to fetch and return to the
     # client. Passed to `StateFilter.from_types(...)`
     added: List[Tuple[str, Optional[str]]] = []
@@ -1425,9 +1452,6 @@ def _required_state_changes(
         if not request_state_keys - old_state_keys:
             # Nothing *added*, so we skip. Removals happen below.
             continue
-
-        # Always update changes to include the newly added keys
-        changes[event_type] = request_state_keys
 
         if StateValues.WILDCARD in old_state_keys:
             # We were previously fetching everything for this type, so we don't need to
@@ -1451,78 +1475,17 @@ def _required_state_changes(
 
     added_state_filter = StateFilter.from_types(added)
 
-    # Convert the list of state deltas to map from type to state_keys that have
-    # changed.
-    changed_types_to_state_keys: Dict[str, Set[str]] = {}
-    for event_type, state_key in state_deltas:
-        changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
-
     # Figure out what changes we need to apply to the effective required state
     # config.
     for event_type, changed_state_keys in changed_types_to_state_keys.items():
-        old_state_keys = prev_required_state_map.get(event_type, set())
-        request_state_keys = request_required_state_map.get(event_type, set())
+        if event_type in new_required_state_map:
+            # We only remove state keys from the effective state if they've been
+            # removed from the request *and* the state has changed. This ensures
+            # that if a client removes and then readds a state key, we only send
+            # down the associated current state event if its changed (rather than
+            # sending down the same event twice).
+            new_required_state_map[event_type] = (
+                new_required_state_map[event_type] - changed_state_keys
+            )
 
-        if old_state_keys == request_state_keys:
-            # No change.
-            continue
-
-        if request_state_keys - old_state_keys:
-            # We've expanded the set of state keys, so we just clobber the
-            # current set with the new set.
-            #
-            # We could also ensure that we keep entries where the state hasn't
-            # changed, but are no longer in the requested required state, but
-            # that's a sufficient edge case that we can ignore (as its only a
-            # performance optimization).
-            changes[event_type] = request_state_keys
-            continue
-
-        old_state_key_wildcard = StateValues.WILDCARD in old_state_keys
-        request_state_key_wildcard = StateValues.WILDCARD in request_state_keys
-
-        if old_state_key_wildcard != request_state_key_wildcard:
-            # If a state_key wildcard has been added or removed, we always update the
-            # effective room required state config to match the request.
-            changes[event_type] = request_state_keys
-            continue
-
-        old_state_key_lazy = StateValues.LAZY in old_state_keys
-        request_state_key_lazy = StateValues.LAZY in request_state_keys
-
-        if old_state_key_lazy != request_state_key_lazy:
-            # If a "$LAZY" has been added or removed we always update the effective room
-            # required state config to match the request.
-            changes[event_type] = request_state_keys
-            continue
-
-        # Handle "$ME" values by replacing state keys that match the user ID.
-        if user_id in changed_state_keys:
-            changed_state_keys.discard(user_id)
-            changed_state_keys.add(StateValues.ME)
-
-        # At this point there are no wildcards and no additions to the set of
-        # state keys requested, only deletions.
-        #
-        # We only remove state keys from the effective state if they've been
-        # removed from the request *and* the state has changed. This ensures
-        # that if a client removes and then readds a state key, we only send
-        # down the associated current state event if its changed (rather than
-        # sending down the same event twice).
-        invalidated = (old_state_keys - request_state_keys) & changed_state_keys
-        if invalidated:
-            changes[event_type] = old_state_keys - invalidated
-
-    if changes:
-        # Update the required state config based on the changes.
-        new_required_state_map = dict(prev_required_state_map)
-        for event_type, state_keys in changes.items():
-            if state_keys:
-                new_required_state_map[event_type] = state_keys
-            else:
-                # Remove entries with empty state keys.
-                new_required_state_map.pop(event_type, None)
-
-        return new_required_state_map, added_state_filter
-    else:
-        return None, added_state_filter
+    return new_required_state_map, added_state_filter

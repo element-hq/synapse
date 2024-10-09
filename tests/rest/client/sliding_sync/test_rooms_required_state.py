@@ -496,6 +496,185 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         )
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
+    def test_rooms_required_state_expand_lazy_loading_room_members_incremental_sync(
+        self,
+    ) -> None:
+        """
+        Test that when we expand the `required_state` to include lazy-loading room
+        members, it returns people relevant to the timeline.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+        self.helper.send(room_id1, "2", tok=user2_tok)
+        self.helper.send(room_id1, "3", tok=user2_tok)
+
+        # Make the Sliding Sync request *without* lazy loading for the room members
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send more timeline events into the room
+        self.helper.send(room_id1, "4", tok=user2_tok)
+        self.helper.send(room_id1, "5", tok=user4_tok)
+        self.helper.send(room_id1, "6", tok=user4_tok)
+
+        # Expand `required_state` and make an incremental Sliding Sync request *with*
+        # lazy-loading room members
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Create, ""],
+            [EventTypes.Member, StateValues.LAZY],
+        ]
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Only user2 and user4 sent events in the last 3 events we see in the `timeline`
+        # and we haven't seen any membership before this sync so we should see both
+        # users.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[(EventTypes.Member, user4_id)],
+            },
+            exact=True,
+        )
+        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+        # Send a message so the room comes down sync.
+        self.helper.send(room_id1, "4", tok=user2_tok)
+
+        # Make another incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # Only user2 and user4 sent events in the last 3 events we see in the `timeline`
+        # but since we've seen both memberships in the last sync, they shouldn't appear
+        # again.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            set(),
+            exact=True,
+        )
+        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_expand_retract_expand_lazy_loading_room_members_incremental_sync(
+        self,
+    ) -> None:
+        """
+        Test that when we expand the `required_state` to include lazy-loading room
+        members, it returns people relevant to the timeline.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+        self.helper.send(room_id1, "2", tok=user2_tok)
+        self.helper.send(room_id1, "3", tok=user2_tok)
+
+        # Make the Sliding Sync request *without* lazy loading for the room members
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send more timeline events into the room
+        self.helper.send(room_id1, "4", tok=user2_tok)
+        self.helper.send(room_id1, "5", tok=user4_tok)
+        self.helper.send(room_id1, "6", tok=user4_tok)
+
+        # Expand `required_state` and make an incremental Sliding Sync request *with*
+        # lazy-loading room members
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Create, ""],
+            [EventTypes.Member, StateValues.LAZY],
+        ]
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Only user2 and user4 sent events in the last 3 events we see in the `timeline`
+        # and we haven't seen any membership before this sync so we should see both
+        # users because we're lazy-loading the room members.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user2_id)],
+                state_map[(EventTypes.Member, user4_id)],
+            },
+            exact=True,
+        )
+
+        # Send a message so the room comes down sync.
+        self.helper.send(room_id1, "msg", tok=user4_tok)
+
+        # Retract `required_state` and make an incremental Sliding Sync request
+        # requesting a few memberships
+        sync_body["lists"]["foo-list"]["required_state"] = [
+            [EventTypes.Create, ""],
+            [EventTypes.Member, StateValues.ME],
+            [EventTypes.Member, user2_id],
+        ]
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # We've seen user2's membership in the last sync so we shouldn't see it here
+        # even though it's requested. We should only see user1's membership.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                state_map[(EventTypes.Member, user1_id)],
+            },
+            exact=True,
+        )
+
     def test_rooms_required_state_me(self) -> None:
         """
         Test `rooms.required_state` correctly handles $ME.
