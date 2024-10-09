@@ -18,9 +18,10 @@
 #
 #
 import logging
-from typing import AbstractSet, Dict, Optional, Set, Tuple
+from typing import AbstractSet, Dict, Mapping, Optional, Set, Tuple
 from unittest.mock import patch
 
+import attr
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -41,7 +42,7 @@ from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
-from synapse.types import JsonDict, StreamToken, UserID
+from synapse.types import JsonDict, StateMap, StreamToken, UserID
 from synapse.types.handlers.sliding_sync import SlidingSyncConfig
 from synapse.types.state import StateFilter
 from synapse.util import Clock
@@ -3218,400 +3219,634 @@ class SortRoomsTestCase(HomeserverTestCase):
         )
 
 
+@attr.s(slots=True, auto_attribs=True, frozen=True)
+class RequiredStateChangesTestParameters:
+    previous_required_state_map: Dict[str, Set[str]]
+    request_required_state_map: Dict[str, Set[str]]
+    state_deltas: StateMap[str]
+    expected_with_state_deltas: Tuple[
+        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+    ]
+    expected_without_state_deltas: Tuple[
+        Optional[Mapping[str, AbstractSet[str]]], StateFilter
+    ]
+
+
 class RequiredStateChangesTestCase(unittest.TestCase):
     """Test cases for `_required_state_changes`"""
 
-    def test_simple_no_change(self) -> None:
-        """Test no change to required state"""
-        previous_required_state_map = {"type1": {"state_key"}}
-        request_required_state_map = previous_required_state_map
+    @parameterized.expand(
+        [
+            (
+                "simple_no_change",
+                """Test no change to required state""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type1", "state_key"): "$event_id"},
+                    # No changes
+                    expected_with_state_deltas=(None, StateFilter.none()),
+                    expected_without_state_deltas=(None, StateFilter.none()),
+                ),
+            ),
+            (
+                "simple_add_type",
+                """Test adding a type to the config""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        # We should see the new type added
+                        StateFilter.from_types([("type2", "state_key")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        StateFilter.from_types([("type2", "state_key")]),
+                    ),
+                ),
+            ),
+            (
+                "simple_add_type_from_nothing",
+                """Test adding a type to the config when previously requesting nothing""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        # We should see the new types added
+                        StateFilter.from_types(
+                            [("type1", "state_key"), ("type2", "state_key")]
+                        ),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {"state_key"}},
+                        StateFilter.from_types(
+                            [("type1", "state_key"), ("type2", "state_key")]
+                        ),
+                    ),
+                ),
+            ),
+            (
+                "simple_add_state_key",
+                """Test adding a state key to the config""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1"}},
+                    request_required_state_map={"type": {"state_key1", "state_key2"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a key so we should persist the changed required state
+                        # config.
+                        {"type": {"state_key1", "state_key2"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type", "state_key2")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type": {"state_key1", "state_key2"}},
+                        StateFilter.from_types([("type", "state_key2")]),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_type",
+                """
+                Test removing a type from the config when there are a matching state
+                delta does cause the persisted required state config to change
 
-        to_persist, added = _required_state_changes(
+                Test removing a type from the config when there are no matching state
+                deltas does *not* cause the persisted required state config to change
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type2` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type2`, we see that we haven't sent it before
+                        # and send the new state. (we should still keep track that we've
+                        # sent `type1` before).
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type2` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type2` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_type_to_nothing",
+                """
+                Test removing a type from the config and no longer requesting any state
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {"state_key"},
+                    },
+                    request_required_state_map={},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type2` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type2`, we see that we haven't sent it before
+                        # and send the new state. (we should still keep track that we've
+                        # sent `type1` before).
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type2` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type2` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "simple_remove_state_key",
+                """
+                Test removing a state_key from the config
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1", "state_key2"}},
+                    request_required_state_map={"type": {"state_key1"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `(type, state_key2)` since there's been a change
+                        # to that state (persist the change to required state).
+                        # That way next time, they request `(type, state_key2)`, we see
+                        # that we haven't sent it before and send the new state. (we
+                        # should still keep track that we've sent `(type, state_key1)`
+                        # before).
+                        {"type": {"state_key1"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `(type, state_key2)` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `(type, state_key1)` and `(type,
+                        # state_key2)` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcards_add",
+                """
+                Test adding a wildcard type causes the persisted required state config
+                to change and we request everything.
+
+                If a event type wildcard has been added or removed we don't try and do
+                anything fancy, and instead always update the effective room required
+                state config to match the request.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key2"}},
+                    request_required_state_map={
+                        "type1": {"state_key2"},
+                        StateValues.WILDCARD: {"state_key"},
+                    },
+                    state_deltas={
+                        ("other_type", "state_key"): "$event_id",
+                    },
+                    # We've added a wildcard, so we persist the change and request everything
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
+                        StateFilter.all(),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key2"}, StateValues.WILDCARD: {"state_key"}},
+                        StateFilter.all(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcards_remove",
+                """
+                Test removing a wildcard type causes the persisted required state config
+                to change and request nothing.
+
+                If a event type wildcard has been added or removed we don't try and do
+                anything fancy, and instead always update the effective room required
+                state config to match the request.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key2"},
+                        StateValues.WILDCARD: {"state_key"},
+                    },
+                    request_required_state_map={"type1": {"state_key2"}},
+                    state_deltas={
+                        ("other_type", "state_key"): "$event_id",
+                    },
+                    # We've removed a type wildcard, so we persist the change but don't request anything
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcards_add",
+                """Test adding a wildcard state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"state_key"}},
+                    request_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {StateValues.WILDCARD},
+                    },
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    # We've added a wildcard state_key, so we persist the change and
+                    # request all of the state for that type
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type2", None)]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"state_key"}, "type2": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type2", None)]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcards_remove",
+                """Test removing a wildcard state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key"},
+                        "type2": {StateValues.WILDCARD},
+                    },
+                    request_required_state_map={"type1": {"state_key"}},
+                    state_deltas={("type2", "state_key"): "$event_id"},
+                    # We've removed a state_key wildcard, so we persist the change and
+                    # request nothing
+                    expected_with_state_deltas=(
+                        {"type1": {"state_key"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    # We've removed a state_key wildcard but there have been no matching
+                    # state changes, so no changes needed, just persist the
+                    # `request_required_state_map` as-is.
+                    expected_without_state_deltas=(
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_remove_some",
+                """
+                Test that removing state keys work when only some of the state keys have
+                changed
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={"type1": {"state_key1"}},
+                    state_deltas={("type1", "state_key3"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've removed some state keys from the type, but only state_key3 was
+                        # changed so only that one should be removed.
+                        {"type1": {"state_key1", "state_key2"}},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # No changes needed, just persist the
+                        # `request_required_state_map` as-is
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_add",
+                """
+                Test adding state keys work when using "$ME"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={"type1": {StateValues.ME}},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {StateValues.ME}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {StateValues.ME}},
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_remove",
+                """
+                Test removing state keys work when using "$ME"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {StateValues.ME}},
+                    request_required_state_map={},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type1` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type1`, we see that we haven't sent it before
+                        # and send the new state. (if we were tracking that we sent any
+                        # other state, we should still keep track that).
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type1` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type1` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_add",
+                """
+                Test adding state keys work when using "$LAZY"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {EventTypes.Member: {StateValues.LAZY}},
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_remove",
+                """
+                Test removing state keys work when using "$LAZY"
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    request_required_state_map={},
+                    state_deltas={(EventTypes.Member, "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # If a "$LAZY" has been added or removed we always update the
+                        # required state to what was requested for simplicity.
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `EventTypes.Member` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcard_with_state_key_wildcard_to_explicit_state_keys",
+                """
+                Test switching from a wildcard ("*", "*") to explicit state keys
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If we were previously fetching everything ("*", "*"), always update the effective
+                    # room required state config to match the request. And since we we're previously
+                    # already fetching everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            StateValues.WILDCARD: {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "type_wildcard_with_explicit_state_keys_to_wildcard_state_key",
+                """
+                Test switching from explicit to wildcard state keys ("*", "*")
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        StateValues.WILDCARD: {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={
+                        StateValues.WILDCARD: {StateValues.WILDCARD}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # We've added a wildcard, so we persist the change and request everything
+                    expected_with_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                    expected_without_state_deltas=(
+                        {StateValues.WILDCARD: {StateValues.WILDCARD}},
+                        StateFilter.all(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcard_to_explicit_state_keys",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {StateValues.WILDCARD}},
+                    request_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And since we we're previously already fetching
+                    # everything, we don't have to fetch anything now that they've
+                    # narrowed.
+                    expected_with_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        {
+                            "type1": {
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_wildcard_to_explicit_state_keys",
+                """Test switching from a wildcard to explicit state keys with a concrete type""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        "type1": {"state_key1", "state_key2", "state_key3"}
+                    },
+                    request_required_state_map={"type1": {StateValues.WILDCARD}},
+                    state_deltas={("type1", "state_key1"): "$event_id"},
+                    # If a state_key wildcard has been added or removed, we always
+                    # update the effective room required state config to match the
+                    # request. And we need to request all of the state for that type
+                    # because we previously, only sent down a few keys.
+                    expected_with_state_deltas=(
+                        {"type1": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {StateValues.WILDCARD}},
+                        StateFilter.from_types([("type1", None)]),
+                    ),
+                ),
+            ),
+        ]
+    )
+    def test_xxx(
+        self,
+        _test_label: str,
+        _test_description: str,
+        test_parameters: RequiredStateChangesTestParameters,
+    ) -> None:
+        # Without `state_deltas`
+        changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
             previous_room_config=RoomSyncConfig(
                 timeline_limit=0,
-                required_state_map=previous_required_state_map,
+                required_state_map=test_parameters.previous_required_state_map,
             ),
             room_sync_config=RoomSyncConfig(
                 timeline_limit=0,
-                required_state_map=request_required_state_map,
+                required_state_map=test_parameters.request_required_state_map,
             ),
             state_deltas={},
         )
 
-        # No changes
-        self.assertIsNone(to_persist)
-        self.assertEqual(added, StateFilter.none())
+        self.assertEqual(
+            changed_required_state_map,
+            test_parameters.expected_without_state_deltas[0],
+            "changed_required_state_map does not match (without state_deltas)",
+        )
+        self.assertEqual(
+            added_state_filter,
+            test_parameters.expected_without_state_deltas[1],
+            "added_state_filter does not match (without state_deltas)",
+        )
 
-    def test_simple_add_type(self) -> None:
-        """Test adding a type to the config"""
-        previous_required_state_map = {"type1": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
+        # With `state_deltas`
+        changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
             previous_room_config=RoomSyncConfig(
                 timeline_limit=0,
-                required_state_map=previous_required_state_map,
+                required_state_map=test_parameters.previous_required_state_map,
             ),
             room_sync_config=RoomSyncConfig(
                 timeline_limit=0,
-                required_state_map=request_required_state_map,
+                required_state_map=test_parameters.request_required_state_map,
             ),
-            state_deltas={},
+            state_deltas=test_parameters.state_deltas,
         )
 
-        # We've added a type so we should persist the changed required state
-        # config.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-
-        # We should see the new type added
-        self.assertEqual(added, StateFilter.from_types([("type2", "state_key")]))
-
-    def test_simple_add_state_key(self) -> None:
-        """Test adding a state key to the config"""
-        previous_required_state_map = {"type": {"state_key1"}}
-        request_required_state_map = {"type": {"state_key1", "state_key2"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
+        self.assertEqual(
+            changed_required_state_map,
+            test_parameters.expected_with_state_deltas[0],
+            "changed_required_state_map does not match (with state_deltas)",
         )
-
-        # We've added a type so we should persist the changed required state
-        # config.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.from_types([("type", "state_key2")]))
-
-    def test_simple_add_state_key_with_change(self) -> None:
-        """Test adding a state key to the config, and see some changed state"""
-        previous_required_state_map = {"type": {"state_key1"}}
-        request_required_state_map = {"type": {"state_key1", "state_key2"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type", "state_key"): "$event_id"},
+        self.assertEqual(
+            added_state_filter,
+            test_parameters.expected_with_state_deltas[1],
+            "added_state_filter does not match (with state_deltas)",
         )
-
-        # We've added a type so we should persist the changed required state
-        # config.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.from_types([("type", "state_key2")]))
-
-    def test_simple_remove_type_no_change(self) -> None:
-        """Test removing a type from the config when there are no matching state
-        deltas not cause the persisted required state config to change"""
-
-        previous_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've removed a type without a change, so nothing should change.
-        self.assertIsNone(to_persist)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_simple_remove_type_change(self) -> None:
-        """Test removing a type from the config when there are is a matching
-        state delta does cause the persisted required state config to change"""
-
-        previous_required_state_map = {"type1": {"state_key"}, "type2": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type2", "state_key"): "$event_id"},
-        )
-
-        # We've removed a type and there's been a change to that state, so we
-        # persist the change to required state.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_type_wildcards_add(self) -> None:
-        """Test that changing the wildcard type"""
-
-        previous_required_state_map = {"type1": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}, "*": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've added a wildcard, so we persist the change and request everything
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.all())
-
-    def test_type_wildcards_remove(self) -> None:
-        """Test that changing the wildcard type"""
-
-        previous_required_state_map = {"type1": {"state_key"}, "*": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've added a wildcard, so we persist the change but don't request anything
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_wildcards_add(self) -> None:
-        """Test that adding a wildcard to a type works"""
-
-        previous_required_state_map = {"type1": {"state_key"}}
-        request_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've added a wildcard, so we persist the change and request the state
-        # for that type
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.from_types([("type2", None)]))
-
-    def test_state_key_wildcards_remove(self) -> None:
-        """Test that removing a wildcard to a type works"""
-
-        previous_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
-        request_required_state_map = {"type1": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type2", "state_key"): "$event_id"},
-        )
-
-        # We've removed a wildcard, so we persist the change and request nothing
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_wildcards_remove_no_change(self) -> None:
-        """Test that removing a wildcard to a type works"""
-
-        previous_required_state_map = {"type1": {"state_key"}, "type2": {"*"}}
-        request_required_state_map = {"type1": {"state_key"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've removed a wildcard but there have been no matching state
-        # changes, so we don't persist anything.
-        self.assertIsNone(to_persist)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_remove_change_some(self) -> None:
-        """Test that removing state keys work when only some of the state keys
-        have changed"""
-
-        previous_required_state_map = {
-            "type1": {"state_key1", "state_key2", "state_key3"}
-        }
-        request_required_state_map = {"type1": {"state_key1"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type1", "state_key3"): "$event_id"},
-        )
-
-        # We've removed some state keys from the type, but only state_key3 was
-        # changed so only that one should be removed.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, {"type1": {"state_key1", "state_key2"}})
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_added_me(self) -> None:
-        """Test that adding state keys work when using "$ME"""
-
-        previous_required_state_map: Dict[str, Set[str]] = {}
-        request_required_state_map = {"type1": {"$ME"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've added the $ME state key, so we should see a persist for that
-        # change.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.from_types([("type1", "@user:test")]))
-
-    def test_state_key_remove_me(self) -> None:
-        """Test that removing state keys work when using "$ME"""
-
-        previous_required_state_map = {"type1": {"$ME"}}
-        request_required_state_map: Dict[str, Set[str]] = {}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type1", "@user:test"): "$event_id"},
-        )
-
-        # We've removed the $ME state key and seen a state change for the user,
-        # so we should see a persist for that change.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_added_lazy(self) -> None:
-        """Test that adding state keys work when using "$LAZY"""
-
-        previous_required_state_map: Dict[str, Set[str]] = {}
-        request_required_state_map = {"type1": {"$LAZY"}}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={},
-        )
-
-        # We've added the $LAZY state key, but that gets handled separately so
-        # it should not appear in `added`
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
-
-    def test_state_key_remove_lazy(self) -> None:
-        """Test that removing state keys work when using "$LAZY"""
-
-        previous_required_state_map = {"type1": {"$LAZY"}}
-        request_required_state_map: Dict[str, Set[str]] = {}
-
-        to_persist, added = _required_state_changes(
-            user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=request_required_state_map,
-            ),
-            state_deltas={("type1", "@user:test"): "$event_id"},
-        )
-
-        # We've removed the $LAZY state key so we persist it when there has been
-        # any state delta for the type.
-        assert to_persist is not None
-        self.assertDictEqual(to_persist, request_required_state_map)
-        self.assertEqual(added, StateFilter.none())
