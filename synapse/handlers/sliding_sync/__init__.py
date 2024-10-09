@@ -1424,9 +1424,9 @@ def _required_state_changes(
             changes[event_type] = request_state_keys
             continue
 
-        # Handle "$ME" values by replacing state keys that match the user ID.
+        # Handle "$ME" values by adding "$ME" if the state key matches the user
+        # ID.
         if user_id in changed_state_keys:
-            changed_state_keys.discard(user_id)
             changed_state_keys.add(StateValues.ME)
 
         # At this point there are no wildcards and no additions to the set of

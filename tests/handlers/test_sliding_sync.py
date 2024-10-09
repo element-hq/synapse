@@ -3623,6 +3623,59 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "state_key_user_id_add",
+                """
+                Test adding state keys work when using your own user ID
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={},
+                    request_required_state_map={"type1": {"@user:test"}},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a type so we should persist the changed required state
+                        # config.
+                        {"type1": {"@user:test"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type1": {"@user:test"}},
+                        StateFilter.from_types([("type1", "@user:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_me_remove",
+                """
+                Test removing state keys work when using your own user ID
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type1": {"@user:test"}},
+                    request_required_state_map={},
+                    state_deltas={("type1", "@user:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `type1` since there's been a change to that state,
+                        # (persist the change to required state). That way next time,
+                        # they request `type1`, we see that we haven't sent it before
+                        # and send the new state. (if we were tracking that we sent any
+                        # other state, we should still keep track that).
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `type1` is no longer requested but since that state hasn't
+                        # changed, nothing should change (we should still keep track
+                        # that we've sent `type1` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
                 "state_key_lazy_add",
                 """
                 Test adding state keys work when using "$LAZY"
