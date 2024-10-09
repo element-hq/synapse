@@ -2500,6 +2500,76 @@ class EventsWorkerStore(SQLBaseStore):
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
 
+    async def get_events_sent_by_user_in_room(
+        self, user_id: str, room_id: str, limit: int, filter: Optional[List[str]] = None
+    ) -> Optional[List[str]]:
+        """
+        Get a list of event ids of events sent by the user in the specified room
+
+        Args:
+            user_id: user ID to search against
+            room_id: room ID of the room to search for events in
+            filter: type of events to filter for
+            limit: maximum number of event ids to return
+        """
+
+        def _get_events_by_user_in_room_txn(
+            txn: LoggingTransaction,
+            user_id: str,
+            room_id: str,
+            filter: Optional[List[str]],
+            batch_size: int,
+            offset: int,
+        ) -> Tuple[Optional[List[str]], int]:
+            if filter:
+                base_clause, args = make_in_list_sql_clause(
+                    txn.database_engine, "type", filter
+                )
+                clause = f"AND {base_clause}"
+                parameters = (user_id, room_id, *args, batch_size, offset)
+            else:
+                clause = ""
+                parameters = (user_id, room_id, batch_size, offset)
+
+            sql = f"""
+                    SELECT event_id FROM events
+                    WHERE sender = ? AND room_id = ?
+                    {clause}
+                    ORDER BY received_ts DESC
+                    LIMIT ?
+                    OFFSET ?
+                  """
+            txn.execute(sql, parameters)
+            res = txn.fetchall()
+            if res:
+                events = [row[0] for row in res]
+            else:
+                events = None
+
+            return events, offset + batch_size
+
+        offset = 0
+        batch_size = 100
+        if batch_size > limit:
+            batch_size = limit
+
+        selected_ids: List[str] = []
+        while offset < limit:
+            res, offset = await self.db_pool.runInteraction(
+                "get_events_by_user",
+                _get_events_by_user_in_room_txn,
+                user_id,
+                room_id,
+                filter,
+                batch_size,
+                offset,
+            )
+            if res:
+                selected_ids = selected_ids + res
+            else:
+                break
+        return selected_ids
+
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
         """Return if it's safe to use the sliding sync membership tables."""
 

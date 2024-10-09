@@ -761,6 +761,19 @@ email:
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
 ```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+Must be a positive value if set.
+
+Defaults to no duration (`null`), which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
+```
 
 ## Homeserver blocking
 Useful options for Synapse admins.
@@ -3709,6 +3722,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3723,6 +3738,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"
@@ -4355,7 +4371,13 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.
+balanced across them. 
+
+The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple `federation_sender_instances` are useful if there is a federation
+with multiple servers.
 
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
@@ -4505,6 +4527,9 @@ This setting has the following sub-options:
 * `path`: The full path to a local Unix socket file. **If this is used, `host` and
  `port` are ignored.** Defaults to `/tmp/redis.sock'
 * `password`: Optional password if configured on the Redis instance.
+* `password_path`: Alternative to `password`, reading the password from an
+   external file. The file should be a plain text file, containing only the
+   password. Synapse reads the password from the given file once at startup.
 * `dbid`: Optional redis dbid if needs to connect to specific redis logical db.
 * `use_tls`: Whether to use tls connection. Defaults to false.
 * `certificate_file`: Optional path to the certificate file
@@ -4518,13 +4543,16 @@ This setting has the following sub-options:
 
   _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
+  _Changed in Synapse 1.116.0: Added password\_path_
+
 Example configuration:
 ```yaml
 redis:
   enabled: true
   host: localhost
   port: 6379
-  password: <secret_password>
+  password_path: <path_to_the_password_file>
+  # OR password: <secret_password>
   dbid: <dbid>
   #use_tls: True
   #certificate_file: <path_to_the_certificate_file>

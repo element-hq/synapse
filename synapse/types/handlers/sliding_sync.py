@@ -158,6 +158,7 @@ class SlidingSyncResult:
                 name changes to mark the room as unread and bump it to the top. For
                 encrypted rooms, we just have to consider any activity as a bump because we
                 can't see the content and the client has to figure it out for themselves.
+                This may not be included if there hasn't been a change.
             joined_count: The number of users with membership of join, including the client's
                 own user ID. (same as sync `v2 m.joined_member_count`)
             invited_count: The number of users with membership of invite. (same as sync v2
@@ -193,7 +194,7 @@ class SlidingSyncResult:
         limited: Optional[bool]
         # Only optional because it won't be included for invite/knock rooms with `stripped_state`
         num_live: Optional[int]
-        bump_stamp: int
+        bump_stamp: Optional[int]
         joined_count: Optional[int]
         invited_count: Optional[int]
         notification_count: int
@@ -675,7 +676,7 @@ class HaveSentRoomFlag(Enum):
     LIVE = "live"
 
 
-T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken)
+T = TypeVar("T", str, RoomStreamToken, MultiWriterStreamToken, int)
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
@@ -823,6 +824,7 @@ class PerConnectionState:
 
     rooms: RoomStatusMap[RoomStreamToken] = attr.Factory(RoomStatusMap)
     receipts: RoomStatusMap[MultiWriterStreamToken] = attr.Factory(RoomStatusMap)
+    account_data: RoomStatusMap[int] = attr.Factory(RoomStatusMap)
 
     room_configs: Mapping[str, RoomSyncConfig] = attr.Factory(dict)
 
@@ -833,6 +835,7 @@ class PerConnectionState:
         return MutablePerConnectionState(
             rooms=self.rooms.get_mutable(),
             receipts=self.receipts.get_mutable(),
+            account_data=self.account_data.get_mutable(),
             room_configs=ChainMap({}, room_configs),
         )
 
@@ -840,6 +843,7 @@ class PerConnectionState:
         return PerConnectionState(
             rooms=self.rooms.copy(),
             receipts=self.receipts.copy(),
+            account_data=self.account_data.copy(),
             room_configs=dict(self.room_configs),
         )
 
@@ -853,6 +857,7 @@ class MutablePerConnectionState(PerConnectionState):
 
     rooms: MutableRoomStatusMap[RoomStreamToken]
     receipts: MutableRoomStatusMap[MultiWriterStreamToken]
+    account_data: MutableRoomStatusMap[int]
 
     room_configs: typing.ChainMap[str, RoomSyncConfig]
 
@@ -860,6 +865,7 @@ class MutablePerConnectionState(PerConnectionState):
         return (
             bool(self.rooms.get_updates())
             or bool(self.receipts.get_updates())
+            or bool(self.account_data.get_updates())
             or bool(self.get_room_config_updates())
         )
 
