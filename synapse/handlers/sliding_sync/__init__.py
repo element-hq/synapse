@@ -1432,12 +1432,6 @@ def _required_state_changes(
         request_state_keys = request_required_state_map.get(event_type, set())
         changed_state_keys = changed_types_to_state_keys.get(event_type, set())
 
-        invalidated_state_keys = (
-            old_state_keys
-            - request_state_keys
-            - {StateValues.WILDCARD, StateValues.LAZY}
-        ) & changed_state_keys
-
         if old_state_keys == request_state_keys:
             # No change to this type
             continue
@@ -1446,9 +1440,20 @@ def _required_state_changes(
             # Nothing *added*, so we skip. Removals happen below.
             continue
 
+        # We only remove state keys from the effective state if they've been
+        # removed from the request *and* the state has changed. This ensures
+        # that if a client removes and then re-adds a state key, we only send
+        # down the associated current state event if its changed (rather than
+        # sending down the same event twice).
+        invalidated_state_keys = (
+            old_state_keys - request_state_keys
+        ) & changed_state_keys
+
         # Always update changes to include the newly added keys
         changes[event_type] = request_state_keys | (
-            old_state_keys - invalidated_state_keys
+            # Wildcard and lazy state keys are not sticky from previous requests
+            (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
+            - invalidated_state_keys
         )
 
         if StateValues.WILDCARD in old_state_keys:
@@ -1482,15 +1487,18 @@ def _required_state_changes(
         old_state_keys = prev_required_state_map.get(event_type, set())
         request_state_keys = request_required_state_map.get(event_type, set())
 
-        invalidated_state_keys = (
-            old_state_keys
-            - request_state_keys
-            - {StateValues.WILDCARD, StateValues.LAZY}
-        ) & changed_state_keys
-
         if old_state_keys == request_state_keys:
             # No change.
             continue
+
+        # We only remove state keys from the effective state if they've been
+        # removed from the request *and* the state has changed. This ensures
+        # that if a client removes and then re-adds a state key, we only send
+        # down the associated current state event if its changed (rather than
+        # sending down the same event twice).
+        invalidated_state_keys = (
+            old_state_keys - request_state_keys
+        ) & changed_state_keys
 
         if request_state_keys - old_state_keys:
             # We've expanded the set of state keys, so we just clobber the
@@ -1501,7 +1509,9 @@ def _required_state_changes(
             # that's a sufficient edge case that we can ignore (as its only a
             # performance optimization).
             changes[event_type] = request_state_keys | (
-                old_state_keys - invalidated_state_keys
+                # Wildcard and lazy state keys are not sticky from previous requests
+                (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
+                - invalidated_state_keys
             )
             continue
 

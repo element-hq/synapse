@@ -3835,24 +3835,22 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     request_required_state_map={},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=(
-                        # TODO
-                        {
-                            EventTypes.Member: {
-                                "@user3:test",
-                            }
-                        },
+                        # Remove `EventTypes.Member` since there's been a change to that
+                        # state, (persist the change to required state). That way next
+                        # time, they request `EventTypes.Member`, we see that we haven't
+                        # sent it before and send the new state. (if we were tracking
+                        # that we sent any other state, we should still keep track
+                        # that).
+                        {},
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
                     ),
                     expected_without_state_deltas=(
-                        # TODO
-                        {
-                            EventTypes.Member: {
-                                "@user2:test",
-                                "@user3:test",
-                            }
-                        },
+                        # `EventTypes.Member` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `EventTypes.Member` before).
+                        None,
                         # We don't need to request anything more if they are requesting
                         # less state now
                         StateFilter.none(),
@@ -4012,28 +4010,20 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # request. And we need to request all of the state for that type
                     # because we previously, only sent down a few keys.
                     expected_with_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
                         StateFilter.from_types([("type1", None)]),
                     ),
-                    # expected_with_state_deltas=(
-                    #     {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
-                    #     StateFilter.from_types([("type1", None)]),
-                    # ),
                     expected_without_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {
+                            "type1": {
+                                StateValues.WILDCARD,
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
                         StateFilter.from_types([("type1", None)]),
                     ),
-                    # expected_without_state_deltas=(
-                    #     {
-                    #         "type1": {
-                    #             StateValues.WILDCARD,
-                    #             "state_key1",
-                    #             "state_key2",
-                    #             "state_key3",
-                    #         }
-                    #     },
-                    #     StateFilter.from_types([("type1", None)]),
-                    # ),
                 ),
             ),
         ]
@@ -4056,11 +4046,6 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             changed_required_state_map,
             test_parameters.expected_without_state_deltas[0],
             "changed_required_state_map does not match (without state_deltas)",
-        )
-        logger.info("asdf actual added_state_filter: %s", added_state_filter)
-        logger.info(
-            "asdf expected added_state_filter: %s",
-            test_parameters.expected_with_state_deltas[1],
         )
         self.assertEqual(
             added_state_filter,
