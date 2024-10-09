@@ -963,13 +963,15 @@ class SlidingSyncHandler:
                                 ).union(timeline_membership)
                             )
 
-                            # TODO
+                            # Update the required state filter so we pick up the new
+                            # membership
                             for user_id in timeline_membership:
                                 required_state_types.append(
                                     (EventTypes.Member, user_id)
                                 )
 
-                            # TODO
+                            # Find what new memberships we need to send down for
+                            # incremental syncs
                             if prev_room_sync_config is not None:
                                 previous_memberships_given_to_client = (
                                     prev_room_sync_config.required_state_map.get(
