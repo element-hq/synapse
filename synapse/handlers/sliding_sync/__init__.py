@@ -1281,6 +1281,7 @@ class SlidingSyncHandler:
 
 def _required_state_changes(
     user_id: str,
+    *,
     previous_room_config: "RoomSyncConfig",
     room_sync_config: RoomSyncConfig,
     state_deltas: StateMap[str],
@@ -1433,7 +1434,7 @@ def _required_state_changes(
         #
         # We only remove state keys from the effective state if they've been
         # removed from the request *and* the state has changed. This ensures
-        # that if a client removes and then readds a state key, we only send
+        # that if a client removes and then re-adds a state key, we only send
         # down the associated current state event if its changed (rather than
         # sending down the same event twice).
         invalidated = (old_state_keys - request_state_keys) & changed_state_keys

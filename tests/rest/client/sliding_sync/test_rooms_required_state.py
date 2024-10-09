@@ -1125,5 +1125,4 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
-        # Send a message so the room comes down sync.
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
