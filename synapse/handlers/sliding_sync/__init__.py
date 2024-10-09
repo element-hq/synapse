@@ -1370,8 +1370,11 @@ def _required_state_changes(
                 if state_key == StateValues.ME:
                     added.append((event_type, user_id))
                 elif state_key == StateValues.LAZY:
-                    # We handle lazy loading separately (outside this function), so
-                    # don't need to explicitly add anything here.
+                    # We handle lazy loading separately (outside this function),
+                    # so don't need to explicitly add anything here.
+                    #
+                    # LAZY values should also be ignore for event types that are
+                    # not membership.
                     pass
                 else:
                     added.append((event_type, state_key))
@@ -1414,14 +1417,15 @@ def _required_state_changes(
             changes[event_type] = request_state_keys
             continue
 
-        old_state_key_lazy = StateValues.LAZY in old_state_keys
-        request_state_key_lazy = StateValues.LAZY in request_state_keys
+        if event_type == EventTypes.Member:
+            old_state_key_lazy = StateValues.LAZY in old_state_keys
+            request_state_key_lazy = StateValues.LAZY in request_state_keys
 
-        if old_state_key_lazy != request_state_key_lazy:
-            # If a "$LAZY" has been added or removed we always update the effective room
-            # required state config to match the request.
-            changes[event_type] = request_state_keys
-            continue
+            if old_state_key_lazy != request_state_key_lazy:
+                # If a "$LAZY" has been added or removed we always update the effective room
+                # required state config to match the request.
+                changes[event_type] = request_state_keys
+                continue
 
         # Handle "$ME" values by adding "$ME" if the state key matches the user
         # ID.
