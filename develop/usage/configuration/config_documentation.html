@@ -3340,6 +3340,8 @@ Supported algorithms are listed
 Required if <code>enabled</code> is set to true.</li>
 <li><code>subject_claim</code>: Name of the claim containing a unique identifier for the user.
 Optional, defaults to <code>sub</code>.</li>
+<li><code>display_name_claim</code>: Name of the claim containing the display name for the user. Optional.
+If provided, the display name will be set to the value of this claim upon first login.</li>
 <li><code>issuer</code>: The issuer to validate the &quot;iss&quot; claim against. Optional. If provided the
 &quot;iss&quot; claim will be required and validated for all JSON web tokens.</li>
 <li><code>audiences</code>: A list of audiences to validate the &quot;aud&quot; claim against. Optional.
@@ -3353,6 +3355,7 @@ validation will fail without configuring audiences.</li>
     secret: &quot;provided-by-your-issuer&quot;
     algorithm: &quot;provided-by-your-issuer&quot;
     subject_claim: &quot;name_of_claim&quot;
+    display_name_claim: &quot;name_of_claim&quot;
     issuer: &quot;provided-by-your-issuer&quot;
     audiences:
         - &quot;provided-by-your-issuer&quot;
