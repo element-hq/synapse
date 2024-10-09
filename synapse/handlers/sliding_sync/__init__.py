@@ -1298,8 +1298,9 @@ def _required_state_changes(
     only want to re-send that entry down sync if it has changed.
 
     Returns:
-        A 2-tuple of updated required state config and the state filter to use
-        to fetch extra current state that we need to return.
+        A 2-tuple of updated required state config (or None if there is no update)
+        and the state filter to use to fetch extra current state that we need to
+        return.
     """
 
     prev_required_state_map = previous_room_config.required_state_map
