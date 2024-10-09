@@ -1011,9 +1011,9 @@ class SlidingSyncHandler:
                 changed_required_state_map, added_state_filter = (
                     _required_state_changes(
                         user.to_string(),
-                        prev_room_sync_config,
-                        room_sync_config,
-                        room_state_delta_id_map,
+                        previous_room_config=prev_room_sync_config,
+                        room_sync_config=room_sync_config,
+                        state_deltas=room_state_delta_id_map,
                     )
                 )
 
