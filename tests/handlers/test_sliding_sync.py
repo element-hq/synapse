@@ -3926,7 +3926,15 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     request_required_state_map={EventTypes.Member: {"@user4:test"}},
                     state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
                     expected_with_state_deltas=(
-                        # TODO
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
                         {
                             EventTypes.Member: {
                                 "@user3:test",
@@ -3937,7 +3945,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
                     ),
                     expected_without_state_deltas=(
-                        # TODO
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
                         {
                             EventTypes.Member: {
                                 "@user2:test",
