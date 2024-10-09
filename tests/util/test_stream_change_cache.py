@@ -53,8 +53,8 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         # return True, whether it's a known entity or not.
         self.assertTrue(cache.has_entity_changed("user@foo.com", 0))
         self.assertTrue(cache.has_entity_changed("not@here.website", 0))
-        self.assertTrue(cache.has_entity_changed("user@foo.com", 3))
-        self.assertTrue(cache.has_entity_changed("not@here.website", 3))
+        self.assertTrue(cache.has_entity_changed("user@foo.com", 2))
+        self.assertTrue(cache.has_entity_changed("not@here.website", 2))
 
     def test_entity_has_changed_pops_off_start(self) -> None:
         """
@@ -76,9 +76,11 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertTrue("user@foo.com" not in cache._entity_to_key)
 
         self.assertEqual(
-            cache.get_all_entities_changed(3).entities, ["user@elsewhere.org"]
+            cache.get_all_entities_changed(2).entities,
+            ["bar@baz.net", "user@elsewhere.org"],
         )
-        self.assertFalse(cache.get_all_entities_changed(2).hit)
+        self.assertFalse(cache.get_all_entities_changed(1).hit)
+        self.assertTrue(cache.get_all_entities_changed(2).hit)
 
         # If we update an existing entity, it keeps the two existing entities
         cache.entity_has_changed("bar@baz.net", 5)
@@ -89,7 +91,8 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
             cache.get_all_entities_changed(3).entities,
             ["user@elsewhere.org", "bar@baz.net"],
         )
-        self.assertFalse(cache.get_all_entities_changed(2).hit)
+        self.assertFalse(cache.get_all_entities_changed(1).hit)
+        self.assertTrue(cache.get_all_entities_changed(2).hit)
 
     def test_get_all_entities_changed(self) -> None:
         """
@@ -114,7 +117,8 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         self.assertEqual(
             cache.get_all_entities_changed(3).entities, ["user@elsewhere.org"]
         )
-        self.assertFalse(cache.get_all_entities_changed(1).hit)
+        self.assertFalse(cache.get_all_entities_changed(0).hit)
+        self.assertTrue(cache.get_all_entities_changed(1).hit)
 
         # ... later, things gest more updates
         cache.entity_has_changed("user@foo.com", 5)
@@ -149,7 +153,7 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
         # With no entities, it returns True for the past, present, and False for
         # the future.
         self.assertTrue(cache.has_any_entity_changed(0))
-        self.assertTrue(cache.has_any_entity_changed(1))
+        self.assertFalse(cache.has_any_entity_changed(1))
         self.assertFalse(cache.has_any_entity_changed(2))
 
         # We add an entity

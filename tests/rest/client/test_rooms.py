@@ -4,7 +4,7 @@
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright 2017 Vector Creations Ltd
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -2289,6 +2289,106 @@ class RoomMessageFilterTestCase(RoomBase):
 
         chunk = channel.json_body["chunk"]
         self.assertEqual(len(chunk), 2, [event["content"] for event in chunk])
+
+
+class RoomDelayedEventTestCase(RoomBase):
+    """Tests delayed events."""
+
+    user_id = "@sid1:red"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = self.helper.create_room_as(self.user_id)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_invalid_event(self) -> None:
+        """Test sending a delayed event with invalid content."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+
+    def test_delayed_event_unsupported_by_default(self) -> None:
+        """Test that sending a delayed event is unsupported with the default config."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            "M_MAX_DELAY_UNSUPPORTED",
+            channel.json_body.get("org.matrix.msc4140.errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "1000"})
+    def test_delayed_event_exceeds_max_delay(self) -> None:
+        """Test that sending a delayed event fails if its delay is longer than allowed."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            "M_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("org.matrix.msc4140.errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_delayed_event_with_negative_delay(self) -> None:
+        """Test that sending a delayed event fails if its delay is negative."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=-2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.INVALID_PARAM, channel.json_body["errcode"], channel.json_body
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_message_event(self) -> None:
+        """Test sending a valid delayed message event."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_state_event(self) -> None:
+        """Test sending a valid delayed state event."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/state/m.room.topic/?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"topic": "This is a topic"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):

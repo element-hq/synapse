@@ -52,8 +52,6 @@ architecture via <https://packages.matrix.org/debian/>.
 
 To install the latest release:
 
-TODO UPDATE ALL THIS
-
 ```sh
 sudo apt install -y lsb-release wget apt-transport-https
 sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
@@ -316,7 +314,7 @@ sudo dnf group install "Development Tools"
 
 *Note: The term "RHEL" below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.*
 
-It's recommended to use the latest Python versions. 
+It's recommended to use the latest Python versions.
 
 RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.
 
@@ -346,7 +344,7 @@ dnf install python3.12 python3.12-devel
 ```
 Finally, install common prerequisites
 ```bash
-dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf 
+dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf
 dnf group install "Development Tools"
 ```
 ###### Using venv module instead of virtualenv command
@@ -355,7 +353,7 @@ It's recommended to use Python venv module directly rather than the virtualenv c
 * On RHEL 9, virtualenv is only available on [EPEL](https://docs.fedoraproject.org/en-US/epel/).
 * On RHEL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.
 
-Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI. 
+Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI.
 
 ```bash
 mkdir -p ~/synapse

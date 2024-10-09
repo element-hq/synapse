@@ -48,6 +48,7 @@ from synapse.metrics.background_process_metrics import (
     wrap_as_background_process,
 )
 from synapse.storage.databases.main.client_ips import DeviceLastConnectionInfo
+from synapse.storage.databases.main.roommember import EventIdMembership
 from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.types import (
     DeviceListUpdates,
@@ -222,7 +223,6 @@ class DeviceWorkerHandler:
         return changed
 
     @trace
-    @measure_func("device.get_user_ids_changed")
     @cancellable
     async def get_user_ids_changed(
         self, user_id: str, from_token: StreamToken
@@ -290,9 +290,11 @@ class DeviceWorkerHandler:
                 memberships_to_fetch.add(delta.prev_event_id)
 
         # Fetch all the memberships for the membership events
-        event_id_to_memberships = await self.store.get_membership_from_event_ids(
-            memberships_to_fetch
-        )
+        event_id_to_memberships: Mapping[str, Optional[EventIdMembership]] = {}
+        if memberships_to_fetch:
+            event_id_to_memberships = await self.store.get_membership_from_event_ids(
+                memberships_to_fetch
+            )
 
         joined_invited_knocked = (
             Membership.JOIN,
@@ -349,7 +351,6 @@ class DeviceWorkerHandler:
 
         return device_list_updates
 
-    @measure_func("_generate_sync_entry_for_device_list")
     async def generate_sync_entry_for_device_list(
         self,
         user_id: str,

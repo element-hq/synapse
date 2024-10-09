@@ -476,6 +476,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
 
         self._attempt_to_invalidate_cache("get_account_data_for_room", None)
         self._attempt_to_invalidate_cache("get_account_data_for_room_and_type", None)
+        self._attempt_to_invalidate_cache("get_tags_for_room", None)
         self._attempt_to_invalidate_cache("get_aliases_for_room", (room_id,))
         self._attempt_to_invalidate_cache("get_latest_event_ids_in_room", (room_id,))
         self._attempt_to_invalidate_cache("_get_forward_extremeties_for_room", None)
