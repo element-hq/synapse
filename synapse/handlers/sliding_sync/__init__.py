@@ -1439,6 +1439,11 @@ def _required_state_changes(
             # No change.
             continue
 
+        # Handle "$ME" values by adding "$ME" if the state key matches the user
+        # ID.
+        if user_id in changed_state_keys:
+            changed_state_keys.add(StateValues.ME)
+
         # We only remove state keys from the effective state if they've been
         # removed from the request *and* the state has changed. This ensures
         # that if a client removes and then re-adds a state key, we only send
@@ -1477,11 +1482,6 @@ def _required_state_changes(
                 changes[event_type] = request_state_keys
                 continue
 
-        # Handle "$ME" values by adding "$ME" if the state key matches the user
-        # ID.
-        if user_id in changed_state_keys:
-            changed_state_keys.add(StateValues.ME)
-
         # At this point there are no wildcards and no additions to the set of
         # state keys requested, only deletions.
         #
@@ -1490,11 +1490,8 @@ def _required_state_changes(
         # that if a client removes and then re-adds a state key, we only send
         # down the associated current state event if its changed (rather than
         # sending down the same event twice).
-        #
-        # TODO: Think about whether we need this anymore
-        invalidated = (old_state_keys - request_state_keys) & changed_state_keys
-        if invalidated:
-            changes[event_type] = old_state_keys - invalidated
+        if invalidated_state_keys:
+            changes[event_type] = old_state_keys - invalidated_state_keys
 
     if changes:
         # Update the required state config based on the changes.
