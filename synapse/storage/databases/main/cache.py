@@ -193,6 +193,13 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]
     ) -> None:
+        logger.info(
+            "asdf process_replication_rows %s %s %s %s",
+            stream_name,
+            instance_name,
+            token,
+            rows,
+        )
         if stream_name == EventsStream.NAME:
             for row in rows:
                 self._process_event_stream_row(token, row)
@@ -219,6 +226,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     members_changed = set(row.keys[1:])
                     self._invalidate_state_caches(room_id, members_changed)
+                    self._curr_state_delta_stream_cache.entity_has_changed(
+                        room_id, token
+                    )  # type: ignore[attr-defined]
                     for user_id in members_changed:
                         self._membership_stream_cache.entity_has_changed(user_id, token)  # type: ignore[attr-defined]
                 elif row.cache_func == PURGE_HISTORY_CACHE_NAME:
@@ -238,6 +248,9 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     room_id = row.keys[0]
                     self._invalidate_caches_for_room_events(room_id)
                     self._invalidate_caches_for_room(room_id)
+                    self._curr_state_delta_stream_cache.entity_has_changed(
+                        room_id, token
+                    )  # type: ignore[attr-defined]
                     self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
@@ -255,6 +268,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
     def _process_event_stream_row(self, token: int, row: EventsStreamRow) -> None:
         data = row.data
 
+        logger.info("asdf _process_event_stream_row %s", row)
+
         if row.type == EventsStreamEventRow.TypeId:
             assert isinstance(data, EventsStreamEventRow)
             self._invalidate_caches_for_event(
@@ -270,6 +285,8 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         elif row.type == EventsStreamCurrentStateRow.TypeId:
             assert isinstance(data, EventsStreamCurrentStateRow)
             self._curr_state_delta_stream_cache.entity_has_changed(data.room_id, token)  # type: ignore[attr-defined]
+
+            logger.info("asdf EventsStreamCurrentStateRow.TypeId %s", data)
 
             if data.type == EventTypes.Member:
                 self._attempt_to_invalidate_cache(
