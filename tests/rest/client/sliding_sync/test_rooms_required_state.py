@@ -1122,7 +1122,4 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
         # We should not see the room name again, as we have already sent that
         # down.
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id1)
-        )
         self.assertIsNone(response_body["rooms"][room_id1].get("required_state"))
