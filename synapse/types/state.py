@@ -617,6 +617,8 @@ class StateFilter:
         return False
 
     def __bool__(self) -> bool:
+        """Returns true if this state filter will match any state, or false if
+        this is the empty filter"""
         if self.include_others:
             return True
         return bool(self.types)
