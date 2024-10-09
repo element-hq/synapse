@@ -529,6 +529,93 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
         self.assertEqual(channel.json_body, {"custom_field": "new_Value"})
 
+        # Deleting the field should work.
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+            content={},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
+        )
+        self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_set_full_profile(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={"custom_field": "test", "displayname": "blah"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body, {"custom_field": "test", "displayname": "blah"}
+        )
+
+        # Updating with PATCH should work.
+        channel = self.make_request(
+            "PATCH",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={"custom_field": "new_Value", "extra_field": "value"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "custom_field": "new_Value",
+                "displayname": "blah",
+                "extra_field": "value",
+            },
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_non_string(self) -> None:
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={
+                "bool_field": True,
+                "array_field": ["test"],
+                "object_field": {"test": "test"},
+                "numeric_field": 1,
+            },
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {
+                "bool_field": True,
+                "array_field": ["test"],
+                "object_field": {"test": "test"},
+                "numeric_field": 1,
+            },
+        )
+
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(

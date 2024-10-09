@@ -12,10 +12,4 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Custom profile fields.
-CREATE TABLE profile_fields (
-    user_id TEXT NOT NULL,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL
-);
-
-CREATE UNIQUE INDEX profile_fields_user_name ON profile_fields (user_id, name);
+ALTER TABLE profiles ADD COLUMN fields JSONB;

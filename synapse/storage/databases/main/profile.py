@@ -20,6 +20,8 @@
 #
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
+from psycopg2.extras import Json
+
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import StoreError
 from synapse.storage._base import SQLBaseStore
@@ -30,7 +32,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, UserID, JsonValue
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -235,16 +237,13 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             A dictionary of custom profile fields.
         """
-        result = cast(
-            List[Tuple[str, str]],
-            await self.db_pool.simple_select_list(
-                table="profile_fields",
-                keyvalues={"user_id": user_id.to_string()},
-                retcols=("name", "value"),
-                desc="get_profile_fields",
-            ),
+        result = await self.db_pool.simple_select_one_onecol(
+            table="profiles",
+            keyvalues={"full_user_id": user_id.to_string()},
+            retcol="fields",
+            desc="get_profile_fields",
         )
-        return dict(result)
+        return result or {}
 
     async def create_profile(self, user_id: UserID) -> None:
         """
@@ -263,9 +262,9 @@ class ProfileWorkerStore(SQLBaseStore):
     def _check_profile_size(
         self, txn: LoggingTransaction, user_id: str, new_field_name: str, new_value: str
     ) -> None:
-        """
-        pass
-        """
+        # XXOXXXXXXXXXXX
+        return
+
         # Start with 2 bytes for the braces.
         total_bytes = 2
         # For each entry there are 4 quotes (2 each for key and value), 1 colon,
@@ -381,7 +380,7 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     async def set_profile_field(
-        self, user_id: UserID, field_name: str, new_value: str
+        self, user_id: UserID, field_name: str, new_value: JsonValue
     ) -> None:
         """
         Set a custom profile field for a user.
@@ -395,11 +394,15 @@ class ProfileWorkerStore(SQLBaseStore):
         def set_profile_field(txn: LoggingTransaction) -> None:
             self._check_profile_size(txn, user_id.to_string(), field_name, new_value)
 
-            self.db_pool.simple_upsert_txn(
-                txn,
-                table="profile_fields",
-                keyvalues={"user_id": user_id.to_string(), "name": field_name},
-                values={"value": new_value},
+            sql = """
+            INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, json_build_object(?, to_jsonb(?)))
+            ON CONFLICT (user_id)
+            DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
+            """
+            txn.execute(
+                sql,
+                # TODO Does new_value need to be canonical_json encoded?
+                (user_id.localpart, user_id.to_string(), field_name, Json(new_value)),
             )
 
         await self.db_pool.runInteraction("set_profile_field", set_profile_field)
@@ -412,11 +415,18 @@ class ProfileWorkerStore(SQLBaseStore):
             user_id: The user's ID.
             field_name: The name of the custom profile field.
         """
-        await self.db_pool.simple_delete(
-            table="profile_fields",
-            keyvalues={"user_id": user_id.to_string(), "name": field_name},
-            desc="delete_profile_field",
-        )
+
+        def delete_profile_field(txn: LoggingTransaction) -> None:
+            sql = """
+            UPDATE profiles SET fields = fields - ?
+            WHERE user_id = ?
+            """
+            txn.execute(
+                sql,
+                (field_name, user_id.localpart),
+            )
+
+        await self.db_pool.runInteraction("delete_profile_field", delete_profile_field)
 
 
 class ProfileStore(ProfileWorkerStore):

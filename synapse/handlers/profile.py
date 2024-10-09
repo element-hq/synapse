@@ -32,7 +32,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import JsonDict, Requester, UserID, create_requester
+from synapse.types import JsonDict, Requester, UserID, create_requester, JsonValue
 from synapse.util.caches.descriptors import cached
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -45,7 +45,6 @@ MAX_DISPLAYNAME_LEN = 256
 MAX_AVATAR_URL_LEN = 1000
 # Field name length is specced at 255, value is server controlled.
 MAX_CUSTOM_FIELD_LEN = 255
-MAX_CUSTOM_VALUE_LEN = 255
 
 
 class ProfileHandler:
@@ -462,7 +461,7 @@ class ProfileHandler:
         target_user: UserID,
         requester: Requester,
         field_name: str,
-        new_value: str,
+        new_value: JsonValue,
         by_admin: bool = False,
         deactivation: bool = False,
     ) -> None:
@@ -481,11 +480,6 @@ class ProfileHandler:
 
         if not by_admin and target_user != requester.user:
             raise AuthError(400, "Cannot set another user's profile")
-
-        if not isinstance(new_value, str):
-            raise SynapseError(
-                400, f"'{field_name}' must be a string", errcode=Codes.INVALID_PARAM
-            )
 
         await self.store.set_profile_field(target_user, field_name, new_value)
 

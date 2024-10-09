@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Tuple
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import Codes, SynapseError
-from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN, MAX_CUSTOM_VALUE_LEN
+from synapse.handlers.profile import MAX_CUSTOM_FIELD_LEN
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
@@ -290,17 +290,6 @@ class UnstableProfileRestServlet(RestServlet):
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
                 )
 
-            if not isinstance(new_value, str):
-                raise SynapseError(
-                    400,
-                    f"Invalid value for field: {field_name}",
-                    errcode=Codes.INVALID_PARAM,
-                )
-            if len(new_value) > MAX_CUSTOM_VALUE_LEN:
-                raise SynapseError(
-                    400, "Field value too long", errcode=Codes.INVALID_PARAM
-                )
-
         propagate = _read_propagate(self.hs, request)
 
         requester_suspended = (
@@ -346,17 +335,6 @@ class UnstableProfileRestServlet(RestServlet):
             if len(field_name) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
-                )
-
-            if not isinstance(new_value, str):
-                raise SynapseError(
-                    400,
-                    f"Invalid value for field: {field_name}",
-                    errcode=Codes.INVALID_PARAM,
-                )
-            if len(new_value) > MAX_CUSTOM_VALUE_LEN:
-                raise SynapseError(
-                    400, "Field value too long", errcode=Codes.INVALID_PARAM
                 )
 
         propagate = _read_propagate(self.hs, request)
@@ -463,11 +441,6 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(
                 400, f"Missing key '{field_name}'", errcode=Codes.MISSING_PARAM
             )
-
-        if not isinstance(new_value, str):
-            raise SynapseError(400, "Invalid value", errcode=Codes.INVALID_PARAM)
-        if len(new_value) > MAX_CUSTOM_VALUE_LEN:
-            raise SynapseError(400, "Field value too long", errcode=Codes.INVALID_PARAM)
 
         propagate = _read_propagate(self.hs, request)
 
