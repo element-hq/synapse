@@ -113,7 +113,7 @@ class JwtHandler:
 
         default_display_name = None
         if self.jwt_display_name_claim:
-            display_name_claim = claims.get(self.jwt_display_name_claim, None)
+            display_name_claim = claims.get(self.jwt_display_name_claim)
             if display_name_claim is not None:
                 default_display_name = display_name_claim
 
