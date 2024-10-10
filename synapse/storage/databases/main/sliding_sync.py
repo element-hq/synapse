@@ -386,8 +386,8 @@ class SlidingSyncStore(SQLBaseStore):
         required_state_map: Dict[int, Dict[str, Set[str]]] = {}
         for row in rows:
             state = required_state_map[row[0]] = {}
-            for event_type, state_keys in db_to_json(row[1]):
-                state[event_type] = set(state_keys)
+            for event_type, state_key in db_to_json(row[1]):
+                state.setdefault(event_type, set()).add(state_key)
 
         # Get all the room configs, looking up the required state from the map
         # above.
