@@ -70,6 +70,7 @@ class E2eKeysHandler:
         self.is_mine = hs.is_mine
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._notifier = hs.get_notifier()
 
         federation_registry = hs.get_federation_registry()
 
@@ -615,7 +616,7 @@ class E2eKeysHandler:
         3. Attempt to fetch fallback keys from the database.
 
         Args:
-            local_query: An iterable of tuples of (user ID, device ID, algorithm).
+            local_query: An iterable of tuples of (user ID, device ID, algorithm, number of keys to claim).
             always_include_fallback_keys: True to always include fallback keys.
 
         Returns:
@@ -629,6 +630,7 @@ class E2eKeysHandler:
         ]
 
         otk_results, not_found = await self.store.claim_e2e_one_time_keys(local_query)
+        self._notifier.notify_one_time_keys_claimed(otk_results.keys())
 
         # If the application services have not provided any keys via the C-S
         # API, query it directly for one-time keys.
@@ -639,6 +641,7 @@ class E2eKeysHandler:
                 appservice_results,
                 not_found,
             ) = await self._appservice_handler.claim_e2e_one_time_keys(not_found)
+            self._notifier.notify_one_time_keys_claimed(appservice_results.keys())
         else:
             appservice_results = {}
 
@@ -693,6 +696,7 @@ class E2eKeysHandler:
         # For each user that does not have a one-time keys available, see if
         # there is a fallback key.
         fallback_results = await self.store.claim_e2e_fallback_keys(fallback_query)
+        self._notifier.notify_one_time_keys_claimed(fallback_results.keys())
 
         # Return the results in order, each item from the input query should
         # only appear once in the combined list.
