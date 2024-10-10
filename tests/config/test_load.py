@@ -19,12 +19,22 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import tempfile
+from typing import Callable
+
 import yaml
+from parameterized import parameterized
 
 from synapse.config import ConfigError
+from synapse.config._base import RootConfig
 from synapse.config.homeserver import HomeServerConfig
 
 from tests.config.utils import ConfigFileTestCase
+
+try:
+    import hiredis
+except ImportError:
+    hiredis = None  # type: ignore
 
 
 class ConfigLoadingFileTestCase(ConfigFileTestCase):
@@ -116,3 +126,49 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self.add_lines_to_config(["trust_identity_server_for_password_resets: true"])
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    @parameterized.expand(
+        [
+            "turn_shared_secret_path: /does/not/exist",
+            "registration_shared_secret_path: /does/not/exist",
+            *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
+            * (hiredis is not None),
+        ]
+    )
+    def test_secret_files_missing(self, config_str: str) -> None:
+        self.generate_config()
+        self.add_lines_to_config(["", config_str])
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    @parameterized.expand(
+        [
+            (
+                "turn_shared_secret_path: {}",
+                lambda c: c.voip.turn_shared_secret,
+            ),
+            (
+                "registration_shared_secret_path: {}",
+                lambda c: c.registration.registration_shared_secret,
+            ),
+            *[
+                (
+                    "redis:\n  enabled: true\n  password_path: {}",
+                    lambda c: c.redis.redis_password,
+                )
+            ]
+            * (hiredis is not None),
+        ]
+    )
+    def test_secret_files_existing(
+        self, config_line: str, get_secret: Callable[[RootConfig], str]
+    ) -> None:
+        self.generate_config_and_remove_lines_containing("registration_shared_secret")
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            secret_file.write(b"53C237")
+
+            self.add_lines_to_config(["", config_line.format(secret_file.name)])
+            config = HomeServerConfig.load_config("", ["-c", self.config_file])
+
+            self.assertEqual(get_secret(config), "53C237")

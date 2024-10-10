@@ -1,1 +1,0 @@
-Fix performance of streams that don't change often.

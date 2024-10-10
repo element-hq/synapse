@@ -4,7 +4,7 @@
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright 2017 Vector Creations Ltd
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as

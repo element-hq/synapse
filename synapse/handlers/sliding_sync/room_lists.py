@@ -500,6 +500,16 @@ class SlidingSyncRoomLists:
                 # depending on the `required_state` requested (see below).
                 partial_state_rooms = await self.store.get_partial_rooms()
 
+                # Fetch any rooms that we have not already fetched from the database.
+                subscription_sliding_sync_rooms = (
+                    await self.store.get_sliding_sync_room_for_user_batch(
+                        user_id,
+                        sync_config.room_subscriptions.keys()
+                        - room_membership_for_user_map.keys(),
+                    )
+                )
+                room_membership_for_user_map.update(subscription_sliding_sync_rooms)
+
                 for (
                     room_id,
                     room_subscription,
@@ -507,16 +517,10 @@ class SlidingSyncRoomLists:
                     # Check if we have a membership for the room, but didn't pull it out
                     # above. This could be e.g. a leave that we don't pull out by
                     # default.
-                    current_room_entry = (
-                        await self.store.get_sliding_sync_room_for_user(
-                            user_id, room_id
-                        )
-                    )
+                    current_room_entry = room_membership_for_user_map.get(room_id)
                     if not current_room_entry:
                         # TODO: Handle rooms the user isn't in.
                         continue
-
-                    room_membership_for_user_map[room_id] = current_room_entry
 
                     all_rooms.add(room_id)
 
