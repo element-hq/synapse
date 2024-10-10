@@ -447,3 +447,6 @@ class ExperimentalConfig(Config):
 
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
+
+        # MSC4210: Remove legacy mentions
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)

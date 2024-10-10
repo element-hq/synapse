@@ -436,6 +436,7 @@ class BulkPushRuleEvaluator:
             self._related_event_match_enabled,
             event.room_version.msc3931_push_features,
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
+            self.hs.config.experimental.msc4210_enabled,
         )
 
         for uid, rules in rules_by_user.items():

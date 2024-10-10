@@ -60,6 +60,7 @@ fn bench_match_exact(b: &mut Bencher) {
         true,
         vec![],
         false,
+        false,
     )
     .unwrap();
 
@@ -104,6 +105,7 @@ fn bench_match_word(b: &mut Bencher) {
         Default::default(),
         true,
         vec![],
+        false,
         false,
     )
     .unwrap();
@@ -150,6 +152,7 @@ fn bench_match_word_miss(b: &mut Bencher) {
         true,
         vec![],
         false,
+        false,
     )
     .unwrap();
 
@@ -195,12 +198,14 @@ fn bench_eval_message(b: &mut Bencher) {
         true,
         vec![],
         false,
+        false,
     )
     .unwrap();
 
     let rules = FilteredPushRules::py_new(
         PushRules::new(Vec::new()),
         Default::default(),
+        false,
         false,
         false,
         false,
