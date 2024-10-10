@@ -405,7 +405,7 @@ class LoggingTransaction:
     def execute_values(
         self,
         sql: str,
-        values: Iterable[Iterable[Any]],
+        values: Collection[Iterable[Any]],
         template: Optional[str] = None,
         fetch: bool = True,
     ) -> List[Tuple]:
@@ -419,6 +419,10 @@ class LoggingTransaction:
         compose the query.
         """
         assert isinstance(self.database_engine, PostgresEngine)
+
+        # If there's no work to do, skip.
+        if not len(values):
+            return []
 
         if isinstance(self.database_engine, Psycopg2Engine):
             from psycopg2.extras import execute_values
@@ -2431,7 +2435,7 @@ class DatabasePool:
             values: for each row, a list of values in the same order as `keys`
         """
 
-        if isinstance(txn.database_engine, PostgresEngine):
+        if isinstance(txn.database_engine, Psycopg2Engine):
             # We use `execute_values` as it can be a lot faster than `execute_batch`,
             # but it's only available on postgres.
             sql = "DELETE FROM %s WHERE (%s) IN (VALUES ?)" % (

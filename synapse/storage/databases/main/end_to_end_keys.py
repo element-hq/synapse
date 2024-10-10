@@ -57,7 +57,7 @@ from synapse.storage.database import (
     make_tuple_in_list_sql_clause,
 )
 from synapse.storage.databases.main.cache import CacheInvalidationWorkerStore
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Psycopg2Engine
 from synapse.storage.util.id_generators import MultiWriterIdGenerator
 from synapse.types import JsonDict, JsonMapping
 from synapse.util import json_decoder, json_encoder
@@ -1134,7 +1134,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         """
         results: Dict[str, Dict[str, Dict[str, JsonDict]]] = {}
         missing: List[Tuple[str, str, str, int]] = []
-        if isinstance(self.database_engine, PostgresEngine):
+        if isinstance(self.database_engine, Psycopg2Engine):
             # If we can use execute_values we can use a single batch query
             # in autocommit mode.
             unfulfilled_claim_counts: Dict[Tuple[str, str, str], int] = {}
@@ -1197,7 +1197,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         Returns:
             A map of user ID -> a map device ID -> a map of key ID -> JSON.
         """
-        if isinstance(self.database_engine, PostgresEngine):
+        if isinstance(self.database_engine, Psycopg2Engine):
             return await self.db_pool.runInteraction(
                 "_claim_e2e_fallback_keys_bulk",
                 self._claim_e2e_fallback_keys_bulk_txn,
@@ -1230,7 +1230,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             SET used = used OR mark_as_used
             FROM claims
             WHERE (k.user_id, k.device_id, k.algorithm) = (claims.user_id, claims.device_id, claims.algorithm)
-            RETURNING k.user_id, k.device_id, k.algorithm, k.key_id, k.key_json;
+            RETURNING k.user_id, k.device_id, k.algorithm, k.key_id, k.key_json
         """
         claimed_keys = cast(
             List[Tuple[str, str, str, str, str]],
