@@ -936,6 +936,9 @@ class Notifier:
             for listener in listeners:
                 listener.callback(current_token)
 
+        # FIXME: How can we poke the replication so that other workers also see the
+        # one-time key change
+
 
 @attr.s(auto_attribs=True)
 class ReplicationNotifier:

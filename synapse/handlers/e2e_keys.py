@@ -837,6 +837,7 @@ class E2eKeysHandler:
             await self._upload_one_time_keys_for_user(
                 user_id, device_id, time_now, one_time_keys
             )
+            self._notifier.notify_one_time_keys_changed([user_id])
         else:
             log_kv(
                 {"message": "Did not update one_time_keys", "reason": "no keys given"}
@@ -853,6 +854,7 @@ class E2eKeysHandler:
                 }
             )
             await self.store.set_e2e_fallback_keys(user_id, device_id, fallback_keys)
+            self._notifier.notify_one_time_keys_changed([user_id])
         elif fallback_keys:
             log_kv({"message": "Did not update fallback_keys", "reason": "not a dict"})
         else:
