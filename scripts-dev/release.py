@@ -801,7 +801,7 @@ def get_repo_and_check_clean_checkout(
 
 
 def check_valid_gh_token(gh_token: Optional[str]) -> None:
-    """Check that if a github token is supplied its valid"""
+    """Check that a github token is valid, if supplied"""
 
     if not gh_token:
         # No github token supplied, so nothing to do.
