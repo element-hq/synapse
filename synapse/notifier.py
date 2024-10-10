@@ -902,13 +902,13 @@ class Notifier:
         for cb in self._lock_released_callback:
             cb(instance_name, lock_name, lock_key)
 
-    def notify_one_time_keys_claimed(
+    def notify_one_time_keys_changed(
         self,
         users: Union[StrCollection, Collection[UserID]],
     ) -> None:
         """
         Used by handlers to inform the notifier that a one-time key has been
-        claimed
+        claimed or uploaded
         """
         # Bail early if there is nothing to do
         if not users:

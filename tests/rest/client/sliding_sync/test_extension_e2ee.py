@@ -278,8 +278,8 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
                     test_device_id,
                     {
                         "fallback_keys": {
-                            "alg1:k1": "fallback_key1",
-                            "alg2:k2": "fallback_key2",
+                            "fallback_alg1:k1": "fallback_key1",
+                            "fallback_alg2:k2": "fallback_key2",
                         }
                     },
                 )
@@ -290,7 +290,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             )
             self.assertIncludes(
                 set(fallback_res),
-                {"alg1", "alg2"},
+                {"fallback_alg1", "fallback_alg2"},
                 exact=True,
                 message=str(fallback_res),
             )
@@ -298,7 +298,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
             # Claim one of those fallback keys
             self.get_success(
                 self.e2e_keys_handler.claim_local_one_time_keys(
-                    local_query=[(user1_id, test_device_id, "alg1", 1)],
+                    local_query=[(user1_id, test_device_id, "fallback_alg1", 1)],
                     always_include_fallback_keys=False,
                 )
             )
@@ -358,7 +358,7 @@ class SlidingSyncE2eeExtensionTestCase(SlidingSyncBase):
                         "device_unused_fallback_key_types", []
                     )
                 ),
-                {"alg2"},
+                {"fallback_alg2"},
                 exact=True,
                 message=str(
                     channel.json_body["extensions"]["e2ee"].get(

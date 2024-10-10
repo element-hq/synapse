@@ -630,7 +630,7 @@ class E2eKeysHandler:
         ]
 
         otk_results, not_found = await self.store.claim_e2e_one_time_keys(local_query)
-        self._notifier.notify_one_time_keys_claimed(otk_results.keys())
+        self._notifier.notify_one_time_keys_changed(otk_results.keys())
 
         # If the application services have not provided any keys via the C-S
         # API, query it directly for one-time keys.
@@ -641,7 +641,7 @@ class E2eKeysHandler:
                 appservice_results,
                 not_found,
             ) = await self._appservice_handler.claim_e2e_one_time_keys(not_found)
-            self._notifier.notify_one_time_keys_claimed(appservice_results.keys())
+            self._notifier.notify_one_time_keys_changed(appservice_results.keys())
         else:
             appservice_results = {}
 
@@ -696,7 +696,7 @@ class E2eKeysHandler:
         # For each user that does not have a one-time keys available, see if
         # there is a fallback key.
         fallback_results = await self.store.claim_e2e_fallback_keys(fallback_query)
-        self._notifier.notify_one_time_keys_claimed(fallback_results.keys())
+        self._notifier.notify_one_time_keys_changed(fallback_results.keys())
 
         # Return the results in order, each item from the input query should
         # only appear once in the combined list.
