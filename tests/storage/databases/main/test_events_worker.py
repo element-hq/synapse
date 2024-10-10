@@ -20,7 +20,7 @@
 #
 import json
 from contextlib import contextmanager
-from typing import Generator, List, Tuple
+from typing import Generator, List, Set, Tuple
 from unittest import mock
 
 from twisted.enterprise.adbapi import ConnectionPool
@@ -293,6 +293,53 @@ class EventCacheTestCase(unittest.HomeserverTestCase):
 
             # We should have fetched the event from the DB
             self.assertEqual(ctx.get_resource_usage().evt_db_fetch_count, 1)
+
+
+class GetEventsTestCase(unittest.HomeserverTestCase):
+    """Test `get_events(...)`/`get_events_as_list(...)`"""
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store: EventsWorkerStore = hs.get_datastores().main
+
+    def test_get_lots_of_messages(self) -> None:
+        """Sanity check that `get_events(...)`/`get_events_as_list(...)` works"""
+        num_events = 100
+
+        user_id = self.register_user("user", "pass")
+        user_tok = self.login(user_id, "pass")
+
+        room_id = self.helper.create_room_as(user_id, tok=user_tok)
+
+        event_ids: Set[str] = set()
+        for i in range(num_events):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=room_id,
+                    type="m.room.message",
+                    sender=user_id,
+                    content={
+                        "body": f"foo{i}",
+                        "msgtype": "m.text",
+                    },
+                )
+            )
+            event_ids.add(event.event_id)
+
+        # Sanity check that we actually created the events
+        self.assertEqual(len(event_ids), num_events)
+
+        # This is the function under test
+        fetched_event_map = self.get_success(self.store.get_events(event_ids))
+
+        # Sanity check that we got the events back
+        self.assertIncludes(fetched_event_map.keys(), event_ids, exact=True)
 
 
 class DatabaseOutageTestCase(unittest.HomeserverTestCase):

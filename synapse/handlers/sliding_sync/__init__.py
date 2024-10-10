@@ -452,13 +452,11 @@ class SlidingSyncHandler:
             to_token=to_token,
         )
 
-        event_map = await self.store.get_events(list(state_ids.values()))
+        events = await self.store.get_events_as_list(list(state_ids.values()))
 
         state_map = {}
-        for key, event_id in state_ids.items():
-            event = event_map.get(event_id)
-            if event:
-                state_map[key] = event
+        for event in events:
+            state_map[(event.type, event.state_key)] = event
 
         return state_map
 
