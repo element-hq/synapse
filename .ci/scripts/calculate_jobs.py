@@ -53,7 +53,7 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.9", "3.10", "3.11", "3.12")
+        for version in ("3.9", "3.10", "3.11", "3.12", "3.13.0rc2")
     )
 
 trial_postgres_tests = [
