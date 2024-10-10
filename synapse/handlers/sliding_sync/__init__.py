@@ -955,6 +955,10 @@ class SlidingSyncHandler:
                                 )
 
                             # Add an explicit entry for each user in the timeline
+                            #
+                            # Make a new set or copy of the state key set so we can
+                            # modify it without affecting the original
+                            # `required_state_map`
                             expanded_required_state_map[EventTypes.Member] = (
                                 expanded_required_state_map.get(
                                     EventTypes.Member, set()
@@ -967,6 +971,10 @@ class SlidingSyncHandler:
                             # Replace `$ME` with the user's ID so we can deduplicate
                             # when someone requests the same state with `$ME` or with
                             # their user ID.
+                            #
+                            # Make a new set or copy of the state key set so we can
+                            # modify it without affecting the original
+                            # `required_state_map`
                             expanded_required_state_map[EventTypes.Member] = (
                                 expanded_required_state_map.get(
                                     EventTypes.Member, set()
