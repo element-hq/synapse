@@ -424,6 +424,7 @@ class DelayedEventsStore(SQLBaseStore):
         room_id: str,
         event_type: str,
         state_key: str,
+        not_from_localpart: str,
     ) -> Optional[Timestamp]:
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
@@ -434,15 +435,19 @@ class DelayedEventsStore(SQLBaseStore):
         def cancel_delayed_state_events_txn(
             txn: LoggingTransaction,
         ) -> Optional[Timestamp]:
-            self.db_pool.simple_delete_txn(
-                txn,
-                table="delayed_events",
-                keyvalues={
-                    "room_id": room_id,
-                    "event_type": event_type,
-                    "state_key": state_key,
-                    "is_processed": False,
-                },
+            txn.execute(
+                """
+                DELETE FROM delayed_events
+                WHERE room_id = ? AND event_type = ? AND state_key = ?
+                    AND user_localpart <> ?
+                    AND NOT is_processed
+                """,
+                (
+                    room_id,
+                    event_type,
+                    state_key,
+                    not_from_localpart,
+                ),
             )
             return self._get_next_delayed_event_send_ts_txn(txn)
 
