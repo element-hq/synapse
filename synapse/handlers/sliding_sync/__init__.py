@@ -49,6 +49,7 @@ from synapse.types import (
     Requester,
     SlidingSyncStreamToken,
     StateMap,
+    StrCollection,
     StreamKeyType,
     StreamToken,
 )
@@ -293,7 +294,6 @@ class SlidingSyncHandler:
             # to record rooms as having updates even if there might not actually
             # be anything new for the user (e.g. due to event filters, events
             # having happened after the user left, etc).
-            unsent_room_ids = []
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
@@ -305,15 +305,24 @@ class SlidingSyncHandler:
                 # TODO: Replace this with something faster. When we land the
                 # sliding sync tables that record the most recent event
                 # positions we can use that.
-                missing_event_map_by_room = (
-                    await self.store.get_room_events_stream_for_rooms(
-                        room_ids=missing_rooms,
-                        from_key=to_token.room_key,
-                        to_key=from_token.stream_token.room_key,
-                        limit=1,
+                unsent_room_ids: StrCollection
+                if await self.store.have_finished_sliding_sync_background_jobs():
+                    unsent_room_ids = await (
+                        self.store.get_rooms_that_have_updates_since_sliding_sync_table(
+                            room_ids=missing_rooms,
+                            from_key=from_token.stream_token.room_key,
+                        )
                     )
-                )
-                unsent_room_ids = list(missing_event_map_by_room)
+                else:
+                    missing_event_map_by_room = (
+                        await self.store.get_room_events_stream_for_rooms(
+                            room_ids=missing_rooms,
+                            from_key=to_token.room_key,
+                            to_key=from_token.stream_token.room_key,
+                            limit=1,
+                        )
+                    )
+                    unsent_room_ids = list(missing_event_map_by_room)
 
                 new_connection_state.rooms.record_unsent_rooms(
                     unsent_room_ids, from_token.stream_token.room_key
@@ -1073,22 +1082,42 @@ class SlidingSyncHandler:
                     )
                 )
 
-        # Figure out the last bump event in the room
-        #
-        # By default, just choose the membership event position for any non-join membership
-        bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+        # Figure out the last bump event in the room. If the bump stamp hasn't
+        # changed we omit it from the response.
+        bump_stamp = None
+
+        always_return_bump_stamp = (
+            # We use the membership event position for any non-join
+            room_membership_for_user_at_to_token.membership != Membership.JOIN
+            # We didn't fetch any timeline events but we should still check for
+            # a bump_stamp that might be somewhere
+            or limited is None
+            # There might be a bump event somewhere before the timeline events
+            # that we fetched, that we didn't previously send down
+            or limited is True
+            # Always give the client some frame of reference if this is the
+            # first time they are seeing the room down the connection
+            or initial
+        )
+
         # If we're joined to the room, we need to find the last bump event before the
         # `to_token`
         if room_membership_for_user_at_to_token.membership == Membership.JOIN:
-            # Try and get a bump stamp, if not we just fall back to the
-            # membership token.
+            # Try and get a bump stamp
             new_bump_stamp = await self._get_bump_stamp(
-                room_id, to_token, timeline_events
+                room_id,
+                to_token,
+                timeline_events,
+                check_outside_timeline=always_return_bump_stamp,
             )
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
-        if bump_stamp < 0:
+        if bump_stamp is None and always_return_bump_stamp:
+            # By default, just choose the membership event position for any non-join membership
+            bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+
+        if bump_stamp is not None and bump_stamp < 0:
             # We never want to send down negative stream orderings, as you can't
             # sensibly compare positive and negative stream orderings (they have
             # different meanings).
@@ -1188,14 +1217,23 @@ class SlidingSyncHandler:
 
     @trace
     async def _get_bump_stamp(
-        self, room_id: str, to_token: StreamToken, timeline: List[EventBase]
+        self,
+        room_id: str,
+        to_token: StreamToken,
+        timeline: List[EventBase],
+        check_outside_timeline: bool,
     ) -> Optional[int]:
-        """Get a bump stamp for the room, if we have a bump event
+        """Get a bump stamp for the room, if we have a bump event and it has
+        changed.
 
         Args:
             room_id
             to_token: The upper bound of token to return
             timeline: The list of events we have fetched.
+            limited: If the timeline was limited.
+            check_outside_timeline: Whether we need to check for bump stamp for
+                events before the timeline if we didn't find a bump stamp in
+                the timeline events.
         """
 
         # First check the timeline events we're returning to see if one of
@@ -1214,6 +1252,11 @@ class SlidingSyncHandler:
                 # instead we use the membership event position.
                 if new_bump_stamp > 0:
                     return new_bump_stamp
+
+        if not check_outside_timeline:
+            # If we are not a limited sync, then we know the bump stamp can't
+            # have changed.
+            return None
 
         # We can quickly query for the latest bump event in the room using the
         # sliding sync tables.

@@ -1039,7 +1039,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         self.deferred = deferred
         self.boundary = boundary
         self.max_length = max_length
-        self.parser = None
+        self.parser: Optional[multipart.MultipartParser] = None
         self.multipart_response = MultipartResponse()
         self.has_redirect = False
         self.in_json = False
@@ -1097,7 +1097,7 @@ class _MultipartParserProtocol(protocol.Protocol):
                         self.deferred.errback()
                     self.file_length += end - start
 
-            callbacks = {
+            callbacks: "multipart.multipart.MultipartCallbacks" = {
                 "on_header_field": on_header_field,
                 "on_header_value": on_header_value,
                 "on_part_data": on_part_data,
@@ -1113,7 +1113,7 @@ class _MultipartParserProtocol(protocol.Protocol):
             self.transport.abortConnection()
 
         try:
-            self.parser.write(incoming_data)  # type: ignore[attr-defined]
+            self.parser.write(incoming_data)
         except Exception as e:
             logger.warning(f"Exception writing to multipart parser: {e}")
             self.deferred.errback()
