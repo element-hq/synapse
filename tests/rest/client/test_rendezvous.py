@@ -34,7 +34,6 @@ from tests import unittest
 from tests.unittest import override_config
 from tests.utils import HAS_AUTHLIB
 
-msc3886_endpoint = "/_matrix/client/unstable/org.matrix.msc3886/rendezvous"
 msc4108_endpoint = "/_matrix/client/unstable/org.matrix.msc4108/rendezvous"
 
 
@@ -54,16 +53,8 @@ class RendezvousServletTestCase(unittest.HomeserverTestCase):
         }
 
     def test_disabled(self) -> None:
-        channel = self.make_request("POST", msc3886_endpoint, {}, access_token=None)
-        self.assertEqual(channel.code, 404)
         channel = self.make_request("POST", msc4108_endpoint, {}, access_token=None)
         self.assertEqual(channel.code, 404)
-
-    @override_config({"experimental_features": {"msc3886_endpoint": "/asd"}})
-    def test_msc3886_redirect(self) -> None:
-        channel = self.make_request("POST", msc3886_endpoint, {}, access_token=None)
-        self.assertEqual(channel.code, 307)
-        self.assertEqual(channel.headers.getRawHeaders("Location"), ["/asd"])
 
     @unittest.skip_unless(HAS_AUTHLIB, "requires authlib")
     @override_config(
