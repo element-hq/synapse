@@ -1,0 +1,1 @@
+Fix sync not being notified when device one-time keys or fallback keys are uploaded/claimed.
