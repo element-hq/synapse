@@ -177,11 +177,11 @@ The following applies to Synapse installations that have been installed from sou
 
 You can start the main Synapse process with Poetry by running the following command:
 ```console
-poetry run synapse_homeserver --config-file [your homeserver.yaml]
+poetry run synapse_homeserver --config-path [your homeserver.yaml]
 ```
 For worker setups, you can run the following command
 ```console
-poetry run synapse_worker --config-file [your homeserver.yaml] --config-file [your worker.yaml]
+poetry run synapse_worker --config-path [your homeserver.yaml] --config-path [your worker.yaml]
 ```
 ## Available worker applications
 

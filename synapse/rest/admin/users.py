@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
-from synapse._pydantic_compat import StrictBool
+from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
 from synapse.api.constants import Direction, UserTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -1421,40 +1421,39 @@ class RedactUser(RestServlet):
         self._store = hs.get_datastores().main
         self.admin_handler = hs.get_admin_handler()
 
+    class PostBody(RequestBodyModel):
+        rooms: List[StrictStr]
+        reason: Optional[StrictStr]
+        limit: Optional[StrictInt]
+
     async def on_POST(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         requester = await self._auth.get_user_by_req(request)
         await assert_user_is_admin(self._auth, requester)
 
-        body = parse_json_object_from_request(request, allow_empty_body=True)
-        rooms = body.get("rooms")
-        if rooms is None:
+        # parse provided user id to check that it is valid
+        UserID.from_string(user_id)
+
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        limit = body.limit
+        if limit and limit <= 0:
             raise SynapseError(
-                HTTPStatus.BAD_REQUEST, "Must provide a value for rooms."
+                HTTPStatus.BAD_REQUEST,
+                "If limit is provided it must be a non-negative integer greater than 0.",
             )
 
-        reason = body.get("reason")
-        if reason:
-            if not isinstance(reason, str):
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    "If a reason is provided it must be a string.",
-                )
-
-        limit = body.get("limit")
-        if limit:
-            if not isinstance(limit, int) or limit <= 0:
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    "If limit is provided it must be a non-negative integer greater than 0.",
-                )
-
+        rooms = body.rooms
         if not rooms:
-            rooms = await self._store.get_rooms_for_user(user_id)
+            current_rooms = list(await self._store.get_rooms_for_user(user_id))
+            banned_rooms = list(
+                await self._store.get_rooms_user_currently_banned_from(user_id)
+            )
+            rooms = current_rooms + banned_rooms
 
         redact_id = await self.admin_handler.start_redact_events(
-            user_id, list(rooms), requester.serialize(), reason, limit
+            user_id, rooms, requester.serialize(), body.reason, limit
         )
 
         return HTTPStatus.OK, {"redact_id": redact_id}
