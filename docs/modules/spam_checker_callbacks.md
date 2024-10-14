@@ -114,7 +114,8 @@ async def user_may_send_3pid_invite(
 
 Called when processing an invitation using a third-party identifier (also called a 3PID,
 e.g. an email address or a phone number). It is only called when a 3PID invite is created
-locally - not when one is received in a room over federation.
+locally - not when one is received in a room over federation. If the 3PID is already associated
+with a Matrix ID, the spam check will go through the `user_may_invite` callback instead.
 
 The inviter is represented by their Matrix user ID (e.g. `@alice:example.com`), and the
 invitee is represented by its medium (e.g. "email") and its address
