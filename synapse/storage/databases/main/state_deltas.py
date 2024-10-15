@@ -73,7 +73,7 @@ class StateDeltasStore(SQLBaseStore):
         self,
         prev_stream_id: int,
         max_stream_id: int,
-        only_with_event_id: Literal[False] = False,
+        exclude_deleted: Literal[False] = False,
     ) -> Tuple[int, List[StateDelta]]: ...
 
     @overload
@@ -81,7 +81,7 @@ class StateDeltasStore(SQLBaseStore):
         self,
         prev_stream_id: int,
         max_stream_id: int,
-        only_with_event_id: Literal[True],
+        exclude_deleted: Literal[True],
     ) -> Tuple[int, List[StateDeltaWithEventId]]: ...
 
     @overload
@@ -89,14 +89,14 @@ class StateDeltasStore(SQLBaseStore):
         self,
         prev_stream_id: int,
         max_stream_id: int,
-        only_with_event_id: bool,
+        exclude_deleted: bool,
     ) -> Tuple[int, Union[List[StateDelta], List[StateDeltaWithEventId]]]: ...
 
     async def get_partial_current_state_deltas(
         self,
         prev_stream_id: int,
         max_stream_id: int,
-        only_with_event_id: bool = False,
+        exclude_deleted: bool = False,
     ) -> Tuple[int, Union[List[StateDelta], List[StateDeltaWithEventId]]]:
         """Fetch a list of room state changes since the given stream id
 
@@ -106,9 +106,7 @@ class StateDeltasStore(SQLBaseStore):
             prev_stream_id: point to get changes since (exclusive)
             max_stream_id: the point that we know has been correctly persisted
                 - ie, an upper limit to return changes from.
-            only_with_event_id: whether to return only state deltas that have
-                an associated event ID. (Deltas without an event ID represent
-                deleted state.)
+            exclude_deleted: whether to exclude deltas for deleted state.
 
         Returns:
             A tuple consisting of:
@@ -132,7 +130,7 @@ class StateDeltasStore(SQLBaseStore):
             return max_stream_id, []
 
         StateDeltaType: Union[Type[StateDelta], Type[StateDeltaWithEventId]]
-        if not only_with_event_id:
+        if not exclude_deleted:
             StateDeltaType = StateDelta
             sql_and_event_id = ""
         else:
