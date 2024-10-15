@@ -29,16 +29,21 @@ from typing import (
     FrozenSet,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Tuple,
     Union,
+    overload,
 )
 
 from synapse.api.constants import EventTypes, Membership
 from synapse.events import EventBase
 from synapse.logging.opentracing import tag_args, trace
-from synapse.storage.databases.main.state_deltas import StateDelta
+from synapse.storage.databases.main.state_deltas import (
+    StateDelta,
+    StateDeltaWithEventId,
+)
 from synapse.storage.roommember import ProfileInfo
 from synapse.storage.util.partial_state_events_tracker import (
     PartialCurrentStateTracker,
@@ -648,11 +653,30 @@ class StateStorageController:
 
         return server_acl_evaluator_from_event(acl_event)
 
+    @overload
+    async def get_current_state_deltas(
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        only_with_event_id: Literal[False] = False,
+    ) -> Tuple[int, List[StateDelta]]: ...
+
+    @overload
+    async def get_current_state_deltas(
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        only_with_event_id: Literal[True],
+    ) -> Tuple[int, List[StateDeltaWithEventId]]: ...
+
     @trace
     @tag_args
     async def get_current_state_deltas(
-        self, prev_stream_id: int, max_stream_id: int, only_with_event_id: bool = False
-    ) -> Tuple[int, List[StateDelta]]:
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        only_with_event_id: bool = False,
+    ) -> Tuple[int, Union[List[StateDelta], List[StateDeltaWithEventId]]]:
         """Fetch a list of room state changes since the given stream id
 
         Args:
