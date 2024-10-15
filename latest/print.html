@@ -271,7 +271,6 @@ For more details, see
 <p>Matrix.org provides Debian/Ubuntu packages of Synapse, for the amd64
 architecture via <a href="https://packages.matrix.org/debian/">https://packages.matrix.org/debian/</a>.</p>
 <p>To install the latest release:</p>
-<p>TODO UPDATE ALL THIS</p>
 <pre><code class="language-sh">sudo apt install -y lsb-release wget apt-transport-https
 sudo wget -O /usr/share/keyrings/matrix-org-archive-keyring.gpg https://packages.matrix.org/debian/matrix-org-archive-keyring.gpg
 echo &quot;deb [signed-by=/usr/share/keyrings/matrix-org-archive-keyring.gpg] https://packages.matrix.org/debian/ $(lsb_release -cs) main&quot; |
@@ -445,7 +444,7 @@ sudo dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h5 id="red-hat-enterprise-linux--rocky-linux"><a class="header" href="#red-hat-enterprise-linux--rocky-linux">Red Hat Enterprise Linux / Rocky Linux</a></h5>
 <p><em>Note: The term &quot;RHEL&quot; below refers to both Red Hat Enterprise Linux and Rocky Linux. The distributions are 1:1 binary compatible.</em></p>
-<p>It's recommended to use the latest Python versions. </p>
+<p>It's recommended to use the latest Python versions.</p>
 <p>RHEL 8 in particular ships with Python 3.6 by default which is EOL and therefore no longer supported by Synapse. RHEL 9 ship with Python 3.9 which is still supported by the Python core team as of this writing. However, newer Python versions provide significant performance improvements and they're available in official distributions' repositories. Therefore it's recommended to use them.</p>
 <p>Python 3.11 and 3.12 are available for both RHEL 8 and 9.</p>
 <p>These commands should be run as root user.</p>
@@ -465,7 +464,7 @@ dnf install python3.11 python3.11-devel
 dnf install python3.12 python3.12-devel
 </code></pre>
 <p>Finally, install common prerequisites</p>
-<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf 
+<pre><code class="language-bash">dnf install libicu libicu-devel libpq5 libpq5-devel lz4 pkgconf
 dnf group install &quot;Development Tools&quot;
 </code></pre>
 <h6 id="using-venv-module-instead-of-virtualenv-command"><a class="header" href="#using-venv-module-instead-of-virtualenv-command">Using venv module instead of virtualenv command</a></h6>
@@ -474,7 +473,7 @@ dnf group install &quot;Development Tools&quot;
 <li>On RHEL 9, virtualenv is only available on <a href="https://docs.fedoraproject.org/en-US/epel/">EPEL</a>.</li>
 <li>On RHEL 8, virtualenv is based on Python 3.6. It does not support creating 3.11/3.12 virtual environments.</li>
 </ul>
-<p>Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI. </p>
+<p>Here's an example of creating Python 3.12 virtual environment and installing Synapse from PyPI.</p>
 <pre><code class="language-bash">mkdir -p ~/synapse
 # To use Python 3.11, simply use the command &quot;python3.11&quot; instead.
 python3.12 -m venv ~/synapse/env
@@ -1874,7 +1873,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.116.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.117.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -7558,7 +7557,12 @@ Defaults to <code>true</code>.</p>
 by running a <a href="usage/configuration/../../workers.html#synapseappgeneric_worker"><code>generic_worker</code></a> and adding it's <a href="usage/configuration/config_documentation.html#worker_name"><code>worker_name</code></a> to
 a <code>federation_sender_instances</code> map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.</p>
+balanced across them. </p>
+<p>The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple <code>federation_sender_instances</code> are useful if there is a federation
+with multiple servers.</p>
 <p>This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
 and then started, to ensure that all instances are running with the same config (otherwise
@@ -7680,6 +7684,11 @@ localhost and 6379</p>
 <p><code>password</code>: Optional password if configured on the Redis instance.</p>
 </li>
 <li>
+<p><code>password_path</code>: Alternative to <code>password</code>, reading the password from an
+external file. The file should be a plain text file, containing only the
+password. Synapse reads the password from the given file once at startup.</p>
+</li>
+<li>
 <p><code>dbid</code>: Optional redis dbid if needs to connect to specific redis logical db.</p>
 </li>
 <li>
@@ -7699,6 +7708,7 @@ localhost and 6379</p>
 <p><em>Added in Synapse 1.78.0.</em></p>
 <p><em>Changed in Synapse 1.84.0: Added use_tls, certificate_file, private_key_file, ca_file and ca_path attributes</em></p>
 <p><em>Changed in Synapse 1.85.0: Added path option to use a local Unix socket</em></p>
+<p><em>Changed in Synapse 1.116.0: Added password_path</em></p>
 </li>
 </ul>
 <p>Example configuration:</p>
@@ -7706,7 +7716,8 @@ localhost and 6379</p>
   enabled: true
   host: localhost
   port: 6379
-  password: &lt;secret_password&gt;
+  password_path: &lt;path_to_the_password_file&gt;
+  # OR password: &lt;secret_password&gt;
   dbid: &lt;dbid&gt;
   #use_tls: True
   #certificate_file: &lt;path_to_the_certificate_file&gt;
@@ -16751,6 +16762,7 @@ can be done by installing the <code>libjemalloc2</code> package and adding this
 line to <code>/etc/default/matrix-synapse</code>:</p>
 <pre><code>LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 </code></pre>
+<p><em>Note</em>: You may need to set <code>PYTHONMALLOC=malloc</code> to ensure that <code>jemalloc</code> can accurately calculate memory usage. By default, Python uses its internal small-object allocator, which may interfere with jemalloc's ability to track memory consumption correctly. This could prevent the <a href="usage/administration/../configuration/config_documentation.html#caches-and-associated-values">cache_autotuning</a> feature from functioning as expected, as the Python allocator may not reach the memory threshold set by <code>max_cache_memory_usage</code>, thus not triggering the cache eviction process.</p>
 <p>This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.</p>
 <p>If you're encountering high CPU use by the Synapse process itself, you
