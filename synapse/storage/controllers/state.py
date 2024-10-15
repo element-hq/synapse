@@ -651,7 +651,7 @@ class StateStorageController:
     @trace
     @tag_args
     async def get_current_state_deltas(
-        self, prev_stream_id: int, max_stream_id: int
+        self, prev_stream_id: int, max_stream_id: int, only_with_event_id: bool = False
     ) -> Tuple[int, List[StateDelta]]:
         """Fetch a list of room state changes since the given stream id
 
@@ -659,6 +659,9 @@ class StateStorageController:
             prev_stream_id: point to get changes since (exclusive)
             max_stream_id: the point that we know has been correctly persisted
                - ie, an upper limit to return changes from.
+            only_with_event_id: whether to return only state deltas that have
+                an associated event ID. (Deltas without an event ID represent
+                deleted state.)
 
         Returns:
             A tuple consisting of:
@@ -670,7 +673,7 @@ class StateStorageController:
         #   https://github.com/matrix-org/synapse/issues/13008
 
         return await self.stores.main.get_partial_current_state_deltas(
-            prev_stream_id, max_stream_id
+            prev_stream_id, max_stream_id, only_with_event_id
         )
 
     @trace

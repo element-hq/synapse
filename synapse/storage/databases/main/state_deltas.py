@@ -55,7 +55,7 @@ class StateDeltasStore(SQLBaseStore):
     _curr_state_delta_stream_cache: StreamChangeCache
 
     async def get_partial_current_state_deltas(
-        self, prev_stream_id: int, max_stream_id: int
+        self, prev_stream_id: int, max_stream_id: int, only_with_event_id: bool = False
     ) -> Tuple[int, List[StateDelta]]:
         """Fetch a list of room state changes since the given stream id
 
@@ -65,6 +65,9 @@ class StateDeltasStore(SQLBaseStore):
             prev_stream_id: point to get changes since (exclusive)
             max_stream_id: the point that we know has been correctly persisted
                 - ie, an upper limit to return changes from.
+            only_with_event_id: whether to return only state deltas that have
+                an associated event ID. (Deltas without an event ID represent
+                deleted state.)
 
         Returns:
             A tuple consisting of:
@@ -94,10 +97,11 @@ class StateDeltasStore(SQLBaseStore):
             # N results.
             # We arbitrarily limit to 100 stream_id entries to ensure we don't
             # select toooo many.
-            sql = """
+            sql = f"""
                 SELECT stream_id, count(*)
                 FROM current_state_delta_stream
-                WHERE stream_id > ? AND stream_id <= ?
+                WHERE stream_id > ? AND stream_id <= ?{
+                " AND event_id IS NOT NULL" if only_with_event_id else ""}
                 GROUP BY stream_id
                 ORDER BY stream_id ASC
                 LIMIT 100
@@ -122,10 +126,11 @@ class StateDeltasStore(SQLBaseStore):
                 clipped_stream_id = max_stream_id
 
             # Now actually get the deltas
-            sql = """
+            sql = f"""
                 SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
                 FROM current_state_delta_stream
-                WHERE ? < stream_id AND stream_id <= ?
+                WHERE ? < stream_id AND stream_id <= ?{
+                " AND event_id IS NOT NULL" if only_with_event_id else ""}
                 ORDER BY stream_id ASC
             """
             txn.execute(sql, (prev_stream_id, clipped_stream_id))
