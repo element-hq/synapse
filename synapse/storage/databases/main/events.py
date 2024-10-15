@@ -1889,7 +1889,7 @@ class PersistEventsStore:
                         membership_info.membership,
                         # Since this is a new membership, it isn't forgotten anymore (which
                         # matches how Synapse currently thinks about the forgotten status)
-                        False,
+                        0,
                         # XXX: We do not use `membership_info.membership_event_stream_ordering` here
                         # because it is an unreliable value. See XXX note above.
                         membership_info.membership_event_id,
@@ -2907,7 +2907,7 @@ class PersistEventsStore:
                     "membership": event.membership,
                     # Since this is a new membership, it isn't forgotten anymore (which
                     # matches how Synapse currently thinks about the forgotten status)
-                    "forgotten": False,
+                    "forgotten": 0,
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
                     "event_instance_name": event.internal_metadata.instance_name,
                 }
