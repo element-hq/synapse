@@ -429,6 +429,13 @@ class DelayedEventsStore(SQLBaseStore):
         """
         Cancels all matching delayed state events, i.e. remove them as long as they haven't been processed.
 
+        Args:
+            room_id: The room ID to match against.
+            event_type: The event type to match against.
+            state_key: The state key to match against.
+            not_from_localpart: The localpart of a user whose delayed events to not cancel.
+                If set to the empty string, any users' delayed events may be cancelled.
+
         Returns: The send time of the next delayed event to be sent, if any.
         """
 
