@@ -304,7 +304,7 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             self._sliding_sync_membership_snapshots_bg_update,
         )
-        # Add a background update tofix data integrity issue in the
+        # Add a background update to fix data integrity issue in the
         # `sliding_sync_membership_snapshots` -> `forgotten` column
         self.db_pool.updates.register_background_update_handler(
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE,
@@ -2442,15 +2442,17 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         Background update to update the `sliding_sync_membership_snapshots` ->
         `forgotten` column to be in sync with the `room_memberships` table.
 
-        For any room that someone has forgotten and subsequently re-joined or had any
-        new membership on, we need to go and update the column to match the
-        `room_memberships` table as it has fallen out of sync.
+        Because of previously flawed code (now fixed); any room that someone has
+        forgotten and subsequently re-joined or had any new membership on, we need to go
+        and update the column to match the `room_memberships` table as it has fallen out
+        of sync.
         """
         last_event_stream_ordering = progress.get(
             "last_event_stream_ordering", -(1 << 31)
         )
 
-        # Any row in `sliding_sync_membership_snapshots` with `forgotten=1` we need to recheck
+        # To simplify things, we can just recheck for any row in
+        # `sliding_sync_membership_snapshots` with `forgotten=1`
         def _find_memberships_to_update_txn(
             txn: LoggingTransaction,
         ) -> List[Tuple[str, str, str, int]]:

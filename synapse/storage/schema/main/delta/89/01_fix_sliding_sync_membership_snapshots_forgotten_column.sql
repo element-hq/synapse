@@ -11,8 +11,6 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-
-
 -- Add a background update to update the `sliding_sync_membership_snapshots` ->
 -- `forgotten` column to be in sync with the `room_memberships` table.
 --
