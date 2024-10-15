@@ -19,7 +19,7 @@
 #
 #
 
-SCHEMA_VERSION = 88  # remember to update the list below when updating
+SCHEMA_VERSION = 89  # remember to update the list below when updating
 """Represents the expectations made by the codebase about the database schema
 
 This should be incremented whenever the codebase changes its requirements on the
@@ -153,6 +153,10 @@ Changes in SCHEMA_VERSION = 87
 Changes in SCHEMA_VERSION = 88
     - MSC4140: Add `delayed_events` table that keeps track of events that are to
       be posted in response to a resettable timeout or an on-demand action.
+
+Changes in SCHEMA_VERSION = 89
+    - Add background update to fix data integrity issue in the
+      `sliding_sync_membership_snapshots` -> `forgotten` column
 """
 
 

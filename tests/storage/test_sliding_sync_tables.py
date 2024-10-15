@@ -5014,3 +5014,106 @@ class SlidingSyncTablesCatchUpBackgroundUpdatesTestCase(SlidingSyncTablesTestCas
             },
             exact=True,
         )
+
+
+class SlidingSyncMembershipSnapshotsTableFixForgottenColumnBackgroundUpdatesTestCase(
+    SlidingSyncTablesTestCaseBase
+):
+    """
+    Test the background updates that fixes `sliding_sync_membership_snapshots` ->
+    `forgotten` column.
+    """
+
+    def test_membership_snapshots_fix_forgotten_column_background_update(self) -> None:
+        """
+        Test that the background update, updates the `sliding_sync_membership_snapshots`
+        -> `forgotten` column to be in sync with the `room_memberships` table.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Leave and forget the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+        # User1 forgets the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Re-join the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Reset `sliding_sync_membership_snapshots` table as if the `forgotten` column
+        # got out of sync from the `room_memberships` table from the previous flawed
+        # code.
+        self.get_success(
+            self.store.db_pool.simple_update_one(
+                table="sliding_sync_membership_snapshots",
+                keyvalues={"room_id": room_id, "user_id": user1_id},
+                updatevalues={"forgotten": 1},
+                desc="sliding_sync_membership_snapshots.test_membership_snapshots_fix_forgotten_column_background_update",
+            )
+        )
+
+        # Insert and run the background update.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                "background_updates",
+                {
+                    "update_name": _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE,
+                    "progress_json": "{}",
+                },
+            )
+        )
+        self.store.db_pool.updates._all_done = False
+        self.wait_for_background_updates()
+
+        # Make sure the table is populated
+
+        sliding_sync_membership_snapshots_results = (
+            self._get_sliding_sync_membership_snapshots()
+        )
+        self.assertIncludes(
+            set(sliding_sync_membership_snapshots_results.keys()),
+            {
+                (room_id, user1_id),
+                (room_id, user2_id),
+            },
+            exact=True,
+        )
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+        # Holds the info according to the current state when the user joined.
+        #
+        # We only care about checking on user1 as that's what we reset and expect to be
+        # correct now
+        self.assertEqual(
+            sliding_sync_membership_snapshots_results.get((room_id, user1_id)),
+            _SlidingSyncMembershipSnapshotResult(
+                room_id=room_id,
+                user_id=user1_id,
+                sender=user1_id,
+                membership_event_id=state_map[(EventTypes.Member, user1_id)].event_id,
+                membership=Membership.JOIN,
+                event_stream_ordering=state_map[
+                    (EventTypes.Member, user1_id)
+                ].internal_metadata.stream_ordering,
+                has_known_state=True,
+                room_type=None,
+                room_name=None,
+                is_encrypted=False,
+                tombstone_successor_room_id=None,
+                # We should see the room as no longer forgotten
+                forgotten=False,
+            ),
+        )

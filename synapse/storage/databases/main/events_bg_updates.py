@@ -304,6 +304,12 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             self._sliding_sync_membership_snapshots_bg_update,
         )
+        # Add a background update tofix data integrity issue in the
+        # `sliding_sync_membership_snapshots` -> `forgotten` column
+        self.db_pool.updates.register_background_update_handler(
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE,
+            self._sliding_sync_membership_snapshots_fix_forgotten_column_bg_update,
+        )
 
         # We want this to run on the main database at startup before we start processing
         # events.
@@ -2425,6 +2431,111 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         await self.db_pool.updates._background_update_progress(
             _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             progress,
+        )
+
+        return len(memberships_to_update_rows)
+
+    async def _sliding_sync_membership_snapshots_fix_forgotten_column_bg_update(
+        self, progress: JsonDict, batch_size: int
+    ) -> int:
+        """
+        Background update to update the `sliding_sync_membership_snapshots` ->
+        `forgotten` column to be in sync with the `room_memberships` table.
+
+        For any room that someone has forgotten and subsequently re-joined or had any
+        new membership on, we need to go and update the column to match the
+        `room_memberships` table as it has fallen out of sync.
+        """
+        last_event_stream_ordering = progress.get(
+            "last_event_stream_ordering", -(1 << 31)
+        )
+
+        # Any row in `sliding_sync_membership_snapshots` with `forgotten=1` we need to recheck
+        def _find_memberships_to_update_txn(
+            txn: LoggingTransaction,
+        ) -> List[Tuple[str, str, str, int]]:
+            txn.execute(
+                """
+                SELECT
+                    room_id,
+                    user_id,
+                    membership_event_id,
+                    event_stream_ordering
+                FROM sliding_sync_membership_snapshots
+                WHERE event_stream_ordering > ?
+                    AND forgotten = 1
+                ORDER BY event_stream_ordering ASC
+                LIMIT ?
+                """,
+                (last_event_stream_ordering, batch_size),
+            )
+
+            memberships_to_update_rows = cast(
+                List[Tuple[str, str, str, int]],
+                txn.fetchall(),
+            )
+
+            return memberships_to_update_rows
+
+        memberships_to_update_rows = await self.db_pool.runInteraction(
+            "_sliding_sync_membership_snapshots_fix_forgotten_column_bg_update._find_memberships_to_update_txn",
+            _find_memberships_to_update_txn,
+        )
+
+        if not memberships_to_update_rows:
+            await self.db_pool.updates._end_background_update(
+                _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE
+            )
+            return 0
+
+        forgotten_update_query_args: List[Tuple[str, str, str, str]] = []
+        for (
+            room_id,
+            user_id,
+            membership_event_id,
+            _event_stream_ordering,
+        ) in memberships_to_update_rows:
+            forgotten_update_query_args.append(
+                (
+                    membership_event_id,
+                    room_id,
+                    user_id,
+                    membership_event_id,
+                )
+            )
+
+        def _fill_table_txn(txn: LoggingTransaction) -> None:
+            # Handle updating the `sliding_sync_membership_snapshots` table
+            #
+            # We need to find the `forgotten` value during the transaction because
+            # we can't risk inserting stale data.
+            txn.execute_batch(
+                """
+                UPDATE sliding_sync_membership_snapshots
+                SET
+                    forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
+                WHERE room_id = ? and user_id = ? AND membership_event_id = ?
+                """,
+                forgotten_update_query_args,
+            )
+
+        await self.db_pool.runInteraction(
+            "sliding_sync_membership_snapshots_fix_forgotten_column_bg_update",
+            _fill_table_txn,
+        )
+
+        # Update the progress
+        (
+            _room_id,
+            _user_id,
+            _membership_event_id,
+            event_stream_ordering,
+        ) = memberships_to_update_rows[-1]
+        await self.db_pool.updates._background_update_progress(
+            _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_FIX_FORGOTTEN_COLUMN_BG_UPDATE,
+            {
+                "last_event_stream_ordering": event_stream_ordering,
+            },
         )
 
         return len(memberships_to_update_rows)
