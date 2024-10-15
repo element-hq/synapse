@@ -1863,10 +1863,10 @@ class PersistEventsStore:
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_membership_snapshots
-                    (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering, event_instance_name
+                    (room_id, user_id, sender, membership_event_id, membership, forgotten, event_stream_ordering, event_instance_name
                     {("," + ", ".join(sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""})
                 VALUES (
-                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?),
                     (SELECT COALESCE(instance_name, 'master') FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
@@ -1876,6 +1876,7 @@ class PersistEventsStore:
                     sender = EXCLUDED.sender,
                     membership_event_id = EXCLUDED.membership_event_id,
                     membership = EXCLUDED.membership,
+                    forgotten = EXCLUDED.forgotten,
                     event_stream_ordering = EXCLUDED.event_stream_ordering
                     {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""}
                 """,
@@ -1886,6 +1887,9 @@ class PersistEventsStore:
                         membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
+                        # Since this is a new membership, it isn't forgotten anymore (which
+                        # matches how Synapse currently thinks about the forgotten status)
+                        False,
                         # XXX: We do not use `membership_info.membership_event_stream_ordering` here
                         # because it is an unreliable value. See XXX note above.
                         membership_info.membership_event_id,
@@ -2901,6 +2905,9 @@ class PersistEventsStore:
                     "sender": event.sender,
                     "membership_event_id": event.event_id,
                     "membership": event.membership,
+                    # Since this is a new membership, it isn't forgotten anymore (which
+                    # matches how Synapse currently thinks about the forgotten status)
+                    "forgotten": False,
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
                     "event_instance_name": event.internal_metadata.instance_name,
                 }
