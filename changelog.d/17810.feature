@@ -1,1 +1,1 @@
-When a user sends a state event, do not cancel their own delayed events (as per MSC4140) for the same piece of state.
+Update MSC4140 implementation to no longer cancel a user's own delayed state events with an event type & state key that match a more recent state event sent by that user.
