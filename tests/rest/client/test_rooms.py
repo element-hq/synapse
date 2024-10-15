@@ -2946,8 +2946,10 @@ class RoomForgottenTestCase(unittest.HomeserverTestCase):
 
         # Room is no longer forgotten because it's a new membership
         #
-        # XXX: Is this correct? Should the room forgotten state only be reset
-        # when the user decides to join again (or is invited/knocks)
+        # XXX: Is this how we actually want it to behave? It seems like ideally, the
+        # room forgotten status should only be reset when the user decides to join again
+        # (or is invited/knocks). This way the room remains forgotten for any ban/leave
+        # transitions.
         forgotten_room_ids = self.get_success(
             self.store.get_forgotten_rooms_for_user(user1_id)
         )
