@@ -84,9 +84,9 @@ sync_processing_time = Histogram(
 # (room_id, user_id). We don't want to store and pull out too much data in the database.
 #
 # 100 is an arbitrary but small-ish number. The idea is that we probably won't send down
-# too many duplicate member state events for a given ongoing conversation if we keep 100
-# around. Most rooms don't have 100 members and it takes a while to cycle through 100
-# members.
+# too many redundant member state events (that the client already knows about) for a
+# given ongoing conversation if we keep 100 around. Most rooms don't have 100 members
+# anyway and it takes a while to cycle through 100 members.
 MAX_NUMBER_STATE_KEYS_TO_REMEMBER = 100
 
 
@@ -1468,7 +1468,10 @@ def _required_state_changes(
         changes[event_type] = request_state_keys | inheritable_previous_state_keys
         # Limit the number of state_keys we should remember sending down the connection
         # for each (room_id, user_id). We don't want to store and pull out too much data
-        # in the database.
+        # in the database. This is a happy-medium between remembering nothing and
+        # everything. We can avoid sending redundant state down the connection most of
+        # the time given that most rooms don't have 100 members anyway and it takes a
+        # while to cycle through 100 members.
         #
         # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
         if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
@@ -1556,7 +1559,10 @@ def _required_state_changes(
             changes[event_type] = request_state_keys | inheritable_previous_state_keys
             # Limit the number of state_keys we should remember sending down the connection
             # for each (room_id, user_id). We don't want to store and pull out too much data
-            # in the database.
+            # in the database. This is a happy-medium between remembering nothing and
+            # everything. We can avoid sending redundant state down the connection most of
+            # the time given that most rooms don't have 100 members anyway and it takes a
+            # while to cycle through 100 members.
             #
             # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
             if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
