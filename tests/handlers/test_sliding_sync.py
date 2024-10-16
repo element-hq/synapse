@@ -33,7 +33,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import (
-    MAX_NUMBER_STATE_KEYS_TO_REMEMBER,
+    MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
     RoomsForUserType,
     RoomSyncConfig,
     StateValues,
@@ -4194,7 +4194,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 # Prefix the state_keys we've "prev_"iously sent so they are easier to
                 # identify in our assertions.
                 f"prev_state_key{i}"
-                for i in range(MAX_NUMBER_STATE_KEYS_TO_REMEMBER - 30)
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
             }
             | extra_state_keys
         }
@@ -4214,14 +4214,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         # We should only remember up to the maximum number of state keys
         self.assertGreaterEqual(
             len(changed_required_state_map[event_type]),
-            # Most of the time this will be `MAX_NUMBER_STATE_KEYS_TO_REMEMBER` but
+            # Most of the time this will be `MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER` but
             # because we are just naively selecting enough previous state_keys to fill
             # the limit, there might be some overlap in what's added back which means we
             # might have slightly less than the limit.
             #
             # `extra_state_keys` overlaps in the previous and requested
             # `required_state_map` so we might see this this scenario.
-            MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(extra_state_keys),
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - len(extra_state_keys),
         )
 
         # Should include all of the requested state
@@ -4244,3 +4244,44 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         assert all(
             state_key.startswith("prev_") for state_key in remaining_state_keys
         ), "Remaining state_keys should be the previous state_keys"
+
+    def test_request_more_state_keys_than_remember_limit(self) -> None:
+        """
+        Test requesting more state_keys than fit in our limit to remember from previous
+        requests.
+        """
+        previous_required_state_map = {
+            "type": {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
+            }
+        }
+        request_required_state_map = {
+            "type": {
+                f"state_key{i}"
+                # Requesting more than the MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER + 20)
+            }
+        }
+        # Ensure that we are requesting more than the limit
+        self.assertGreater(
+            len(request_required_state_map["type"]),
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
+        )
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map["type"],
+            request_required_state_map["type"],
+        )

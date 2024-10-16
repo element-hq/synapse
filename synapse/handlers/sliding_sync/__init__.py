@@ -87,7 +87,7 @@ sync_processing_time = Histogram(
 # too many redundant member state events (that the client already knows about) for a
 # given ongoing conversation if we keep 100 around. Most rooms don't have 100 members
 # anyway and it takes a while to cycle through 100 members.
-MAX_NUMBER_STATE_KEYS_TO_REMEMBER = 100
+MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER = 100
 
 
 class SlidingSyncHandler:
@@ -1473,8 +1473,13 @@ def _required_state_changes(
         # the time given that most rooms don't have 100 members anyway and it takes a
         # while to cycle through 100 members.
         #
-        # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
-        if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
+        # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER) state_keys
+        if (
+            # Reset back to the limit if we've gone over
+            len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+            # Skip if there isn't any room to add more state keys
+            and len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+        ):
             changes[event_type] = (
                 # Make sure the requested keys are still present
                 request_state_keys
@@ -1489,7 +1494,8 @@ def _required_state_changes(
                         # overlap in the keys between the requested and previous but we
                         # will decide to just take the easy route for now and avoid
                         # additional set operations to figure it out.
-                        MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(request_state_keys),
+                        MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                        - len(request_state_keys),
                     )
                 )
             )
@@ -1564,8 +1570,13 @@ def _required_state_changes(
             # the time given that most rooms don't have 100 members anyway and it takes a
             # while to cycle through 100 members.
             #
-            # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
-            if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
+            # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER) state_keys
+            if (
+                # Reset back to the limit if we've gone over
+                len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                # Skip if there isn't any room to add more state keys
+                and len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+            ):
                 changes[event_type] = (
                     # Make sure the requested keys are still present
                     request_state_keys
@@ -1580,7 +1591,8 @@ def _required_state_changes(
                             # overlap in the keys between the requested and previous but we
                             # will decide to just take the easy route for now and avoid
                             # additional set operations to figure it out.
-                            MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(request_state_keys),
+                            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                            - len(request_state_keys),
                         )
                     )
                 )
