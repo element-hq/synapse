@@ -33,6 +33,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import (
+    MAX_NUMBER_STATE_KEYS_TO_REMEMBER,
     RoomsForUserType,
     RoomSyncConfig,
     StateValues,
@@ -3320,6 +3321,32 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "simple_retain_previous_state_keys",
+                """Test adding a state key to the config and retaining a previously sent state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1"}},
+                    request_required_state_map={"type": {"state_key2", "state_key3"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a key so we should persist the changed required state
+                        # config.
+                        #
+                        # Retain `state_key1` from the `previous_required_state_map`
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                ),
+            ),
+            (
                 "simple_remove_type",
                 """
                 Test removing a type from the config when there are a matching state
@@ -3894,6 +3921,14 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                         # sent it before and send the new state. (if we were tracking
                         # that we sent any other state, we should still keep track
                         # that).
+                        #
+                        # This acts the same as the `simple_remove_type` test. It's
+                        # possible that we could remember the specific `state_keys` that
+                        # we have sent down before but this currently just acts the same
+                        # as if a whole `type` was removed. Perhaps it's good that we
+                        # "garbage collect" and forget what we've sent before for a
+                        # given `type`  when the client stops caring about a certain
+                        # `type`.
                         {},
                         # We don't need to request anything more if they are requesting
                         # less state now
@@ -4133,3 +4168,79 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             test_parameters.expected_with_state_deltas[1],
             "added_state_filter does not match (with state_deltas)",
         )
+
+    @parameterized.expand(
+        [
+            # Test with a normal arbitrary type (no special meaning)
+            ("arbitrary_type", "type", set()),
+            # Test with membership
+            ("membership", EventTypes.Member, set()),
+            # Test with lazy-loading room members
+            ("lazy_loading_membership", EventTypes.Member, {StateValues.LAZY}),
+        ]
+    )
+    def test_limit_retained_previous_state_keys(
+        self,
+        _test_label: str,
+        event_type: str,
+        extra_state_keys: Set[str],
+    ) -> None:
+        """
+        Test that we limit the number of state_keys that we remember but always include
+        the state_keys that we've just requested.
+        """
+        previous_required_state_map = {
+            event_type: {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_STATE_KEYS_TO_REMEMBER - 30)
+            }
+            | extra_state_keys
+        }
+        request_required_state_map = {
+            event_type: {f"state_key{i}" for i in range(50)} | extra_state_keys
+        }
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # We should only remember up to the maximum number of state keys
+        self.assertGreaterEqual(
+            len(changed_required_state_map[event_type]),
+            # Most of the time this will be `MAX_NUMBER_STATE_KEYS_TO_REMEMBER` but
+            # because we are just naively selecting enough previous state_keys to fill
+            # the limit, there might be some overlap in what's added back which means we
+            # might have slightly less than the limit.
+            #
+            # `extra_state_keys` overlaps in the previous and requested
+            # `required_state_map` so we might see this this scenario.
+            MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(extra_state_keys),
+        )
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map[event_type],
+            request_required_state_map[event_type],
+        )
+        # And the rest is filled with the previous state keys
+        #
+        # We can't assert the exact state_keys since we don't know the order so we just
+        # check that they all start with "prev_" and that we have the correct amount.
+        remaining_state_keys = (
+            changed_required_state_map[event_type]
+            - request_required_state_map[event_type]
+        )
+        self.assertGreater(
+            len(remaining_state_keys),
+            0,
+        )
+        assert all(
+            state_key.startswith("prev_") for state_key in remaining_state_keys
+        ), "Remaining state_keys should be the previous state_keys"

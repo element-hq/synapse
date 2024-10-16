@@ -12,6 +12,7 @@
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 #
 
+import itertools
 import logging
 from itertools import chain
 from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
@@ -78,6 +79,15 @@ sync_processing_time = Histogram(
     "Time taken to generate a sliding sync response, ignoring wait times.",
     ["initial"],
 )
+
+# Limit the number of state_keys we should remember sending down the connection for each
+# (room_id, user_id). We don't want to store and pull out too much data in the database.
+#
+# 100 is an arbitrary but small-ish number. The idea is that we probably won't send down
+# too many duplicate member state events for a given ongoing conversation if we keep 100
+# around. Most rooms don't have 100 members and it takes a while to cycle through 100
+# members.
+MAX_NUMBER_STATE_KEYS_TO_REMEMBER = 100
 
 
 class SlidingSyncHandler:
@@ -1445,12 +1455,41 @@ def _required_state_changes(
             old_state_keys - request_state_keys
         ) & changed_state_keys
 
-        # Always update changes to include the newly added keys
-        changes[event_type] = request_state_keys | (
-            # Wildcard and lazy state keys are not sticky from previous requests
+        # Figure out which state keys we should remember sending down the connection
+        inheritable_previous_state_keys = (
+            # Retain the previous state_keys that we've sent down before.
+            # Wildcard and lazy state keys are not sticky from previous requests.
             (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
             - invalidated_state_keys
         )
+
+        # Always update changes to include the newly added keys, use the new requested
+        # set with whatever hasn't been invalidated from the previous set.
+        changes[event_type] = request_state_keys | inheritable_previous_state_keys
+        # Limit the number of state_keys we should remember sending down the connection
+        # for each (room_id, user_id). We don't want to store and pull out too much data
+        # in the database.
+        #
+        # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
+        if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
+            changes[event_type] = (
+                # Make sure the requested keys are still present
+                request_state_keys
+                |
+                # Fill the rest with previous state_keys. Ideally, we could sort these
+                # by recency but it's just a set so just pick an arbitrary subset (good
+                # enough).
+                set(
+                    itertools.islice(
+                        inheritable_previous_state_keys,
+                        # Just taking the difference isn't perfect as there could be
+                        # overlap in the keys between the requested and previous but we
+                        # will decide to just take the easy route for now and avoid
+                        # additional set operations to figure it out.
+                        MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(request_state_keys),
+                    )
+                )
+            )
 
         if StateValues.WILDCARD in old_state_keys:
             # We were previously fetching everything for this type, so we don't need to
@@ -1502,14 +1541,43 @@ def _required_state_changes(
             old_state_keys - request_state_keys
         ) & changed_state_keys
 
+        # We've expanded the set of state keys, ...
         if request_state_keys - old_state_keys:
-            # We've expanded the set of state keys, use the new requested set
-            # with whatever hasn't been invalidated from the previous set.
-            changes[event_type] = request_state_keys | (
-                # Wildcard and lazy state keys are not sticky from previous requests
+            # Figure out which state keys we should remember sending down the connection
+            inheritable_previous_state_keys = (
+                # Retain the previous state_keys that we've sent down before.
+                # Wildcard and lazy state keys are not sticky from previous requests.
                 (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
                 - invalidated_state_keys
             )
+
+            # We've expanded the set of state keys, use the new requested set
+            # with whatever hasn't been invalidated from the previous set.
+            changes[event_type] = request_state_keys | inheritable_previous_state_keys
+            # Limit the number of state_keys we should remember sending down the connection
+            # for each (room_id, user_id). We don't want to store and pull out too much data
+            # in the database.
+            #
+            # Only remember up to (MAX_NUMBER_STATE_KEYS_TO_REMEMBER) state_keys
+            if len(changes[event_type]) > MAX_NUMBER_STATE_KEYS_TO_REMEMBER:
+                changes[event_type] = (
+                    # Make sure the requested keys are still present
+                    request_state_keys
+                    |
+                    # Fill the rest with previous state_keys. Ideally, we could sort
+                    # these by recency but it's just a set so just pick an arbitrary
+                    # subset (good enough).
+                    set(
+                        itertools.islice(
+                            inheritable_previous_state_keys,
+                            # Just taking the difference isn't perfect as there could be
+                            # overlap in the keys between the requested and previous but we
+                            # will decide to just take the easy route for now and avoid
+                            # additional set operations to figure it out.
+                            MAX_NUMBER_STATE_KEYS_TO_REMEMBER - len(request_state_keys),
+                        )
+                    )
+                )
             continue
 
         old_state_key_wildcard = StateValues.WILDCARD in old_state_keys
