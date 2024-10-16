@@ -1473,21 +1473,17 @@ def _required_state_changes(
         # the time given that most rooms don't have 100 members anyway and it takes a
         # while to cycle through 100 members.
         #
-        # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER) state_keys
-        if (
-            # Reset back to the limit if we've gone over
-            len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
-            # Skip if there isn't any room to add more state keys
-            and len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
-        ):
-            changes[event_type] = (
-                # Make sure the requested keys are still present
-                request_state_keys
-                |
-                # Fill the rest with previous state_keys. Ideally, we could sort these
-                # by recency but it's just a set so just pick an arbitrary subset (good
-                # enough).
-                set(
+        # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER)
+        if len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
+            # Reset back to only the requested state keys
+            changes[event_type] = request_state_keys
+
+            # Skip if there isn't any room to fill in the rest with previous state keys
+            if len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
+                # Fill the rest with previous state_keys. Ideally, we could sort
+                # these by recency but it's just a set so just pick an arbitrary
+                # subset (good enough).
+                changes[event_type] = changes[event_type] | set(
                     itertools.islice(
                         inheritable_previous_state_keys,
                         # Just taking the difference isn't perfect as there could be
@@ -1498,7 +1494,6 @@ def _required_state_changes(
                         - len(request_state_keys),
                     )
                 )
-            )
 
         if StateValues.WILDCARD in old_state_keys:
             # We were previously fetching everything for this type, so we don't need to
@@ -1570,21 +1565,17 @@ def _required_state_changes(
             # the time given that most rooms don't have 100 members anyway and it takes a
             # while to cycle through 100 members.
             #
-            # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER) state_keys
-            if (
-                # Reset back to the limit if we've gone over
-                len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
-                # Skip if there isn't any room to add more state keys
-                and len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
-            ):
-                changes[event_type] = (
-                    # Make sure the requested keys are still present
-                    request_state_keys
-                    |
+            # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER)
+            if len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
+                # Reset back to only the requested state keys
+                changes[event_type] = request_state_keys
+
+                # Skip if there isn't any room to fill in the rest with previous state keys
+                if len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
                     # Fill the rest with previous state_keys. Ideally, we could sort
                     # these by recency but it's just a set so just pick an arbitrary
                     # subset (good enough).
-                    set(
+                    changes[event_type] = changes[event_type] | set(
                         itertools.islice(
                             inheritable_previous_state_keys,
                             # Just taking the difference isn't perfect as there could be
@@ -1595,7 +1586,6 @@ def _required_state_changes(
                             - len(request_state_keys),
                         )
                     )
-                )
             continue
 
         old_state_key_wildcard = StateValues.WILDCARD in old_state_keys

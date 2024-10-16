@@ -4284,4 +4284,5 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         self.assertIncludes(
             changed_required_state_map["type"],
             request_required_state_map["type"],
+            exact=True,
         )
