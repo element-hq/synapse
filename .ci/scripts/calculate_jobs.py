@@ -31,7 +31,8 @@ def set_output(key: str, value: str):
         print(f"{key}={value}", file=f)
 
 
-IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
+# TEMP: this is to test the new targets in the PR CI
+IS_PR = False
 
 # First calculate the various trial jobs.
 #
@@ -53,7 +54,7 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.9", "3.10", "3.11", "3.12")
+        for version in ("3.9", "3.10", "3.11", "3.12", "3.13")
     )
 
 trial_postgres_tests = [
@@ -68,9 +69,9 @@ trial_postgres_tests = [
 if not IS_PR:
     trial_postgres_tests.append(
         {
-            "python-version": "3.12",
+            "python-version": "3.13",
             "database": "postgres",
-            "postgres-version": "16",
+            "postgres-version": "17",
             "extras": "all",
         }
     )
