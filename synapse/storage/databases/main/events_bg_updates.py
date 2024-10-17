@@ -24,7 +24,12 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple, cast
 
 import attr
 
-from synapse.api.constants import EventContentFields, Membership, RelationTypes
+from synapse.api.constants import (
+    EventContentFields,
+    EventTypes,
+    Membership,
+    RelationTypes,
+)
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage._base import SQLBaseStore, db_to_json, make_in_list_sql_clause
@@ -47,13 +52,13 @@ from synapse.storage.databases.main.events_worker import (
 )
 from synapse.storage.databases.main.state_deltas import StateDeltasStore
 from synapse.storage.databases.main.stream import StreamWorkerStore
-from synapse.storage.engines import PostgresEngine
 from synapse.storage.types import Cursor
 from synapse.types import JsonDict, RoomStreamToken, StateMap, StrCollection
 from synapse.types.handlers import SLIDING_SYNC_DEFAULT_BUMP_EVENT_TYPES
 from synapse.types.state import StateFilter
 from synapse.types.storage import _BackgroundUpdates
 from synapse.util import json_encoder
+from synapse.util.async_helpers import concurrently_execute
 from synapse.util.iterutils import batch_iter
 
 if TYPE_CHECKING:
@@ -1626,16 +1631,31 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             return rooms_to_update_rows
 
-        rooms_to_update = await self.db_pool.runInteraction(
+        rooms_to_update_rows = await self.db_pool.runInteraction(
             "_sliding_sync_joined_rooms_bg_update._get_rooms_to_update_txn",
             _get_rooms_to_update_txn,
         )
 
-        if not rooms_to_update:
+        if not rooms_to_update_rows:
             await self.db_pool.updates._end_background_update(
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE
             )
             return 0
+
+        # As long as we get this value before we fetch the current state, we can use it
+        # to check if something has changed since that point.
+        most_recent_current_state_delta_stream_id = (
+            await self.get_max_stream_id_in_current_state_deltas()
+        )
+        # Same as `await self.get_stats_positions()` but get around the method
+        # resolution issues that crop up when we try to mixin `StatsStore` into this
+        # store.
+        stats_stream_position = await self.db_pool.simple_select_one_onecol(
+            table="stats_incremental_position",
+            keyvalues={},
+            retcol="stream_id",
+            desc="stats_incremental_position",
+        )
 
         # Map from room_id to insert/update state values in the `sliding_sync_joined_rooms` table.
         joined_room_updates: Dict[str, SlidingSyncStateInsertValues] = {}
@@ -1643,12 +1663,8 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         joined_room_stream_ordering_updates: Dict[
             str, _JoinedRoomStreamOrderingUpdate
         ] = {}
-        # As long as we get this value before we fetch the current state, we can use it
-        # to check if something has changed since that point.
-        most_recent_current_state_delta_stream_id = (
-            await self.get_max_stream_id_in_current_state_deltas()
-        )
-        for (room_id,) in rooms_to_update:
+
+        async def handle_room(room_id: str) -> None:
             current_state_ids_map = await self.db_pool.runInteraction(
                 "_sliding_sync_joined_rooms_bg_update._get_relevant_sliding_sync_current_state_event_ids_txn",
                 PersistEventsStore._get_relevant_sliding_sync_current_state_event_ids_txn,
@@ -1659,36 +1675,100 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # `sliding_sync_joined_rooms` table so we should skip and b) we won't have
             # any `current_state_events` for the room.
             if not current_state_ids_map:
-                continue
+                return
 
-            try:
-                fetched_events = await self.get_events(current_state_ids_map.values())
-            except (DatabaseCorruptionError, InvalidEventError) as e:
-                logger.warning(
-                    "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
-                    room_id,
-                    e,
-                )
-                continue
+            current_state_ids_to_fetch: List[str] = []
 
-            current_state_map: StateMap[EventBase] = {
-                state_key: fetched_events[event_id]
-                for state_key, event_id in current_state_ids_map.items()
-                # `get_events(...)` will filter out events for unknown room versions
-                if event_id in fetched_events
-            }
+            state_insert_values: SlidingSyncStateInsertValues = {}
 
-            # Even if we are joined to the room, this can happen for unknown room
-            # versions (old room versions that aren't known anymore) since
-            # `get_events(...)` will filter out events for unknown room versions
-            if not current_state_map:
-                continue
-
-            state_insert_values = (
-                PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
-                    current_state_map
-                )
+            # Check if the current state has been updated since the stats were
+            # generated.
+            state_deltas_since_stats = await self.get_current_state_deltas_for_room(
+                room_id,
+                from_token=RoomStreamToken(stream=stats_stream_position),
+                to_token=None,
             )
+            can_use_room_stats_state_table = True
+            for state_delta in state_deltas_since_stats:
+                # We only need to check for the state is relevant to the
+                # `sliding_sync_joined_rooms` table.
+                if (
+                    state_delta.event_type,
+                    state_delta.state_key,
+                ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                    can_use_room_stats_state_table = False
+                    # Once we find one relevant state event that changed, no need to
+                    # look any further
+                    break
+
+            # Avoid fetching full events out as much as possible. We can look-up all of
+            # the relevant state values except for the `tombstone_successor_room_id`
+            # from the `room_stats_state` table.
+            if can_use_room_stats_state_table:
+                (name, room_type, encryption) = cast(
+                    Tuple[Optional[str], Optional[str], Optional[str]],
+                    await self.db_pool.simple_select_one(
+                        table="room_stats_state",
+                        keyvalues={"room_id": room_id},
+                        retcols=["name", "room_type", "encryption"],
+                    ),
+                )
+
+                state_insert_values["room_name"] = name
+                state_insert_values["room_type"] = room_type
+                state_insert_values["is_encrypted"] = encryption is not None
+
+                # If the room has a tombstone, we still need to fetch it out manually
+                # because this information isn't available in the `room_stats_state`
+                # table.
+                tombstone_event_id = current_state_ids_map.get(
+                    (EventTypes.Tombstone, "")
+                )
+                if tombstone_event_id is not None:
+                    current_state_ids_to_fetch.append(tombstone_event_id)
+
+            else:
+                current_state_ids_to_fetch.extend(current_state_ids_map.values())
+
+            # Fetch any more events that we need to complete the `state_insert_values`.
+            # For the happy-path, this will just be the tombstone event if the room has
+            # one since we got the rest of the values already from the
+            # `room_stats_state` table. In the case, where we can't use
+            # `room_stats_state`, we just fetch all of the events manually.
+            if current_state_ids_to_fetch:
+                try:
+                    fetched_events = await self.get_events(
+                        current_state_ids_map.values()
+                    )
+                except (DatabaseCorruptionError, InvalidEventError) as e:
+                    logger.warning(
+                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                        room_id,
+                        e,
+                    )
+                    return
+
+                # Even if we are joined to the room, `get_events(...)` will filter out
+                # events for unknown room versions that we no longer support. We don't need
+                # to do anything for these unsupported rooms.
+                if not fetched_events:
+                    return
+
+                current_state_map: StateMap[EventBase] = {
+                    state_key: fetched_events[event_id]
+                    for state_key, event_id in current_state_ids_map.items()
+                    # `get_events(...)` will filter out events for unknown room versions
+                    if event_id in fetched_events
+                }
+
+                more_state_insert_values = (
+                    PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                        current_state_map
+                    )
+                )
+                # Update our main insert map
+                state_insert_values.update(more_state_insert_values)
+
             # We should have some insert values for each room, even if they are `None`
             assert state_insert_values
             joined_room_updates[room_id] = state_insert_values
@@ -1731,87 +1811,92 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                 )
             )
 
-        def _fill_table_txn(txn: LoggingTransaction) -> None:
+        rooms_to_update = [row[0] for row in rooms_to_update_rows]
+        await concurrently_execute(handle_room, rooms_to_update, 10)
+
+        def _fill_table_for_room_txn(txn: LoggingTransaction, room_id: str) -> None:
+            update_map = joined_room_updates[room_id]
+            joined_room_stream_ordering_update = joined_room_stream_ordering_updates[
+                room_id
+            ]
+            event_stream_ordering = (
+                joined_room_stream_ordering_update.most_recent_event_stream_ordering
+            )
+            bump_stamp = joined_room_stream_ordering_update.most_recent_bump_stamp
+
+            # Check if the current state has been updated since we gathered it.
+            # We're being careful not to insert/overwrite with stale data.
+            state_deltas_since_we_gathered_current_state = (
+                self.get_current_state_deltas_for_room_txn(
+                    txn,
+                    room_id,
+                    from_token=RoomStreamToken(
+                        stream=most_recent_current_state_delta_stream_id
+                    ),
+                    to_token=None,
+                )
+            )
+            for state_delta in state_deltas_since_we_gathered_current_state:
+                # We only need to check for the state is relevant to the
+                # `sliding_sync_joined_rooms` table.
+                if (
+                    state_delta.event_type,
+                    state_delta.state_key,
+                ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                    # Raising exception so we can just exit and try again. It would
+                    # be hard to resolve this within the transaction because we need
+                    # to get full events out that take redactions into account. We
+                    # could add some retry logic here, but it's easier to just let
+                    # the background update try again.
+                    raise Exception(
+                        "Current state was updated after we gathered it to update "
+                        + "`sliding_sync_joined_rooms` in the background update. "
+                        + "Raising exception so we can just try again."
+                    )
+
             # Handle updating the `sliding_sync_joined_rooms` table
             #
-            for (
-                room_id,
-                update_map,
-            ) in joined_room_updates.items():
-                joined_room_stream_ordering_update = (
-                    joined_room_stream_ordering_updates[room_id]
-                )
-                event_stream_ordering = (
-                    joined_room_stream_ordering_update.most_recent_event_stream_ordering
-                )
-                bump_stamp = joined_room_stream_ordering_update.most_recent_bump_stamp
-
-                # Check if the current state has been updated since we gathered it.
-                # We're being careful not to insert/overwrite with stale data.
-                state_deltas_since_we_gathered_current_state = (
-                    self.get_current_state_deltas_for_room_txn(
-                        txn,
-                        room_id,
-                        from_token=RoomStreamToken(
-                            stream=most_recent_current_state_delta_stream_id
-                        ),
-                        to_token=None,
-                    )
-                )
-                for state_delta in state_deltas_since_we_gathered_current_state:
-                    # We only need to check for the state is relevant to the
-                    # `sliding_sync_joined_rooms` table.
-                    if (
-                        state_delta.event_type,
-                        state_delta.state_key,
-                    ) in SLIDING_SYNC_RELEVANT_STATE_SET:
-                        # Raising exception so we can just exit and try again. It would
-                        # be hard to resolve this within the transaction because we need
-                        # to get full events out that take redactions into account. We
-                        # could add some retry logic here, but it's easier to just let
-                        # the background update try again.
-                        raise Exception(
-                            "Current state was updated after we gathered it to update "
-                            + "`sliding_sync_joined_rooms` in the background update. "
-                            + "Raising exception so we can just try again."
-                        )
-
-                # Since we fully insert rows into `sliding_sync_joined_rooms`, we can
-                # just do everything on insert and `ON CONFLICT DO NOTHING`.
-                #
-                self.db_pool.simple_upsert_txn(
-                    txn,
-                    table="sliding_sync_joined_rooms",
-                    keyvalues={"room_id": room_id},
-                    values={},
-                    insertion_values={
-                        **update_map,
-                        # The reason we're only *inserting* (not *updating*) `event_stream_ordering`
-                        # and `bump_stamp` is because if they are present, that means they are already
-                        # up-to-date.
-                        "event_stream_ordering": event_stream_ordering,
-                        "bump_stamp": bump_stamp,
-                    },
-                )
-
-            # Now that we've processed all the room, we can remove them from the
-            # queue.
+            # Since we fully insert rows into `sliding_sync_joined_rooms`, we can
+            # just do everything on insert and `ON CONFLICT DO NOTHING`.
             #
-            # Note: we need to remove all the rooms from the queue we pulled out
-            # from the DB, not just the ones we've processed above. Otherwise
-            # we'll simply keep pulling out the same rooms over and over again.
-            self.db_pool.simple_delete_many_batch_txn(
+            self.db_pool.simple_upsert_txn(
                 txn,
-                table="sliding_sync_joined_rooms_to_recalculate",
-                keys=("room_id",),
-                values=rooms_to_update,
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                values={},
+                insertion_values={
+                    # The reason we're only *inserting* (not *updating*) is because if
+                    # they are present, that means they are already up-to-date.
+                    **update_map,
+                    "event_stream_ordering": event_stream_ordering,
+                    "bump_stamp": bump_stamp,
+                },
             )
 
-        await self.db_pool.runInteraction(
-            "sliding_sync_joined_rooms_bg_update", _fill_table_txn
+        async def fill_table_for_room(room_id: str) -> None:
+            await self.db_pool.runInteraction(
+                "sliding_sync_joined_rooms_bg_update", _fill_table_for_room_txn, room_id
+            )
+
+        # Since most of the time spent here is probably just latency to/from the
+        # database, let's just run this concurrently.
+        await concurrently_execute(fill_table_for_room, joined_room_updates.keys(), 10)
+
+        # Now that we've processed all of the rooms, we can remove them from the
+        # queue.
+        #
+        # Note: we need to remove all the rooms from the queue we pulled out
+        # from the DB, not just the ones we've processed above. Otherwise
+        # we'll simply keep pulling out the same rooms over and over again.
+        await self.db_pool.simple_delete_many(
+            table="sliding_sync_joined_rooms_to_recalculate",
+            column="room_id",
+            iterable=rooms_to_update,
+            keyvalues={},
+            desc="_sliding_sync_joined_rooms_bg_update: removing rooms that we processed",
         )
 
-        return len(rooms_to_update)
+        return len(rooms_to_update_rows)
 
     async def _sliding_sync_membership_snapshots_bg_update(
         self, progress: JsonDict, batch_size: int
@@ -1866,6 +1951,18 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
         ]:
             # Fetch the set of event IDs that we want to update
             #
+            # It's important to sort by `stream_ordering` *ascending* (oldest to
+            # newest) (at-least per-room) so that we can re-use the snapshots along the
+            # way if nothing has changed.
+            #
+            # Also be careful because `local_current_membership.event_stream_ordering`
+            # is nullable and not always filled in. We need to join on `events` to rely
+            # on `events.stream_ordering` instead. Even though the
+            # `events.stream_ordering` also doesn't have a `NOT NULL` constraint, it
+            # doesn't have any rows where this is the case (checked on `matrix.org`).
+            # The fact the `events.stream_ordering` is a nullable column is a holdover
+            # from a rename of the column.
+            #
             # We skip over rows which we've already handled, i.e. have a
             # matching row in `sliding_sync_membership_snapshots` with the same
             # room, user and event ID.
@@ -1874,7 +1971,6 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
             # kicked). This is to avoid having to port lots of old rooms that we
             # will never send down sliding sync (as we exclude such rooms from
             # initial syncs).
-
             if initial_phase:
                 # There are some old out-of-band memberships (before
                 # https://github.com/matrix-org/synapse/issues/6983) where we don't have
@@ -1900,13 +1996,13 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
                     WHERE (c.room_id, c.user_id) > (?, ?)
                         AND (m.user_id IS NULL OR c.event_id != m.membership_event_id)
-                    ORDER BY c.room_id ASC, c.user_id ASC
+                    ORDER BY c.room_id ASC, e.stream_ordering ASC, c.user_id ASC
                     LIMIT ?
                     """,
                     (last_room_id, last_user_id, batch_size),
                 )
             elif last_event_stream_ordering is not None:
-                # It's important to sort by `event_stream_ordering` *ascending* (oldest to
+                # It's important to sort by `stream_ordering` *ascending* (oldest to
                 # newest) so that if we see that this background update in progress and want
                 # to start the catch-up process, we can safely assume that it will
                 # eventually get to the rooms we want to catch-up on anyway (see
@@ -1925,16 +2021,16 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         e.sender,
                         c.event_id,
                         c.membership,
-                        c.event_stream_ordering,
+                        e.stream_ordering,
                         e.instance_name,
                         e.outlier
                     FROM local_current_membership AS c
                     LEFT JOIN sliding_sync_membership_snapshots AS m USING (room_id, user_id)
                     INNER JOIN events AS e USING (event_id)
                     LEFT JOIN rooms AS r ON (c.room_id = r.room_id)
-                    WHERE c.event_stream_ordering > ?
+                    WHERE e.stream_ordering > ?
                         AND (m.user_id IS NULL OR c.event_id != m.membership_event_id)
-                    ORDER BY c.event_stream_ordering ASC
+                    ORDER BY e.stream_ordering ASC
                     LIMIT ?
                     """,
                     (last_event_stream_ordering, batch_size),
@@ -2048,87 +2144,420 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
 
             return event_id, membership
 
+        # As long as we get this value before we fetch the current state, we can use it
+        # to check if something has changed since that point.
+        #
+        # Same as `await self.get_stats_positions()` but get around the method
+        # resolution issues that crop up when we try to mixin `StatsStore` into this
+        # store.
+        stats_stream_position = await self.db_pool.simple_select_one_onecol(
+            table="stats_incremental_position",
+            keyvalues={},
+            retcol="stream_id",
+            desc="stats_incremental_position",
+        )
+
         # Map from (room_id, user_id) to ...
         to_insert_membership_snapshots: Dict[
             Tuple[str, str], SlidingSyncMembershipSnapshotSharedInsertValues
         ] = {}
+        # Map from (room_id, user_id) to ...
         to_insert_membership_infos: Dict[
             Tuple[str, str], SlidingSyncMembershipInfoWithEventPos
         ] = {}
-        for (
-            room_id,
-            room_id_from_rooms_table,
-            room_version_id,
-            user_id,
-            sender,
-            membership_event_id,
-            membership,
-            membership_event_stream_ordering,
-            membership_event_instance_name,
-            is_outlier,
-        ) in memberships_to_update_rows:
-            # We don't know how to handle `membership` values other than these. The
-            # code below would need to be updated.
-            assert membership in (
-                Membership.JOIN,
-                Membership.INVITE,
-                Membership.KNOCK,
-                Membership.LEAVE,
-                Membership.BAN,
-            )
 
-            if (
-                room_version_id is not None
-                and room_version_id not in KNOWN_ROOM_VERSIONS
-            ):
-                # Ignore rooms with unknown room versions (these were
-                # experimental rooms, that we no longer support).
-                continue
+        # Map from room_id to the last join membership snapshot/info we inserted.
+        # Just some convenience maps for easier lookup by `room_id`.
+        last_to_insert_join_membership_snapshots_by_room_id: Dict[
+            str, SlidingSyncMembershipSnapshotSharedInsertValues
+        ] = {}
+        last_to_insert_join_membership_infos_by_room_id: Dict[
+            str, SlidingSyncMembershipInfoWithEventPos
+        ] = {}
 
-            # There are some old out-of-band memberships (before
-            # https://github.com/matrix-org/synapse/issues/6983) where we don't have the
-            # corresponding room stored in the `rooms` table`. We have a `FOREIGN KEY`
-            # constraint on the `sliding_sync_membership_snapshots` table so we have to
-            # fix-up these memberships by adding the room to the `rooms` table.
-            if room_id_from_rooms_table is None:
-                await self.db_pool.simple_insert(
-                    table="rooms",
-                    values={
-                        "room_id": room_id,
-                        # Only out-of-band memberships are missing from the `rooms`
-                        # table so that is the only type of membership we're dealing
-                        # with here. Since we don't calculate the "chain cover" for
-                        # out-of-band memberships, we can just set this to `True` as if
-                        # the user ever joins the room, we will end up calculating the
-                        # "chain cover" anyway.
-                        "has_auth_chain_index": True,
-                    },
+        async def _handle_memberships_to_update_rows_for_room(
+            memberships_to_update_rows: List[
+                Tuple[
+                    str,
+                    Optional[str],
+                    Optional[str],
+                    str,
+                    str,
+                    str,
+                    str,
+                    int,
+                    Optional[str],
+                    bool,
+                ]
+            ],
+        ) -> None:
+            # We should have exited earlier if there were no rows to process
+            assert len(memberships_to_update_rows) > 0
+
+            room_id_for_all_rows: str = memberships_to_update_rows[0][0]
+
+            for (
+                room_id,
+                room_id_from_rooms_table,
+                room_version_id,
+                user_id,
+                sender,
+                membership_event_id,
+                membership,
+                membership_event_stream_ordering,
+                membership_event_instance_name,
+                is_outlier,
+            ) in memberships_to_update_rows:
+                # Sanity check that we're working on the same room for all of the rows
+                # so the snapshot re-use logic can work properly (we need to process
+                # memberships in a room sequentially by `stream_ordering` ascending)
+                assert room_id == room_id_for_all_rows
+
+                # We don't know how to handle `membership` values other than these. The
+                # code below would need to be updated.
+                assert membership in (
+                    Membership.JOIN,
+                    Membership.INVITE,
+                    Membership.KNOCK,
+                    Membership.LEAVE,
+                    Membership.BAN,
                 )
 
-            # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
-            sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
-            if membership == Membership.JOIN:
-                # If we're still joined, we can pull from current state.
-                current_state_ids_map: StateMap[
-                    str
-                ] = await self.hs.get_storage_controllers().state.get_current_state_ids(
-                    room_id,
-                    state_filter=StateFilter.from_types(
-                        SLIDING_SYNC_RELEVANT_STATE_SET
-                    ),
-                    # Partially-stated rooms should have all state events except for
-                    # remote membership events so we don't need to wait at all because
-                    # we only want some non-membership state
-                    await_full_state=False,
+                if (
+                    room_version_id is not None
+                    and room_version_id not in KNOWN_ROOM_VERSIONS
+                ):
+                    # Ignore rooms with unknown room versions (these were
+                    # experimental rooms, that we no longer support).
+                    continue
+
+                # There are some old out-of-band memberships (before
+                # https://github.com/matrix-org/synapse/issues/6983) where we don't have the
+                # corresponding room stored in the `rooms` table`. We have a `FOREIGN KEY`
+                # constraint on the `sliding_sync_membership_snapshots` table so we have to
+                # fix-up these memberships by adding the room to the `rooms` table.
+                if room_id_from_rooms_table is None:
+                    await self.db_pool.simple_insert(
+                        table="rooms",
+                        values={
+                            "room_id": room_id,
+                            # Only out-of-band memberships are missing from the `rooms`
+                            # table so that is the only type of membership we're dealing
+                            # with here. Since we don't calculate the "chain cover" for
+                            # out-of-band memberships, we can just set this to `True` as if
+                            # the user ever joins the room, we will end up calculating the
+                            # "chain cover" anyway.
+                            "has_auth_chain_index": True,
+                        },
+                    )
+
+                # Check if we can potentially re-use the last snapshot we inserted for this
+                # room.
+                #
+                can_use_last_snapshot = False
+                # TODO: We could also look in the database to see if a snapshot is
+                # available. Is it worth the lookup time?
+                last_to_insert_join_membership_snapshot = (
+                    last_to_insert_join_membership_snapshots_by_room_id.get(room_id)
                 )
-                # We're iterating over rooms that we are joined to so they should
-                # have `current_state_events` and we should have some current state
-                # for each room
-                if current_state_ids_map:
-                    try:
-                        fetched_events = await self.get_events(
-                            current_state_ids_map.values()
+                last_to_insert_join_membership_info = (
+                    last_to_insert_join_membership_infos_by_room_id.get(room_id)
+                )
+                # We can only re-use the last snapshot if their previous membership was in
+                # the room. Since that's not easy to determine without more extra lookups,
+                # we only apply this to join memberships for now.
+                #
+                # - JOIN: Re-use if no state changes
+                # - LEAVE: Could re-use if they were previously joined otherwise this could
+                #   be a rescinded/rejected invite/knock and we don't want to leak anything.
+                # - INVITE/KNOCK: ❌ We can only rely on the stripped state
+                # - BAN: Could re-use if they were previously joined otherwise they might
+                #   have just been banned after invite/knock and we don't want to leak
+                #   anything.
+                if (
+                    last_to_insert_join_membership_snapshot is not None
+                    and membership == Membership.JOIN
+                ):
+                    can_use_last_snapshot = True
+
+                    # These should go hand-in-hand
+                    assert last_to_insert_join_membership_info is not None
+
+                    # Sanity check that our tokens are in order. We should be iterating in
+                    # ascending order.
+                    assert (
+                        last_to_insert_join_membership_info.membership_event_stream_ordering
+                        <= membership_event_stream_ordering
+                    ), (
+                        f"Expected to be iterating in ascending order as we process membership snapshots for room {room_id}"
+                        + f" but our last join membership was at {last_to_insert_join_membership_info.membership_event_stream_ordering}"
+                        + f" and our current membership is at {membership_event_stream_ordering}"
+                    )
+
+                    # Check if the current state has been updated since the last snapshot we inserted.
+                    state_deltas_since_last_snapshot = await self.get_current_state_deltas_for_room(
+                        room_id,
+                        # From the last snapshot we inserted
+                        from_token=RoomStreamToken(
+                            stream=last_to_insert_join_membership_info.membership_event_stream_ordering,
+                        ),
+                        # To our current membership position
+                        to_token=RoomStreamToken(
+                            stream=membership_event_stream_ordering,
+                        ),
+                    )
+                    for state_delta in state_deltas_since_last_snapshot:
+                        # We only need to check for the state is relevant to the
+                        # `sliding_sync_joined_rooms` table.
+                        if (
+                            state_delta.event_type,
+                            state_delta.state_key,
+                        ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                            can_use_last_snapshot = False
+                            # Once we find one relevant state event that changed, no need to
+                            # look any further
+                            break
+
+                # Map of values to insert/update in the `sliding_sync_membership_snapshots` table
+                sliding_sync_membership_snapshots_insert_map: SlidingSyncMembershipSnapshotSharedInsertValues = {}
+                # If none of the relevant state has changed since the last snapshot, we can
+                # just re-use the last snapshot we inserted.
+                if can_use_last_snapshot:
+                    # Based on the logic above, we should have a last snapshot to work from
+                    assert last_to_insert_join_membership_snapshot is not None
+
+                    sliding_sync_membership_snapshots_insert_map = (
+                        last_to_insert_join_membership_snapshot
+                    )
+                elif membership == Membership.JOIN:
+                    # If we're still joined, we can pull from current state.
+                    current_state_ids_map: StateMap[
+                        str
+                    ] = await self.hs.get_storage_controllers().state.get_current_state_ids(
+                        room_id,
+                        state_filter=StateFilter.from_types(
+                            SLIDING_SYNC_RELEVANT_STATE_SET
+                        ),
+                        # Partially-stated rooms should have all state events except for
+                        # remote membership events so we don't need to wait at all because
+                        # we only want some non-membership state
+                        await_full_state=False,
+                    )
+
+                    # We're iterating over rooms that we are joined to so they should
+                    # have `current_state_events` and we should have some current state
+                    # for each room
+                    if current_state_ids_map:
+                        current_state_ids_to_fetch: List[str] = []
+
+                        # Check if the current state has been updated since the stats were
+                        # generated.
+                        state_deltas_since_stats = (
+                            await self.get_current_state_deltas_for_room(
+                                room_id,
+                                from_token=RoomStreamToken(
+                                    stream=stats_stream_position
+                                ),
+                                to_token=None,
+                            )
                         )
+                        can_use_room_stats_state_table = True
+                        for state_delta in state_deltas_since_stats:
+                            # We only need to check for the state is relevant to the
+                            # `sliding_sync_joined_rooms` table.
+                            if (
+                                state_delta.event_type,
+                                state_delta.state_key,
+                            ) in SLIDING_SYNC_RELEVANT_STATE_SET:
+                                can_use_room_stats_state_table = False
+                                # Once we find one relevant state event that changed, no need to
+                                # look any further
+                                break
+
+                        # Avoid fetching full events out as much as possible. We can look-up all of
+                        # the relevant state values except for the `tombstone_successor_room_id`
+                        # from the `room_stats_state` table.
+                        if can_use_room_stats_state_table:
+                            (name, room_type, encryption) = cast(
+                                Tuple[Optional[str], Optional[str], Optional[str]],
+                                await self.db_pool.simple_select_one(
+                                    table="room_stats_state",
+                                    keyvalues={"room_id": room_id},
+                                    retcols=["name", "room_type", "encryption"],
+                                ),
+                            )
+
+                            # We have current state to work from
+                            sliding_sync_membership_snapshots_insert_map[
+                                "has_known_state"
+                            ] = True
+                            # And can copy some of the values from the `room_stats_state` table
+                            sliding_sync_membership_snapshots_insert_map[
+                                "room_name"
+                            ] = name
+                            sliding_sync_membership_snapshots_insert_map[
+                                "room_type"
+                            ] = room_type
+                            sliding_sync_membership_snapshots_insert_map[
+                                "is_encrypted"
+                            ] = encryption is not None
+
+                            # If the room has a tombstone, we still need to fetch it out manually
+                            # because this information isn't available in the `room_stats_state`
+                            # table.
+                            tombstone_event_id = current_state_ids_map.get(
+                                (EventTypes.Tombstone, "")
+                            )
+                            if tombstone_event_id is not None:
+                                current_state_ids_to_fetch.append(tombstone_event_id)
+
+                        else:
+                            current_state_ids_to_fetch.extend(
+                                current_state_ids_map.values()
+                            )
+
+                        # Fetch any more events that we need to complete the `state_insert_values`.
+                        # For the happy-path, this will just be the tombstone event if the room has
+                        # one since we got the rest of the values already from the
+                        # `room_stats_state` table. In the case, where we can't use
+                        # `room_stats_state`, we just fetch all of the events manually.
+                        if current_state_ids_to_fetch:
+                            try:
+                                fetched_events = await self.get_events(
+                                    current_state_ids_to_fetch
+                                )
+                            except (DatabaseCorruptionError, InvalidEventError) as e:
+                                logger.warning(
+                                    "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
+                                    room_id,
+                                    e,
+                                )
+                                continue
+
+                            current_state_map: StateMap[EventBase] = {
+                                state_key: fetched_events[event_id]
+                                for state_key, event_id in current_state_ids_map.items()
+                                # `get_events(...)` will filter out events for unknown room versions
+                                if event_id in fetched_events
+                            }
+
+                            # Can happen for unknown room versions (old room versions that aren't known
+                            # anymore) since `get_events(...)` will filter out events for unknown room
+                            # versions
+                            if not current_state_map:
+                                continue
+
+                            more_state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
+                                current_state_map
+                            )
+                            # Update our main insert map
+                            sliding_sync_membership_snapshots_insert_map.update(
+                                more_state_insert_values
+                            )
+                            # We should have some insert values for each room, even if they are `None`
+                            assert sliding_sync_membership_snapshots_insert_map
+
+                            # We have current state to work from
+                            sliding_sync_membership_snapshots_insert_map[
+                                "has_known_state"
+                            ] = True
+                    else:
+                        # Although we expect every room to have a create event (even
+                        # past unknown room versions since we haven't supported one
+                        # without it), there seem to be some corrupted rooms in
+                        # practice that don't have the create event in the
+                        # `current_state_events` table. The create event does exist
+                        # in the events table though. We'll just say that we don't
+                        # know the state for these rooms and continue on with our
+                        # day.
+                        sliding_sync_membership_snapshots_insert_map = {
+                            "has_known_state": False,
+                            "room_type": None,
+                            "room_name": None,
+                            "is_encrypted": False,
+                        }
+                elif membership in (Membership.INVITE, Membership.KNOCK) or (
+                    membership in (Membership.LEAVE, Membership.BAN) and is_outlier
+                ):
+                    invite_or_knock_event_id = None
+                    invite_or_knock_membership = None
+
+                    # If the event is an `out_of_band_membership` (special case of
+                    # `outlier`), we never had historical state so we have to pull from
+                    # the stripped state on the previous invite/knock event. This gives
+                    # us a consistent view of the room state regardless of your
+                    # membership (i.e. the room shouldn't disappear if your using the
+                    # `is_encrypted` filter and you leave).
+                    if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
+                        previous_membership = await self.db_pool.runInteraction(
+                            "sliding_sync_membership_snapshots_bg_update._find_previous_invite_or_knock_membership_txn",
+                            _find_previous_invite_or_knock_membership_txn,
+                            room_id,
+                            user_id,
+                            membership_event_id,
+                        )
+                        if previous_membership is not None:
+                            (
+                                invite_or_knock_event_id,
+                                invite_or_knock_membership,
+                            ) = previous_membership
+                    else:
+                        invite_or_knock_event_id = membership_event_id
+                        invite_or_knock_membership = membership
+
+                    if (
+                        invite_or_knock_event_id is not None
+                        and invite_or_knock_membership is not None
+                    ):
+                        # Pull from the stripped state on the invite/knock event
+                        invite_or_knock_event = await self.get_event(
+                            invite_or_knock_event_id
+                        )
+
+                        raw_stripped_state_events = None
+                        if invite_or_knock_membership == Membership.INVITE:
+                            invite_room_state = invite_or_knock_event.unsigned.get(
+                                "invite_room_state"
+                            )
+                            raw_stripped_state_events = invite_room_state
+                        elif invite_or_knock_membership == Membership.KNOCK:
+                            knock_room_state = invite_or_knock_event.unsigned.get(
+                                "knock_room_state"
+                            )
+                            raw_stripped_state_events = knock_room_state
+
+                        sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
+                            raw_stripped_state_events
+                        )
+                    else:
+                        # We couldn't find any state for the membership, so we just have to
+                        # leave it as empty.
+                        sliding_sync_membership_snapshots_insert_map = {
+                            "has_known_state": False,
+                            "room_type": None,
+                            "room_name": None,
+                            "is_encrypted": False,
+                        }
+
+                    # We should have some insert values for each room, even if no
+                    # stripped state is on the event because we still want to record
+                    # that we have no known state
+                    assert sliding_sync_membership_snapshots_insert_map
+                elif membership in (Membership.LEAVE, Membership.BAN):
+                    # Pull from historical state
+                    state_ids_map = await self.hs.get_storage_controllers().state.get_state_ids_for_event(
+                        membership_event_id,
+                        state_filter=StateFilter.from_types(
+                            SLIDING_SYNC_RELEVANT_STATE_SET
+                        ),
+                        # Partially-stated rooms should have all state events except for
+                        # remote membership events so we don't need to wait at all because
+                        # we only want some non-membership state
+                        await_full_state=False,
+                    )
+
+                    try:
+                        fetched_events = await self.get_events(state_ids_map.values())
                     except (DatabaseCorruptionError, InvalidEventError) as e:
                         logger.warning(
                             "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
@@ -2137,9 +2566,9 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                         )
                         continue
 
-                    current_state_map: StateMap[EventBase] = {
+                    state_map: StateMap[EventBase] = {
                         state_key: fetched_events[event_id]
-                        for state_key, event_id in current_state_ids_map.items()
+                        for state_key, event_id in state_ids_map.items()
                         # `get_events(...)` will filter out events for unknown room versions
                         if event_id in fetched_events
                     }
@@ -2147,11 +2576,11 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     # Can happen for unknown room versions (old room versions that aren't known
                     # anymore) since `get_events(...)` will filter out events for unknown room
                     # versions
-                    if not current_state_map:
+                    if not state_map:
                         continue
 
                     state_insert_values = PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
-                        current_state_map
+                        state_map
                     )
                     sliding_sync_membership_snapshots_insert_map.update(
                         state_insert_values
@@ -2159,241 +2588,176 @@ class EventsBackgroundUpdatesStore(StreamWorkerStore, StateDeltasStore, SQLBaseS
                     # We should have some insert values for each room, even if they are `None`
                     assert sliding_sync_membership_snapshots_insert_map
 
-                    # We have current state to work from
+                    # We have historical state to work from
                     sliding_sync_membership_snapshots_insert_map["has_known_state"] = (
                         True
                     )
                 else:
-                    # Although we expect every room to have a create event (even
-                    # past unknown room versions since we haven't supported one
-                    # without it), there seem to be some corrupted rooms in
-                    # practice that don't have the create event in the
-                    # `current_state_events` table. The create event does exist
-                    # in the events table though. We'll just say that we don't
-                    # know the state for these rooms and continue on with our
-                    # day.
-                    sliding_sync_membership_snapshots_insert_map = {
-                        "has_known_state": False,
-                        "room_type": None,
-                        "room_name": None,
-                        "is_encrypted": False,
-                    }
-            elif membership in (Membership.INVITE, Membership.KNOCK) or (
-                membership in (Membership.LEAVE, Membership.BAN) and is_outlier
-            ):
-                invite_or_knock_event_id = None
-                invite_or_knock_membership = None
-
-                # If the event is an `out_of_band_membership` (special case of
-                # `outlier`), we never had historical state so we have to pull from
-                # the stripped state on the previous invite/knock event. This gives
-                # us a consistent view of the room state regardless of your
-                # membership (i.e. the room shouldn't disappear if your using the
-                # `is_encrypted` filter and you leave).
-                if membership in (Membership.LEAVE, Membership.BAN) and is_outlier:
-                    previous_membership = await self.db_pool.runInteraction(
-                        "sliding_sync_membership_snapshots_bg_update._find_previous_invite_or_knock_membership_txn",
-                        _find_previous_invite_or_knock_membership_txn,
-                        room_id,
-                        user_id,
-                        membership_event_id,
-                    )
-                    if previous_membership is not None:
-                        (
-                            invite_or_knock_event_id,
-                            invite_or_knock_membership,
-                        ) = previous_membership
-                else:
-                    invite_or_knock_event_id = membership_event_id
-                    invite_or_knock_membership = membership
-
-                if (
-                    invite_or_knock_event_id is not None
-                    and invite_or_knock_membership is not None
-                ):
-                    # Pull from the stripped state on the invite/knock event
-                    invite_or_knock_event = await self.get_event(
-                        invite_or_knock_event_id
+                    # We don't know how to handle this type of membership yet
+                    #
+                    # FIXME: We should use `assert_never` here but for some reason
+                    # the exhaustive matching doesn't recognize the `Never` here.
+                    # assert_never(membership)
+                    raise AssertionError(
+                        f"Unexpected membership {membership} ({membership_event_id}) that we don't know how to handle yet"
                     )
 
-                    raw_stripped_state_events = None
-                    if invite_or_knock_membership == Membership.INVITE:
-                        invite_room_state = invite_or_knock_event.unsigned.get(
-                            "invite_room_state"
-                        )
-                        raw_stripped_state_events = invite_room_state
-                    elif invite_or_knock_membership == Membership.KNOCK:
-                        knock_room_state = invite_or_knock_event.unsigned.get(
-                            "knock_room_state"
-                        )
-                        raw_stripped_state_events = knock_room_state
-
-                    sliding_sync_membership_snapshots_insert_map = PersistEventsStore._get_sliding_sync_insert_values_from_stripped_state(
-                        raw_stripped_state_events
-                    )
-                else:
-                    # We couldn't find any state for the membership, so we just have to
-                    # leave it as empty.
-                    sliding_sync_membership_snapshots_insert_map = {
-                        "has_known_state": False,
-                        "room_type": None,
-                        "room_name": None,
-                        "is_encrypted": False,
-                    }
-
-                # We should have some insert values for each room, even if no
-                # stripped state is on the event because we still want to record
-                # that we have no known state
-                assert sliding_sync_membership_snapshots_insert_map
-            elif membership in (Membership.LEAVE, Membership.BAN):
-                # Pull from historical state
-                state_ids_map = await self.hs.get_storage_controllers().state.get_state_ids_for_event(
-                    membership_event_id,
-                    state_filter=StateFilter.from_types(
-                        SLIDING_SYNC_RELEVANT_STATE_SET
-                    ),
-                    # Partially-stated rooms should have all state events except for
-                    # remote membership events so we don't need to wait at all because
-                    # we only want some non-membership state
-                    await_full_state=False,
+                to_insert_membership_snapshots[(room_id, user_id)] = (
+                    sliding_sync_membership_snapshots_insert_map
                 )
-
-                try:
-                    fetched_events = await self.get_events(state_ids_map.values())
-                except (DatabaseCorruptionError, InvalidEventError) as e:
-                    logger.warning(
-                        "Failed to fetch state for room '%s' due to corrupted events. Ignoring. Error: %s",
-                        room_id,
-                        e,
-                    )
-                    continue
-
-                state_map: StateMap[EventBase] = {
-                    state_key: fetched_events[event_id]
-                    for state_key, event_id in state_ids_map.items()
-                    # `get_events(...)` will filter out events for unknown room versions
-                    if event_id in fetched_events
-                }
-
-                # Can happen for unknown room versions (old room versions that aren't known
-                # anymore) since `get_events(...)` will filter out events for unknown room
-                # versions
-                if not state_map:
-                    continue
-
-                state_insert_values = (
-                    PersistEventsStore._get_sliding_sync_insert_values_from_state_map(
-                        state_map
+                to_insert_membership_infos[(room_id, user_id)] = (
+                    SlidingSyncMembershipInfoWithEventPos(
+                        user_id=user_id,
+                        sender=sender,
+                        membership_event_id=membership_event_id,
+                        membership=membership,
+                        membership_event_stream_ordering=membership_event_stream_ordering,
+                        # If instance_name is null we default to "master"
+                        membership_event_instance_name=membership_event_instance_name
+                        or "master",
                     )
                 )
-                sliding_sync_membership_snapshots_insert_map.update(state_insert_values)
-                # We should have some insert values for each room, even if they are `None`
-                assert sliding_sync_membership_snapshots_insert_map
+                # Keep track of the last join membership snapshot as we may be able to
+                # re-use all the work we did.
+                if membership == Membership.JOIN:
+                    last_to_insert_join_membership_snapshots_by_room_id[room_id] = (
+                        to_insert_membership_snapshots[(room_id, user_id)]
+                    )
+                    last_to_insert_join_membership_infos_by_room_id[room_id] = (
+                        to_insert_membership_infos[(room_id, user_id)]
+                    )
 
-                # We have historical state to work from
-                sliding_sync_membership_snapshots_insert_map["has_known_state"] = True
-            else:
-                # We don't know how to handle this type of membership yet
-                #
-                # FIXME: We should use `assert_never` here but for some reason
-                # the exhaustive matching doesn't recognize the `Never` here.
-                # assert_never(membership)
-                raise AssertionError(
-                    f"Unexpected membership {membership} ({membership_event_id}) that we don't know how to handle yet"
-                )
+        # Bucket the memberships by room_id so we can process them concurrently.
+        room_id_to_memberships_to_update_rows: Dict[
+            str,
+            List[
+                Tuple[
+                    str,
+                    Optional[str],
+                    Optional[str],
+                    str,
+                    str,
+                    str,
+                    str,
+                    int,
+                    Optional[str],
+                    bool,
+                ]
+            ],
+        ] = {}
+        for row in memberships_to_update_rows:
+            room_id = row[0]
+            room_id_to_memberships_to_update_rows.setdefault(room_id, []).append(row)
 
-            to_insert_membership_snapshots[(room_id, user_id)] = (
-                sliding_sync_membership_snapshots_insert_map
+        # We can batch process each room concurrently.
+        #
+        # In order for the snapshot re-use logic to work correctly, we need to process
+        # memberships in a room sequentially by `stream_ordering` ascending.
+        await concurrently_execute(
+            _handle_memberships_to_update_rows_for_room,
+            room_id_to_memberships_to_update_rows.values(),
+            10,
+        )
+
+        # Re-assemble data so it's ready for the batch queries in the transaction
+        key_names = ("room_id", "user_id")
+        key_values: List[Tuple[str, str]] = []
+        insertion_value_names = (
+            "has_known_state",
+            "room_type",
+            "is_encrypted",
+            "room_name",
+            "tombstone_successor_room_id",
+            "sender",
+            "membership_event_id",
+            "membership",
+            "event_stream_ordering",
+            "event_instance_name",
+        )
+        insertion_value_values: List[
+            Tuple[
+                bool,
+                Optional[str],
+                bool,
+                Optional[str],
+                Optional[str],
+                str,
+                str,
+                str,
+                int,
+                str,
+            ]
+        ] = []
+        forgotten_update_query_args: List[Tuple[str, str, str, str]] = []
+        for key, insert_map in to_insert_membership_snapshots.items():
+            room_id, user_id = key
+            membership_info = to_insert_membership_infos[(room_id, user_id)]
+            sender = membership_info.sender
+            membership_event_id = membership_info.membership_event_id
+            membership = membership_info.membership
+            membership_event_stream_ordering = (
+                membership_info.membership_event_stream_ordering
             )
-            to_insert_membership_infos[(room_id, user_id)] = (
-                SlidingSyncMembershipInfoWithEventPos(
-                    user_id=user_id,
-                    sender=sender,
-                    membership_event_id=membership_event_id,
-                    membership=membership,
-                    membership_event_stream_ordering=membership_event_stream_ordering,
-                    # If instance_name is null we default to "master"
-                    membership_event_instance_name=membership_event_instance_name
-                    or "master",
+            membership_event_instance_name = (
+                membership_info.membership_event_instance_name
+            )
+
+            key_values.append((room_id, user_id))
+            insertion_value_values.append(
+                (
+                    # `has_known_state` should be set to *some* True/False value
+                    insert_map["has_known_state"],
+                    insert_map.get("room_type"),
+                    insert_map.get("is_encrypted", False),
+                    insert_map.get("room_name"),
+                    insert_map.get("tombstone_successor_room_id"),
+                    sender,
+                    membership_event_id,
+                    membership,
+                    membership_event_stream_ordering,
+                    membership_event_instance_name,
+                )
+            )
+
+            forgotten_update_query_args.append(
+                (
+                    membership_event_id,
+                    room_id,
+                    user_id,
+                    membership_event_id,
                 )
             )
 
         def _fill_table_txn(txn: LoggingTransaction) -> None:
             # Handle updating the `sliding_sync_membership_snapshots` table
             #
-            for key, insert_map in to_insert_membership_snapshots.items():
-                room_id, user_id = key
-                membership_info = to_insert_membership_infos[key]
-                sender = membership_info.sender
-                membership_event_id = membership_info.membership_event_id
-                membership = membership_info.membership
-                membership_event_stream_ordering = (
-                    membership_info.membership_event_stream_ordering
-                )
-                membership_event_instance_name = (
-                    membership_info.membership_event_instance_name
-                )
+            # We don't need to update in the upsert the state because we never partially
+            # insert/update the snapshots and anything already there is up-to-date
+            # EXCEPT for the `forgotten` field since that is updated out-of-band from
+            # the membership changes. We're using an upsert to avoid unique
+            # violation errors that would happen from directly inserting.
+            self.db_pool.simple_upsert_many_txn(
+                txn,
+                table="sliding_sync_membership_snapshots",
+                key_names=key_names,
+                key_values=key_values,
+                value_names=(),
+                value_values=[],
+                insertion_value_names=insertion_value_names,
+                insertion_value_values=insertion_value_values,
+            )
 
-                # We don't need to upsert the state because we never partially
-                # insert/update the snapshots and anything already there is up-to-date
-                # EXCEPT for the `forgotten` field since that is updated out-of-band
-                # from the membership changes.
-                #
-                # Even though we're only doing insertions, we're using
-                # `simple_upsert_txn()` here to avoid unique violation errors that would
-                # happen from `simple_insert_txn()`
-                self.db_pool.simple_upsert_txn(
-                    txn,
-                    table="sliding_sync_membership_snapshots",
-                    keyvalues={"room_id": room_id, "user_id": user_id},
-                    values={},
-                    insertion_values={
-                        **insert_map,
-                        "sender": sender,
-                        "membership_event_id": membership_event_id,
-                        "membership": membership,
-                        "event_stream_ordering": membership_event_stream_ordering,
-                        "event_instance_name": membership_event_instance_name,
-                    },
-                )
-                # We need to find the `forgotten` value during the transaction because
-                # we can't risk inserting stale data.
-                if isinstance(txn.database_engine, PostgresEngine):
-                    txn.execute(
-                        """
-                        UPDATE sliding_sync_membership_snapshots
-                        SET
-                            forgotten = m.forgotten
-                        FROM room_memberships AS m
-                        WHERE sliding_sync_membership_snapshots.room_id = ?
-                            AND sliding_sync_membership_snapshots.user_id = ?
-                            AND membership_event_id = ?
-                            AND membership_event_id = m.event_id
-                            AND m.event_id IS NOT NULL
-                        """,
-                        (
-                            room_id,
-                            user_id,
-                            membership_event_id,
-                        ),
-                    )
-                else:
-                    # SQLite doesn't support UPDATE FROM before 3.33.0, so we do
-                    # this via sub-selects.
-                    txn.execute(
-                        """
-                        UPDATE sliding_sync_membership_snapshots
-                        SET
-                            forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
-                        WHERE room_id = ? and user_id = ? AND membership_event_id = ?
-                        """,
-                        (
-                            membership_event_id,
-                            room_id,
-                            user_id,
-                            membership_event_id,
-                        ),
-                    )
+            # We need to find the `forgotten` value during the transaction because
+            # we can't risk inserting stale data.
+            txn.execute_batch(
+                """
+                UPDATE sliding_sync_membership_snapshots
+                SET
+                    forgotten = (SELECT forgotten FROM room_memberships WHERE event_id = ?)
+                WHERE room_id = ? and user_id = ? AND membership_event_id = ?
+                """,
+                forgotten_update_query_args,
+            )
 
         await self.db_pool.runInteraction(
             "sliding_sync_membership_snapshots_bg_update", _fill_table_txn
@@ -2533,6 +2897,10 @@ def _resolve_stale_data_in_sliding_sync_joined_rooms_table(
                 # No value columns, therefore make a blank list so that the following
                 # zip() works correctly.
                 value_values=[() for x in range(len(chunk))],
+                insertion_value_names=(),
+                # No value columns, therefore make a blank list so that the following
+                # zip() works correctly.
+                insertion_value_values=[() for x in range(len(chunk))],
             )
     else:
         # Avoid adding the background updates when there is no data to run them on (if
