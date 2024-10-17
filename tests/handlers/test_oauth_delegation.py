@@ -569,6 +569,16 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             channel.json_body["errcode"], Codes.UNRECOGNIZED, channel.json_body
         )
 
+    def expect_forbidden(
+        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+    ) -> None:
+        channel = self.make_request(method, path, content)
+
+        self.assertEqual(channel.code, 403, channel.json_body)
+        self.assertEqual(
+            channel.json_body["errcode"], Codes.FORBIDDEN, channel.json_body
+        )
+
     def test_uia_endpoints(self) -> None:
         """Test that endpoints that were removed in MSC2964 are no longer available."""
 
@@ -627,7 +637,11 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
             "GET", "/_matrix/client/v1/register/m.login.registration_token/validity"
         )
         # This is still available for AS registrations
-        # self.expect_unrecognized("POST", "/_matrix/client/v3/register")
+        self.expect_forbidden(
+            "POST",
+            "/_matrix/client/v3/register",
+            {"username": "alice", "password": "hunter2"},
+        )
         self.expect_unrecognized("GET", "/_matrix/client/v3/register/available")
         self.expect_unrecognized(
             "POST", "/_matrix/client/v3/register/email/requestToken"
