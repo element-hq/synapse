@@ -3,7 +3,7 @@
 
 **Element Synapse - Matrix homeserver implementation**
 
-|support| |development| |documentation| |license| |pypi| |python|
+|support| |development| |documentation| |license| |pypi| |python| |gurubase|
 
 Synapse is an open source `Matrix <https://matrix.org>`__ homeserver
 implementation, written and maintained by `Element <https://element.io>`_.
@@ -273,3 +273,7 @@ Alongside all that, join our developer community on Matrix:
 .. |python| image:: https://img.shields.io/pypi/pyversions/matrix-synapse
   :alt: (supported python versions)
   :target: https://pypi.org/project/matrix-synapse
+
+.. |gurubase| image:: https://img.shields.io/badge/Gurubase-Ask%20Synapse%20Guru-006BFF
+  :alt: (Synapse Guru on Gurubase.io)
+  :target: https://gurubase.io/g/synapse
