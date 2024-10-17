@@ -54,7 +54,7 @@ class Psycopg2Engine(
     def set_statement_timeout(
         self, cursor: psycopg2.extensions.cursor, statement_timeout: int
     ) -> None:
-        cursor.execute("SET statement_timeout TO ?", (statement_timeout,))
+        cursor.execute("SET statement_timeout TO %s", (statement_timeout,))
 
     def convert_param_style(self, sql: str) -> str:
         return sql.replace("?", "%s")
