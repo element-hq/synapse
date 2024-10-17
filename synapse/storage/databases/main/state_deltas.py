@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple, Type, Union, overload
 
 import attr
 
@@ -49,14 +49,55 @@ class StateDelta:
     """previous event_id for this state key. None if it's new state."""
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class StateDeltaWithEventId:
+    stream_id: int
+    room_id: str
+    event_type: str
+    state_key: str
+
+    event_id: str
+    """new event_id for this state key."""
+
+    prev_event_id: Optional[str]
+    """previous event_id for this state key. None if it's new state."""
+
+
 class StateDeltasStore(SQLBaseStore):
     # This class must be mixed in with a child class which provides the following
     # attribute. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
 
+    @overload
     async def get_partial_current_state_deltas(
-        self, prev_stream_id: int, max_stream_id: int
-    ) -> Tuple[int, List[StateDelta]]:
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        exclude_deleted: Literal[False] = False,
+    ) -> Tuple[int, List[StateDelta]]: ...
+
+    @overload
+    async def get_partial_current_state_deltas(
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        exclude_deleted: Literal[True],
+    ) -> Tuple[int, List[StateDeltaWithEventId]]: ...
+
+    @overload
+    async def get_partial_current_state_deltas(
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        exclude_deleted: bool,
+    ) -> Tuple[int, Union[List[StateDelta], List[StateDeltaWithEventId]]]: ...
+
+    async def get_partial_current_state_deltas(
+        self,
+        prev_stream_id: int,
+        max_stream_id: int,
+        exclude_deleted: bool = False,
+    ) -> Tuple[int, Union[List[StateDelta], List[StateDeltaWithEventId]]]:
         """Fetch a list of room state changes since the given stream id
 
         This may be the partial state if we're lazy joining the room.
@@ -65,6 +106,7 @@ class StateDeltasStore(SQLBaseStore):
             prev_stream_id: point to get changes since (exclusive)
             max_stream_id: the point that we know has been correctly persisted
                 - ie, an upper limit to return changes from.
+            exclude_deleted: whether to exclude deltas for deleted state.
 
         Returns:
             A tuple consisting of:
@@ -87,17 +129,25 @@ class StateDeltasStore(SQLBaseStore):
             # max_stream_id.
             return max_stream_id, []
 
+        StateDeltaType: Union[Type[StateDelta], Type[StateDeltaWithEventId]]
+        if not exclude_deleted:
+            StateDeltaType = StateDelta
+            sql_and_event_id = ""
+        else:
+            StateDeltaType = StateDeltaWithEventId
+            sql_and_event_id = " AND event_id IS NOT NULL"
+
         def get_current_state_deltas_txn(
             txn: LoggingTransaction,
-        ) -> Tuple[int, List[StateDelta]]:
+        ) -> Tuple[int, List]:
             # First we calculate the max stream id that will give us less than
             # N results.
             # We arbitrarily limit to 100 stream_id entries to ensure we don't
             # select toooo many.
-            sql = """
+            sql = f"""
                 SELECT stream_id, count(*)
                 FROM current_state_delta_stream
-                WHERE stream_id > ? AND stream_id <= ?
+                WHERE stream_id > ? AND stream_id <= ?{sql_and_event_id}
                 GROUP BY stream_id
                 ORDER BY stream_id ASC
                 LIMIT 100
@@ -122,15 +172,15 @@ class StateDeltasStore(SQLBaseStore):
                 clipped_stream_id = max_stream_id
 
             # Now actually get the deltas
-            sql = """
+            sql = f"""
                 SELECT stream_id, room_id, type, state_key, event_id, prev_event_id
                 FROM current_state_delta_stream
-                WHERE ? < stream_id AND stream_id <= ?
+                WHERE ? < stream_id AND stream_id <= ?{sql_and_event_id}
                 ORDER BY stream_id ASC
             """
             txn.execute(sql, (prev_stream_id, clipped_stream_id))
             return clipped_stream_id, [
-                StateDelta(
+                StateDeltaType(
                     stream_id=row[0],
                     room_id=row[1],
                     event_type=row[2],
