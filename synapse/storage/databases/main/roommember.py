@@ -1375,6 +1375,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 keyvalues={"user_id": user_id, "room_id": room_id},
                 updatevalues={"forgotten": 1},
             )
+            # Handle updating the `sliding_sync_membership_snapshots` table
             self.db_pool.simple_update_txn(
                 txn,
                 table="sliding_sync_membership_snapshots",
