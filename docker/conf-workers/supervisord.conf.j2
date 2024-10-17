@@ -35,3 +35,12 @@ autorestart=true
 # Redis can be disabled if the image is being used without workers
 autostart={{ enable_redis }}
 
+[program:mas]
+comamnd=/usr/local/bin/prefix-log /usr/local/bin/mas-cli --config /conf/mas.yaml
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+autorestart=unexpected
+
+autostart={{ enable_mas }}
