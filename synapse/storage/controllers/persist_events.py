@@ -49,7 +49,7 @@ from prometheus_client import Counter, Histogram
 
 from twisted.internet import defer
 
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, HistoryVisibility, Membership
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.handlers.worker_lock import NEW_EVENT_DURING_PURGE_LOCK_NAME
@@ -635,6 +635,44 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
+            visibilities: Dict[str, str] = {}
+            with Measure(self._clock, "calculate_history_vis"):
+                # TODO: We only need to do this on changes, rather than looking
+                # up the state for every event
+                for event, context in events_and_contexts:
+                    if (
+                        backfilled
+                        or event.internal_metadata.is_outlier()
+                        or context.rejected
+                    ):
+                        continue
+
+                    state = await context.get_current_state_ids(
+                        StateFilter.from_types([(EventTypes.RoomHistoryVisibility, "")])
+                    )
+                    # We're not an outlier
+                    assert state is not None
+
+                    history_visibility = HistoryVisibility.SHARED
+                    history_visibility_event_id = state.get(
+                        (EventTypes.RoomHistoryVisibility, "")
+                    )
+                    if history_visibility_event_id:
+                        for event, _ in events_and_contexts:
+                            if event.event_id == history_visibility_event_id:
+                                history_visibility_event = event
+                                break
+                        else:
+                            history_visibility_event = await self.main_store.get_event(
+                                history_visibility_event_id,
+                                get_prev_content=False,
+                            )
+                        history_visibility = history_visibility_event.content.get(
+                            "history_visibility", HistoryVisibility.SHARED
+                        )
+
+                    visibilities[event.event_id] = history_visibility
+
             await self.persist_events_store._persist_events_and_state_updates(
                 room_id,
                 chunk,
@@ -643,6 +681,7 @@ class EventsPersistenceStorageController:
                 use_negative_stream_ordering=backfilled,
                 inhibit_local_membership_updates=backfilled,
                 new_event_links=new_event_links,
+                visibilities=visibilities,
             )
 
         return replaced_events
