@@ -1434,7 +1434,7 @@ number of entries that can be stored.
    Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry
    durations.
      * `max_cache_memory_usage` sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-        They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in
+        They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in
         the setting below, or until the `min_cache_ttl` is hit. There is no default value for this option.
      * `target_cache_memory_usage` sets a rough target for the desired memory usage of the caches. There is no default value
         for this option.
@@ -3722,6 +3722,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3736,6 +3738,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"

@@ -206,7 +206,7 @@ class Thumbnailer:
     def _encode_image(self, output_image: Image.Image, output_type: str) -> BytesIO:
         output_bytes_io = BytesIO()
         fmt = self.FORMATS[output_type]
-        if fmt == "JPEG":
+        if fmt == "JPEG" or fmt == "PNG" and output_image.mode == "CMYK":
             output_image = output_image.convert("RGB")
         output_image.save(output_bytes_io, fmt, quality=80)
         return output_bytes_io

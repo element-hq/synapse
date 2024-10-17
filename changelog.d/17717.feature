@@ -1,1 +1,0 @@
-Add config option `redis.password_path`.

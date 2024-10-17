@@ -443,8 +443,8 @@ class AdminHandler:
                 ["m.room.member", "m.room.message"],
             )
             if not event_ids:
-                # there's nothing to redact
-                return TaskStatus.COMPLETE, result, None
+                # nothing to redact in this room
+                continue
 
             events = await self._store.get_events_as_list(event_ids)
             for event in events:
