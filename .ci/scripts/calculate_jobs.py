@@ -31,7 +31,8 @@ def set_output(key: str, value: str):
         print(f"{key}={value}", file=f)
 
 
-IS_PR = os.environ["GITHUB_REF"].startswith("refs/pull/")
+# TEMP: this is to test the new targets in the PR CI
+IS_PR = False
 
 # First calculate the various trial jobs.
 #
