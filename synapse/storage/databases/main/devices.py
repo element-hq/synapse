@@ -1422,7 +1422,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                 DELETE FROM device_lists_outbound_last_success
                 WHERE destination = ? AND user_id = ?
             """
-            txn.execute_batch(sql, ((row[0], row[1]) for row in rows))
+            txn.execute_batch(sql, [(row[0], row[1]) for row in rows])
 
             logger.info("Pruned %d device list outbound pokes", count)
 
