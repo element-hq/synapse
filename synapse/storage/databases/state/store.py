@@ -804,11 +804,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         logger.info("[purge] removing redundant state groups")
         txn.execute_batch(
             "DELETE FROM state_groups_state WHERE state_group = ?",
-            ((sg,) for sg in state_groups_to_delete),
+            [(sg,) for sg in state_groups_to_delete],
         )
         txn.execute_batch(
             "DELETE FROM state_groups WHERE id = ?",
-            ((sg,) for sg in state_groups_to_delete),
+            [(sg,) for sg in state_groups_to_delete],
         )
 
     @trace
