@@ -40,6 +40,7 @@ from synapse.api.constants import (
     EventTypes,
     EventUnsignedContentFields,
     HistoryVisibility,
+    JoinRules,
     Membership,
 )
 from synapse.events import EventBase
@@ -117,7 +118,7 @@ async def filter_events_for_client(
                 [event.event_id for event in events],
             )
 
-    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id))
+    types = (_HISTORY_VIS_KEY, (EventTypes.Member, user_id), (EventTypes.JoinRules, ""))
 
     # we exclude outliers at this point, and then handle them separately later
     event_id_to_state = await storage.state.get_state_for_events(
@@ -155,6 +156,16 @@ async def filter_events_for_client(
         )
         if filtered is None:
             return None
+
+        # Filter out call invites in public rooms, as this would potentially
+        # ring a lot of users.
+        if state_after_event is not None and event.type == EventTypes.CallInvite:
+            room_join_rules = state_after_event.get((EventTypes.JoinRules, ""))
+            if (
+                room_join_rules is not None
+                and room_join_rules.content.get("join_rule") == JoinRules.PUBLIC
+            ):
+                return None
 
         # Annotate the event with the user's membership after the event.
         #
