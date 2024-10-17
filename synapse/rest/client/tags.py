@@ -50,6 +50,7 @@ class TagListServlet(RestServlet):
         super().__init__()
         self.auth = hs.get_auth()
         self.store = hs.get_datastores().main
+        self.room_member_handler = hs.get_room_member_handler()
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str, room_id: str
@@ -85,6 +86,9 @@ class TagServlet(RestServlet):
         requester = await self.auth.get_user_by_req(request)
         if user_id != requester.user.to_string():
             raise AuthError(403, "Cannot add tags for other users.")
+        
+        # check if the user is member of the room and raise error if not
+        await self.room_member_handler.check_user_membership(user_id=user_id, room_id=room_id)
 
         body = parse_json_object_from_request(request)
 
