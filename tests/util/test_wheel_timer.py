@@ -78,3 +78,16 @@ class WheelTimerTestCase(unittest.TestCase):
         self.assertListEqual(wheel.fetch(147), [obj2])
         self.assertListEqual(wheel.fetch(200), [obj1])
         self.assertListEqual(wheel.fetch(240), [])
+    
+    def test_multi_insert_then_past(self) -> None:
+        wheel: WheelTimer[object] = WheelTimer(bucket_size=5)
+
+        obj1 = object()
+        obj2 = object()
+        obj3 = object()
+        wheel.insert(100, obj1, 150)
+        wheel.insert(100, obj2, 160)
+        wheel.insert(100, obj3, 155)
+       
+        self.assertListEqual(wheel.fetch(110), [])
+        self.assertListEqual(wheel.fetch(158), [obj1])
