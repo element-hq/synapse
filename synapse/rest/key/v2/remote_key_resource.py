@@ -23,17 +23,11 @@ import logging
 import re
 from typing import TYPE_CHECKING, Dict, Mapping, Optional, Set, Tuple
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import Extra, StrictInt, StrictStr
-else:
-    from pydantic import StrictInt, StrictStr, Extra
-
 from signedjson.sign import sign_json
 
 from twisted.web.server import Request
 
+from synapse._pydantic_compat import Extra, StrictInt, StrictStr
 from synapse.crypto.keyring import ServerKeyFetcher
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -191,10 +185,10 @@ class RemoteKey(RestServlet):
         server_keys: Dict[Tuple[str, str], Optional[FetchKeyResultForRemote]] = {}
         for server_name, key_ids in query.items():
             if key_ids:
-                results: Mapping[str, Optional[FetchKeyResultForRemote]] = (
-                    await self.store.get_server_keys_json_for_remote(
-                        server_name, key_ids
-                    )
+                results: Mapping[
+                    str, Optional[FetchKeyResultForRemote]
+                ] = await self.store.get_server_keys_json_for_remote(
+                    server_name, key_ids
                 )
             else:
                 results = await self.store.get_all_server_keys_json_for_remote(

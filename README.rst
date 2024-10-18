@@ -1,4 +1,4 @@
-.. image:: https://github.com/element-hq/product/assets/87339233/7abf477a-5277-47f3-be44-ea44917d8ed7
+.. image:: ./docs/element_logo_white_bg.svg
    :height: 60px
 
 **Element Synapse - Matrix homeserver implementation**
@@ -158,7 +158,7 @@ it:
 
 We **strongly** recommend using a CAPTCHA, particularly if your homeserver is exposed to
 the public internet. Without it, anyone can freely register accounts on your homeserver.
-This can be exploited by attackers to create spambots targetting the rest of the Matrix
+This can be exploited by attackers to create spambots targeting the rest of the Matrix
 federation.
 
 Your new user name will be formed partly from the ``server_name``, and partly

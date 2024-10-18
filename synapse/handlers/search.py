@@ -423,9 +423,9 @@ class SearchHandler:
             }
 
         if search_result.room_groups and "room_id" in group_keys:
-            rooms_cat_res.setdefault("groups", {})[
-                "room_id"
-            ] = search_result.room_groups
+            rooms_cat_res.setdefault("groups", {})["room_id"] = (
+                search_result.room_groups
+            )
 
         if sender_group and "sender" in group_keys:
             rooms_cat_res.setdefault("groups", {})["sender"] = sender_group

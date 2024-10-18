@@ -268,7 +268,7 @@ class LoginRestServlet(RestServlet):
                     approval_notice_medium=ApprovalNoticeMedium.NONE,
                 )
 
-        well_known_data = self._well_known_builder.get_well_known()
+        well_known_data = await self._well_known_builder.get_well_known()
         if well_known_data:
             result["well_known"] = well_known_data
         return 200, result
@@ -363,6 +363,7 @@ class LoginRestServlet(RestServlet):
         login_submission: JsonDict,
         callback: Optional[Callable[[LoginResponse], Awaitable[None]]] = None,
         create_non_existent_users: bool = False,
+        default_display_name: Optional[str] = None,
         ratelimit: bool = True,
         auth_provider_id: Optional[str] = None,
         should_issue_refresh_token: bool = False,
@@ -410,7 +411,8 @@ class LoginRestServlet(RestServlet):
             canonical_uid = await self.auth_handler.check_user_exists(user_id)
             if not canonical_uid:
                 canonical_uid = await self.registration_handler.register_user(
-                    localpart=UserID.from_string(user_id).localpart
+                    localpart=UserID.from_string(user_id).localpart,
+                    default_display_name=default_display_name,
                 )
             user_id = canonical_uid
 
@@ -546,11 +548,14 @@ class LoginRestServlet(RestServlet):
         Returns:
             The body of the JSON response.
         """
-        user_id = self.hs.get_jwt_handler().validate_login(login_submission)
+        user_id, default_display_name = self.hs.get_jwt_handler().validate_login(
+            login_submission
+        )
         return await self._complete_login(
             user_id,
             login_submission,
             create_non_existent_users=True,
+            default_display_name=default_display_name,
             should_issue_refresh_token=should_issue_refresh_token,
             request_info=request_info,
         )

@@ -255,6 +255,8 @@ line to `/etc/default/matrix-synapse`:
 
     LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2
 
+*Note*: You may need to set `PYTHONMALLOC=malloc` to ensure that `jemalloc` can accurately calculate memory usage. By default, Python uses its internal small-object allocator, which may interfere with jemalloc's ability to track memory consumption correctly. This could prevent the [cache_autotuning](../configuration/config_documentation.md#caches-and-associated-values) feature from functioning as expected, as the Python allocator may not reach the memory threshold set by `max_cache_memory_usage`, thus not triggering the cache eviction process.
+
 This made a significant difference on Python 2.7 - it's unclear how
 much of an improvement it provides on Python 3.x.
 

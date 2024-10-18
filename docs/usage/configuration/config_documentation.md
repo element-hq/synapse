@@ -246,6 +246,7 @@ Example configuration:
 ```yaml
 presence:
   enabled: false
+  include_offline_users_on_sync: false
 ```
 
 `enabled` can also be set to a special value of "untracked" which ignores updates
@@ -253,6 +254,10 @@ received via clients and federation, while still accepting updates from the
 [module API](../../modules/index.md).
 
 *The "untracked" option was added in Synapse 1.96.0.*
+
+When clients perform an initial or `full_state` sync, presence results for offline users are
+not included by default. Setting `include_offline_users_on_sync` to `true` will always include
+offline users in the results. Defaults to false.
 
 ---
 ### `require_auth_for_profile_requests`
@@ -504,7 +509,8 @@ Unix socket support (_Added in Synapse 1.89.0_):
 
 Valid resource names are:
 
-* `client`: the client-server API (/_matrix/client), and the synapse admin API (/_synapse/admin). Also implies `media` and `static`.
+* `client`: the client-server API (/_matrix/client). Also implies `media` and `static`.
+  If configuring the main process, the Synapse Admin API (/_synapse/admin) is also implied.
 
 * `consent`: user consent forms (/_matrix/consent). See [here](../../consent_tracking.md) for more.
 
@@ -754,6 +760,19 @@ email:
     invite_from_person: "[%(app)s] %(person)s has invited you to chat on %(app)s..."
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
+```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+Must be a positive value if set.
+
+Defaults to no duration (`null`), which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
 ```
 
 ## Homeserver blocking
@@ -1415,7 +1434,7 @@ number of entries that can be stored.
    Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry
    durations.
      * `max_cache_memory_usage` sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-        They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in
+        They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in
         the setting below, or until the `min_cache_ttl` is hit. There is no default value for this option.
      * `target_cache_memory_usage` sets a rough target for the desired memory usage of the caches. There is no default value
         for this option.
@@ -1760,7 +1779,7 @@ rc_3pid_validation:
 
 This option sets ratelimiting how often invites can be sent in a room or to a
 specific user. `per_room` defaults to `per_second: 0.3`, `burst_count: 10`,
-`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer` 
+`per_user` defaults to `per_second: 0.003`, `burst_count: 5`, and `per_issuer`
 defaults to `per_second: 0.3`, `burst_count: 10`.
 
 Client requests that invite user(s) when [creating a
@@ -1864,6 +1883,18 @@ federation_rr_transactions_per_room_per_second: 40
 Config options related to Synapse's media store.
 
 ---
+### `enable_authenticated_media`
+
+When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
+unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
+this will change to true in a future Synapse release.
+
+Example configuration:
+```yaml
+enable_authenticated_media: true
+```
+---
 ### `enable_media_repo`
 
 Enable the media store service in the Synapse master. Defaults to true.
@@ -1949,7 +1980,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.  
+Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized - if the bucket is full, ie a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains.  Defaults to 500MiB. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests.
 
 Example configuration:
 ```yaml
@@ -2298,6 +2329,22 @@ Example configuration:
 turn_shared_secret: "YOUR_SHARED_SECRET"
 ```
 ---
+### `turn_shared_secret_path`
+
+An alternative to [`turn_shared_secret`](#turn_shared_secret):
+allows the shared secret to be specified in an external file.
+
+The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.
+
+Example configuration:
+```yaml
+turn_shared_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.116.0._
+
+---
 ### `turn_username` and `turn_password`
 
 The Username and password if the TURN server needs them and does not use a token.
@@ -2369,7 +2416,7 @@ enable_registration_without_verification: true
 ---
 ### `registrations_require_3pid`
 
-If this is set, users must provide all of the specified types of 3PID when registering an account.
+If this is set, users must provide all of the specified types of [3PID](https://spec.matrix.org/latest/appendices/#3pid-types) when registering an account.
 
 Note that [`enable_registration`](#enable_registration) must also be set to allow account registration.
 
@@ -2394,6 +2441,9 @@ disable_msisdn_registration: true
 
 Mandate that users are only allowed to associate certain formats of
 3PIDs with accounts on this server, as specified by the `medium` and `pattern` sub-options.
+`pattern` is a [Perl-like regular expression](https://docs.python.org/3/library/re.html#module-re).
+
+More information about 3PIDs, allowed `medium` types and their `address` syntax can be found [in the Matrix spec](https://spec.matrix.org/latest/appendices/#3pid-types).
 
 Example configuration:
 ```yaml
@@ -2403,7 +2453,7 @@ allowed_local_3pids:
   - medium: email
     pattern: '^[^@]+@vector\.im$'
   - medium: msisdn
-    pattern: '\+44'
+    pattern: '^44\d{10}$'
 ```
 ---
 ### `enable_3pid_lookup`
@@ -3282,8 +3332,8 @@ saml2_config:
     contact_person:
       - given_name: Bob
         sur_name: "the Sysadmin"
-        email_address": ["admin@example.com"]
-        contact_type": technical
+        email_address: ["admin@example.com"]
+        contact_type: technical
 
   saml_session_lifetime: 5m
 
@@ -3672,6 +3722,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3686,6 +3738,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"
@@ -4134,6 +4187,38 @@ default_power_level_content_override:
    trusted_private_chat: null
    public_chat: null
 ```
+
+The default power levels for each preset are:
+```yaml
+"m.room.name": 50
+"m.room.power_levels": 100
+"m.room.history_visibility": 100
+"m.room.canonical_alias": 50
+"m.room.avatar": 50
+"m.room.tombstone": 100
+"m.room.server_acl": 100
+"m.room.encryption": 100
+```
+
+So a complete example where the default power-levels for a preset are maintained
+but the power level for a new key is set is:
+```yaml
+default_power_level_content_override:
+   private_chat:
+    events:
+      "com.example.foo": 0
+      "m.room.name": 50
+      "m.room.power_levels": 100
+      "m.room.history_visibility": 100
+      "m.room.canonical_alias": 50
+      "m.room.avatar": 50
+      "m.room.tombstone": 100
+      "m.room.server_acl": 100
+      "m.room.encryption": 100
+   trusted_private_chat: null
+   public_chat: null
+```
+
 ---
 ### `forget_rooms_on_leave`
 
@@ -4286,7 +4371,13 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.
+balanced across them. 
+
+The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple `federation_sender_instances` are useful if there is a federation
+with multiple servers.
 
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
@@ -4436,6 +4527,9 @@ This setting has the following sub-options:
 * `path`: The full path to a local Unix socket file. **If this is used, `host` and
  `port` are ignored.** Defaults to `/tmp/redis.sock'
 * `password`: Optional password if configured on the Redis instance.
+* `password_path`: Alternative to `password`, reading the password from an
+   external file. The file should be a plain text file, containing only the
+   password. Synapse reads the password from the given file once at startup.
 * `dbid`: Optional redis dbid if needs to connect to specific redis logical db.
 * `use_tls`: Whether to use tls connection. Defaults to false.
 * `certificate_file`: Optional path to the certificate file
@@ -4449,13 +4543,16 @@ This setting has the following sub-options:
 
   _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
+  _Changed in Synapse 1.116.0: Added password\_path_
+
 Example configuration:
 ```yaml
 redis:
   enabled: true
   host: localhost
   port: 6379
-  password: <secret_password>
+  password_path: <path_to_the_password_file>
+  # OR password: <secret_password>
   dbid: <dbid>
   #use_tls: True
   #certificate_file: <path_to_the_certificate_file>
@@ -4633,7 +4730,9 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match the "worker_name".
+* `worker_to_run_on`: Which worker to run this module on. This must match 
+  the "worker_name". If not set or `null`, invites will be accepted on the
+  main process.
 
 NOTE: Care should be taken not to enable this setting if the `synapse_auto_accept_invite` module is enabled and installed.
 The two modules will compete to perform the same task and may result in undesired behaviour. For example, multiple join

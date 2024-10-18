@@ -1,1 +1,0 @@
-Forget all of a user's rooms upon deactivation, enabling future purges.

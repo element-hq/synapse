@@ -40,7 +40,7 @@ T = TypeVar("T")
 
 
 def make_test(
-    main: Callable[[ISynapseReactor, int], Coroutine[Any, Any, float]]
+    main: Callable[[ISynapseReactor, int], Coroutine[Any, Any, float]],
 ) -> Callable[[int], float]:
     """
     Take a benchmark function and wrap it in a reactor start and stop.
@@ -90,6 +90,10 @@ if __name__ == "__main__":
 
     if runner.args.worker:
         if runner.args.log:
+            # sys.__stdout__ can technically be None, just exit if it's the case
+            if not sys.__stdout__:
+                exit(1)
+
             globalLogBeginner.beginLoggingTo(
                 [textFileLogObserver(sys.__stdout__)], redirectStandardIO=False
             )

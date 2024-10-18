@@ -210,8 +210,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             )
 
         # Blow away caches (supported room versions can only change due to a restart).
-        self.store.get_rooms_for_user_with_stream_ordering.invalidate_all()
         self.store.get_rooms_for_user.invalidate_all()
+        self.store._get_rooms_for_local_user_where_membership_is_inner.invalidate_all()
         self.store._get_event_cache.clear()
         self.store._event_ref.clear()
 
@@ -843,7 +843,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         ) -> List[EventBase]:
             return list(pdus)
 
-        self.client._check_sigs_and_hash_for_pulled_events_and_fetch = _check_sigs_and_hash_for_pulled_events_and_fetch  # type: ignore[assignment]
+        self.client._check_sigs_and_hash_for_pulled_events_and_fetch = (  # type: ignore[method-assign]
+            _check_sigs_and_hash_for_pulled_events_and_fetch  # type: ignore[assignment]
+        )
 
         prev_events = self.get_success(self.store.get_prev_events_for_room(room_id))
 

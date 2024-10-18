@@ -401,7 +401,10 @@ class FederationCatchUpTestCases(FederatingHomeserverTestCase):
         now = self.clock.time_msec()
         self.get_success(
             self.hs.get_datastores().main.set_destination_retry_timings(
-                "zzzerver", now, now, 24 * 60 * 60 * 1000  # retry in 1 day
+                "zzzerver",
+                now,
+                now,
+                24 * 60 * 60 * 1000,  # retry in 1 day
             )
         )
 

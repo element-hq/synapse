@@ -34,14 +34,9 @@
         name = "Internal Changes"
         showcontent = true
 
-[tool.black]
-target-version = ['py38', 'py39', 'py310', 'py311']
-# black ignores everything in .gitignore by default, see
-# https://black.readthedocs.io/en/stable/usage_and_configuration/file_collection_and_discovery.html#gitignore
-# Use `extend-exclude` if you want to exclude something in addition to this.
-
 [tool.ruff]
 line-length = 88
+target-version = "py38"
 
 [tool.ruff.lint]
 # See https://beta.ruff.rs/docs/rules/#error-e
@@ -63,6 +58,8 @@ select = [
     "W",
     # pyflakes
     "F",
+    # isort
+    "I001",
     # flake8-bugbear
     "B0",
     # flake8-comprehensions
@@ -79,17 +76,20 @@ select = [
     "EXE",
 ]
 
-[tool.isort]
-line_length = 88
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "TWISTED", "FIRSTPARTY", "TESTS", "LOCALFOLDER"]
-default_section = "THIRDPARTY"
-known_first_party = ["synapse"]
-known_tests = ["tests"]
-known_twisted = ["twisted", "OpenSSL"]
-multi_line_output = 3
-include_trailing_comma = true
-combine_as_imports = true
-skip_gitignore = true
+[tool.ruff.lint.isort]
+combine-as-imports = true
+section-order = ["future", "standard-library", "third-party", "twisted", "first-party", "testing", "local-folder"]
+known-first-party = ["synapse"]
+
+[tool.ruff.lint.isort.sections]
+twisted = ["twisted", "OpenSSL"]
+testing = ["tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
 
 [tool.maturin]
 manifest-path = "rust/Cargo.toml"
@@ -97,7 +97,7 @@ module-name = "synapse.synapse_rust"
 
 [tool.poetry]
 name = "matrix-synapse"
-version = "1.110.0"
+version = "1.117.0"
 description = "Homeserver for the Matrix decentralised comms protocol"
 authors = ["Matrix.org Team and Contributors <packages@matrix.org>"]
 license = "AGPL-3.0-or-later"
@@ -201,8 +201,8 @@ netaddr = ">=0.7.18"
 # add a lower bound to the Jinja2 dependency.
 Jinja2 = ">=3.0"
 bleach = ">=1.4.3"
-# We use `Self`, which were added in `typing-extensions` 4.0.
-typing-extensions = ">=4.0"
+# We use `assert_never`, which were added in `typing-extensions` 4.1.
+typing-extensions = ">=4.1"
 # We enforce that we have a `cryptography` version that bundles an `openssl`
 # with the latest security patches.
 cryptography = ">=3.4.7"
@@ -320,9 +320,7 @@ all = [
 # failing on new releases. Keeping lower bounds loose here means that dependabot
 # can bump versions without having to update the content-hash in the lockfile.
 # This helps prevents merge conflicts when running a batch of dependabot updates.
-isort = ">=5.10.1"
-black = ">=22.7.0"
-ruff = "0.5.0"
+ruff = "0.6.9"
 # Type checking only works with the pydantic.v1 compat module from pydantic v2
 pydantic = "^2"
 

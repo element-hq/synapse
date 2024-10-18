@@ -131,15 +131,11 @@ jobs:
         with:
           install-project: "false"
 
-      - name: Import order (isort)
-        run: poetry run isort --check --diff .
+      - name: Run ruff check
+        run: poetry run ruff check --output-format=github .
 
-      - name: Code style (black)
-        run: poetry run black --check --diff .
-
-      - name: Semantic checks (ruff)
-        # --quiet suppresses the update check.
-        run: poetry run ruff check --quiet .
+      - name: Run ruff format
+        run: poetry run ruff format --check .
 
   lint-mypy:
     runs-on: ubuntu-latest
@@ -305,7 +301,7 @@ jobs:
       - lint-readme
     runs-on: ubuntu-latest
     steps:
-      - uses: matrix-org/done-action@v2
+      - uses: matrix-org/done-action@v3
         with:
           needs: ${{ toJSON(needs) }}
 
@@ -737,7 +733,7 @@ jobs:
       - linting-done
     runs-on: ubuntu-latest
     steps:
-      - uses: matrix-org/done-action@v2
+      - uses: matrix-org/done-action@v3
         with:
           needs: ${{ toJSON(needs) }}
 

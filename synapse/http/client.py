@@ -1039,7 +1039,7 @@ class _MultipartParserProtocol(protocol.Protocol):
         self.deferred = deferred
         self.boundary = boundary
         self.max_length = max_length
-        self.parser = None
+        self.parser: Optional[multipart.MultipartParser] = None
         self.multipart_response = MultipartResponse()
         self.has_redirect = False
         self.in_json = False
@@ -1057,11 +1057,11 @@ class _MultipartParserProtocol(protocol.Protocol):
         if not self.parser:
 
             def on_header_field(data: bytes, start: int, end: int) -> None:
-                if data[start:end] == b"Location":
+                if data[start:end].lower() == b"location":
                     self.has_redirect = True
-                if data[start:end] == b"Content-Disposition":
+                if data[start:end].lower() == b"content-disposition":
                     self.in_disposition = True
-                if data[start:end] == b"Content-Type":
+                if data[start:end].lower() == b"content-type":
                     self.in_content_type = True
 
             def on_header_value(data: bytes, start: int, end: int) -> None:
@@ -1088,7 +1088,6 @@ class _MultipartParserProtocol(protocol.Protocol):
                     return
                 # otherwise we are in the file part
                 else:
-                    logger.info("Writing multipart file data to stream")
                     try:
                         self.stream.write(data[start:end])
                     except Exception as e:
@@ -1098,7 +1097,7 @@ class _MultipartParserProtocol(protocol.Protocol):
                         self.deferred.errback()
                     self.file_length += end - start
 
-            callbacks = {
+            callbacks: "multipart.multipart.MultipartCallbacks" = {
                 "on_header_field": on_header_field,
                 "on_header_value": on_header_value,
                 "on_part_data": on_part_data,
@@ -1114,7 +1113,7 @@ class _MultipartParserProtocol(protocol.Protocol):
             self.transport.abortConnection()
 
         try:
-            self.parser.write(incoming_data)  # type: ignore[attr-defined]
+            self.parser.write(incoming_data)
         except Exception as e:
             logger.warning(f"Exception writing to multipart parser: {e}")
             self.deferred.errback()
@@ -1314,6 +1313,5 @@ def is_unknown_endpoint(
         )
     ) or (
         # Older Synapses returned a 400 error.
-        e.code == 400
-        and synapse_error.errcode == Codes.UNRECOGNIZED
+        e.code == 400 and synapse_error.errcode == Codes.UNRECOGNIZED
     )

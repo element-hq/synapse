@@ -503,13 +503,19 @@ class StateFilter:
         #   - if so, which event types are excluded? ('excludes')
         #   - which entire event types to include ('wildcards')
         #   - which concrete state keys to include ('concrete state keys')
-        (self_all, self_excludes), (
-            self_wildcards,
-            self_concrete_keys,
+        (
+            (self_all, self_excludes),
+            (
+                self_wildcards,
+                self_concrete_keys,
+            ),
         ) = self._decompose_into_four_parts()
-        (other_all, other_excludes), (
-            other_wildcards,
-            other_concrete_keys,
+        (
+            (other_all, other_excludes),
+            (
+                other_wildcards,
+                other_concrete_keys,
+            ),
         ) = other._decompose_into_four_parts()
 
         # Start with an estimate of the difference based on self
@@ -609,6 +615,13 @@ class StateFilter:
             return True
 
         return False
+
+    def __bool__(self) -> bool:
+        """Returns true if this state filter will match any state, or false if
+        this is the empty filter"""
+        if self.include_others:
+            return True
+        return bool(self.types)
 
 
 _ALL_STATE_FILTER = StateFilter(types=immutabledict(), include_others=True)

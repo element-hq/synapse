@@ -6,7 +6,7 @@ import synapse.rest.admin
 import synapse.rest.client.login
 import synapse.rest.client.room
 from synapse.api.constants import EventTypes, Membership
-from synapse.api.errors import LimitExceededError, SynapseError
+from synapse.api.errors import Codes, LimitExceededError, SynapseError
 from synapse.crypto.event_signing import add_hashes_and_signatures
 from synapse.events import FrozenEventV3
 from synapse.federation.federation_client import SendJoinResult
@@ -380,8 +380,28 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         )
 
     def test_forget_when_not_left(self) -> None:
-        """Tests that a user cannot not forgets a room that has not left."""
+        """Tests that a user cannot forget a room that they are still in."""
         self.get_failure(self.handler.forget(self.alice_ID, self.room_id), SynapseError)
+
+    def test_nonlocal_room_user_action(self) -> None:
+        """
+        Test that non-local user ids cannot perform room actions through
+        this homeserver.
+        """
+        alien_user_id = UserID.from_string("@cheeky_monkey:matrix.org")
+        bad_room_id = f"{self.room_id}+BAD_ID"
+
+        exc = self.get_failure(
+            self.handler.update_membership(
+                create_requester(self.alice),
+                alien_user_id,
+                bad_room_id,
+                "unban",
+            ),
+            SynapseError,
+        ).value
+
+        self.assertEqual(exc.errcode, Codes.BAD_JSON)
 
     def test_rejoin_forgotten_by_user(self) -> None:
         """Test that a user that has forgotten a room can do a re-join.
