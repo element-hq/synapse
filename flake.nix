@@ -163,8 +163,8 @@
                 # Create a postgres user called 'synapse_user' which has ownership
                 # over the 'synapse' database.
                 services.postgres.initialScript = ''
-                CREATE USER synapse_user;
-                ALTER DATABASE synapse OWNER TO synapse_user;
+                  CREATE USER synapse_user;
+                  ALTER DATABASE synapse OWNER TO synapse_user;
                 '';
 
                 # Redis is needed in order to run Synapse in worker mode.
