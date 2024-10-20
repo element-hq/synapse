@@ -39,9 +39,9 @@
 
 {
   inputs = {
-    # Use the master/unstable branch of nixpkgs. Used to fetch the latest
+    # Use the rolling/unstable branch of nixpkgs. Used to fetch the latest
     # available versions of packages.
-    nixpkgs.url = "github:NixOS/nixpkgs/master";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     # Output a development shell for x86_64/aarch64 Linux/Darwin (MacOS).
     systems.url = "github:nix-systems/default";
     # A development environment manager built on Nix. See https://devenv.sh.
