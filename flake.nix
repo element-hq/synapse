@@ -50,7 +50,7 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, devenv, systems, rust-overlay, ... } @ inputs:
+  outputs = { nixpkgs, devenv, systems, rust-overlay, ... } @ inputs:
     let
       forEachSystem = nixpkgs.lib.genAttrs (import systems);
     in {
