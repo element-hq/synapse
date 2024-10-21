@@ -1,0 +1,1881 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "modules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "module": { "type": "string" },
+          "config": { "type": "object" }
+        }
+      },
+      "default": []
+    },
+    "server_name": { "type": "string" },
+    "pid_file": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "web_client_location": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "public_baseurl": {
+      "type": ["string", "null"],
+      "$comment": "Defaults to `https://<server_name>/`.",
+      "default": null
+    },
+    "serve_server_wellknown": {
+      "type": "boolean",
+      "default": false
+    },
+    "extra_well_known_client_content": { "type": "object" },
+    "soft_file_limit": {
+      "type": "integer",
+      "default": 0
+    },
+    "presence": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": ["boolean", "string"],
+          "oneOf": [
+            { "type": "boolean" },
+            {
+              "type": "string",
+              "const": "untracked"
+            }
+          ],
+          "default": true
+        },
+        "include_offline_users_on_sync": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "require_auth_for_profile_requests": {
+      "type": "boolean",
+      "default": false
+    },
+    "limit_profile_requests_to_users_who_share_rooms": {
+      "type": "boolean",
+      "default": false
+    },
+    "include_profile_data_on_invite": {
+      "type": "boolean",
+      "default": true
+    },
+    "allow_public_rooms_without_auth": {
+      "type": "boolean",
+      "default": false
+    },
+    "allow_public_rooms_over_federation": {
+      "type": "boolean",
+      "default": false
+    },
+    "default_room_version": {
+      "type": "string",
+      "default": "10"
+    },
+    "gc_thresholds": {
+      "type": ["array", "null"],
+      "default": null
+    },
+    "gc_min_interval": {
+      "type": "array",
+      "default": ["1s", "10s", "30s"]
+    },
+    "filter_timeline_limit": {
+      "type": "integer",
+      "default": 100
+    },
+    "block_non_admin_invites": {
+      "type": "boolean",
+      "default": false
+    },
+    "enable_search": {
+      "type": "boolean",
+      "default": true
+    },
+    "ip_range_blacklist": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "default": null
+    },
+    "ip_range_whitelist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "listeners": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "port": { "type": "integer" },
+          "tag": { "type": ["string", "null"] },
+          "bind_addresses": {
+            "type": ["array", "null"],
+            "items": { "type": "string" }
+          },
+          "type": {
+            "type": "string",
+            "enum": ["http", "manhole", "metrics"]
+          },
+          "tls": { "type": "boolean" },
+          "x_forwarded": { "type": "boolean" },
+          "request_id_header": { "type": ["string", "null"] },
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "client",
+                      "consent",
+                      "federation",
+                      "keys",
+                      "media",
+                      "metrics",
+                      "openid",
+                      "replication",
+                      "static",
+                      "health"
+                    ]
+                  }
+                },
+                "compress": { "type": "boolean" }
+              }
+            }
+          },
+          "additional_resources": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "properties": {
+                "module": { "type": "string" },
+                "config": { "type": "object" }
+              }
+            }
+          },
+          "path": { "type": "string" },
+          "mode": { "type": "integer" }
+        }
+      }
+    },
+    "manhole_settings": {
+      "type": "object",
+      "properties": {
+        "username": { "type": ["string", "null"] },
+        "password": { "type": ["string", "null"] },
+        "ssh_priv_key_path": { "type": ["string", "null"] },
+        "ssh_pub_key_path": { "type": ["string", "null"] }
+      }
+    },
+    "dummy_events_threshold": {
+      "type": "integer",
+      "default": 10
+    },
+    "delete_stale_devices_after": {
+      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "default": null
+    },
+    "email": {
+      "type": "object",
+      "properties": {
+        "smtp_host": {
+          "type": "string",
+          "default": "localhost"
+        },
+        "smtp_port": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "smtp_user": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "smtp_pass": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "force_tls": {
+          "type": "boolean",
+          "default": false
+        },
+        "require_transport_security": {
+          "type": "boolean",
+          "default": false
+        },
+        "enable_tls": {
+          "type": "boolean",
+          "default": true
+        },
+        "notif_from": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "app_name": {
+          "type": "string",
+          "default": "Matrix"
+        },
+        "enable_notifs": {
+          "type": "boolean",
+          "default": false
+        },
+        "notif_for_new_users": {
+          "type": "boolean",
+          "default": true
+        },
+        "notif_delay_before_mail": {
+          "$ref": "#/$defs/duration",
+          "default": "10m"
+        },
+        "client_base_url": {
+          "type": "string",
+          "default": "https://matrix.to"
+        },
+        "validation_token_lifetime": {
+          "$ref": "#/$defs/duration",
+          "default": "1h"
+        },
+        "invite_client_location": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "subjects": {
+          "type": "object",
+          "properties": {
+            "message_from_person_in_room": {
+              "type": "string",
+              "default": "[%(app)s] You have a message on %(app)s from %(person)s in the %(room)s room..."
+            },
+            "message_from_person": {
+              "type": "string",
+              "default": "[%(app)s] You have a message on %(app)s from %(person)s..."
+            },
+            "messages_from_person": {
+              "type": "string",
+              "default": "[%(app)s] You have messages on %(app)s from %(person)s..."
+            },
+            "messages_in_room": {
+              "type": "string",
+              "default": "[%(app)s] You have messages on %(app)s in the %(room)s room..."
+            },
+            "messages_in_room_and_others": {
+              "type": "string",
+              "default": "[%(app)s] You have messages on %(app)s in the %(room)s room and others..."
+            },
+            "messages_from_person_and_others": {
+              "type": "string",
+              "default": "[%(app)s] You have messages on %(app)s from %(person)s and others..."
+            },
+            "invite_from_person_to_room": {
+              "type": "string",
+              "default": "[%(app)s] %(person)s has invited you to join the %(room)s room on %(app)s..."
+            },
+            "invite_from_person": {
+              "type": "string",
+              "default": "[%(app)s] %(person)s has invited you to chat on %(app)s..."
+            },
+            "password_reset": {
+              "type": "string",
+              "default": "[%(server_name)s] Password reset"
+            },
+            "email_validation": {
+              "type": "string",
+              "default": "[%(server_name)s] Validate your email"
+            }
+          }
+        }
+      }
+    },
+    "max_event_delay_duration": {
+      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "default": null
+    },
+    "admin_contact": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "hs_disabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "hs_disabled_message": {
+      "type": "string",
+      "default": "Homeserver is currently blocked"
+    },
+    "limit_usage_by_mau": {
+      "type": "boolean",
+      "default": false
+    },
+    "max_mau_value": {
+      "type": "integer",
+      "default": 0
+    },
+    "mau_trial_days": {
+      "type": "integer",
+      "default": 0
+    },
+    "mau_appservice_trial_days": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" },
+      "default": {}
+    },
+    "mau_limit_alerting": {
+      "type": "boolean",
+      "default": true
+    },
+    "mau_stats_only": {
+      "type": "boolean",
+      "default": false
+    },
+    "mau_limit_reserved_threepids": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "medium": { "type": "string" },
+          "address": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "server_context": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "limit_remote_rooms": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "complexity": {
+          "type": "number",
+          "default": 1.0
+        },
+        "complexity_error": {
+          "type": "string",
+          "default": "Your homeserver is unable to join rooms this large or complex. Please speak to your server administrator, or upgrade your instance to join this room."
+        },
+        "admins_can_join": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "require_membership_for_aliases": {
+      "type": "boolean",
+      "default": true
+    },
+    "allow_per_room_profiles": {
+      "type": "boolean",
+      "default": true
+    },
+    "max_avatar_size": {
+      "oneOf": [{ "$ref": "#/$defs/bytes" }, { "type": "null" }],
+      "default": null
+    },
+    "allowed_avatar_mimetypes": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "default": null
+    },
+    "redaction_retention_period": {
+      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "default": "7d"
+    },
+    "forgotten_room_retention_period": {
+      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "default": null
+    },
+    "user_ips_max_age": {
+      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "default": "28d"
+    },
+    "request_token_inhibit_3pid_errors": {
+      "type": "boolean",
+      "default": false
+    },
+    "next_link_domain_whitelist": {
+      "type": ["array", "null"],
+      "default": null
+    },
+    "templates": {
+      "type": "object",
+      "properties": {
+        "custom_template_directory": {
+          "type": ["string", "null"],
+          "default": null
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "default_policy": {
+          "type": "object",
+          "properties": {
+            "min_lifetime": {
+              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "default": null
+            },
+            "max_lifetime": {
+              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "default": null
+            }
+          }
+        },
+        "allowed_lifetime_min": {
+          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "default": null
+        },
+        "allowed_lifetime_max": {
+          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "default": null
+        },
+        "purge_jobs": {
+          "type": ["array", "null"],
+          "items": {
+            "type": "object",
+            "properties": {
+              "shortest_max_lifetime": {
+                "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }]
+              },
+              "longest_max_lifetime": {
+                "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }]
+              },
+              "interval": { "$ref": "#/$defs/duration" }
+            }
+          },
+          "default": null
+        }
+      }
+    },
+    "tls_certificate_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "tls_private_key_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "federation_verify_certificates": {
+      "type": "boolean",
+      "default": true
+    },
+    "federation_client_minimum_tls_version": {
+      "type": "string",
+      "default": "1"
+    },
+    "federation_certificate_verification_whitelist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "federation_custom_ca_list": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "federation_domain_whitelist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "federation_whitelist_endpoint_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "federation_metrics_domains": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "allow_profile_lookup_over_federation": {
+      "type": "boolean",
+      "default": true
+    },
+    "allow_device_name_lookup_over_federation": {
+      "type": "boolean",
+      "default": false
+    },
+    "federation": {
+      "type": "object",
+      "properties": {
+        "client_timeout": {
+          "$ref": "#/$defs/duration",
+          "default": "60s"
+        },
+        "max_short_retry_delay": {
+          "$ref": "#/$defs/duration",
+          "default": "2s"
+        },
+        "max_long_retry_delay": {
+          "$ref": "#/$defs/duration",
+          "default": "60s"
+        },
+        "max_short_retries": {
+          "type": "integer",
+          "default": 3
+        },
+        "max_long_retries": {
+          "type": "integer",
+          "default": 10
+        },
+        "destination_min_retry_interval": {
+          "$ref": "#/$defs/duration",
+          "default": "10m"
+        },
+        "destination_retry_multiplier": {
+          "type": "integer",
+          "default": 2
+        },
+        "destination_max_retry_interval": {
+          "$ref": "#/$defs/duration",
+          "default": "1w"
+        }
+      }
+    },
+    "event_cache_size": {
+      "$ref": "#/$defs/size",
+      "default": "10K"
+    },
+    "caches": {
+      "type": "object",
+      "properties": {
+        "global_factor": {
+          "type": "number",
+          "default": 0.5
+        },
+        "per_cache_factors": {
+          "type": "object",
+          "additionalProperties": { "type": "number" },
+          "default": {}
+        },
+        "expire_caches": {
+          "type": "boolean",
+          "default": true
+        },
+        "cache_entry_ttl": {
+          "$ref": "#/$defs/duration",
+          "default": "30m"
+        },
+        "sync_response_cache_duration": {
+          "$ref": "#/$defs/duration",
+          "default": "2m"
+        },
+        "cache_autotuning": {
+          "type": "object",
+          "properties": {
+            "max_cache_memory_usage": {
+              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "default": null
+            },
+            "target_cache_memory_usage": {
+              "oneOf": [{ "$ref": "#/$defs/bytes" }, { "type": "null" }],
+              "default": null
+            },
+            "min_cache_ttl": {
+              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "default": null
+            }
+          }
+        }
+      }
+    },
+    "database": {
+      "$ref": "#/$defs/database",
+      "examples": [
+        {
+          "name": "sqlite3",
+          "args": { "database": "/path/to/homeserver.db" }
+        },
+        {
+          "name": "psycopg2",
+          "txn_limit": 10000,
+          "args": {
+            "user": "synapse_user",
+            "password": "secretpassword",
+            "dbname": "synapse",
+            "host": "localhost",
+            "port": 5432,
+            "cp_min": 5,
+            "cp_max": 10
+          }
+        }
+      ]
+    },
+    "databases": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/database",
+        "properties": {
+          "data_stores": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["state", "main"]
+            }
+          }
+        }
+      },
+      "default": {}
+    },
+    "log_config": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "rc_message": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 0.2,
+        "burst_count": 10
+      }
+    },
+    "rc_registration": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 0.17,
+        "burst_count": 3
+      }
+    },
+    "rc_registration_token_validity": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 0.1,
+        "burst_count": 5
+      }
+    },
+    "rc_login": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.003,
+            "burst_count": 5
+          }
+        },
+        "account": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.003,
+            "burst_count": 5
+          }
+        },
+        "failed_attempts": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.17,
+            "burst_count": 3
+          }
+        }
+      }
+    },
+    "rc_admin_redaction": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 1.0,
+        "burst_count": 50
+      }
+    },
+    "rc_joins": {
+      "type": "object",
+      "properties": {
+        "local": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.1,
+            "burst_count": 10
+          }
+        },
+        "remote": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.01,
+            "burst_count": 10
+          }
+        }
+      }
+    },
+    "rc_joins_per_room": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 1.0,
+        "burst_count": 10
+      }
+    },
+    "rc_3pid_validation": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 0.003,
+        "burst_count": 5
+      }
+    },
+    "rc_invites": {
+      "type": "object",
+      "properties": {
+        "per_room": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.3,
+            "burst_count": 10
+          }
+        },
+        "per_user": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.003,
+            "burst_count": 5
+          }
+        },
+        "per_issuer": {
+          "$ref": "#/$defs/rc",
+          "default": {
+            "per_second": 0.3,
+            "burst_count": 10
+          }
+        }
+      }
+    },
+    "rc_third_party_invite": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 0.2,
+        "burst_count": 10
+      }
+    },
+    "rc_media_create": {
+      "$ref": "#/$defs/rc",
+      "default": {
+        "per_second": 10.0,
+        "burst_count": 50
+      }
+    },
+    "rc_federation": {
+      "type": "object",
+      "properties": {
+        "window_size": {
+          "type": "integer",
+          "default": 1000
+        },
+        "sleep_limit": {
+          "type": "integer",
+          "default": 10
+        },
+        "sleep_delay": {
+          "type": "integer",
+          "default": 500
+        },
+        "reject_limit": {
+          "type": "integer",
+          "default": 50
+        },
+        "concurrent": {
+          "type": "integer",
+          "default": 3
+        }
+      }
+    },
+    "federation_rr_transactions_per_room_per_second": {
+      "type": "integer",
+      "default": 50
+    },
+    "enable_authenticated_media": {
+      "type": "boolean",
+      "default": false
+    },
+    "enable_media_repo": {
+      "type": "boolean",
+      "default": true
+    },
+    "media_store_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "max_pending_media_uploads": {
+      "type": "integer",
+      "default": 5
+    },
+    "unused_expiration_time": {
+      "$ref": "#/$defs/duration",
+      "default": "24h"
+    },
+    "media_storage_providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "module": { "type": "string" },
+          "store_local": { "type": "boolean" },
+          "store_remote": { "type": "boolean" },
+          "store_synchronous": { "type": "boolean" },
+          "config": {
+            "type": "object",
+            "properties": { "directory": { "type": "string" } }
+          }
+        }
+      },
+      "default": []
+    },
+    "max_upload_size": {
+      "$ref": "#/$defs/bytes",
+      "default": "50M"
+    },
+    "max_image_pixels": {
+      "$ref": "#/$defs/bytes",
+      "default": "32M"
+    },
+    "remote_media_download_burst_count": {
+      "$ref": "#/$defs/bytes",
+      "default": "500MiB"
+    },
+    "remote_media_download_per_second": {
+      "$ref": "#/$defs/bytes",
+      "default": "87KiB"
+    },
+    "prevent_media_downloads_from": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "dynamic_thumbnails": {
+      "type": "boolean",
+      "default": false
+    },
+    "thumbnail_sizes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "width": { "type": "integer" },
+          "height": { "type": "integer" },
+          "method": { "type": "string", "enum": ["crop", "scale"] }
+        }
+      },
+      "default": [
+        { "width": 32, "height": 32, "method": "crop" },
+        { "width": 96, "height": 96, "method": "crop" },
+        { "width": 320, "height": 240, "method": "scale" },
+        { "width": 640, "height": 480, "method": "scale" },
+        { "width": 800, "height": 600, "method": "scale" }
+      ]
+    },
+    "media_retention": {
+      "type": "object",
+      "properties": {
+        "local_media_lifetime": {
+          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "default": null
+        },
+        "remote_media_lifetime": {
+          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "default": null
+        }
+      }
+    },
+    "url_preview_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "url_preview_ip_range_blacklist": {
+      "type": ["array", "null"],
+      "items": { "type": "string" },
+      "default": null,
+      "examples": [
+        [
+          "127.0.0.0/8",
+          "10.0.0.0/8",
+          "172.16.0.0/12",
+          "192.168.0.0/16",
+          "100.64.0.0/10",
+          "192.0.0.0/24",
+          "169.254.0.0/16",
+          "192.88.99.0/24",
+          "198.18.0.0/15",
+          "192.0.2.0/24",
+          "198.51.100.0/24",
+          "203.0.113.0/24",
+          "224.0.0.0/4",
+          "::1/128",
+          "fe80::/10",
+          "fc00::/7",
+          "2001:db8::/32",
+          "ff00::/8",
+          "fec0::/10"
+        ]
+      ]
+    },
+    "url_preview_ip_range_whitelist": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "url_preview_url_blacklist": {
+      "type": "array",
+      "items": { "type": "object" },
+      "default": []
+    },
+    "max_spider_size": {
+      "$ref": "#/$defs/bytes",
+      "default": "10M"
+    },
+    "url_preview_accept_language": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": ["en"]
+    },
+    "oembed": {
+      "type": "object",
+      "properties": {
+        "disable_default_providers": {
+          "type": "boolean",
+          "default": false
+        },
+        "additional_providers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "recaptcha_public_key": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "recaptcha_private_key": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "enable_registration_captcha": {
+      "type": "boolean",
+      "default": false
+    },
+    "recaptcha_siteverify_api": {
+      "type": "string",
+      "default": "https://www.recaptcha.net/recaptcha/api/siteverify"
+    },
+    "turn_uris": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "turn_shared_secret": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "turn_shared_secret_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "turn_username": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "turn_password": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "turn_user_lifetime": {
+      "$ref": "#/$defs/duration",
+      "default": "1h"
+    },
+    "turn_allow_guests": {
+      "type": "boolean",
+      "default": true
+    },
+    "enable_registration": {
+      "type": "boolean",
+      "default": false
+    },
+    "enable_registration_without_verification": {
+      "type": "boolean",
+      "default": false
+    },
+    "registrations_require_3pid": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "disable_msisdn_registration": {
+      "type": "boolean",
+      "default": false
+    },
+    "allowed_local_3pids": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "medium": { "$ref": "#/$defs/3pidmedium" },
+          "pattern": { "type": "string" }
+        }
+      },
+      "default": null
+    },
+    "enable_3pid_lookup": {
+      "type": "boolean",
+      "default": true
+    },
+    "registration_requires_token": {
+      "type": "boolean",
+      "default": false
+    },
+    "registration_shared_secret": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "registration_shared_secret_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "bcrypt_rounds": {
+      "type": "integer",
+      "default": 12
+    },
+    "allow_guest_access": {
+      "type": "boolean",
+      "default": false
+    },
+    "default_identity_server": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "account_threepid_delegates": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "enable_set_displayname": {
+      "type": "boolean",
+      "default": true
+    },
+    "enable_set_avatar_url": {
+      "type": "boolean",
+      "default": true
+    },
+    "enable_3pid_changes": {
+      "type": "boolean",
+      "default": true
+    },
+    "auto_join_rooms": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "autocreate_auto_join_rooms": {
+      "type": "boolean",
+      "default": true
+    },
+    "autocreate_auto_join_rooms_federated": {
+      "type": "boolean",
+      "default": true
+    },
+    "autocreate_auto_join_room_preset": {
+      "type": "string",
+      "enum": ["public_chat", "private_chat", "trusted_private_chat"],
+      "default": "public_chat"
+    },
+    "auto_join_mxid_localpart": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "auto_join_rooms_for_guests": {
+      "type": "boolean",
+      "default": true
+    },
+    "inhibit_user_in_use_error": {
+      "type": "boolean",
+      "default": false
+    },
+    "session_lifetime": {
+      "$ref": "#/$defs/duration",
+      "default": "infinity"
+    },
+    "refreshable_access_token_lifetime": {
+      "$ref": "#/$defs/duration",
+      "default": "5m"
+    },
+    "refresh_token_lifetime": {
+      "$ref": "#/$defs/duration",
+      "default": "infinity"
+    },
+    "nonrefreshable_access_token_lifetime": {
+      "$ref": "#/$defs/duration",
+      "default": "infinity"
+    },
+    "ui_auth": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/duration"
+        },
+        {
+          "type": "object",
+          "properties": { "session_timeout": { "$ref": "#/$defs/duration" } }
+        }
+      ],
+      "default": 0
+    },
+    "login_via_existing_session": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "require_ui_auth": {
+          "type": "boolean",
+          "default": true
+        },
+        "token_timeout": {
+          "$ref": "#/$defs/duration",
+          "default": "5m"
+        }
+      }
+    },
+    "enable_metrics": {
+      "type": "boolean",
+      "default": false
+    },
+    "sentry": {
+      "type": "object",
+      "properties": {
+        "dsn": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "environment": {
+          "type": ["string", "null"],
+          "default": null
+        }
+      }
+    },
+    "metrics_flags": {
+      "type": "object",
+      "properties": {
+        "known_servers": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "report_stats": {
+      "type": "boolean",
+      "default": false
+    },
+    "report_stats_endpoint": {
+      "type": "string",
+      "default": "https://matrix.org/report-usage-stats/push"
+    },
+    "room_prejoin_state": {
+      "type": "object",
+      "properties": {
+        "disable_default_event_types": {
+          "type": "boolean",
+          "default": false
+        },
+        "additional_event_types": {
+          "type": "array",
+          "items": {
+            "type": ["string", "array"],
+            "items": { "type": "string" }
+          },
+          "default": []
+        }
+      }
+    },
+    "track_puppeted_user_ips": {
+      "type": "boolean",
+      "default": false
+    },
+    "app_service_config_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "track_appservice_user_ips": {
+      "type": "boolean",
+      "default": false
+    },
+    "use_appservice_legacy_authorization": {
+      "type": "boolean",
+      "default": false
+    },
+    "macaroon_secret_key": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "form_secret": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "signing_key_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "old_signing_keys": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "key": { "type": "string" },
+          "expired_ts": { "type": "integer" }
+        }
+      },
+      "default": {}
+    },
+    "key_refresh_interval": {
+      "$ref": "#/$defs/duration",
+      "default": "1d"
+    },
+    "trusted_key_servers": {
+      "type": "array",
+      "items": {
+        "server_name": { "type": "string" },
+        "verify_keys": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "string" }
+        },
+        "accept_keys_insecurely": { "type": "boolean" }
+      },
+      "default": [{ "server_name": "matrix.org" }]
+    },
+    "suppress_key_server_warning": {
+      "type": "boolean",
+      "default": false
+    },
+    "key_server_signing_keys_path": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "saml2_config": {
+      "type": "object",
+      "properties": {
+        "idp_name": { "type": "string" },
+        "idp_icon": { "type": ["string", "null"] },
+        "idp_brand": {},
+        "sp_config": {
+          "type": ["object", "null"],
+          "default": null
+        },
+        "config_path": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "saml_session_lifetime": {
+            "$ref": "#/$defs/duration",
+            "default": "15m"
+          },
+        "user_mapping_provider": {
+          "type": "object",
+          "properties": {
+            "module": { "type": "string" },
+            "config": { "type": "object" }
+          }
+        },
+        "grandfathered_mxid_source_attribute": {
+          "type": "string",
+          "default": "uid"
+        },
+        "attribute_requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "attribute": { "type": "string" },
+              "value": { "type": "string" }
+            }
+          }
+        },
+        "idp_entityid": {
+          "type": ["string", "null"],
+          "default": null
+        }
+      }
+    },
+    "oidc_providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "idp_id": { "type": "string" },
+          "idp_name": { "type": "string" },
+          "idp_icon": { "type": "string" },
+          "idp_brand": { "type": "string" },
+          "discover": { "type": "boolean" },
+          "issuer": { "type": "string" },
+          "client_id": { "type": "string" },
+          "client_secret": { "type": ["string", "null"] },
+          "client_secret_path": { "type": ["string", "null"] },
+          "client_secret_jwt_key": {
+            "type": ["object", "null"],
+            "properties": {
+              "key": { "type": ["string", "null"] },
+              "key_file": { "type": ["string", "null"] },
+              "jwt_header": {
+                "type": "object",
+                "properties": { "alg": { "type": "string" } }
+              },
+              "jwt_payload": { "type": "object" }
+            }
+          },
+          "client_auth_method": {
+            "type": ["string", "null"],
+            "enum": ["client_secret_basic", "client_secret_post", "none", null]
+          },
+          "pkce_method": {
+            "type": ["string", "null"],
+            "enum": ["auto", "always", "never", null]
+          },
+          "scopes": {
+            "type": ["array", "null"],
+            "items": { "type": "string" }
+          },
+          "authorization_endpoint": { "type": "string" },
+          "token_endpoint": { "type": "string" },
+          "userinfo_endpoint": { "type": "string" },
+          "jwks_uri": { "type": "string" },
+          "skip_verification": { "type": "boolean" },
+          "user_profile_method": {
+            "type": ["string", "null"],
+            "enum": ["auto", "userinfo_endpoint", null]
+          },
+          "additional_authorization_parameters": {
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
+          "allow_existing_users": { "type": "boolean" },
+          "enable_registration": { "type": "boolean" },
+          "user_mapping_provider": {
+            "type": "object",
+            "properties": {
+              "module": { "type": "string" },
+              "config": { "type": "object" }
+            }
+          },
+          "backchannel_logout_enabled": { "type": "boolean" },
+          "backchannel_logout_ignore_sub": { "type": "boolean" }
+        }
+      },
+      "default": []
+    },
+    "cas_config": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "idp_name": { "type": "string" },
+        "idp_icon": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "idp_brand": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "server_url": { "type": "string" },
+        "protocol_version": {
+          "type": ["integer", "null"],
+          "default": null
+        },
+        "displayname_attribute": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "required_attributes": {
+          "type": "object",
+          "additionalProperties": { "type": ["string", "null"] },
+          "default": {}
+        },
+        "enable_registration": {
+          "type": "boolean",
+          "default": true
+        },
+        "allow_numeric_ids": {
+          "type": "boolean",
+          "default": false
+        },
+        "numeric_ids_prefix": { 
+          "type": "string",
+          "default": "u"
+        }
+      }
+    },
+    "sso": {
+      "type": "object",
+      "properties": {
+        "client_whitelist": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "default": null
+        },
+        "update_profile_information": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "jwt_config": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "secret": { "type": "string" },
+        "algorithm": { "type": "string" },
+        "subject_claim": {
+          "type": ["string", "null"],
+          "default": "sub"
+        },
+        "issuer": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "audiences": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "default": null
+        }
+      }
+    },
+    "password_config": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": ["boolean", "string"],
+          "enum": [true, false, "only_for_reauth"],
+          "default": true
+        },
+        "localdb_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "pepper": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "policy": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "minimum_length": {
+              "type": "integer",
+              "default": 0
+            },
+            "require_digit": {
+              "type": "boolean",
+              "default": false
+            },
+            "require_symbol": {
+              "type": "boolean",
+              "default": false
+            },
+            "require_lowercase": {
+              "type": "boolean",
+              "default": false
+            },
+            "require_uppercase": {
+              "type": "boolean",
+              "default": false
+            }
+          }
+        }
+      }
+    },
+    "push": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "include_content": {
+          "type": "boolean",
+          "default": true
+        },
+        "group_unread_count_by_room": {
+          "type": "boolean",
+          "default": true
+        },
+        "jitter_delay": {
+          "$ref": "#/$defs/duration",
+          "default": "0s"
+        }
+      }
+    },
+    "encryption_enabled_by_default_for_room_type": {
+      "type": "string",
+      "enum": ["all", "invite", "off"],
+      "default": "off"
+    },
+    "user_directory": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "search_all_users": {
+          "type": "boolean",
+          "default": false
+        },
+        "prefer_local_users": {
+          "type": "boolean",
+          "default": false
+        },
+        "show_locked_users": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "user_consent": {
+      "type": "object",
+      "properties": {
+        "template_dir": { "type": "string" },
+        "version": { "type": "number" },
+        "server_notice_content": {
+          "type": "object",
+          "properties": {
+            "msgtype": { "type": "string" },
+            "body": { "type": "string" }
+          }
+        },
+        "send_server_notice_to_guests": {
+          "type": "boolean",
+          "default": false
+        },
+        "block_events_error": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "require_at_registration": { "type": "boolean" },
+        "policy_name": {
+          "type": "string",
+          "default": "Privacy Policy"
+        }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "server_notices": {
+      "type": "object",
+      "properties": {
+        "system_mxid_display_name": {
+          "type": "string",
+          "default": "Notices"
+        },
+        "system_mxid_avatar_url": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "room_name": {
+          "type": "string",
+          "default": "Server Notices"
+        },
+        "room_avatar_url": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "room_topic": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "auto_join": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "enable_room_list_search": {
+      "type": "boolean",
+      "default": true
+    },
+    "alias_creation_rules": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": ["string", "null"] },
+          "alias": { "type": ["string", "null"] },
+          "room_id": { "type": ["string", "null"] },
+          "action": {
+            "type": "string",
+            "enum": ["allow", "deny"]
+          }
+        }
+      },
+      "default": null
+    },
+    "room_list_publication_rules": {
+      "type": ["array", "null"],
+      "items": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": ["string", "null"] },
+          "alias": { "type": ["string", "null"] },
+          "room_id": { "type": ["string", "null"] },
+          "action": {
+            "type": "string",
+            "enum": ["allow", "deny"]
+          }
+        }
+      },
+      "default": null
+    },
+    "default_power_level_content_override": {
+      "type": "object",
+      "default": {}
+    },
+    "forget_rooms_on_leave": {
+      "type": "boolean",
+      "default": false
+    },
+    "exclude_rooms_from_sync": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "opentracing": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "homeserver_whitelist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "force_tracing_for_users": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "jaeger_config": {
+          "type": "object",
+          "default": {}
+        }
+      }
+    },
+    "worker_replication_secret": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "start_pushers": {
+      "type": "boolean",
+      "default": true
+    },
+    "pusher_instances": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "send_federation": {
+      "type": "boolean",
+      "default": true
+    },
+    "federation_sender_instances": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "instance_map": {
+      "type": "object",
+      "additionalProperties": { "type": "object" },
+      "default": {}
+    },
+    "stream_writers": {
+      "type": "object",
+      "properties": {
+        "events": { "type": "string" },
+        "typing": { "type": "string" },
+        "to_device": { "type": "string" },
+        "account_data": { "type": "string" },
+        "receipts": { "type": "string" },
+        "presence": { "type": "string" },
+        "push_rules": { "type": "string" }
+      },
+      "default": {}
+    },
+    "outbound_federation_restricted_to": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": []
+    },
+    "run_background_tasks_on": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "update_user_directory_from_worker": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "notify_appservices_from_worker": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "media_instance_running_background_jobs": {
+      "type": ["string", "null"],
+      "default": null
+    },
+    "redis": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "host": {
+          "type": "string",
+          "default": "localhost"
+        },
+        "port": {
+          "type": "integer",
+          "default": 6379
+        },
+        "path": {
+          "type": "string",
+          "default": "/tmp/redis.sock"
+        },
+        "password": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "password_path": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "dbid": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "use_tls": {
+          "type": "boolean",
+          "default": false
+        },
+        "certificate_file": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "private_key_file": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "ca_file": {
+          "type": ["string", "null"],
+          "default": null
+        },
+        "ca_path": {
+          "type": ["string", "null"],
+          "default": null
+        }
+      }
+    },
+    "background_updates": {
+      "type": "object",
+      "properties": {
+        "background_update_duration_ms": {
+          "type": "integer",
+          "default": 100
+        },
+        "sleep_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "sleep_duration_ms": {
+          "type": "integer",
+          "default": 1000
+        },
+        "min_batch_size": {
+          "type": "integer",
+          "default": 1
+        },
+        "default_batch_size": {
+          "type": "integer",
+          "default": 100
+        }
+      }
+    },
+    "auto_accept_invites": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "only_for_direct_messages": {
+          "type": "boolean",
+          "default": false
+        },
+        "only_from_local_users": {
+          "type": "boolean",
+          "default": false
+        },
+        "worker_to_run_on": {
+          "type": ["string", "null"],
+          "default": null
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bytes": { "type": ["string", "integer"] },
+    "duration": { "type": "string" },
+    "size": { "type": ["string", "integer"] },
+    "3pidmedium": { "type": "string", "enum": ["email", "msisdn"] },
+    "rc": {
+      "type": "object",
+      "properties": {
+        "per_second": { "type": "number" },
+        "burst_count": { "type": "integer" }
+      }
+    },
+    "database": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "enum": ["sqlite3", "psycopg2"],
+          "default": "sqlite3"
+        },
+        "txn_limit": {
+          "type": "integer",
+          "default": 0
+        },
+        "allow_unsafe_locale": {
+          "type": "boolean",
+          "default": false
+        },
+        "args": { "type": "object" }
+      }
+    }
+  }
+}
