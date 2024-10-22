@@ -18,4 +18,4 @@
 -- membership on, we need to go and update the column to match the `room_memberships`
 -- table as it has fallen out of sync.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-  (8901, 'sliding_sync_membership_snapshots_fix_forgotten_column_bg_update', '{}');
+  (8802, 'sliding_sync_membership_snapshots_fix_forgotten_column_bg_update', '{}');
