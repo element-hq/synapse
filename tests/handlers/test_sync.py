@@ -571,6 +571,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.state.values()],
             [],
         )
+        self.assertEqual(room_sync.state_after, {})
 
         # Now send another event that points to S2, but not E3.
         with self._patch_get_latest_events([s2_event]):
@@ -602,6 +603,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.state.values()],
             [s2_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
     def test_state_includes_changes_on_ungappy_syncs(self) -> None:
         """Test `state` where the sync is not gappy.
@@ -776,6 +778,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [unrelated_state_event, s1_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
         # Send S2 -> S1
         s2_event = self.helper.send_state(
@@ -800,6 +803,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [s2_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
         # Send two regular events on different branches:
         # E3 -> S1
@@ -835,6 +839,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 e4_event,
             ],  # We have two events from different timelines neither of which are state events
         )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state_after.values()],
+            [
+                s2_event
+            ],  # S2 is repeated because it is the state at the end of the the timeline (after E4)
+        )
 
         # Send E5 which resolves the branches
         e5_event = self.helper.send(room_id, "E5", tok=alice_tok)["event_id"]
@@ -857,7 +867,9 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e5_event],
         )
-        # Problem: S2 is the winning state event but the last state event the client saw was S1.
+        self.assertEqual(room_sync.state_after, {})
+
+        # FIXED: S2 is the winning state event and the last state event that the client saw!
 
     def test_state_after_on_branches_winner_at_start_of_timeline(self) -> None:
         r"""Test `state` and `state_after` where not all information is in `state` + `timeline`.
@@ -922,6 +934,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [unrelated_state_event, s1_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
         # Send S2 -> S1
         s2_event = self.helper.send_state(
@@ -946,6 +959,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [s2_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
         # Send two events on different branches:
         # S3 -> S1
@@ -978,6 +992,12 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 e4_event,
             ],  # We have two events from different timelines
         )
+        self.assertEqual(
+            [e.event_id for e in room_sync.state_after.values()],
+            [
+                s2_event
+            ],  # S2 is repeated because it is the state at the end of the the timeline (after E4)
+        )
 
         # Send E5 which resolves the branches with S3 winning
         e5_event = self.helper.send(room_id, "E5", tok=alice_tok)["event_id"]
@@ -1003,6 +1023,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e5_event],
         )
+        self.assertEqual(room_sync.state_after, {})
 
     @parameterized.expand(
         [

@@ -521,9 +521,11 @@ class SyncRestServlet(RestServlet):
             The room, encoded in our response format
         """
         state_dict = room.state
+        state_after_dict = room.state_after
         timeline_events = room.timeline.events
 
         state_events = state_dict.values()
+        state_after_events = state_after_dict.values()
 
         for event in itertools.chain(state_events, timeline_events):
             # We've had bug reports that events were coming down under the
@@ -545,6 +547,9 @@ class SyncRestServlet(RestServlet):
             config=serialize_options,
             bundle_aggregations=room.timeline.bundled_aggregations,
         )
+        serialized_state_after = await self._event_serializer.serialize_events(
+            state_after_events, time_now, config=serialize_options
+        )
 
         account_data = room.account_data
 
@@ -555,6 +560,7 @@ class SyncRestServlet(RestServlet):
                 "limited": room.timeline.limited,
             },
             "state": {"events": serialized_state},
+            "state_after": {"events": serialized_state_after},
             "account_data": {"events": account_data},
         }
 
