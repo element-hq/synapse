@@ -921,15 +921,6 @@ def set_cors_headers(request: "SynapseRequest") -> None:
             b"Access-Control-Expose-Headers",
             b"Synapse-Trace-Id, Server, ETag",
         )
-    elif request.experimental_cors_msc3886:
-        request.setHeader(
-            b"Access-Control-Allow-Headers",
-            b"X-Requested-With, Content-Type, Authorization, Date, If-Match, If-None-Match",
-        )
-        request.setHeader(
-            b"Access-Control-Expose-Headers",
-            b"ETag, Location, X-Max-Bytes",
-        )
     else:
         request.setHeader(
             b"Access-Control-Allow-Headers",
