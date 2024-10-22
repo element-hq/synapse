@@ -113,7 +113,7 @@ class Authenticator:
                 ):
                     raise AuthenticationError(
                         HTTPStatus.UNAUTHORIZED,
-                        "Destination mismatch in auth header",
+                        f"Destination mismatch in auth header, received: {destination!r}",
                         Codes.UNAUTHORIZED,
                     )
         if (
