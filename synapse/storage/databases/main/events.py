@@ -1605,7 +1605,13 @@ class PersistEventsStore:
             room_id
             delta_state: Deltas that are going to be used to update the
                 `current_state_events` table. Changes to the current state of the room.
-            stream_id: TODO
+            stream_id: This is expected to be the minimum `stream_ordering` for the
+                batch of events that we are persisting; which means we do not end up in a
+                situation where workers see events before the `current_state_delta` updates.
+                FIXME: However, this function also gets called with next upcoming
+                `stream_ordering` when we re-sync the state of a partial stated room (see
+                `update_current_state(...)`) which may be "correct" but it would be good to
+                nail down what exactly is the expected value here.
             sliding_sync_table_changes: Changes to the
                 `sliding_sync_membership_snapshots` and `sliding_sync_joined_rooms` tables
                 derived from the given `delta_state` (see
@@ -1907,6 +1913,13 @@ class PersistEventsStore:
             room_id,
             stream_id,
         )
+
+        for user_id in members_to_cache_bust:
+            txn.call_after(
+                self.store._membership_stream_cache.entity_has_changed,
+                user_id,
+                stream_id,
+            )
 
         # Invalidate the various caches
         self.store._invalidate_state_caches_and_stream(
