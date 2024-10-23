@@ -1,0 +1,1 @@
+Allow `StateDeltasStore.get_partial_current_state_deltas` to exclude deltas for deleted state.
