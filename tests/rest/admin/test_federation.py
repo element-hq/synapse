@@ -96,7 +96,7 @@ class FederationTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             "GET",
             self.url + "?order_by=bar",
