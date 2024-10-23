@@ -259,7 +259,7 @@ class MediaRepository:
         """
         media = await self.store.get_local_media(media_id)
         if media is None:
-            raise SynapseError(404, "Unknow media ID", errcode=Codes.NOT_FOUND)
+            raise SynapseError(404, "Unknown media ID", errcode=Codes.NOT_FOUND)
 
         if media.user_id != auth_user.to_string():
             raise SynapseError(
