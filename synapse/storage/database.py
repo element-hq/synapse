@@ -71,6 +71,7 @@ from synapse.storage.engines import (
     PsycopgEngine,
     Sqlite3Engine,
 )
+from synapse.storage.engines._base import IsolationLevel
 from synapse.storage.types import Connection, Cursor, SQLQueryParameters
 from synapse.types import StrCollection
 from synapse.util.async_helpers import delay_cancellation
@@ -408,7 +409,7 @@ class LoggingTransaction:
         values: Collection[Iterable[Any]],
         template: Optional[str] = None,
         fetch: bool = True,
-    ) -> List[Tuple]:
+    ) -> Iterable[Tuple]:
         """Corresponds to psycopg2.extras.execute_values. Only available when
         using postgres.
 
@@ -453,7 +454,7 @@ class LoggingTransaction:
             def f(
                 the_sql: str, the_args: Sequence[Sequence[Any]]
             ) -> Iterable[Tuple[Any, ...]]:
-                with self.txn.copy(the_sql, the_args) as copy:
+                with self.txn.copy(the_sql, the_args) as copy:  # type: ignore[attr-defined]
                     yield from copy.rows()
 
             # Flatten the values.
@@ -468,7 +469,7 @@ class LoggingTransaction:
         def f(
             the_sql: str, the_args: Iterable[Any], the_values: Iterable[Iterable[Any]]
         ) -> None:
-            with self.txn.copy(the_sql, the_args) as copy:
+            with self.txn.copy(the_sql, the_args) as copy:  # type: ignore[attr-defined]
                 for record in the_values:
                     copy.write_row(record)
 
@@ -504,12 +505,6 @@ class LoggingTransaction:
 
     def _make_sql_one_line(self, sql: str) -> str:
         "Strip newlines out of SQL so that the loggers in the DB are on one line"
-        if isinstance(self.database_engine, PsycopgEngine):
-            import psycopg.sql
-
-            if isinstance(sql, psycopg.sql.Composed):
-                return sql.as_string(None)
-
         return " ".join(line.strip() for line in sql.splitlines() if line.strip())
 
     def _do_execute(
@@ -933,7 +928,7 @@ class DatabasePool:
         func: Callable[..., R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: Optional[IsolationLevel] = None,
         **kwargs: Any,
     ) -> R:
         """Starts a transaction on the database and runs a given function
@@ -1015,7 +1010,7 @@ class DatabasePool:
         func: Callable[Concatenate[LoggingDatabaseConnection, P], R],
         *args: Any,
         db_autocommit: bool = False,
-        isolation_level: Optional[int] = None,
+        isolation_level: Optional[IsolationLevel] = None,
         **kwargs: Any,
     ) -> R:
         """Wraps the .runWithConnection() method on the underlying db_pool.
@@ -2421,7 +2416,7 @@ class DatabasePool:
         txn: LoggingTransaction,
         table: str,
         keys: Collection[str],
-        values: Iterable[Iterable[Any]],
+        values: Sequence[Iterable[Any]],
     ) -> None:
         """Executes a DELETE query on the named table.
 

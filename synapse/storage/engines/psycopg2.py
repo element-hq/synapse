@@ -76,10 +76,12 @@ class Psycopg2Engine(
         return conn.set_session(autocommit=autocommit)
 
     def attempt_to_set_isolation_level(
-        self, conn: psycopg2.extensions.connection, isolation_level: Optional[int]
+        self,
+        conn: psycopg2.extensions.connection,
+        isolation_level: Optional[IsolationLevel] = None,
     ) -> None:
         if isolation_level is None:
-            isolation_level = self.default_isolation_level
+            pg_isolation_level = self.default_isolation_level
         else:
-            isolation_level = self.isolation_level_map[isolation_level]
-        return conn.set_isolation_level(isolation_level)
+            pg_isolation_level = self.isolation_level_map[isolation_level]
+        return conn.set_isolation_level(pg_isolation_level)

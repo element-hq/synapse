@@ -132,7 +132,7 @@ class BaseDatabaseEngine(
 
     @abc.abstractmethod
     def attempt_to_set_isolation_level(
-        self, conn: ConnectionType, isolation_level: Optional[IsolationLevelType]
+        self, conn: ConnectionType, isolation_level: Optional[IsolationLevel] = None
     ) -> None:
         """Attempt to set the connections isolation level.
 
