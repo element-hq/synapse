@@ -1,0 +1,1 @@
+Prevent exception from receiving an invalid `Content-Type` response header upon fetching remote media.
