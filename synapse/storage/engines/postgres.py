@@ -21,7 +21,7 @@
 
 import abc
 import logging
-from typing import TYPE_CHECKING, Any, Generic, Mapping, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Mapping, Optional, Tuple, cast
 
 from synapse.storage.engines._base import (
     AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
@@ -29,6 +29,7 @@ from synapse.storage.engines._base import (
     ConnectionType,
     CursorType,
     IncorrectDatabaseSetup,
+    IsolationLevel,
     IsolationLevelType,
 )
 from synapse.storage.types import Cursor, DBAPI2Module
@@ -36,16 +37,14 @@ from synapse.storage.types import Cursor, DBAPI2Module
 if TYPE_CHECKING:
     from synapse.storage.database import LoggingDatabaseConnection
 
-
 logger = logging.getLogger(__name__)
 
 
 class PostgresEngine(
-    Generic[ConnectionType, CursorType, IsolationLevelType],
     BaseDatabaseEngine[ConnectionType, CursorType, IsolationLevelType],
     metaclass=abc.ABCMeta,
 ):
-    isolation_level_map: Mapping[int, IsolationLevelType]
+    isolation_level_map: Mapping[IsolationLevel, IsolationLevelType]
     default_isolation_level: IsolationLevelType
 
     def __init__(self, module: DBAPI2Module, database_config: Mapping[str, Any]):
@@ -173,7 +172,7 @@ class PostgresEngine(
 
     def on_new_connection(self, db_conn: "LoggingDatabaseConnection") -> None:
         # mypy doesn't realize that ConnectionType matches the Connection protocol.
-        self.attempt_to_set_isolation_level(db_conn.conn, self.default_isolation_level)  # type: ignore[arg-type]
+        self.attempt_to_set_isolation_level(db_conn.conn)  # type: ignore[arg-type]
 
         # Set the bytea output to escape, vs the default of hex
         cursor = db_conn.cursor()
@@ -187,7 +186,12 @@ class PostgresEngine(
 
         # Abort really long-running statements and turn them into errors.
         if self.statement_timeout is not None:
-            self.set_statement_timeout(cursor.txn, self.statement_timeout)
+            # Because the PostgresEngine is considered an ABCMeta, a superclass and a
+            # subclass, cursor's type is messy. We know it should be a CursorType,
+            # but for now that doesn't pass cleanly through LoggingDatabaseConnection
+            # and LoggingTransaction. Fortunately, it's merely running an execute()
+            # and nothing more exotic.
+            self.set_statement_timeout(cursor.txn, self.statement_timeout)  # type: ignore[arg-type]
 
         cursor.close()
         db_conn.commit()

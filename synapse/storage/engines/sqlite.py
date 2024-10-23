@@ -25,7 +25,10 @@ import threading
 from typing import TYPE_CHECKING, Any, List, Mapping, Optional
 
 from synapse.storage.engines import BaseDatabaseEngine
-from synapse.storage.engines._base import AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER
+from synapse.storage.engines._base import (
+    AUTO_INCREMENT_PRIMARY_KEYPLACEHOLDER,
+    IsolationLevel,
+)
 from synapse.storage.types import Cursor
 
 if TYPE_CHECKING:
@@ -146,7 +149,7 @@ class Sqlite3Engine(BaseDatabaseEngine[sqlite3.Connection, sqlite3.Cursor, int])
         pass
 
     def attempt_to_set_isolation_level(
-        self, conn: sqlite3.Connection, isolation_level: Optional[int]
+        self, conn: sqlite3.Connection, isolation_level: Optional[IsolationLevel] = None
     ) -> None:
         # All transactions are SERIALIZABLE by default in sqlite
         pass

@@ -123,7 +123,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         self.datastore = SQLBaseStore(db, None, hs)  # type: ignore[arg-type]
 
     def tearDown(self) -> None:
-        if USE_POSTGRES_FOR_TESTS != "psycopg":
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.execute_batch_patcher.stop()
             self.execute_values_patcher.stop()
 
@@ -388,7 +388,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         # execute_batch is only used on psycopg2.
-        if USE_POSTGRES_FOR_TESTS != "psycopg":
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_batch.assert_called_once_with(
                 self.mock_txn,
                 "UPDATE tablename SET col3 = ? WHERE col1 = ? AND col2 = ?",
@@ -429,7 +429,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         # execute_batch is only used on psycopg2.
-        if USE_POSTGRES_FOR_TESTS != "psycopg":
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_batch.assert_not_called()
         else:
             self.mock_txn.executemany.assert_not_called()
@@ -601,7 +601,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         # execute_values is only used on psycopg2.
-        if USE_POSTGRES_FOR_TESTS != "psycopg":
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_values.assert_called_once_with(
                 self.mock_txn,
                 "INSERT INTO tablename (keycol1, keycol2, valuecol3) VALUES ? ON CONFLICT (keycol1, keycol2) DO UPDATE SET valuecol3=EXCLUDED.valuecol3",
@@ -631,7 +631,7 @@ class SQLBaseStoreTestCase(unittest.TestCase):
         )
 
         # execute_values is only used on psycopg2.
-        if USE_POSTGRES_FOR_TESTS != "psycopg":
+        if USE_POSTGRES_FOR_TESTS and USE_POSTGRES_FOR_TESTS != "psycopg":
             self.mock_execute_values.assert_called_once_with(
                 self.mock_txn,
                 "INSERT INTO tablename (columnname) VALUES ? ON CONFLICT (columnname) DO NOTHING",
