@@ -240,6 +240,7 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
         self,
         invitee_user_id: str,
         unsigned_invite_room_state: Optional[List[StrippedStateEvent]],
+        invite_room_id: Optional[str] = None,
     ) -> str:
         """
         Create a fake invite for a remote room and persist it.
@@ -252,19 +253,23 @@ class SlidingSyncBase(unittest.HomeserverTestCase):
             invitee_user_id: The person being invited
             unsigned_invite_room_state: List of stripped state events to assist the
                 receiver in identifying the room.
+            invite_room_id: Optional remote room ID to be invited to. When unset, we
+                will generate one.
 
         Returns:
             The room ID of the remote invite room
         """
         store = self.hs.get_datastores().main
 
-        invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
+        if invite_room_id is None:
+            invite_room_id = f"!test_room{self._remote_invite_count}:remote_server"
 
         invite_event_dict = {
             "room_id": invite_room_id,
             "sender": "@inviter:remote_server",
             "state_key": invitee_user_id,
-            "depth": 1,
+            # Just keep advancing the depth
+            "depth": self._remote_invite_count,
             "origin_server_ts": 1,
             "type": EventTypes.Member,
             "content": {"membership": Membership.INVITE},
@@ -676,6 +681,112 @@ class SlidingSyncTestCase(SlidingSyncBase):
         self.assertIncludes(
             set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
             set(),
+            exact=True,
+        )
+
+    def test_rejoin_forgotten_room(self) -> None:
+        """
+        Make sure we can see a forgotten room again if we rejoin (or any new membership
+        like an invite) (no longer forgotten)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # We should see the room (like normal)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+        # Leave and forget the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+        # User1 forgets the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Re-join the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # We should see the room again after re-joining
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+    def test_invited_to_forgotten_remote_room(self) -> None:
+        """
+        Make sure we can see a forgotten room again if we are invited again
+        (remote/federated out-of-band memberships)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # Create a remote room invite (out-of-band membership)
+        room_id = self._create_remote_invite_room_for_user(user1_id, None)
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+        # We should see the room (like normal)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
+            exact=True,
+        )
+
+        # Leave and forget the room
+        self.helper.leave(room_id, user1_id, tok=user1_tok)
+        # User1 forgets the room
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/r0/rooms/{room_id}/forget",
+            content={},
+            access_token=user1_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Get invited to the room again
+        # self.helper.join(room_id, user1_id, tok=user1_tok)
+        self._create_remote_invite_room_for_user(user1_id, None, invite_room_id=room_id)
+
+        # We should see the room again after re-joining
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+        self.assertIncludes(
+            set(response_body["lists"]["foo-list"]["ops"][0]["room_ids"]),
+            {room_id},
             exact=True,
         )
 

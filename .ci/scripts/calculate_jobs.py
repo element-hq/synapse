@@ -53,7 +53,7 @@ if not IS_PR:
             "database": "sqlite",
             "extras": "all",
         }
-        for version in ("3.9", "3.10", "3.11", "3.12")
+        for version in ("3.9", "3.10", "3.11", "3.12", "3.13")
     )
 
 # Run with both psycopg2 and psycopg.
@@ -76,15 +76,15 @@ if not IS_PR:
     trial_postgres_tests.extend(
         [
             {
-                "python-version": "3.12",
+                "python-version": "3.13",
                 "database": "postgres",
-                "postgres-version": "16",
+                "postgres-version": "17",
                 "extras": "all",
             },
             {
-                "python-version": "3.12",
+                "python-version": "3.13",
                 "database": "psycopg",
-                "postgres-version": "16",
+                "postgres-version": "17",
                 "extras": "all",
             },
         ]

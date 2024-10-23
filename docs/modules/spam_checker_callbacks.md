@@ -76,8 +76,9 @@ _Changed in Synapse v1.62.0: `synapse.module_api.NOT_SPAM` and `synapse.module_a
 async def user_may_invite(inviter: str, invitee: str, room_id: str) -> Union["synapse.module_api.NOT_SPAM", "synapse.module_api.errors.Codes", bool]
 ```
 
-Called when processing an invitation. Both inviter and invitee are
-represented by their Matrix user ID (e.g. `@alice:example.com`).
+Called when processing an invitation, both when one is created locally or when
+receiving an invite over federation. Both inviter and invitee are represented by
+their Matrix user ID (e.g. `@alice:example.com`).
 
 
 The callback must return one of:
@@ -112,7 +113,9 @@ async def user_may_send_3pid_invite(
 ```
 
 Called when processing an invitation using a third-party identifier (also called a 3PID,
-e.g. an email address or a phone number). 
+e.g. an email address or a phone number). It is only called when a 3PID invite is created
+locally - not when one is received in a room over federation. If the 3PID is already associated
+with a Matrix ID, the spam check will go through the `user_may_invite` callback instead.
 
 The inviter is represented by their Matrix user ID (e.g. `@alice:example.com`), and the
 invitee is represented by its medium (e.g. "email") and its address
