@@ -58,6 +58,7 @@ components.
 import logging
 from typing import (
     TYPE_CHECKING,
+    Any,
     Awaitable,
     Callable,
     Collection,
@@ -482,11 +483,21 @@ class _Recoverer:
         self.service = service
         self.callback = callback
         self.backoff_counter = 1
+        self._delayed_call_handler = None
+
+    def reset(self) -> None:
+        if self._delayed_call_handler is not None and self._delayed_call_handler.active():
+            self._delayed_call_handler.cancel()
+            self._delayed_call_handler = None
+
+        self.backoff_counter = 1
+        
+        self.recover()
 
     def recover(self) -> None:
         delay = 2**self.backoff_counter
         logger.info("Scheduling retries on %s in %fs", self.service.id, delay)
-        self.clock.call_later(
+        self._delayed_call_handler = self.clock.call_later(
             delay, run_as_background_process, "as-recoverer", self.retry
         )
 

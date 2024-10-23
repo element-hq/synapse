@@ -21,6 +21,8 @@
 
 from typing import TYPE_CHECKING
 
+from synapse.module_api.callbacks.appservice_login_callbacks import AppserviceLoginModuleApiCallbacks
+
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
@@ -40,3 +42,4 @@ class ModuleApiCallbacks:
         self.account_validity = AccountValidityModuleApiCallbacks()
         self.spam_checker = SpamCheckerModuleApiCallbacks(hs)
         self.third_party_event_rules = ThirdPartyEventRulesModuleApiCallbacks(hs)
+        self.appservice_login = AppserviceLoginModuleApiCallbacks(hs)
