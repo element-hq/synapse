@@ -1050,7 +1050,6 @@ class SyncHandler:
         name_id = state_ids.get((EventTypes.Name, ""))
         canonical_alias_id = state_ids.get((EventTypes.CanonicalAlias, ""))
 
-
         summary: JsonDict = {}
         empty_ms = MemberSummary([], 0)
 
@@ -1100,7 +1099,6 @@ class SyncHandler:
                 member_ids[user_id] = event_id
 
         me = sync_config.user.to_string()
-        # HERE:
         summary["m.heroes"] = extract_heroes_from_room_summary(details, me, ignore_members_for_heroes)
 
         if not sync_config.filter_collection.lazy_load_members():
