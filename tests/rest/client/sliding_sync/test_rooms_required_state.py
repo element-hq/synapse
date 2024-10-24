@@ -751,9 +751,10 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
         self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
 
     @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
-    def test_rooms_required_state_leave_ban(self, stop_membership: str) -> None:
+    def test_rooms_required_state_leave_ban_initial(self, stop_membership: str) -> None:
         """
-        Test `rooms.required_state` should not return state past a leave/ban event.
+        Test `rooms.required_state` should not return state past a leave/ban event when
+        it's the first "initial" time the room is being sent down the connection.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
@@ -788,6 +789,13 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             body={"foo": "bar"},
             tok=user2_tok,
         )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.bar_state",
+            state_key="",
+            body={"bar": "bar"},
+            tok=user2_tok,
+        )
 
         if stop_membership == Membership.LEAVE:
             # User 1 leaves
@@ -796,6 +804,8 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             # User 1 is banned
             self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
 
+        # Get the state_map before we change the state as this is the final state we
+        # expect User1 to be able to see
         state_map = self.get_success(
             self.storage_controllers.state.get_current_state(room_id1)
         )
@@ -808,12 +818,36 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             body={"foo": "qux"},
             tok=user2_tok,
         )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.bar_state",
+            state_key="",
+            body={"bar": "qux"},
+            tok=user2_tok,
+        )
         self.helper.leave(room_id1, user3_id, tok=user3_tok)
 
         # Make an incremental Sliding Sync request
+        #
+        # Also expand the required state to include the `org.matrix.bar_state` event.
+        # This is just an extra complication of the test.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.Member, "*"],
+                        ["org.matrix.foo_state", ""],
+                        ["org.matrix.bar_state", ""],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
         response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
 
-        # Only user2 and user3 sent events in the 3 events we see in the `timeline`
+        # We should only see the state up to the leave/ban event
         self._assertRequiredStateIncludes(
             response_body["rooms"][room_id1]["required_state"],
             {
@@ -822,6 +856,126 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
                 state_map[(EventTypes.Member, user2_id)],
                 state_map[(EventTypes.Member, user3_id)],
                 state_map[("org.matrix.foo_state", "")],
+                state_map[("org.matrix.bar_state", "")],
+            },
+            exact=True,
+        )
+        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+    @parameterized.expand([(Membership.LEAVE,), (Membership.BAN,)])
+    def test_rooms_required_state_leave_ban_incremental(
+        self, stop_membership: str
+    ) -> None:
+        """
+        Test `rooms.required_state` should not return state past a leave/ban event on
+        incremental sync.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "bar"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.bar_state",
+            state_key="",
+            body={"bar": "bar"},
+            tok=user2_tok,
+        )
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.Member, "*"],
+                        ["org.matrix.foo_state", ""],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        _, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        if stop_membership == Membership.LEAVE:
+            # User 1 leaves
+            self.helper.leave(room_id1, user1_id, tok=user1_tok)
+        elif stop_membership == Membership.BAN:
+            # User 1 is banned
+            self.helper.ban(room_id1, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        # Get the state_map before we change the state as this is the final state we
+        # expect User1 to be able to see
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Change the state after user 1 leaves
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.foo_state",
+            state_key="",
+            body={"foo": "qux"},
+            tok=user2_tok,
+        )
+        self.helper.send_state(
+            room_id1,
+            event_type="org.matrix.bar_state",
+            state_key="",
+            body={"bar": "qux"},
+            tok=user2_tok,
+        )
+        self.helper.leave(room_id1, user3_id, tok=user3_tok)
+
+        # Make an incremental Sliding Sync request
+        #
+        # Also expand the required state to include the `org.matrix.bar_state` event.
+        # This is just an extra complication of the test.
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.Member, "*"],
+                        ["org.matrix.foo_state", ""],
+                        ["org.matrix.bar_state", ""],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        # User1 should only see the state up to the leave/ban event
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                # User1 should see their leave/ban membership
+                state_map[(EventTypes.Member, user1_id)],
+                state_map[("org.matrix.bar_state", "")],
+                # The commented out state events were already returned in the initial
+                # sync so we shouldn't see them again on the incremental sync. And we
+                # shouldn't see the state events that changed after the leave/ban event.
+                #
+                # state_map[(EventTypes.Create, "")],
+                # state_map[(EventTypes.Member, user2_id)],
+                # state_map[(EventTypes.Member, user3_id)],
+                # state_map[("org.matrix.foo_state", "")],
             },
             exact=True,
         )
