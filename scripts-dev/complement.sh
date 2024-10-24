@@ -246,7 +246,11 @@ if [[ -n "$WORKERS" ]]; then
   export PASS_SYNAPSE_WORKER_TYPES="$WORKER_TYPES"
 
   # Workers can only use Postgres as a database.
-  export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+  if [[ "$POSTGRES" = "psycopg" ]]; then
+    export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+  else
+    export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
+  fi
 
   # And provide some more configuration to complement.
 
@@ -256,7 +260,9 @@ if [[ -n "$WORKERS" ]]; then
   export COMPLEMENT_SPAWN_HS_TIMEOUT_SECS=120
 else
   export PASS_SYNAPSE_COMPLEMENT_USE_WORKERS=
-  if [[ -n "$POSTGRES" ]]; then
+  if [[ "$POSTGRES" = "psycopg" ]]; then
+    export PASS_SYNAPSE_COMPLEMENT_DATABASE=psycopg
+  elif [[ -n "$POSTGRES" ]]; then
     export PASS_SYNAPSE_COMPLEMENT_DATABASE=postgres
   else
     export PASS_SYNAPSE_COMPLEMENT_DATABASE=sqlite
