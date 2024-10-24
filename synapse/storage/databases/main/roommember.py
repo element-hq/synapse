@@ -1754,7 +1754,9 @@ class RoomMemberStore(
 
 
 def extract_heroes_from_room_summary(
-    details: Mapping[str, MemberSummary], me: str, skip_user_ids: List[str] = [],
+    details: Mapping[str, MemberSummary],
+    me: str,
+    skip_user_ids: List[str] = None,
 ) -> List[str]:
     """Determine the users that represent a room, from the perspective of the `me` user.
 
@@ -1775,16 +1777,27 @@ def extract_heroes_from_room_summary(
     Returns a list (possibly empty) of heroes' mxids.
     """
     empty_ms = MemberSummary([], 0)
+    skip_user_ids = skip_user_ids or []
 
     joined_user_ids = [
-        r[0] for r in details.get(Membership.JOIN, empty_ms).members if r[0] != me and r[0] not in skip_user_ids
+        r[0]
+        for r in details.get(Membership.JOIN, empty_ms).members
+        if r[0] != me and r[0] not in skip_user_ids
     ]
     invited_user_ids = [
-        r[0] for r in details.get(Membership.INVITE, empty_ms).members if r[0] != me and r[0] not in skip_user_ids
+        r[0]
+        for r in details.get(Membership.INVITE, empty_ms).members
+        if r[0] != me and r[0] not in skip_user_ids
     ]
     gone_user_ids = [
-        r[0] for r in details.get(Membership.LEAVE, empty_ms).members if r[0] != me and r[0] not in skip_user_ids
-    ] + [r[0] for r in details.get(Membership.BAN, empty_ms).members if r[0] != me and r[0] not in skip_user_ids]
+        r[0]
+        for r in details.get(Membership.LEAVE, empty_ms).members
+        if r[0] != me and r[0] not in skip_user_ids
+    ] + [
+        r[0]
+        for r in details.get(Membership.BAN, empty_ms).members
+        if r[0] != me and r[0] not in skip_user_ids
+    ]
 
     # We expect `MemberSummary.members` to already be sorted by `stream_ordering`
     if joined_user_ids or invited_user_ids:

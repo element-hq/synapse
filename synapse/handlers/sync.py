@@ -1074,18 +1074,23 @@ class SyncHandler:
             if canonical_alias and canonical_alias.content.get("alias"):
                 return summary
 
-
         ignore_members_for_heroes = []
 
         if self.hide_service_members_from_heroes:
-            functional_members_id = state_ids.get((EventTypes.MSC4171FunctionalMembers, ""))
+            functional_members_id = state_ids.get(
+                (EventTypes.MSC4171FunctionalMembers, "")
+            )
             if functional_members_id:
                 functional_members = await self.store.get_event(
                     functional_members_id, allow_none=True
                 )
                 # If there is a functional members event, and the service_members is an array, then apply the filter.
-                if functional_members and isinstance(functional_members.content.get("service_members"), list):
-                    ignore_members_for_heroes = functional_members.content.get("service_members")
+                if functional_members and isinstance(
+                    functional_members.content.get("service_members"), list
+                ):
+                    ignore_members_for_heroes = functional_members.content.get(
+                        "service_members"
+                    )
 
         # FIXME: only build up a member_ids list for our heroes
         member_ids = {}
@@ -1099,7 +1104,9 @@ class SyncHandler:
                 member_ids[user_id] = event_id
 
         me = sync_config.user.to_string()
-        summary["m.heroes"] = extract_heroes_from_room_summary(details, me, ignore_members_for_heroes)
+        summary["m.heroes"] = extract_heroes_from_room_summary(
+            details, me, ignore_members_for_heroes
+        )
 
         if not sync_config.filter_collection.lazy_load_members():
             return summary
