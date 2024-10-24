@@ -377,10 +377,13 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         exclude_members = []
         if functional_members_event_id:
             functional_members_event = await self.get_event(functional_members_event_id)
-            # TODO: Validate data
-            exclude_members = functional_members_event.content.get(
-                "service_members", []
+            functional_members_data = functional_members_event.content.get(
+                "service_members"
             )
+            # ONLY use this value if this looks like a valid list of strings. Otherwise, ignore.
+            if isinstance(functional_members_data, list) and all(isinstance(item, str) for item in functional_members_data):
+                exclude_members = functional_members_data
+
 
         return await self.db_pool.runInteraction(
             "get_room_summary", _get_room_summary_txn, exclude_members
