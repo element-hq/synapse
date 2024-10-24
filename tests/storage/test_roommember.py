@@ -636,6 +636,49 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
             hero_user_ids, [user1_id, user2_id, user3_id, user4_id, user5_id]
         )
 
+    def test_extract_heroes_from_room_summary_exclude_service_members(self) -> None:
+        """
+        Test that `extract_heroes_from_room_summary(...)` returns the first 5 joins.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+        user5_id = self.register_user("user5", "pass")
+        user5_tok = self.login(user5_id, "pass")
+        user6_id = self.register_user("user6", "pass")
+        user6_tok = self.login(user6_id, "pass")
+        user7_id = self.register_user("user7", "pass")
+        user7_tok = self.login(user7_id, "pass")
+
+        # Setup the room (user1 is the creator and is joined to the room)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # User2 -> User7 joins
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+        self.helper.join(room_id, user4_id, tok=user4_tok)
+        self.helper.join(room_id, user5_id, tok=user5_tok)
+        self.helper.join(room_id, user6_id, tok=user6_tok)
+        self.helper.join(room_id, user7_id, tok=user7_tok)
+
+        room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
+
+        print(room_membership_summary)
+
+        hero_user_ids = extract_heroes_from_room_summary(
+            room_membership_summary, me="@fakuser", skip_user_ids=[user2_id, user3_id]
+        )
+
+        # First 5 users to join the room
+        self.assertListEqual(
+            hero_user_ids, [user1_id, user4_id, user5_id, user6_id, user7_id]
+        )
+
     def test_extract_heroes_from_room_summary_membership_order(self) -> None:
         """
         Test that `extract_heroes_from_room_summary(...)` prefers joins/invites over
