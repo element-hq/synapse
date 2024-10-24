@@ -1,0 +1,1 @@
+Add support for filtering out "service members" from room summary responses, as described in MSC4171.
