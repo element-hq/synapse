@@ -135,6 +135,8 @@ class EventTypes:
 
     PollStart: Final = "m.poll.start"
 
+    MSC4171FunctionalMembers: Final = "io.element.functional_members"
+
 
 class ToDeviceEventTypes:
     RoomKeyRequest: Final = "m.room_key_request"
