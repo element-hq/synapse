@@ -306,7 +306,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         """
 
         def _get_room_summary_txn(
-            txn: LoggingTransaction,
+            txn: LoggingTransaction, exclude_members: List[str]
         ) -> Dict[str, MemberSummary]:
             # first get counts.
             # We do this all in one transaction to keep the cache small.
@@ -317,6 +317,10 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             res: Dict[str, MemberSummary] = {}
             for membership, count in counts.items():
                 res.setdefault(membership, MemberSummary([], count))
+
+            exclude_users_clause, args = make_in_list_sql_clause(
+                self.database_engine, "state_key", exclude_members, negative=True
+            )
 
             # Order by membership (joins -> invites -> leave (former insiders) ->
             # everything else (outsiders like bans/knocks), then by `stream_ordering` so
@@ -330,16 +334,18 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 FROM current_state_events
                 WHERE type = 'm.room.member' AND room_id = ?
                     AND membership IS NOT NULL
+                    AND %s
                 ORDER BY
                     CASE membership WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 ELSE 4 END ASC,
                     event_stream_ordering ASC
                 LIMIT ?
-            """
+            """ % (exclude_users_clause)
 
             txn.execute(
                 sql,
                 (
                     room_id,
+                    *args,
                     # Sort order
                     Membership.JOIN,
                     Membership.INVITE,
@@ -357,8 +363,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
             return res
 
+        functional_members_event_id = await self.db_pool.simple_select_one_onecol(
+            table="current_state_events",
+            keyvalues={
+                "room_id": room_id,
+                "type": EventTypes.MSC4171FunctionalMembers,
+                "state_key": "",
+            },
+            retcol="event_id",
+            allow_none=True,
+        )
+
+        exclude_members = []
+        if functional_members_event_id:
+            functional_members_event = await self.get_event(functional_members_event_id)
+            # TODO: Validate data
+            exclude_members = functional_members_event.content.get(
+                "service_members", []
+            )
+
         return await self.db_pool.runInteraction(
-            "get_room_summary", _get_room_summary_txn
+            "get_room_summary", _get_room_summary_txn, exclude_members
         )
 
     @cached()
@@ -1756,7 +1781,6 @@ class RoomMemberStore(
 def extract_heroes_from_room_summary(
     details: Mapping[str, MemberSummary],
     me: str,
-    skip_user_ids: List[str] = None,
 ) -> List[str]:
     """Determine the users that represent a room, from the perspective of the `me` user.
 
@@ -1772,32 +1796,20 @@ def extract_heroes_from_room_summary(
         details: Mapping from membership type to member summary. We expect
             `MemberSummary.members` to already be sorted by `stream_ordering`.
         me: The user for whom we are determining the heroes for.
-        skip_user_ids: Users to always ignore when building up a list of heros.
 
     Returns a list (possibly empty) of heroes' mxids.
     """
     empty_ms = MemberSummary([], 0)
-    skip_user_ids = skip_user_ids or []
 
     joined_user_ids = [
-        r[0]
-        for r in details.get(Membership.JOIN, empty_ms).members
-        if r[0] != me and r[0] not in skip_user_ids
+        r[0] for r in details.get(Membership.JOIN, empty_ms).members if r[0] != me
     ]
     invited_user_ids = [
-        r[0]
-        for r in details.get(Membership.INVITE, empty_ms).members
-        if r[0] != me and r[0] not in skip_user_ids
+        r[0] for r in details.get(Membership.INVITE, empty_ms).members if r[0] != me
     ]
     gone_user_ids = [
-        r[0]
-        for r in details.get(Membership.LEAVE, empty_ms).members
-        if r[0] != me and r[0] not in skip_user_ids
-    ] + [
-        r[0]
-        for r in details.get(Membership.BAN, empty_ms).members
-        if r[0] != me and r[0] not in skip_user_ids
-    ]
+        r[0] for r in details.get(Membership.LEAVE, empty_ms).members if r[0] != me
+    ] + [r[0] for r in details.get(Membership.BAN, empty_ms).members if r[0] != me]
 
     # We expect `MemberSummary.members` to already be sorted by `stream_ordering`
     if joined_user_ids or invited_user_ids:

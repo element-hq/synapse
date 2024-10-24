@@ -658,6 +658,14 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         # Setup the room (user1 is the creator and is joined to the room)
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
 
+        # Exclude some users
+        self.helper.send_state(
+            room_id,
+            event_type=EventTypes.MSC4171FunctionalMembers,
+            body={"service_members": [user2_id, user3_id]},
+            tok=user1_tok,
+        )
+
         # User2 -> User7 joins
         self.helper.join(room_id, user2_id, tok=user2_tok)
         self.helper.join(room_id, user3_id, tok=user3_tok)
@@ -669,7 +677,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
 
         hero_user_ids = extract_heroes_from_room_summary(
-            room_membership_summary, me="@fakuser", skip_user_ids=[user2_id, user3_id]
+            room_membership_summary, me="@fakuser"
         )
 
         # First 5 users to join the room
