@@ -90,6 +90,7 @@ class SlidingSyncHandler:
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+        self.hide_service_members_from_heroes = hs.config.experimental.msc4171_enabled
         self.is_mine_id = hs.is_mine_id
 
         self.connection_store = SlidingSyncConnectionStore(self.store)
@@ -765,15 +766,31 @@ class SlidingSyncHandler:
         membership_changed = False
         name_changed = False
         avatar_changed = False
+        ignore_members_for_heroes = []
         if initial:
-            # Check whether the room has a name set
-            name_state_ids = await self.get_current_state_ids_at(
+            state_filter_types = [(EventTypes.Name, "")]
+
+            if self.hide_service_members_from_heroes:
+                state_filter_types.append((EventTypes.MSC4171FunctionalMembers, ""))
+
+            # Check whether the room has a name set (and fetch the service members)
+            state_ids = await self.get_current_state_ids_at(
                 room_id=room_id,
                 room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
-                state_filter=StateFilter.from_types([(EventTypes.Name, "")]),
+                state_filter=StateFilter.from_types(state_filter_types),
                 to_token=to_token,
             )
-            name_event_id = name_state_ids.get((EventTypes.Name, ""))
+            name_event_id = state_ids.get((EventTypes.Name, ""))
+
+            if self.hide_service_members_from_heroes:
+                functional_members_id = state_ids.get((EventTypes.MSC4171FunctionalMembers, ""))
+                if functional_members_id:
+                    functional_members = await self.store.get_event(
+                        functional_members_id, allow_none=True
+                    )
+                    if functional_members and isinstance(functional_members.content.get("service_members"), list):
+                        ignore_members_for_heroes = functional_members.content.get("service_members")
+
         else:
             assert from_bound is not None
 
@@ -833,7 +850,7 @@ class SlidingSyncHandler:
                 # TODO: Reverse/rewind back to the `to_token`
 
             hero_user_ids = extract_heroes_from_room_summary(
-                room_membership_summary, me=user.to_string()
+                room_membership_summary, me=user.to_string(), skip_user_ids=ignore_members_for_heroes
             )
 
         # Fetch the membership counts for rooms we're joined to.

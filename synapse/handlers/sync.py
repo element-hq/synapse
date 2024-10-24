@@ -366,6 +366,7 @@ class SyncHandler:
         )
 
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+        self.hide_service_members_from_heroes = hs.config.experimental.msc4171_enabled
 
     @overload
     async def wait_for_sync_for_user(
@@ -1032,11 +1033,15 @@ class SyncHandler:
             return None
 
         last_event = last_events[-1]
+
+        state_filter_types = [(EventTypes.Name, ""), (EventTypes.CanonicalAlias, "")]
+
+        if self.hide_service_members_from_heroes:
+            state_filter_types.append((EventTypes.MSC4171FunctionalMembers, ""))
+
         state_ids = await self._state_storage_controller.get_state_ids_for_event(
             last_event.event_id,
-            state_filter=StateFilter.from_types(
-                [(EventTypes.Name, ""), (EventTypes.CanonicalAlias, "")]
-            ),
+            state_filter=StateFilter.from_types(state_filter_types),
         )
 
         # this is heavily cached, thus: fast.
@@ -1044,6 +1049,7 @@ class SyncHandler:
 
         name_id = state_ids.get((EventTypes.Name, ""))
         canonical_alias_id = state_ids.get((EventTypes.CanonicalAlias, ""))
+
 
         summary: JsonDict = {}
         empty_ms = MemberSummary([], 0)
@@ -1069,6 +1075,18 @@ class SyncHandler:
             if canonical_alias and canonical_alias.content.get("alias"):
                 return summary
 
+
+        ignore_members_for_heroes = []
+
+        if self.hide_service_members_from_heroes:
+            functional_members_id = state_ids.get((EventTypes.MSC4171FunctionalMembers, ""))
+            if functional_members_id:
+                functional_members = await self.store.get_event(
+                    functional_members_id, allow_none=True
+                )
+                if functional_members and isinstance(functional_members.content.get("service_members"), list):
+                    ignore_members_for_heroes = functional_members.content.get("service_members")
+
         # FIXME: only build up a member_ids list for our heroes
         member_ids = {}
         for membership in (
@@ -1081,7 +1099,8 @@ class SyncHandler:
                 member_ids[user_id] = event_id
 
         me = sync_config.user.to_string()
-        summary["m.heroes"] = extract_heroes_from_room_summary(details, me)
+        # HERE:
+        summary["m.heroes"] = extract_heroes_from_room_summary(details, me, ignore_members_for_heroes)
 
         if not sync_config.filter_collection.lazy_load_members():
             return summary
