@@ -1189,12 +1189,13 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             outlier=outlier,
             origin_server_ts=origin_server_ts,
         )
-    async def check_user_membership(self, user_id, room_id) -> None:
-        rooms_for_user = await self.store.get_rooms_for_user(user_id)
-        if room_id not in rooms_for_user:
-            raise AuthError(
-                403, f"You are not member of the room {room_id}"
-            )
+
+    async def check_user_membership(self, user_id: str, room_id: str) -> None:
+        result: Optional[Tuple[Optional[str], Optional[str]]] = await self.store.get_local_current_membership_for_user_in_room(user_id=user_id, room_id=room_id)
+        
+        if result is None:
+            raise AuthError(403, f"You are not a member of the room {room_id}")
+
 
     async def _should_perform_remote_join(
         self,
