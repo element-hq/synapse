@@ -668,8 +668,6 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
 
         room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
 
-        print(room_membership_summary)
-
         hero_user_ids = extract_heroes_from_room_summary(
             room_membership_summary, me="@fakuser", skip_user_ids=[user2_id, user3_id]
         )
