@@ -788,6 +788,7 @@ class SlidingSyncHandler:
                     functional_members = await self.store.get_event(
                         functional_members_id, allow_none=True
                     )
+                    # If there is a functional members event, and the service_members is an array, then apply the filter.
                     if functional_members and isinstance(functional_members.content.get("service_members"), list):
                         ignore_members_for_heroes = functional_members.content.get("service_members")
 
