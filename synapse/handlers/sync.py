@@ -1536,11 +1536,15 @@ class SyncHandler:
             await_full_state=await_full_state,
         )
 
-        state_at_previous_sync_start = {} if since_token.prev_batch is None else await self._state_storage_controller.get_state_ids_at(
-            room_id,
-            stream_position=since_token.prev_batch,
-            state_filter=state_filter,
-            await_full_state=await_full_state,
+        state_at_previous_sync_start = (
+            {}
+            if since_token.prev_batch is None
+            else await self._state_storage_controller.get_state_ids_at(
+                room_id,
+                stream_position=since_token.prev_batch,
+                state_filter=state_filter,
+                await_full_state=await_full_state,
+            )
         )
 
         state_at_timeline_end = await self._state_storage_controller.get_state_ids_at(

@@ -988,7 +988,9 @@ class StreamToken:
 
     @classmethod
     @cancellable
-    async def from_string(cls, store: "DataStore", string: str, prev_batch: Optional["StreamToken"] = None) -> "StreamToken":
+    async def from_string(
+        cls, store: "DataStore", string: str, prev_batch: Optional["StreamToken"] = None
+    ) -> "StreamToken":
         """
         Creates a RoomStreamToken from its textual representation.
         """
@@ -997,7 +999,9 @@ class StreamToken:
                 # We have a prev_token
                 batches = string.split(cls._BATCH_SEPARATOR)
                 prev_batch = await StreamToken.from_string(store, batches[1])
-                batch = await StreamToken.from_string(store, batches[0], prev_batch=prev_batch)
+                batch = await StreamToken.from_string(
+                    store, batches[0], prev_batch=prev_batch
+                )
                 return batch
 
             keys = string.split(cls._SEPARATOR)
@@ -1036,12 +1040,16 @@ class StreamToken:
         except Exception:
             raise SynapseError(400, "Invalid stream token")
 
-    async def to_string(self, store: "DataStore", include_prev_batch: bool = True) -> str:
+    async def to_string(
+        self, store: "DataStore", include_prev_batch: bool = True
+    ) -> str:
         if include_prev_batch and self.prev_batch:
-            return self._BATCH_SEPARATOR.join([
-                await self.to_string(store, include_prev_batch=False),
-                await self.prev_batch.to_string(store, include_prev_batch=False),
-            ])
+            return self._BATCH_SEPARATOR.join(
+                [
+                    await self.to_string(store, include_prev_batch=False),
+                    await self.prev_batch.to_string(store, include_prev_batch=False),
+                ]
+            )
         else:
             return self._SEPARATOR.join(
                 [
