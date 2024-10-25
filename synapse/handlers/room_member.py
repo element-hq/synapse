@@ -1191,7 +1191,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         )
 
     async def check_user_membership(self, user_id: str, room_id: str) -> None:
-        result: Optional[Tuple[Optional[str], Optional[str]]] = await self.store.get_local_current_membership_for_user_in_room(user_id=user_id, room_id=room_id)
+        result = await self.store.get_local_current_membership_for_user_in_room(user_id=user_id, room_id=room_id)
         
         if result is None:
             raise AuthError(403, f"You are not a member of the room {room_id}")
