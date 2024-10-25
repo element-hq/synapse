@@ -1190,7 +1190,17 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts=origin_server_ts,
         )
 
-    async def check_user_membership(self, user_id: str, room_id: str) -> None:
+    async def check_for_any_membership_in_room(self, *, user_id: str, room_id: str) -> None:
+        """
+        Check if the user has any membership in the room and raise error if not.
+
+        Args:
+            user_id: The user to check.
+            room_id: The room to check.
+
+        Raises:
+            AuthError if the user doesn't have any membership in the room.
+        """
         result = await self.store.get_local_current_membership_for_user_in_room(user_id=user_id, room_id=room_id)
         
         if result is None:
