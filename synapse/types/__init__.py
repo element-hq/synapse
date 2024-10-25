@@ -980,16 +980,26 @@ class StreamToken:
     groups_key: int
     un_partial_stated_rooms_key: int
 
+    prev_batch: Optional["StreamToken"] = None
+    _BATCH_SEPARATOR = "~"
+
     _SEPARATOR = "_"
     START: ClassVar["StreamToken"]
 
     @classmethod
     @cancellable
-    async def from_string(cls, store: "DataStore", string: str) -> "StreamToken":
+    async def from_string(cls, store: "DataStore", string: str, prev_batch: Optional["StreamToken"] = None) -> "StreamToken":
         """
         Creates a RoomStreamToken from its textual representation.
         """
         try:
+            if string.count(cls._BATCH_SEPARATOR) == 1:
+                # We have a prev_token
+                batches = string.split(cls._BATCH_SEPARATOR)
+                prev_batch = await StreamToken.from_string(store, batches[1])
+                batch = await StreamToken.from_string(store, batches[0], prev_batch=prev_batch)
+                return batch
+
             keys = string.split(cls._SEPARATOR)
             while len(keys) < len(attr.fields(cls)):
                 # i.e. old token from before receipt_key
@@ -1006,6 +1016,7 @@ class StreamToken:
                 device_list_key,
                 groups_key,
                 un_partial_stated_rooms_key,
+                prev_batch,
             ) = keys
 
             return cls(
@@ -1025,24 +1036,30 @@ class StreamToken:
         except Exception:
             raise SynapseError(400, "Invalid stream token")
 
-    async def to_string(self, store: "DataStore") -> str:
-        return self._SEPARATOR.join(
-            [
-                await self.room_key.to_string(store),
-                str(self.presence_key),
-                str(self.typing_key),
-                await self.receipt_key.to_string(store),
-                str(self.account_data_key),
-                str(self.push_rules_key),
-                str(self.to_device_key),
-                str(self.device_list_key),
-                # Note that the groups key is no longer used, but it is still
-                # serialized so that there will not be confusion in the future
-                # if additional tokens are added.
-                str(self.groups_key),
-                str(self.un_partial_stated_rooms_key),
-            ]
-        )
+    async def to_string(self, store: "DataStore", include_prev_batch: bool = True) -> str:
+        if include_prev_batch and self.prev_batch:
+            return self._BATCH_SEPARATOR.join([
+                await self.to_string(store, include_prev_batch=False),
+                await self.prev_batch.to_string(store, include_prev_batch=False),
+            ])
+        else:
+            return self._SEPARATOR.join(
+                [
+                    await self.room_key.to_string(store),
+                    str(self.presence_key),
+                    str(self.typing_key),
+                    await self.receipt_key.to_string(store),
+                    str(self.account_data_key),
+                    str(self.push_rules_key),
+                    str(self.to_device_key),
+                    str(self.device_list_key),
+                    # Note that the groups key is no longer used, but it is still
+                    # serialized so that there will not be confusion in the future
+                    # if additional tokens are added.
+                    str(self.groups_key),
+                    str(self.un_partial_stated_rooms_key),
+                ]
+            )
 
     @property
     def room_stream_id(self) -> int:

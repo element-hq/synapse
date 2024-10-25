@@ -822,12 +822,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         room_sync = incremental_sync.joined[0]
 
         self.assertEqual(room_sync.room_id, room_id)
-        self.assertEqual(
-            [e.event_id for e in room_sync.state.values()],
-            [
-                s1_event
-            ],  # S1 is repeated because it is the state at the start of the timeline (before E3)
-        )
+        self.assertEqual(room_sync.state, {})
         self.assertEqual(
             [e.event_id for e in room_sync.timeline.events],
             [
@@ -857,7 +852,7 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e5_event],
         )
-        # Problem: S2 is the winning state event but the last state event the client saw was S1.
+        # FIXED: S2 is the winning state event but and the last that the client saw!
 
     def test_state_after_on_branches_winner_at_start_of_timeline(self) -> None:
         r"""Test `state` and `state_after` where not all information is in `state` + `timeline`.

@@ -1397,6 +1397,7 @@ class SyncHandler:
             timeline_contains=timeline_state,
             timeline_start=state_at_timeline_start,
             timeline_end=state_at_timeline_end,
+            previous_timeline_start={},
             previous_timeline_end={},
             lazy_load_members=lazy_load_members,
         )
@@ -1535,6 +1536,13 @@ class SyncHandler:
             await_full_state=await_full_state,
         )
 
+        state_at_previous_sync_start = {} if since_token.prev_batch is None else await self._state_storage_controller.get_state_ids_at(
+            room_id,
+            stream_position=since_token.prev_batch,
+            state_filter=state_filter,
+            await_full_state=await_full_state,
+        )
+
         state_at_timeline_end = await self._state_storage_controller.get_state_ids_at(
             room_id,
             stream_position=end_token,
@@ -1546,6 +1554,7 @@ class SyncHandler:
             timeline_contains=timeline_state,
             timeline_start=state_at_timeline_start,
             timeline_end=state_at_timeline_end,
+            previous_timeline_start=state_at_previous_sync_start,
             previous_timeline_end=state_at_previous_sync,
             lazy_load_members=lazy_load_members,
         )
@@ -1965,7 +1974,7 @@ class SyncHandler:
         # this is due to some of the underlying streams not supporting the ability
         # to query up to a given point.
         # Always use the `now_token` in `SyncResultBuilder`
-        now_token = self.event_sources.get_current_token()
+        now_token = self.event_sources.get_current_token(prev_batch=since_token)
         log_kv({"now_token": now_token})
 
         # Since we fetched the users room list before calculating the `now_token` (see
@@ -2980,6 +2989,7 @@ def _calculate_state(
     timeline_contains: StateMap[str],
     timeline_start: StateMap[str],
     timeline_end: StateMap[str],
+    previous_timeline_start: StateMap[str],
     previous_timeline_end: StateMap[str],
     lazy_load_members: bool,
 ) -> StateMap[str]:
@@ -3007,6 +3017,7 @@ def _calculate_state(
 
     timeline_end_ids = set(timeline_end.values())
     timeline_start_ids = set(timeline_start.values())
+    previous_timeline_start_ids = set(previous_timeline_start.values())
     previous_timeline_end_ids = set(previous_timeline_end.values())
     timeline_contains_ids = set(timeline_contains.values())
 
@@ -3082,7 +3093,7 @@ def _calculate_state(
 
     state_ids = (
         (timeline_end_ids | timeline_start_ids)
-        - previous_timeline_end_ids
+        - (previous_timeline_end_ids | previous_timeline_start_ids)
         - timeline_contains_ids
     )
 
