@@ -638,7 +638,8 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
 
     def test_extract_heroes_from_room_summary_exclude_service_members(self) -> None:
         """
-        Test that `extract_heroes_from_room_summary(...)` returns the first 5 joins.
+        Test that `extract_heroes_from_room_summary(...)` returns the first 5 joins who are
+        not mentioned in the functional members state event.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
