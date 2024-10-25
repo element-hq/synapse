@@ -710,9 +710,298 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e4_event, e5_event],
         )
+
+    def test_state_after_on_branches_winner_at_end_of_timeline(self) -> None:
+        r"""Test `state` and `state_after` where not all information is in `state` + `timeline`.
+
+            -----|---------- initial sync
+                 |
+        unrelated state event
+                 |
+                 S1
+            -----|---------- incremental sync 1
+               ↗    ↖
+              |      S2
+            --|------|------ incremental sync 2
+              E3     E4
+            --|------|------ incremental sync 3
+              |      |
+               \    ↗        S2 wins
+                 E5
+            -----|---------- incremental sync 4
+
+        The "interesting" sync is sync 3. At the end of sync 3 the server doesn't know which branch will win.
+
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Send an unrelated state event which doesn't change across the branches
+        unrelated_state_event = self.helper.send_state(
+            room_id, "m.something.else", {"node": "S1"}, tok=alice_tok
+        )["event_id"]
+
+        # Send S1
+        s1_event = self.helper.send_state(
+            room_id, "m.call.member", {"node": "S1"}, tok=alice_tok
+        )["event_id"]
+
+        # Incremental sync 1
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [unrelated_state_event, s1_event],
+        )
+
+        # Send S2 -> S1
+        s2_event = self.helper.send_state(
+            room_id, "m.call.member", {"node": "S2"}, tok=alice_tok
+        )["event_id"]
+
+        # Incremental sync 2
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [s2_event],
+        )
+
+        # Send two regular events on different branches:
+        # E3 -> S1
+        # E4 -> S2
+        with self._patch_get_latest_events([s1_event]):
+            e3_event = self.helper.send(room_id, "E3", tok=alice_tok)["event_id"]
+        with self._patch_get_latest_events([s2_event]):
+            e4_event = self.helper.send(room_id, "E4", tok=alice_tok)["event_id"]
+
+        # Incremental sync 3
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
         self.assertEqual(
             [e.event_id for e in room_sync.state.values()],
+            [
+                s1_event
+            ],  # S1 is repeated because it is the state at the start of the timeline (before E3)
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [
+                e3_event,
+                e4_event,
+            ],  # We have two events from different timelines neither of which are state events
+        )
+
+        # Send E5 which resolves the branches
+        e5_event = self.helper.send(room_id, "E5", tok=alice_tok)["event_id"]
+
+        # Incremental sync 4
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e5_event],
+        )
+        # Problem: S2 is the winning state event but the last state event the client saw was S1.
+
+    def test_state_after_on_branches_winner_at_start_of_timeline(self) -> None:
+        r"""Test `state` and `state_after` where not all information is in `state` + `timeline`.
+
+        -----|---------- initial sync
+             |
+             S1
+        -----|---------- incremental sync 1
+           ↗    ↖
+          |      S2
+        --|------|------ incremental sync 2
+          S3     E4
+        --|------|------ incremental sync 3
+          |      |
+           ↖    /        S3 wins
+             E5
+        -----|---------- incremental sync 4
+
+        The "interesting" sync is sync 3. At the end of sync 3 the server doesn't know which branch will win.
+
+        """
+        alice = self.register_user("alice", "password")
+        alice_tok = self.login(alice, "password")
+        alice_requester = create_requester(alice)
+        room_id = self.helper.create_room_as(alice, is_public=True, tok=alice_tok)
+
+        # Do an initial sync to get a known starting point.
+        initial_sync_result = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+            )
+        )
+
+        # Send an unrelated state event which doesn't change across the branches
+        unrelated_state_event = self.helper.send_state(
+            room_id, "m.something.else", {"node": "S1"}, tok=alice_tok
+        )["event_id"]
+
+        # Send S1
+        s1_event = self.helper.send_state(
+            room_id, "m.call.member", {"node": "S1"}, tok=alice_tok
+        )["event_id"]
+
+        # Incremental sync 1
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=initial_sync_result.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [unrelated_state_event, s1_event],
+        )
+
+        # Send S2 -> S1
+        s2_event = self.helper.send_state(
+            room_id, "m.call.member", {"node": "S2"}, tok=alice_tok
+        )["event_id"]
+
+        # Incremental sync 2
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
             [s2_event],
+        )
+
+        # Send two events on different branches:
+        # S3 -> S1
+        # E4 -> S2
+        with self._patch_get_latest_events([s1_event]):
+            s3_event = self.helper.send_state(
+                room_id, "m.call.member", {"node": "S3"}, tok=alice_tok
+            )["event_id"]
+        with self._patch_get_latest_events([s2_event]):
+            e4_event = self.helper.send(room_id, "E4", tok=alice_tok)["event_id"]
+
+        # Incremental sync 3
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(room_sync.state, {})
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [
+                s3_event,
+                e4_event,
+            ],  # We have two events from different timelines
+        )
+
+        # Send E5 which resolves the branches with S3 winning
+        e5_event = self.helper.send(room_id, "E5", tok=alice_tok)["event_id"]
+
+        # Incremental sync 4
+        incremental_sync = self.get_success(
+            self.sync_handler.wait_for_sync_for_user(
+                alice_requester,
+                generate_sync_config(alice),
+                sync_version=SyncVersion.SYNC_V2,
+                request_key=generate_request_key(),
+                since_token=incremental_sync.next_batch,
+            )
+        )
+        room_sync = incremental_sync.joined[0]
+
+        self.assertEqual(room_sync.room_id, room_id)
+        self.assertEqual(
+            [e.event_id for e in room_sync.state.values()],
+            [s3_event],  # S3 is the winning state event
+        )
+        self.assertEqual(
+            [e.event_id for e in room_sync.timeline.events],
+            [e5_event],
         )
 
     @parameterized.expand(
