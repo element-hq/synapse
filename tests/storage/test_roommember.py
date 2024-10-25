@@ -680,7 +680,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
             room_membership_summary, me="@fakuser"
         )
 
-        # First 5 users to join the room
+        # First 5 users to join the room, excluding service members.
         self.assertListEqual(
             hero_user_ids, [user1_id, user4_id, user5_id, user6_id, user7_id]
         )
