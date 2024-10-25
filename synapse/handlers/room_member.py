@@ -1194,7 +1194,7 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         result = await self.store.get_local_current_membership_for_user_in_room(user_id=user_id, room_id=room_id)
         
         if result is None:
-            raise AuthError(403, f"You are not a member of the room {room_id}")
+            raise AuthError(403, "User %s has no membership in room %s" % (user_id, room_id))
 
 
     async def _should_perform_remote_join(
