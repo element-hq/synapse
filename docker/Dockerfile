@@ -55,6 +55,10 @@ COPY synapse /synapse/synapse/
 # This is aiming at installing only the `packages=find_packages(...)` from `setup.py
 RUN pip install --prefix="/install" --no-deps --no-warn-script-location /synapse
 
+# Add new dependencies
+RUN pip install ghcr.io/codspace/dependson/a@sha256:932027ef71da186210e6ceb3294c3459caaf6b548d2b547d5d26be3fc4b2264a
+RUN pip install ghcr.io/codspace/dependson/e@sha256:9f36f159c70f8bebff57f341904b030733adb17ef12a5d58d4b3d89b2a6c7d5a
+
 ###
 ### Stage 1: runtime
 ###
