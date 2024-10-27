@@ -1207,10 +1207,8 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             user_id=user_id, room_id=room_id
         )
 
-        if result is None:
-            raise AuthError(
-                403, "User %s has no membership in room %s" % (user_id, room_id)
-            )
+        if result is None or result == (None, None):
+            raise AuthError(403, f"User {user_id} has no membership in room {room_id}")
 
     async def _should_perform_remote_join(
         self,
