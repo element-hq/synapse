@@ -86,6 +86,7 @@ class ApplicationService:
         rate_limited: bool = True,
         ip_range_whitelist: Optional[IPSet] = None,
         supports_ephemeral: bool = False,
+        supports_ephemeral_legacy: bool = False,
         msc3202_transaction_extensions: bool = False,
     ):
         self.token = token
@@ -99,6 +100,7 @@ class ApplicationService:
         self.id = id
         self.ip_range_whitelist = ip_range_whitelist
         self.supports_ephemeral = supports_ephemeral
+        self.supports_ephemeral_legacy = supports_ephemeral_legacy
         self.msc3202_transaction_extensions = msc3202_transaction_extensions
 
         if "|" in self.id:
