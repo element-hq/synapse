@@ -81,8 +81,8 @@ class ApplicationServicesHandler:
         self.clock = hs.get_clock()
         self.notify_appservices = hs.config.worker.should_notify_appservices
         self.event_sources = hs.get_event_sources()
-        self._msc2409_to_device_messages_enabled = (
-            hs.config.experimental.msc2409_to_device_messages_enabled
+        self._msc4203_to_device_messages_enabled = (
+            hs.config.experimental.msc4203_to_device_messages_enabled
         )
         self._msc3202_transaction_extensions_enabled = (
             hs.config.experimental.msc3202_transaction_extensions
@@ -269,7 +269,7 @@ class ApplicationServicesHandler:
         # Ignore to-device messages if the feature flag is not enabled
         if (
             stream_key == StreamKeyType.TO_DEVICE
-            and not self._msc2409_to_device_messages_enabled
+            and not self._msc4203_to_device_messages_enabled
         ):
             return
 

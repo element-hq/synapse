@@ -299,7 +299,7 @@ class ExperimentalConfig(Config):
         # key not matching the MSC.
         # Presence, typing and read receipt EDUs are already sent to application services that
         # have opted in to receive them. If enabled, this adds to-device messages to that list.
-        self.msc2409_to_device_messages_enabled: bool = experimental.get(
+        self.msc4203_to_device_messages_enabled: bool = experimental.get(
             "msc2409_to_device_messages_enabled", False
         )
 
