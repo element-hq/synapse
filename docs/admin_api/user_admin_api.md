@@ -1365,6 +1365,9 @@ _Added in Synapse 1.72.0._
 
 ## Redact all the events of a user
 
+This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
+local user. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. 
+
 The API is 
 ```
 POST /_synapse/admin/v1/user/$user_id/redact

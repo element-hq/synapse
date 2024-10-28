@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import urllib.parse
 from binascii import unhexlify
 from http import HTTPStatus
@@ -5422,10 +5423,6 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.bad_user = self.register_user("teresa", "pass")
         self.bad_user_tok = self.login("teresa", "pass")
 
-        self.store = hs.get_datastores().main
-
-        self.spam_checker = hs.get_module_api_callbacks().spam_checker
-
         # create rooms - room versions 11+ store the `redacts` key in content while
         # earlier ones don't so we use a mix of room versions
         self.rm1 = self.helper.create_room_as(
@@ -5451,16 +5448,16 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         )
 
         # join rooms, send some messages
-        originals = []
+        original_event_ids = set()
         for rm in [self.rm1, self.rm2, self.rm3]:
             join = self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
-            originals.append(join["event_id"])
+            original_event_ids.add(join["event_id"])
             for i in range(15):
                 event = {"body": f"hello{i}", "msgtype": "m.text"}
                 res = self.helper.send_event(
                     rm, "m.room.message", event, tok=self.bad_user_tok, expect_code=200
                 )
-                originals.append(res["event_id"])
+                original_event_ids.add(res["event_id"])
 
         # redact all events in all rooms
         channel = self.make_request(
@@ -5472,19 +5469,23 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        for _ in range(100):
+        timeout = 10
+        start_time = time.time()
+        redact_result = ""
+        while redact_result != "complete":
+            if start_time + timeout < time.time():
+                self.fail("Timed out waiting for redactions.")
+
             channel2 = self.make_request(
                 "GET",
                 f"/_synapse/admin/v1/user/redact_status/{id}",
                 access_token=self.admin_tok,
             )
             redact_result = channel2.json_body["status"]
-            if redact_result == "complete":
-                break
             if redact_result == "failed":
                 self.fail("Redaction task failed.")
 
-        matched = []
+        redaction_ids = set()
         for rm in [self.rm1, self.rm2, self.rm3]:
             filter = json.dumps({"types": [EventTypes.Redaction]})
             channel = self.make_request(
@@ -5495,10 +5496,7 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
             self.assertEqual(channel.code, 200)
 
             for event in channel.json_body["chunk"]:
-                for event_id in originals:
-                    if (
-                        event["type"] == "m.room.redaction"
-                        and event["redacts"] == event_id
-                    ):
-                        matched.append(event_id)
-        self.assertEqual(len(matched), len(originals))
+                if event["type"] == "m.room.redaction":
+                    redaction_ids.add(event["redacts"])
+
+        self.assertIncludes(redaction_ids, original_event_ids, exact=True)
