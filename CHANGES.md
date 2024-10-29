@@ -1,3 +1,10 @@
+# Synapse 1.118.0 (2024-10-29)
+
+No significant changes since 1.118.0rc1.
+
+
+
+
 # Synapse 1.118.0rc1 (2024-10-22)
 
 ### Python 3.8 support will be dropped in the next release
