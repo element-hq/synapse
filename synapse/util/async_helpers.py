@@ -463,13 +463,26 @@ async def gather_optional_coroutines(
 async def gather_optional_coroutines(
     *coroutines: Unpack[Tuple[Optional[Coroutine[Any, Any, T1]], ...]],
 ) -> Tuple[Optional[T1], ...]:
+    """Helper function that allows waiting on multiple coroutines at once.
+
+    The return value is a tuple of the return values of the coroutines in order.
+
+    If a `None` is passed instead of a coroutine, it will be ignored and a None
+    is returned in the tuple.
+
+    Note: For typechecking we need to have an explicit overload for each
+    distinct number of coroutines passed in. If you see type problems, it's
+    likely because you're using many arguments and you need to add a new
+    overload above.
+    """
+
     try:
         results = await make_deferred_yieldable(
             defer.gatherResults(
                 [
                     run_coroutine_in_background(coroutine)
                     for coroutine in coroutines
-                    if coroutine
+                    if coroutine is not None
                 ],
                 consumeErrors=True,
             )
@@ -477,7 +490,8 @@ async def gather_optional_coroutines(
 
         results_iter = iter(results)
         return tuple(
-            next(results_iter) if coroutine else None for coroutine in coroutines
+            next(results_iter) if coroutine is not None else None
+            for coroutine in coroutines
         )
     except defer.FirstError as dfe:
         # unwrap the error from defer.gatherResults.

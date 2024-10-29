@@ -854,6 +854,19 @@ def run_in_background(
 def run_coroutine_in_background(
     coroutine: typing.Coroutine[Any, Any, R],
 ) -> "defer.Deferred[R]":
+    """Run the coroutine, ensuring that the current context is restored after
+    return from the function, and that the sentinel context is set once the
+    deferred returned by the function completes.
+
+    Useful for wrapping coroutines that you don't yield or await on (for
+    instance because you want to pass it to deferred.gatherResults()).
+
+    This is a special case of `run_in_background` where we can accept a
+    coroutine directly rather than a function. We can do this because coroutines
+    do not run until called, and so calling an async function without awaiting
+    cannot change the log contexts.
+    """
+
     current = current_context()
     d = defer.ensureDeferred(coroutine)
 
