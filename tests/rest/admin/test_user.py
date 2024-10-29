@@ -5469,11 +5469,11 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
         self.assertEqual(channel.code, 200)
         id = channel.json_body.get("redact_id")
 
-        timeout = 10
+        timeout_s = 10
         start_time = time.time()
         redact_result = ""
         while redact_result != "complete":
-            if start_time + timeout < time.time():
+            if start_time + timeout_s < time.time():
                 self.fail("Timed out waiting for redactions.")
 
             channel2 = self.make_request(
