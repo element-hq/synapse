@@ -45,9 +45,10 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(
             user1_id, "pass"
-        )  # login(username: str, password: str) -> str
+        ) 
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         tag = "test_tag"
+
         # Make the request
         channel = self.make_request(
             "PUT",
