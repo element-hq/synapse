@@ -1373,7 +1373,7 @@ Please see the <a href="#config-conventions">Config Conventions</a> for informat
 durations.</p>
 <ul>
 <li><code>max_cache_memory_usage</code> sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-They will continue to be evicted until the memory usage drops below the <code>target_memory_usage</code>, set in
+They will continue to be evicted until the memory usage drops below the <code>target_cache_memory_usage</code>, set in
 the setting below, or until the <code>min_cache_ttl</code> is hit. There is no default value for this option.</li>
 <li><code>target_cache_memory_usage</code> sets a rough target for the desired memory usage of the caches. There is no default value
 for this option.</li>
@@ -3340,6 +3340,8 @@ Supported algorithms are listed
 Required if <code>enabled</code> is set to true.</li>
 <li><code>subject_claim</code>: Name of the claim containing a unique identifier for the user.
 Optional, defaults to <code>sub</code>.</li>
+<li><code>display_name_claim</code>: Name of the claim containing the display name for the user. Optional.
+If provided, the display name will be set to the value of this claim upon first login.</li>
 <li><code>issuer</code>: The issuer to validate the &quot;iss&quot; claim against. Optional. If provided the
 &quot;iss&quot; claim will be required and validated for all JSON web tokens.</li>
 <li><code>audiences</code>: A list of audiences to validate the &quot;aud&quot; claim against. Optional.
@@ -3353,6 +3355,7 @@ validation will fail without configuring audiences.</li>
     secret: &quot;provided-by-your-issuer&quot;
     algorithm: &quot;provided-by-your-issuer&quot;
     subject_claim: &quot;name_of_claim&quot;
+    display_name_claim: &quot;name_of_claim&quot;
     issuer: &quot;provided-by-your-issuer&quot;
     audiences:
         - &quot;provided-by-your-issuer&quot;

@@ -1873,7 +1873,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.117.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.118.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -5032,7 +5032,7 @@ Please see the <a href="usage/configuration/config_documentation.html#config-con
 durations.</p>
 <ul>
 <li><code>max_cache_memory_usage</code> sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-They will continue to be evicted until the memory usage drops below the <code>target_memory_usage</code>, set in
+They will continue to be evicted until the memory usage drops below the <code>target_cache_memory_usage</code>, set in
 the setting below, or until the <code>min_cache_ttl</code> is hit. There is no default value for this option.</li>
 <li><code>target_cache_memory_usage</code> sets a rough target for the desired memory usage of the caches. There is no default value
 for this option.</li>
@@ -6999,6 +6999,8 @@ Supported algorithms are listed
 Required if <code>enabled</code> is set to true.</li>
 <li><code>subject_claim</code>: Name of the claim containing a unique identifier for the user.
 Optional, defaults to <code>sub</code>.</li>
+<li><code>display_name_claim</code>: Name of the claim containing the display name for the user. Optional.
+If provided, the display name will be set to the value of this claim upon first login.</li>
 <li><code>issuer</code>: The issuer to validate the &quot;iss&quot; claim against. Optional. If provided the
 &quot;iss&quot; claim will be required and validated for all JSON web tokens.</li>
 <li><code>audiences</code>: A list of audiences to validate the &quot;aud&quot; claim against. Optional.
@@ -7012,6 +7014,7 @@ validation will fail without configuring audiences.</li>
     secret: &quot;provided-by-your-issuer&quot;
     algorithm: &quot;provided-by-your-issuer&quot;
     subject_claim: &quot;name_of_claim&quot;
+    display_name_claim: &quot;name_of_claim&quot;
     issuer: &quot;provided-by-your-issuer&quot;
     audiences:
         - &quot;provided-by-your-issuer&quot;
@@ -10384,8 +10387,9 @@ this callback.</p>
 <p><em>Changed in Synapse v1.62.0: <code>synapse.module_api.NOT_SPAM</code> and <code>synapse.module_api.errors.Codes</code> can be returned by this callback. Returning a boolean is now deprecated.</em> </p>
 <pre><code class="language-python">async def user_may_invite(inviter: str, invitee: str, room_id: str) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;, bool]
 </code></pre>
-<p>Called when processing an invitation. Both inviter and invitee are
-represented by their Matrix user ID (e.g. <code>@alice:example.com</code>).</p>
+<p>Called when processing an invitation, both when one is created locally or when
+receiving an invite over federation. Both inviter and invitee are represented by
+their Matrix user ID (e.g. <code>@alice:example.com</code>).</p>
 <p>The callback must return one of:</p>
 <ul>
 <li>
@@ -10419,7 +10423,9 @@ this callback.</p>
 ) -&gt; Union[&quot;synapse.module_api.NOT_SPAM&quot;, &quot;synapse.module_api.errors.Codes&quot;, bool]
 </code></pre>
 <p>Called when processing an invitation using a third-party identifier (also called a 3PID,
-e.g. an email address or a phone number). </p>
+e.g. an email address or a phone number). It is only called when a 3PID invite is created
+locally - not when one is received in a room over federation. If the 3PID is already associated
+with a Matrix ID, the spam check will go through the <code>user_may_invite</code> callback instead.</p>
 <p>The inviter is represented by their Matrix user ID (e.g. <code>@alice:example.com</code>), and the
 invitee is represented by its medium (e.g. &quot;email&quot;) and its address
 (e.g. <code>alice@example.com</code>). See <a href="https://matrix.org/docs/spec/appendices#pid-types">the Matrix specification</a>
@@ -11649,10 +11655,10 @@ recommend the use of <code>systemd</code> where available: for information on se
 <h2 id="start-synapse-with-poetry"><a class="header" href="#start-synapse-with-poetry">Start Synapse with Poetry</a></h2>
 <p>The following applies to Synapse installations that have been installed from source using <code>poetry</code>.</p>
 <p>You can start the main Synapse process with Poetry by running the following command:</p>
-<pre><code class="language-console">poetry run synapse_homeserver --config-file [your homeserver.yaml]
+<pre><code class="language-console">poetry run synapse_homeserver --config-path [your homeserver.yaml]
 </code></pre>
 <p>For worker setups, you can run the following command</p>
-<pre><code class="language-console">poetry run synapse_worker --config-file [your homeserver.yaml] --config-file [your worker.yaml]
+<pre><code class="language-console">poetry run synapse_worker --config-path [your homeserver.yaml] --config-path [your worker.yaml]
 </code></pre>
 <h2 id="available-worker-applications"><a class="header" href="#available-worker-applications">Available worker applications</a></h2>
 <h3 id="synapseappgeneric_worker"><a class="header" href="#synapseappgeneric_worker"><code>synapse.app.generic_worker</code></a></h3>
