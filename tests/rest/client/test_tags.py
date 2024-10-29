@@ -14,61 +14,71 @@
 
 """Tests REST events for /tags paths."""
 
-from twisted.test.proto_helpers import MemoryReactor
+from http import HTTPStatus
 
-from synapse.rest.client import room, tags
-from synapse.server import HomeServer
-from synapse.types import UserID
-from synapse.util import Clock
+import synapse.rest.admin
+from synapse.rest.client import login, room, tags
 
 from tests import unittest
-
-PATH_PREFIX = "/_matrix/client/api/v1"
 
 
 class RoomTaggingTestCase(unittest.HomeserverTestCase):
     """Tests /user/$user_id/rooms/$room_id/tags/$tag REST API."""
 
-    user_id = "@sid:red"
-    servlets = [room.register_servlets, tags.register_servlets]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        hs = self.setup_test_homeserver("red")
-        return hs
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.room_id = self.helper.create_room_as(self.user_id)
+    servlets = [
+        room.register_servlets,
+        tags.register_servlets,
+        login.register_servlets,
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+    ]
 
     def test_put_tag_checks_room_membership(self) -> None:
+        """
+        Test that a user can add a tag to a room if they have membership to the room.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(
+            user1_id, "pass"
+        )  # login(username: str, password: str) -> str
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         tag = "test_tag"
         # Make the request
         channel = self.make_request(
             "PUT",
-            f"/user/{self.user_id}/rooms/{self.room_id}/tags/{tag}",
+            f"/user/{user1_id}/rooms/{room_id}/tags/{tag}",
             content={"order": 0.5},
-            access_token=self.get_success(
-                self.hs.get_auth_handler().create_access_token_for_user_id(
-                    self.user_id, device_id=None, valid_until_ms=None
-                )
-            ),
+            access_token=user1_tok,
         )
         # Check that the request was successful
-        self.assertEqual(channel.code, 200, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
 
     def test_put_tag_fails_if_not_in_room(self) -> None:
+        """
+        Test that a user cannot add a tag to a room if they don't have membership to the room.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
         room_id = "!nonexistent:test"
         tag = "test_tag"
-
         # Make the request
         channel = self.make_request(
             "PUT",
-            f"/user/{self.user_id}/rooms/{room_id}/tags/{tag}",
+            f"/user/{user1_id}/rooms/{room_id}/tags/{tag}",
             content={"order": 0.5},
-            access_token=self.get_success(
-                self.hs.get_auth_handler().create_access_token_for_user_id(
-                    self.user_id, device_id=None, valid_until_ms=None
-                )
-            ),
+            access_token=user1_tok,
         )
         # Check that the request failed with the correct error
-        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.result)
