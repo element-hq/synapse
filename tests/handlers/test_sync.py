@@ -548,6 +548,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         ... and a filter that means we only return 1 event, represented by the dashed
         horizontal lines: `S2` must be included in the `state` section on the second sync.
+
+        When `use_state_after` is enabled, then we expect to see `s2` in the first sync.
         """
         alice = self.register_user("alice", "password")
         alice_tok = self.login(alice, "password")
@@ -598,10 +600,18 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e3_event],
         )
-        self.assertEqual(
-            [e.event_id for e in room_sync.state.values()],
-            [],
-        )
+
+        if self.use_state_after:
+            # When using `state_after` we get told about s2 immediately
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [s2_event],
+            )
+        else:
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [],
+            )
 
         # Now send another event that points to S2, but not E3.
         with self._patch_get_latest_events([s2_event]):
@@ -630,10 +640,19 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e4_event],
         )
-        self.assertEqual(
-            [e.event_id for e in room_sync.state.values()],
-            [s2_event],
-        )
+
+        if self.use_state_after:
+            # When using `state_after` we got told about s2 previously, so we
+            # don't again.
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [],
+            )
+        else:
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [s2_event],
+            )
 
     def test_state_includes_changes_on_ungappy_syncs(self) -> None:
         """Test `state` where the sync is not gappy.
@@ -670,6 +689,8 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
 
         This is the last chance for us to tell the client about S2, so it *must* be
         included in the response.
+
+        When `use_state_after` is enabled, then we expect to see `s2` in the first sync.
         """
         alice = self.register_user("alice", "password")
         alice_tok = self.login(alice, "password")
@@ -717,7 +738,11 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e3_event],
         )
-        self.assertNotIn(s2_event, [e.event_id for e in room_sync.state.values()])
+        if self.use_state_after:
+            # When using `state_after` we get told about s2 immediately
+            self.assertIn(s2_event, [e.event_id for e in room_sync.state.values()])
+        else:
+            self.assertNotIn(s2_event, [e.event_id for e in room_sync.state.values()])
 
         # More events, E4 and E5
         with self._patch_get_latest_events([e3_event]):
@@ -743,10 +768,19 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
             [e.event_id for e in room_sync.timeline.events],
             [e4_event, e5_event],
         )
-        self.assertEqual(
-            [e.event_id for e in room_sync.state.values()],
-            [s2_event],
-        )
+
+        if self.use_state_after:
+            # When using `state_after` we got told about s2 previously, so we
+            # don't again.
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [],
+            )
+        else:
+            self.assertEqual(
+                [e.event_id for e in room_sync.state.values()],
+                [s2_event],
+            )
 
     @parameterized.expand(
         [
@@ -827,7 +861,15 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
         if empty_timeline:
             # The timeline should be empty
             self.assertEqual(sync_room_result.timeline.events, [])
+        else:
+            # The last three events in the timeline should be those leading up to the
+            # leave
+            self.assertEqual(
+                [e.event_id for e in sync_room_result.timeline.events[-3:]],
+                [before_message_event, before_state_event, leave_event],
+            )
 
+        if empty_timeline or self.use_state_after:
             # And the state should include the leave event...
             self.assertEqual(
                 sync_room_result.state[("m.room.member", bob)].event_id, leave_event
@@ -837,12 +879,6 @@ class SyncTestCase(tests.unittest.HomeserverTestCase):
                 sync_room_result.state[("test_state", "")].event_id, before_state_event
             )
         else:
-            # The last three events in the timeline should be those leading up to the
-            # leave
-            self.assertEqual(
-                [e.event_id for e in sync_room_result.timeline.events[-3:]],
-                [before_message_event, before_state_event, leave_event],
-            )
             # ... And the state should be empty
             self.assertEqual(sync_room_result.state, {})
 
