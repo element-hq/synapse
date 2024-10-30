@@ -35,17 +35,9 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
     def test_put_tag_checks_room_membership(self) -> None:
         """
         Test that a user can add a tag to a room if they have membership to the room.
-
-        Args:
-            None
-
-        Returns:
-            None
         """
         user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(
-            user1_id, "pass"
-        ) 
+        user1_tok = self.login(user1_id, "pass")
         room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
         tag = "test_tag"
 
@@ -62,12 +54,6 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
     def test_put_tag_fails_if_not_in_room(self) -> None:
         """
         Test that a user cannot add a tag to a room if they don't have membership to the room.
-
-        Args:
-            None
-
-        Returns:
-            None
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
