@@ -22,7 +22,7 @@
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Tuple, cast, Pattern, Any
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -127,7 +127,10 @@ class ReportRoomRestServlet(RestServlet):
         # TODO: Remove the unstable variant after 2-3 releases
         # https://github.com/element-hq/synapse/issues/17373
         if hs.config.experimental.msc4151_enabled:
-            self.PATTERNS.append(
+            # XXX: We shouldn't be casting like this because we're relying on an
+            # implementation detail. This code *should* be temporary though, per
+            # above TODO, so is safe enough?
+            cast(self.PATTERNS, list[Pattern[Any]]).append(
                 re.compile(
                     f"^{CLIENT_API_PREFIX}/unstable/org.matrix.msc4151"
                     "/rooms/(?P<room_id>[^/]*)/report$"
