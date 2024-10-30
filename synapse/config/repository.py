@@ -273,7 +273,7 @@ class ContentRepositoryConfig(Config):
             )
 
         self.enable_authenticated_media = config.get(
-            "enable_authenticated_media", False
+            "enable_authenticated_media", True
         )
 
     def generate_config_section(self, data_dir_path: str, **kwargs: Any) -> str:
