@@ -1079,4 +1079,5 @@ def generate_sync_config(
         filter_collection=filter_collection,
         is_guest=False,
         device_id=device_id,
+        use_state_after=False,
     )

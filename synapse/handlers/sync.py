@@ -143,6 +143,7 @@ class SyncConfig:
     filter_collection: FilterCollection
     is_guest: bool
     device_id: Optional[str]
+    use_state_after: bool
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
