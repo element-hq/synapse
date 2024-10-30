@@ -249,6 +249,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     """
 
     REQUIRED_ON_BACKGROUND_TASK_STARTUP = [
+        "admin",
         "account_validity",
         "auth",
         "deactivate_account",
