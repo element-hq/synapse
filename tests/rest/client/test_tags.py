@@ -53,13 +53,37 @@ class RoomTaggingTestCase(unittest.HomeserverTestCase):
 
     def test_put_tag_fails_if_not_in_room(self) -> None:
         """
-        Test that a user cannot add a tag to a room if they don't have membership to the room.
+        Test that a user cannot add a tag to a room if they don't have membership to the
+        room.
         """
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        # Create the room with user2 (user1 has no membership in the room)
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        tag = "test_tag"
 
+        # Make the request
+        channel = self.make_request(
+            "PUT",
+            f"/user/{user1_id}/rooms/{room_id}/tags/{tag}",
+            content={"order": 0.5},
+            access_token=user1_tok,
+        )
+        # Check that the request failed with the correct error
+        self.assertEqual(channel.code, HTTPStatus.FORBIDDEN, channel.result)
+
+    def test_put_tag_fails_if_room_does_not_exist(self) -> None:
+        """
+        Test that a user cannot add a tag to a room if the room doesn't exist (therefore
+        no membership in the room.)
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
         room_id = "!nonexistent:test"
         tag = "test_tag"
+
         # Make the request
         channel = self.make_request(
             "PUT",
