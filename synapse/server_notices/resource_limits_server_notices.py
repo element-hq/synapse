@@ -119,7 +119,9 @@ class ResourceLimitsServerNotices:
             elif not currently_blocked and limit_msg:
                 # Room is not notifying of a block, when it ought to be.
                 await self._apply_limit_block_notification(
-                    user_id, limit_msg, limit_type  # type: ignore
+                    user_id,
+                    limit_msg,
+                    limit_type,  # type: ignore
                 )
         except SynapseError as e:
             logger.error("Error sending resource limits server notice: %s", e)

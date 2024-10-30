@@ -48,7 +48,7 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
 
     """
 
-    NAME = "add_user_account_data"
+    NAME = "remove_pusher"
     PATH_ARGS = ("user_id",)
     CACHE = False
 
@@ -98,7 +98,9 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         self._store = hs.get_datastores().main
 
     @staticmethod
-    async def _serialize_payload(user_id: str, old_room_id: str, new_room_id: str) -> JsonDict:  # type: ignore[override]
+    async def _serialize_payload(  # type: ignore[override]
+        user_id: str, old_room_id: str, new_room_id: str
+    ) -> JsonDict:
         return {}
 
     async def _handle_request(  # type: ignore[override]
@@ -109,7 +111,6 @@ class ReplicationCopyPusherRestServlet(ReplicationEndpoint):
         old_room_id: str,
         new_room_id: str,
     ) -> Tuple[int, JsonDict]:
-
         await self._store.copy_push_rules_from_room_to_room_for_user(
             old_room_id, new_room_id, user_id
         )

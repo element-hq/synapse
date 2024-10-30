@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2021 The Matrix.org Foundation C.I.C.
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -384,6 +384,11 @@ class ServerConfig(Config):
         # Whether to internally track presence, requires that presence is enabled,
         self.track_presence = self.presence_enabled and presence_enabled != "untracked"
 
+        # Determines if presence results for offline users are included on initial/full sync
+        self.presence_include_offline_users_on_sync = presence_config.get(
+            "include_offline_users_on_sync", False
+        )
+
         # Custom presence router module
         # This is the legacy way of configuring it (the config should now be put in the modules section)
         self.presence_router_module_class = None
@@ -394,12 +399,6 @@ class ServerConfig(Config):
                 self.presence_router_module_class,
                 self.presence_router_config,
             ) = load_module(presence_router_config, ("presence", "presence_router"))
-
-        # whether to enable the media repository endpoints. This should be set
-        # to false if the media repository is running as a separate endpoint;
-        # doing so ensures that we will not run cache cleanup jobs on the
-        # master, potentially causing inconsistency.
-        self.enable_media_repo = config.get("enable_media_repo", True)
 
         # Whether to require authentication to retrieve profile data (avatars,
         # display names) of other users through the client API.
@@ -781,6 +780,17 @@ class ServerConfig(Config):
         else:
             self.delete_stale_devices_after = None
 
+        # The maximum allowed delay duration for delayed events (MSC4140).
+        max_event_delay_duration = config.get("max_event_delay_duration")
+        if max_event_delay_duration is not None:
+            self.max_event_delay_ms: Optional[int] = self.parse_duration(
+                max_event_delay_duration
+            )
+            if self.max_event_delay_ms <= 0:
+                raise ConfigError("max_event_delay_duration must be a positive value")
+        else:
+            self.max_event_delay_ms = None
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 
@@ -829,13 +839,10 @@ class ServerConfig(Config):
             ).lstrip()
 
         if not unsecure_listeners:
-            unsecure_http_bindings = (
-                """- port: %(unsecure_port)s
+            unsecure_http_bindings = """- port: %(unsecure_port)s
             tls: false
             type: http
-            x_forwarded: true"""
-                % locals()
-            )
+            x_forwarded: true""" % locals()
 
             if not open_private_ports:
                 unsecure_http_bindings += (
@@ -854,16 +861,13 @@ class ServerConfig(Config):
         if not secure_listeners:
             secure_http_bindings = ""
 
-        return (
-            """\
+        return """\
         server_name: "%(server_name)s"
         pid_file: %(pid_file)s
         listeners:
           %(secure_http_bindings)s
           %(unsecure_http_bindings)s
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_arguments(self, args: argparse.Namespace) -> None:
         if args.manhole is not None:

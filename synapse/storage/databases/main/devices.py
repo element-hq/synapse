@@ -243,6 +243,9 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
     def get_device_stream_token(self) -> int:
         return self._device_list_id_gen.get_current_token()
 
+    def get_device_stream_id_generator(self) -> MultiWriterIdGenerator:
+        return self._device_list_id_gen
+
     async def count_devices_by_users(
         self, user_ids: Optional[Collection[str]] = None
     ) -> int:
@@ -667,9 +670,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                         result["keys"] = keys
 
                     device_display_name = None
-                    if (
-                        self.hs.config.federation.allow_device_name_lookup_over_federation
-                    ):
+                    if self.hs.config.federation.allow_device_name_lookup_over_federation:
                         device_display_name = device.display_name
                     if device_display_name:
                         result["device_display_name"] = device_display_name
@@ -914,7 +915,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             from_key,
             to_key,
         )
-        return {u for u, in rows}
+        return {u for (u,) in rows}
 
     @cancellable
     async def get_users_whose_devices_changed(
@@ -965,7 +966,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
                     txn.database_engine, "user_id", chunk
                 )
                 txn.execute(sql % (clause,), [from_key, to_key] + args)
-                changes.update(user_id for user_id, in txn)
+                changes.update(user_id for (user_id,) in txn)
 
             return changes
 
@@ -1517,7 +1518,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             args: List[Any],
         ) -> Set[str]:
             txn.execute(sql.format(clause=clause), args)
-            return {user_id for user_id, in txn}
+            return {user_id for (user_id,) in txn}
 
         changes = set()
         for chunk in batch_iter(changed_room_ids, 1000):
@@ -1557,7 +1558,7 @@ class DeviceWorkerStore(RoomMemberWorkerStore, EndToEndKeyWorkerStore):
             txn: LoggingTransaction,
         ) -> Set[str]:
             txn.execute(sql, (from_id, to_id))
-            return {room_id for room_id, in txn}
+            return {room_id for (room_id,) in txn}
 
         return await self.db_pool.runInteraction(
             "get_all_device_list_changes",

@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, Type
 
 from PIL import Image
 
-from synapse.api.errors import Codes, SynapseError, cs_error
+from synapse.api.errors import Codes, NotFoundError, SynapseError, cs_error
 from synapse.config.repository import THUMBNAIL_SUPPORTED_MEDIA_FORMAT_MAP
 from synapse.http.server import respond_with_json
 from synapse.http.site import SynapseRequest
@@ -36,9 +36,11 @@ from synapse.media._base import (
     ThumbnailInfo,
     respond_404,
     respond_with_file,
+    respond_with_multipart_responder,
     respond_with_responder,
 )
-from synapse.media.media_storage import MediaStorage
+from synapse.media.media_storage import FileResponder, MediaStorage
+from synapse.storage.databases.main.media_repository import LocalMedia
 
 if TYPE_CHECKING:
     from synapse.media.media_repository import MediaRepository
@@ -204,7 +206,7 @@ class Thumbnailer:
     def _encode_image(self, output_image: Image.Image, output_type: str) -> BytesIO:
         output_bytes_io = BytesIO()
         fmt = self.FORMATS[output_type]
-        if fmt == "JPEG":
+        if fmt == "JPEG" or fmt == "PNG" and output_image.mode == "CMYK":
             output_image = output_image.convert("RGB")
         output_image.save(output_bytes_io, fmt, quality=80)
         return output_bytes_io
@@ -257,6 +259,7 @@ class ThumbnailProvider:
         media_storage: MediaStorage,
     ):
         self.hs = hs
+        self.reactor = hs.get_reactor()
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
@@ -271,12 +274,20 @@ class ThumbnailProvider:
         method: str,
         m_type: str,
         max_timeout_ms: int,
+        for_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         await self._select_and_respond_with_thumbnail(
@@ -290,6 +301,8 @@ class ThumbnailProvider:
             media_id,
             url_cache=bool(media_info.url_cache),
             server_name=None,
+            for_federation=for_federation,
+            media_info=media_info,
         )
 
     async def select_or_generate_local_thumbnail(
@@ -301,13 +314,20 @@ class ThumbnailProvider:
         desired_method: str,
         desired_type: str,
         max_timeout_ms: int,
+        for_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_local_media_info(
             request, media_id, max_timeout_ms
         )
-
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_local_media_thumbnails(media_id)
         for info in thumbnail_infos:
@@ -326,15 +346,26 @@ class ThumbnailProvider:
 
                 responder = await self.media_storage.fetch_media(file_info)
                 if responder:
-                    await respond_with_responder(
-                        request, responder, info.type, info.length
-                    )
-                    return
+                    if for_federation:
+                        await respond_with_multipart_responder(
+                            self.hs.get_clock(),
+                            request,
+                            responder,
+                            info.type,
+                            info.length,
+                            None,
+                        )
+                        return
+                    else:
+                        await respond_with_responder(
+                            request, responder, info.type, info.length
+                        )
+                        return
 
         logger.debug("We don't have a thumbnail of that size. Generating")
 
         # Okay, so we generate one.
-        file_path = await self.media_repo.generate_local_exact_thumbnail(
+        thumbnail_result = await self.media_repo.generate_local_exact_thumbnail(
             media_id,
             desired_width,
             desired_height,
@@ -343,8 +374,21 @@ class ThumbnailProvider:
             url_cache=bool(media_info.url_cache),
         )
 
-        if file_path:
-            await respond_with_file(request, desired_type, file_path)
+        if thumbnail_result:
+            file_path, file_info = thumbnail_result
+            assert file_info.thumbnail is not None
+
+            if for_federation:
+                await respond_with_multipart_responder(
+                    self.hs.get_clock(),
+                    request,
+                    FileResponder(self.hs, open(file_path, "rb")),
+                    file_info.thumbnail.type,
+                    file_info.thumbnail.length,
+                    None,
+                )
+            else:
+                await respond_with_file(self.hs, request, desired_type, file_path)
         else:
             logger.warning("Failed to generate thumbnail")
             raise SynapseError(400, "Failed to generate thumbnail.")
@@ -360,13 +404,27 @@ class ThumbnailProvider:
         desired_type: str,
         max_timeout_ms: int,
         ip_address: str,
+        use_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms, ip_address
+            server_name,
+            media_id,
+            max_timeout_ms,
+            ip_address,
+            use_federation,
+            allow_authenticated,
         )
         if not media_info:
             respond_404(request)
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                respond_404(request)
+                return
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
@@ -408,7 +466,7 @@ class ThumbnailProvider:
         )
 
         if file_path:
-            await respond_with_file(request, desired_type, file_path)
+            await respond_with_file(self.hs, request, desired_type, file_path)
         else:
             logger.warning("Failed to generate thumbnail")
             raise SynapseError(400, "Failed to generate thumbnail.")
@@ -424,15 +482,28 @@ class ThumbnailProvider:
         m_type: str,
         max_timeout_ms: int,
         ip_address: str,
+        use_federation: bool,
+        allow_authenticated: bool = True,
     ) -> None:
         # TODO: Don't download the whole remote file
         # We should proxy the thumbnail from the remote server instead of
         # downloading the remote file and generating our own thumbnails.
         media_info = await self.media_repo.get_remote_media_info(
-            server_name, media_id, max_timeout_ms, ip_address
+            server_name,
+            media_id,
+            max_timeout_ms,
+            ip_address,
+            use_federation,
+            allow_authenticated,
         )
         if not media_info:
             return
+
+        # if the media the thumbnail is generated from is authenticated, don't serve the
+        # thumbnail over an unauthenticated endpoint
+        if self.hs.config.media.enable_authenticated_media and not allow_authenticated:
+            if media_info.authenticated:
+                raise NotFoundError()
 
         thumbnail_infos = await self.store.get_remote_media_thumbnails(
             server_name, media_id
@@ -448,6 +519,7 @@ class ThumbnailProvider:
             media_info.filesystem_id,
             url_cache=False,
             server_name=server_name,
+            for_federation=False,
         )
 
     async def _select_and_respond_with_thumbnail(
@@ -461,6 +533,8 @@ class ThumbnailProvider:
         media_id: str,
         file_id: str,
         url_cache: bool,
+        for_federation: bool,
+        media_info: Optional[LocalMedia] = None,
         server_name: Optional[str] = None,
     ) -> None:
         """
@@ -476,6 +550,8 @@ class ThumbnailProvider:
             file_id: The ID of the media that a thumbnail is being requested for.
             url_cache: True if this is from a URL cache.
             server_name: The server name, if this is a remote thumbnail.
+            for_federation: whether the request is from the federation /thumbnail request
+            media_info: metadata about the media being requested.
         """
         logger.debug(
             "_select_and_respond_with_thumbnail: media_id=%s desired=%sx%s (%s) thumbnail_infos=%s",
@@ -511,13 +587,25 @@ class ThumbnailProvider:
 
             responder = await self.media_storage.fetch_media(file_info)
             if responder:
-                await respond_with_responder(
-                    request,
-                    responder,
-                    file_info.thumbnail.type,
-                    file_info.thumbnail.length,
-                )
-                return
+                if for_federation:
+                    assert media_info is not None
+                    await respond_with_multipart_responder(
+                        self.hs.get_clock(),
+                        request,
+                        responder,
+                        file_info.thumbnail.type,
+                        file_info.thumbnail.length,
+                        None,
+                    )
+                    return
+                else:
+                    await respond_with_responder(
+                        request,
+                        responder,
+                        file_info.thumbnail.type,
+                        file_info.thumbnail.length,
+                    )
+                    return
 
             # If we can't find the thumbnail we regenerate it. This can happen
             # if e.g. we've deleted the thumbnails but still have the original
@@ -558,12 +646,23 @@ class ThumbnailProvider:
                 )
 
             responder = await self.media_storage.fetch_media(file_info)
-            await respond_with_responder(
-                request,
-                responder,
-                file_info.thumbnail.type,
-                file_info.thumbnail.length,
-            )
+            if for_federation:
+                assert media_info is not None
+                await respond_with_multipart_responder(
+                    self.hs.get_clock(),
+                    request,
+                    responder,
+                    file_info.thumbnail.type,
+                    file_info.thumbnail.length,
+                    None,
+                )
+            else:
+                await respond_with_responder(
+                    request,
+                    responder,
+                    file_info.thumbnail.type,
+                    file_info.thumbnail.length,
+                )
         else:
             # This might be because:
             # 1. We can't create thumbnails for the given media (corrupted or

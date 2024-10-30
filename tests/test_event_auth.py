@@ -292,12 +292,14 @@ class EventAuthTestCase(unittest.TestCase):
         ]
 
         # pleb should not be able to send state
-        self.assertRaises(
-            AuthError,
-            event_auth.check_state_dependent_auth_rules,
-            _random_state_event(RoomVersions.V1, pleb),
-            auth_events,
-        ),
+        (
+            self.assertRaises(
+                AuthError,
+                event_auth.check_state_dependent_auth_rules,
+                _random_state_event(RoomVersions.V1, pleb),
+                auth_events,
+            ),
+        )
 
         # king should be able to send state
         event_auth.check_state_dependent_auth_rules(

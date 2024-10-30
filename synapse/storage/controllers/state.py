@@ -409,7 +409,7 @@ class StateStorageController:
 
         return state_ids
 
-    async def get_state_at(
+    async def get_state_ids_at(
         self,
         room_id: str,
         stream_position: StreamToken,
@@ -436,6 +436,9 @@ class StateStorageController:
             )
         )
 
+        # FIXME: This will return incorrect results when there are timeline gaps. For
+        # example, when you try to get a point in the room we haven't backfilled before.
+
         if last_event_id:
             state = await self.get_state_after_event(
                 last_event_id,
@@ -456,6 +459,30 @@ class StateStorageController:
                 stream_position.room_key,
             )
         return state
+
+    @trace
+    @tag_args
+    async def get_state_at(
+        self,
+        room_id: str,
+        stream_position: StreamToken,
+        state_filter: Optional[StateFilter] = None,
+        await_full_state: bool = True,
+    ) -> StateMap[EventBase]:
+        """Same as `get_state_ids_at` but also fetches the events"""
+        state_map_ids = await self.get_state_ids_at(
+            room_id, stream_position, state_filter, await_full_state
+        )
+
+        event_map = await self.stores.main.get_events(list(state_map_ids.values()))
+
+        state_map = {}
+        for key, event_id in state_map_ids.items():
+            event = event_map.get(event_id)
+            if event:
+                state_map[key] = event
+
+        return state_map
 
     @trace
     @tag_args

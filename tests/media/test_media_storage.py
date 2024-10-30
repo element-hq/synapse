@@ -18,7 +18,6 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-import itertools
 import os
 import shutil
 import tempfile
@@ -61,7 +60,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.server import FakeChannel
-from tests.test_utils import SMALL_PNG
+from tests.test_utils import SMALL_CMYK_JPEG, SMALL_PNG
 from tests.unittest import override_config
 from tests.utils import default_config
 
@@ -129,7 +128,7 @@ class MediaStorageTests(unittest.HomeserverTestCase):
 
 
 @attr.s(auto_attribs=True, slots=True, frozen=True)
-class _TestImage:
+class TestImage:
     """An image for testing thumbnailing with the expected results
 
     Attributes:
@@ -158,7 +157,7 @@ class _TestImage:
     is_inline: bool = True
 
 
-small_png = _TestImage(
+small_png = TestImage(
     SMALL_PNG,
     b"image/png",
     b".png",
@@ -175,7 +174,7 @@ small_png = _TestImage(
     ),
 )
 
-small_png_with_transparency = _TestImage(
+small_png_with_transparency = TestImage(
     unhexlify(
         b"89504e470d0a1a0a0000000d49484452000000010000000101000"
         b"00000376ef9240000000274524e5300010194fdae0000000a4944"
@@ -188,7 +187,69 @@ small_png_with_transparency = _TestImage(
     # different versions of Pillow.
 )
 
-small_lossless_webp = _TestImage(
+small_cmyk_jpeg = TestImage(
+    SMALL_CMYK_JPEG,
+    b"image/jpeg",
+    b".jpeg",
+    # These values were sourced simply by seeing at what the tests produced at
+    # the time of writing. If this changes, the tests will fail.
+    unhexlify(
+        b"ffd8ffe000104a46494600010100000100010000ffdb00430006"
+        b"040506050406060506070706080a100a0a09090a140e0f0c1017"
+        b"141818171416161a1d251f1a1b231c1616202c20232627292a29"
+        b"191f2d302d283025282928ffdb0043010707070a080a130a0a13"
+        b"281a161a28282828282828282828282828282828282828282828"
+        b"2828282828282828282828282828282828282828282828282828"
+        b"2828ffc00011080020002003012200021101031101ffc4001f00"
+        b"0001050101010101010000000000000000010203040506070809"
+        b"0a0bffc400b5100002010303020403050504040000017d010203"
+        b"00041105122131410613516107227114328191a1082342b1c115"
+        b"52d1f02433627282090a161718191a25262728292a3435363738"
+        b"393a434445464748494a535455565758595a636465666768696a"
+        b"737475767778797a838485868788898a92939495969798999aa2"
+        b"a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9ca"
+        b"d2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7"
+        b"f8f9faffc4001f01000301010101010101010100000000000001"
+        b"02030405060708090a0bffc400b5110002010204040304070504"
+        b"0400010277000102031104052131061241510761711322328108"
+        b"144291a1b1c109233352f0156272d10a162434e125f11718191a"
+        b"262728292a35363738393a434445464748494a53545556575859"
+        b"5a636465666768696a737475767778797a82838485868788898a"
+        b"92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9"
+        b"bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8"
+        b"e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f00fa"
+        b"a68a28a0028a28a0028a28a0028a28a00fffd9"
+    ),
+    unhexlify(
+        b"ffd8ffe000104a46494600010100000100010000ffdb00430006"
+        b"040506050406060506070706080a100a0a09090a140e0f0c1017"
+        b"141818171416161a1d251f1a1b231c1616202c20232627292a29"
+        b"191f2d302d283025282928ffdb0043010707070a080a130a0a13"
+        b"281a161a28282828282828282828282828282828282828282828"
+        b"2828282828282828282828282828282828282828282828282828"
+        b"2828ffc00011080001000103012200021101031101ffc4001f00"
+        b"0001050101010101010000000000000000010203040506070809"
+        b"0a0bffc400b5100002010303020403050504040000017d010203"
+        b"00041105122131410613516107227114328191a1082342b1c115"
+        b"52d1f02433627282090a161718191a25262728292a3435363738"
+        b"393a434445464748494a535455565758595a636465666768696a"
+        b"737475767778797a838485868788898a92939495969798999aa2"
+        b"a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9ca"
+        b"d2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7"
+        b"f8f9faffc4001f01000301010101010101010100000000000001"
+        b"02030405060708090a0bffc400b5110002010204040304070504"
+        b"0400010277000102031104052131061241510761711322328108"
+        b"144291a1b1c109233352f0156272d10a162434e125f11718191a"
+        b"262728292a35363738393a434445464748494a53545556575859"
+        b"5a636465666768696a737475767778797a82838485868788898a"
+        b"92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9"
+        b"bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8"
+        b"e9eaf2f3f4f5f6f7f8f9faffda000c03010002110311003f00fa"
+        b"a68a28a00fffd9"
+    ),
+)
+
+small_lossless_webp = TestImage(
     unhexlify(
         b"524946461a000000574542505650384c0d0000002f0000001007" b"1011118888fe0700"
     ),
@@ -196,7 +257,7 @@ small_lossless_webp = _TestImage(
     b".webp",
 )
 
-empty_file = _TestImage(
+empty_file = TestImage(
     b"",
     b"image/gif",
     b".gif",
@@ -204,7 +265,7 @@ empty_file = _TestImage(
     unable_to_thumbnail=True,
 )
 
-SVG = _TestImage(
+SVG = TestImage(
     b"""<?xml version="1.0"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
@@ -227,19 +288,15 @@ test_images = [
     empty_file,
     SVG,
 ]
-urls = [
-    "_matrix/media/r0/thumbnail",
-    "_matrix/client/unstable/org.matrix.msc3916/media/thumbnail",
-]
+input_values = [(x,) for x in test_images]
 
 
-@parameterized_class(("test_image", "url"), itertools.product(test_images, urls))
+@parameterized_class(("test_image",), input_values)
 class MediaRepoTests(unittest.HomeserverTestCase):
     servlets = [media.register_servlets]
-    test_image: ClassVar[_TestImage]
+    test_image: ClassVar[TestImage]
     hijack_auth = True
     user_id = "@test:user"
-    url: ClassVar[str]
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.fetches: List[
@@ -266,7 +323,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
             ) -> Tuple[int, Dict[bytes, List[bytes]]]:
                 data, response = r
                 output_stream.write(data)
@@ -304,7 +361,6 @@ class MediaRepoTests(unittest.HomeserverTestCase):
             "config": {"directory": self.storage_path},
         }
         config["media_storage_providers"] = [provider_config]
-        config["experimental_features"] = {"msc3916_authenticated_media_enabled": True}
 
         hs = self.setup_test_homeserver(config=config, federation_http_client=client)
 
@@ -509,7 +565,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=scale"
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -537,7 +593,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -573,7 +629,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
         params = "?width=32&height=32&method=" + method
         channel = self.make_request(
             "GET",
-            f"/{self.url}/{self.media_id}{params}",
+            f"/_matrix/media/r0/thumbnail/{self.media_id}{params}",
             shorthand=False,
             await_result=False,
         )
@@ -608,7 +664,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_UNKNOWN",
-                    "error": f"Cannot find any thumbnails for the requested media ('/{self.url}/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
+                    "error": "Cannot find any thumbnails for the requested media ('/_matrix/media/r0/thumbnail/example.com/12345'). This might mean the media is not a supported_media_format=(image/jpeg, image/jpg, image/webp, image/gif, image/png) or that thumbnailing failed for some other reason. (Dynamic thumbnails are disabled on this server.)",
                 },
             )
         else:
@@ -618,7 +674,7 @@ class MediaRepoTests(unittest.HomeserverTestCase):
                 channel.json_body,
                 {
                     "errcode": "M_NOT_FOUND",
-                    "error": f"Not found '/{self.url}/example.com/12345'",
+                    "error": "Not found '/_matrix/media/r0/thumbnail/example.com/12345'",
                 },
             )
 
@@ -1063,13 +1119,15 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
         )
         assert channel.code == 200
 
+    @override_config({"remote_media_download_burst_count": "87M"})
     @patch(
         "synapse.http.matrixfederationclient.read_body_with_max_size",
         read_body_with_max_size_30MiB,
     )
-    def test_download_ratelimit_max_size_sub(self) -> None:
+    def test_download_ratelimit_unknown_length(self) -> None:
         """
-        Test that if no content-length is provided, the default max size is applied instead
+        Test that if no content-length is provided, ratelimit will still be applied after
+        download once length is known
         """
 
         # mock out actually sending the request
@@ -1083,19 +1141,48 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 
         self.client._send_request = _send_request  # type: ignore
 
-        # ten requests should go through using the max size (500MB/50MB)
-        for i in range(10):
-            channel2 = self.make_request(
+        # 3 requests should go through (note 3rd one would technically violate ratelimit but
+        # is applied *after* download - the next one will be ratelimited)
+        for i in range(3):
+            channel = self.make_request(
                 "GET",
                 f"/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxy{i}",
                 shorthand=False,
             )
-            assert channel2.code == 200
+            assert channel.code == 200
 
-        # eleventh will hit ratelimit
-        channel3 = self.make_request(
+        # 4th will hit ratelimit
+        channel2 = self.make_request(
             "GET",
             "/_matrix/media/v3/download/remote.org/abcdefghijklmnopqrstuvwxyx",
             shorthand=False,
         )
-        assert channel3.code == 429
+        assert channel2.code == 429
+
+    @override_config({"max_upload_size": "29M"})
+    @patch(
+        "synapse.http.matrixfederationclient.read_body_with_max_size",
+        read_body_with_max_size_30MiB,
+    )
+    def test_max_download_respected(self) -> None:
+        """
+        Test that the max download size is enforced - note that max download size is determined
+        by the max_upload_size
+        """
+
+        # mock out actually sending the request
+        async def _send_request(*args: Any, **kwargs: Any) -> IResponse:
+            resp = MagicMock(spec=IResponse)
+            resp.code = 200
+            resp.length = 31457280
+            resp.headers = Headers({"Content-Type": ["application/octet-stream"]})
+            resp.phrase = b"OK"
+            return resp
+
+        self.client._send_request = _send_request  # type: ignore
+
+        channel = self.make_request(
+            "GET", "/_matrix/media/v3/download/remote.org/abcd", shorthand=False
+        )
+        assert channel.code == 502
+        assert channel.json_body["errcode"] == "M_TOO_LARGE"

@@ -283,6 +283,10 @@ class DeactivateAccountHandler:
                     ratelimit=False,
                     require_consent=False,
                 )
+
+                # Mark the room forgotten too, because they won't be able to do this
+                # for us. This may lead to the room being purged eventually.
+                await self._room_member_handler.forget(user, room_id)
             except Exception:
                 logger.exception(
                     "Failed to part user %r from room %r: ignoring and continuing",

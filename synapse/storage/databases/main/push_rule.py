@@ -109,6 +109,7 @@ def _load_rules(
         msc3664_enabled=experimental_config.msc3664_enabled,
         msc3381_polls_enabled=experimental_config.msc3381_polls_enabled,
         msc4028_push_encrypted_events=experimental_config.msc4028_push_encrypted_events,
+        msc4210_enabled=experimental_config.msc4210_enabled,
     )
 
     return filtered_rules
@@ -177,6 +178,9 @@ class PushRulesWorkerStore(
             int
         """
         return self._push_rules_stream_id_gen.get_current_token()
+
+    def get_push_rules_stream_id_gen(self) -> MultiWriterIdGenerator:
+        return self._push_rules_stream_id_gen
 
     def process_replication_rows(
         self, stream_name: str, instance_name: str, token: int, rows: Iterable[Any]

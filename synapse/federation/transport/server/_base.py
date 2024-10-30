@@ -113,7 +113,7 @@ class Authenticator:
                 ):
                     raise AuthenticationError(
                         HTTPStatus.UNAUTHORIZED,
-                        "Destination mismatch in auth header",
+                        f"Destination mismatch in auth header, received: {destination!r}",
                         Codes.UNAUTHORIZED,
                     )
         if (
@@ -362,7 +362,9 @@ class BaseFederationServlet:
                                 return None
                             if (
                                 func.__self__.__class__.__name__  # type: ignore
-                                == "FederationUnstableMediaDownloadServlet"
+                                == "FederationMediaDownloadServlet"
+                                or func.__self__.__class__.__name__  # type: ignore
+                                == "FederationMediaThumbnailServlet"
                             ):
                                 response = await func(
                                     origin, content, request, *args, **kwargs
@@ -374,7 +376,9 @@ class BaseFederationServlet:
                     else:
                         if (
                             func.__self__.__class__.__name__  # type: ignore
-                            == "FederationUnstableMediaDownloadServlet"
+                            == "FederationMediaDownloadServlet"
+                            or func.__self__.__class__.__name__  # type: ignore
+                            == "FederationMediaThumbnailServlet"
                         ):
                             response = await func(
                                 origin, content, request, *args, **kwargs

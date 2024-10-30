@@ -103,7 +103,7 @@ _rate_limiter_instances_lock = threading.Lock()
 
 
 def _get_counts_from_rate_limiter_instance(
-    count_func: Callable[["FederationRateLimiter"], int]
+    count_func: Callable[["FederationRateLimiter"], int],
 ) -> Mapping[Tuple[str, ...], int]:
     """Returns a count of something (slept/rejected hosts) by (metrics_name)"""
     # Cast to a list to prevent it changing while the Prometheus

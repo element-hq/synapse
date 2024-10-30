@@ -23,7 +23,7 @@ import logging
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -40,10 +40,6 @@ from ._base import client_patterns
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import StrictStr
-else:
-    from pydantic import StrictStr
 
 logger = logging.getLogger(__name__)
 
