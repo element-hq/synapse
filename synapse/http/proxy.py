@@ -30,7 +30,7 @@ from twisted.internet.protocol import connectionDone
 from twisted.python import failure
 from twisted.python.failure import Failure
 from twisted.web.client import ResponseDone
-from twisted.web.http_headers import Headers
+from twisted.web.http_headers import Headers, _nameEncoder
 from twisted.web.iweb import IResponse
 from twisted.web.resource import IResource
 from twisted.web.server import Request, Site
@@ -65,11 +65,14 @@ HOP_BY_HOP_HEADERS = {
 if hasattr(Headers, "_canonicalNameCaps"):
     # Twisted < 24.7.0rc1
     _canonicalHeaderName = Headers()._canonicalNameCaps  # type: ignore[attr-defined]
-else:
-    # Twisted >= 24.7.0rc1
+elif hasattr(Headers, "_encodeName"):
+    # 24.7.0rc1 <= Twisted < 24.10.0rc1
     # But note that `_encodeName` still exists on prior versions,
     # it just encodes differently
     _canonicalHeaderName = Headers()._encodeName
+else:
+    # Twisted >= 24.10.0rc1
+    _canonicalHeaderName = _nameEncoder.encode
 
 
 def parse_connection_header_value(
