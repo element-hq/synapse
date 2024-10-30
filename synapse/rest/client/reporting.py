@@ -22,7 +22,7 @@
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Tuple, cast, Pattern, Any
+from typing import TYPE_CHECKING, Any, Pattern, Tuple, cast
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
