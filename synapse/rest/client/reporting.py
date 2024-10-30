@@ -22,7 +22,7 @@
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, Pattern, Tuple, cast
+from typing import TYPE_CHECKING, Tuple
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
@@ -110,11 +110,14 @@ class ReportRoomRestServlet(RestServlet):
     Introduced by MSC4151: https://github.com/matrix-org/matrix-spec-proposals/pull/4151
     """
 
-    PATTERNS = client_patterns(
-        "/rooms/(?P<room_id>[^/]*)/report$",
-        releases=("v3",),
-        unstable=False,
-        v1=False,
+    # Cast the Iterable to a list so that we can `append` below.
+    PATTERNS = list(
+        client_patterns(
+            "/rooms/(?P<room_id>[^/]*)/report$",
+            releases=("v3",),
+            unstable=False,
+            v1=False,
+        )
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -127,10 +130,7 @@ class ReportRoomRestServlet(RestServlet):
         # TODO: Remove the unstable variant after 2-3 releases
         # https://github.com/element-hq/synapse/issues/17373
         if hs.config.experimental.msc4151_enabled:
-            # XXX: We shouldn't be casting like this because we're relying on an
-            # implementation detail. This code *should* be temporary though, per
-            # above TODO, so is safe enough?
-            cast(self.PATTERNS, list[Pattern[Any]]).append(
+            self.PATTERNS.append(
                 re.compile(
                     f"^{CLIENT_API_PREFIX}/unstable/org.matrix.msc4151"
                     "/rooms/(?P<room_id>[^/]*)/report$"
