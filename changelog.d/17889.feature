@@ -1,0 +1,1 @@
+Set `enable_authenticated_media` to `true` by default. In a future release of Synapse, this option will be removed and become always-on.
