@@ -103,6 +103,141 @@ apply if you want your config file to be read properly. A few helpful things to 
   In addition, each setting has an example of its usage, with the proper indentation
   shown.
 """
+SECTION_HEADERS = {
+    "modules": {
+        "title": "Modules",
+        "description": (
+            "Server admins can expand Synapse's functionality with external "
+            "modules.\n\n"
+            "See [here](../../modules/index.md) for more documentation on how "
+            "to configure or create custom modules for Synapse."
+        ),
+    },
+    "server_name": {
+        "title": "Server",
+        "description": "Define your homeserver name and other base options.",
+    },
+    "admin_contact": {
+        "title": "Homeserver blocking",
+        "description": "Useful options for Synapse admins.",
+    },
+    "tls_certificate_path": {
+        "title": "TLS",
+        "description": "Options related to TLS.",
+    },
+    "federation_domain_whitelist": {
+        "title": "Federation",
+        "description": "Options related to federation.",
+    },
+    "event_cache_size": {
+        "title": "Caching",
+        "description": "Options related to caching.",
+    },
+    "database": {
+        "title": "Database",
+        "description": "Config options related to database settings.",
+    },
+    "log_config": {
+        "title": "Logging",
+        "description": ("Config options related to logging."),
+    },
+    "rc_message": {
+        "title": "Ratelimiting",
+        "description": (
+            "Options related to ratelimiting in Synapse.\n\n"
+            "Each ratelimiting configuration is made of two parameters:\n"
+            "- `per_second`: number of requests a client can send per second.\n"
+            "- `burst_count`: number of requests a client can send before "
+            "being throttled."
+        ),
+    },
+    "enable_authenticated_media": {
+        "title": "Media Store",
+        "description": "Config options related to Synapse's media store.",
+    },
+    "recaptcha_public_key": {
+        "title": "Captcha",
+        "description": (
+            "See [here](../../CAPTCHA_SETUP.md) for full details on setting up captcha."
+        ),
+    },
+    "turn_uris": {
+        "title": "TURN",
+        "description": ("Options related to adding a TURN server to Synapse."),
+    },
+    "enable_registration": {
+        "title": "Registration",
+        "description": (
+            "Registration can be rate-limited using the parameters in the "
+            "[Ratelimiting](#ratelimiting) section of this manual."
+        ),
+    },
+    "session_lifetime": {
+        "title": "User session management",
+        "description": ("Config options related to user session management."),
+    },
+    "enable_metrics": {
+        "title": "Metrics",
+        "description": ("Config options related to metrics."),
+    },
+    "room_prejoin_state": {
+        "title": "API Configuration",
+        "description": ("Config settings related to the client/server API."),
+    },
+    "signing_key_path": {
+        "title": "Signing Keys",
+        "description": ("Config options relating to signing keys."),
+    },
+    "saml2_config": {
+        "title": "Single sign-on integration",
+        "description": (
+            "The following settings can be used to make Synapse use a single sign-on provider for authentication, instead of its internal password database.\n\n"
+            "You will probably also want to set the following options to `false` to disable the regular login/registration flows:\n"
+            "* [`enable_registration`](#enable_registration)\n"
+            "* [`password_config.enabled`](#password_config)"
+        ),
+    },
+    "push": {
+        "title": "Push",
+        "description": ("Configuration settings related to push notifications."),
+    },
+    "encryption_enabled_by_default_for_room_type": {
+        "title": "Rooms",
+        "description": ("Config options relating to rooms."),
+    },
+    "opentracing": {
+        "title": "Opentracing",
+        "description": ("Configuration options related to Opentracing support."),
+    },
+    "worker_replication_secret": {
+        "title": "Coordinating workers",
+        "description": (
+            "Configuration options related to workers which belong in the main config file (usually called `homeserver.yaml`). A Synapse deployment can scale horizontally by running multiple Synapse processes called _workers_. Incoming requests are distributed between workers to handle higher loads. Some workers are privileged and can accept requests from other workers.\n\n"
+            "As a result, the worker configuration is divided into two parts.\n\n"
+            "1. The first part (in this section of the manual) defines which shardable tasks are delegated to privileged workers. This allows unprivileged workers to make requests to a privileged worker to act on their behalf.\n"
+            "2. [The second part](#individual-worker-configuration) controls the behaviour of individual workers in isolation.\n\n"
+            "For guidance on setting up workers, see the [worker documentation](../../workers.md)."
+        ),
+    },
+    "worker_app": {
+        "title": "Individual worker configuration",
+        "description": (
+            "These options configure an individual worker, in its worker configuration file. They should be not be provided when configuring the main process.\n\n"
+            "Note also the configuration above for [coordinating a cluster of workers](#coordinating-workers).\n\n"
+            "For guidance on setting up workers, see the [worker documentation](../../workers.md)."
+        ),
+    },
+    "background_updates": {
+        "title": "Background Updates",
+        "description": ("Configuration settings related to background updates."),
+    },
+    "auto_accept_invites": {
+        "title": "Auto Accept Invites",
+        "description": (
+            "Configuration settings related to automatically accepting invites."
+        ),
+    },
+}
 INDENT = "  "
 
 
@@ -253,6 +388,14 @@ def section(prop: str, values: dict) -> str:
             return ""
         return f"Defaults to `{json.dumps(default)}`."
 
+    def header() -> str:
+        try:
+            title = SECTION_HEADERS[prop]["title"]
+            description = SECTION_HEADERS[prop]["description"]
+            return f"## {title}\n\n{description}\n\n---\n"
+        except KeyError:
+            return ""
+
     def title() -> str:
         return f"### `{prop}`\n"
 
@@ -282,6 +425,7 @@ def section(prop: str, values: dict) -> str:
 
     return (
         "---\n"
+        + header()
         + title()
         + description()
         + items()
