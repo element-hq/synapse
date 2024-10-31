@@ -678,7 +678,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
 
         hero_user_ids = extract_heroes_from_room_summary(
-            room_membership_summary, me="@fakuser"
+            room_membership_summary, me="@fakeuser"
         )
 
         # First 5 users to join the room, excluding service members.
