@@ -285,7 +285,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         )
 
     @cached(max_entries=100000)  # type: ignore[synapse-@cached-mutable]
-    async def get_room_summary(self, room_id: str) -> Mapping[str, MemberSummary]:
+    async def get_room_summary(
+        self, room_id: str, exclude_service_users: bool = False
+    ) -> Mapping[str, MemberSummary]:
         """
         Get the details of a room roughly suitable for use by the room
         summary extension to /sync. Useful when lazy loading room members.
@@ -363,28 +365,30 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
             return res
 
-        functional_members_event_id = await self.db_pool.simple_select_one_onecol(
-            table="current_state_events",
-            keyvalues={
-                "room_id": room_id,
-                "type": EventTypes.MSC4171FunctionalMembers,
-                "state_key": "",
-            },
-            retcol="event_id",
-            allow_none=True,
-        )
-
         exclude_members = []
-        if functional_members_event_id:
-            functional_members_event = await self.get_event(functional_members_event_id)
-            functional_members_data = functional_members_event.content.get(
-                "service_members"
+        if exclude_service_users:
+            functional_members_event_id = await self.db_pool.simple_select_one_onecol(
+                table="current_state_events",
+                keyvalues={
+                    "room_id": room_id,
+                    "type": EventTypes.MSC4171FunctionalMembers,
+                    "state_key": "",
+                },
+                retcol="event_id",
+                allow_none=True,
             )
-            # ONLY use this value if this looks like a valid list of strings. Otherwise, ignore.
-            if isinstance(functional_members_data, list) and all(
-                isinstance(item, str) for item in functional_members_data
-            ):
-                exclude_members = functional_members_data
+            if functional_members_event_id:
+                functional_members_event = await self.get_event(
+                    functional_members_event_id
+                )
+                functional_members_data = functional_members_event.content.get(
+                    "service_members"
+                )
+                # ONLY use this value if this looks like a valid list of strings. Otherwise, ignore.
+                if isinstance(functional_members_data, list) and all(
+                    isinstance(item, str) for item in functional_members_data
+                ):
+                    exclude_members = functional_members_data
 
         return await self.db_pool.runInteraction(
             "get_room_summary", _get_room_summary_txn, exclude_members

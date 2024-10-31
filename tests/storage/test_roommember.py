@@ -675,7 +675,9 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         self.helper.join(room_id, user6_id, tok=user6_tok)
         self.helper.join(room_id, user7_id, tok=user7_tok)
 
-        room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
+        room_membership_summary = self.get_success(
+            self.store.get_room_summary(room_id, True)
+        )
 
         hero_user_ids = extract_heroes_from_room_summary(
             room_membership_summary, me="@fakeuser"

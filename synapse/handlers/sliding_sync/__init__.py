@@ -90,6 +90,8 @@ class SlidingSyncHandler:
         self.event_sources = hs.get_event_sources()
         self.relations_handler = hs.get_relations_handler()
         self.rooms_to_exclude_globally = hs.config.server.rooms_to_exclude_from_sync
+        self.should_exclude_service_members = hs.config.experimental.msc4171_enabled
+
         self.is_mine_id = hs.is_mine_id
 
         self.connection_store = SlidingSyncConnectionStore(self.store)
@@ -829,7 +831,9 @@ class SlidingSyncHandler:
                 # For invite/knock rooms we don't include the information.
                 room_membership_summary = {}
             else:
-                room_membership_summary = await self.store.get_room_summary(room_id)
+                room_membership_summary = await self.store.get_room_summary(
+                    room_id, self.should_exclude_service_members
+                )
                 # TODO: Reverse/rewind back to the `to_token`
 
             hero_user_ids = extract_heroes_from_room_summary(

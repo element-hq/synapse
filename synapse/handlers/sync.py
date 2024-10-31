@@ -343,6 +343,7 @@ class SyncHandler:
         self._task_scheduler = hs.get_task_scheduler()
 
         self.should_calculate_push_rules = hs.config.push.enable_push
+        self.should_exclude_service_members = hs.config.experimental.msc4171_enabled
 
         # TODO: flush cache entries on subsequent sync request.
         #    Once we get the next /sync request (ie, one with the same access token
@@ -1040,7 +1041,9 @@ class SyncHandler:
         )
 
         # this is heavily cached, thus: fast.
-        details = await self.store.get_room_summary(room_id)
+        details = await self.store.get_room_summary(
+            room_id, self.should_exclude_service_members
+        )
 
         name_id = state_ids.get((EventTypes.Name, ""))
         canonical_alias_id = state_ids.get((EventTypes.CanonicalAlias, ""))

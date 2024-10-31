@@ -732,6 +732,8 @@ class FederationServer(FederationBase):
         state_event_ids: Collection[str]
         servers_in_room: Optional[Collection[str]]
         if caller_supports_partial_state:
+            # NOTE: We do not exclude service members from the federated
+            # room summary.
             summary = await self.store.get_room_summary(room_id)
             state_event_ids = _get_event_ids_for_partial_state_join(
                 event, prev_state_ids, summary
