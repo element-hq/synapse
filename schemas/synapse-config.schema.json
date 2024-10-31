@@ -3297,6 +3297,66 @@
         }
       ]
     },
+    "worker_app": {
+      "type": "string",
+      "description": "The type of worker. The currently available worker applications are listed in [worker documentation](../../workers.md#available-worker-applications).\n\nThe most common worker is the [`synapse.app.generic_worker`](../../workers.md#synapseappgeneric_worker).",
+      "examples": ["synapse.app.generic_worker"]
+    },
+    "worker_name": {
+      "type": "string",
+      "description": "A unique name for the worker. The worker needs a name to be addressed in further parameters and identification in log files. We strongly recommend giving each worker a unique `worker_name`.",
+      "examples": ["generic_worker1"]
+    },
+    "worker_listeners": {
+      "type": "array",
+      "description": "A worker can handle HTTP requests. To do so, a `worker_listeners` option must be declared, in the same way as the [`listeners` option](#listeners) in the shared config.\n\nWorkers declared in [`stream_writers`](#stream_writers) and [`instance_map`](#instance_map) will need to include a `replication` listener here, in order to accept internal HTTP requests from other workers.\n\nExample #2 is using UNIX sockets with a `replication` listener.",
+      "default": [],
+      "examples": [
+        [
+          {
+            "type": "http",
+            "port": 8083,
+            "resources": [{ "names": ["client", "federation"] }]
+          }
+        ],
+        [
+          {
+            "type": "http",
+            "path": "/run/synapse/worker_replication.sock",
+            "resources": [{ "names": ["replication"] }]
+          },
+          {
+            "type": "http",
+            "path": "/run/synapse/worker_public.sock",
+            "resources": [{ "names": ["client", "federation"] }]
+          }
+        ]
+      ]
+    },
+    "worker_manhole": {
+      "type": ["integer", "null"],
+      "description": "A worker may have a listener for [`manhole`](../../manhole.md). It allows server administrators to access a Python shell on the worker.\n\nThe example below is a short form for\n```yaml\nworker_listeners:\n  - port: 9000\n    bind_addresses: ['127.0.0.1']\n    type: manhole\n```\n\nIt needs also an additional [`manhole_settings`](#manhole_settings) configuration.",
+      "default": null,
+      "examples": [9000]
+    },
+    "worker_daemonize": {
+      "type": "boolean",
+      "description": "Specifies whether the worker should be started as a daemon process. If Synapse is being managed by [systemd](../../systemd-with-workers/), this option must be omitted or set to `false`.",
+      "default": false,
+      "examples": [true]
+    },
+    "worker_pid_file": {
+      "type": ["string", "null"],
+      "description": "When running a worker as a daemon, we need a place to store the [PID](https://en.wikipedia.org/wiki/Process_identifier) of the worker. This option defines the location of that “pid file”.\n\nThis option is required if `worker_daemonize` is `true` and ignored otherwise.\n\nSee also the [`pid_file` option](#pid_file) option for the main Synapse process.",
+      "default": null,
+      "examples": ["DATADIR/generic_worker1.pid"]
+    },
+    "worker_log_config": {
+      "type": ["string", "null"],
+      "description": "This option specifies a yaml python logging config file as described [here](https://docs.python.org/3/library/logging.config.html#configuration-dictionary-schema). See also the [`log_config` option](#log_config) option for the main Synapse process.",
+      "default": null,
+      "examples": ["/etc/matrix-synapse/generic-worker-log.yaml"]
+    },
     "background_updates": {
       "type": "object",
       "description": "Background updates are database updates that are run in the background in batches. The duration, minimum batch size, default batch size, whether to sleep between batches and if so, how long to sleep can all be configured. This is helpful to speed up or slow down the updates.",
