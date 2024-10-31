@@ -480,7 +480,15 @@ class FederationServer(FederationBase):
                     pdu_results[possible_event_id] = {"error": msg}
                     continue
 
-            event = event_from_pdu_json(p, room_version)
+            try:
+                event = event_from_pdu_json(p, room_version)
+            except Exception as e:
+                if possible_event_id != "<Unknown>":
+                    msg = f"Failed to convert json to event"
+                    pdu_results[possible_event_id] = {"error": f"Failed to convert json into event, {e}"}
+                logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, because of {e}")
+                continue
+
             pdus_by_room.setdefault(room_id, []).append(event)
 
             if event.origin_server_ts > newest_pdu_ts:
