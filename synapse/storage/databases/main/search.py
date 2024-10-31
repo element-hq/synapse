@@ -94,7 +94,7 @@ class SearchWorkerStore(SQLBaseStore):
             VALUES (?,?,?,to_tsvector('english', ?),?,?)
             """
 
-            args1 = (
+            args1 = [
                 (
                     entry.event_id,
                     entry.room_id,
@@ -104,7 +104,7 @@ class SearchWorkerStore(SQLBaseStore):
                     entry.origin_server_ts,
                 )
                 for entry in entries
-            )
+            ]
 
             txn.execute_batch(sql, args1)
 

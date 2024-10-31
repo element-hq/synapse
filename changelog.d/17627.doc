@@ -1,1 +1,0 @@
-Clarify when the `user_may_invite` and `user_may_send_3pid_invite` module callbacks are called.

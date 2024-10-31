@@ -1686,7 +1686,7 @@ class PersistEventsStore:
                 """
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         stream_id,
                         self._instance_name,
@@ -1699,17 +1699,17 @@ class PersistEventsStore:
                         state_key,
                     )
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
             # Now we actually update the current_state_events table
 
             txn.execute_batch(
                 "DELETE FROM current_state_events"
                 " WHERE room_id = ? AND type = ? AND state_key = ?",
-                (
+                [
                     (room_id, etype, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
 
             # We include the membership in the current state table, hence we do
@@ -1799,11 +1799,11 @@ class PersistEventsStore:
             txn.execute_batch(
                 "DELETE FROM local_current_membership"
                 " WHERE room_id = ? AND user_id = ?",
-                (
+                [
                     (room_id, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
                     if etype == EventTypes.Member and self.is_mine_id(state_key)
-                ),
+                ],
             )
 
         if to_insert:
@@ -3208,7 +3208,7 @@ class PersistEventsStore:
         if notifiable_events:
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         event.room_id,
                         event.internal_metadata.stream_ordering,
@@ -3216,18 +3216,18 @@ class PersistEventsStore:
                         event.event_id,
                     )
                     for event in notifiable_events
-                ),
+                ],
             )
 
         # Now we delete the staging area for *all* events that were being
         # persisted.
         txn.execute_batch(
             "DELETE FROM event_push_actions_staging WHERE event_id = ?",
-            (
+            [
                 (event.event_id,)
                 for event, _ in all_events_and_contexts
                 if event.internal_metadata.is_notifiable()
-            ),
+            ],
         )
 
     def _remove_push_actions_for_event_id_txn(
