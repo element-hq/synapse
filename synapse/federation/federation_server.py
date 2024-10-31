@@ -56,7 +56,7 @@ from synapse.api.errors import (
     SynapseError,
     UnsupportedRoomVersionError,
 )
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, EventFormatVersions, RoomVersion
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
@@ -432,6 +432,8 @@ class FederationServer(FederationBase):
 
         newest_pdu_ts = 0
 
+        pdu_results = {}
+
         for p in transaction.pdus:
             # FIXME (richardv): I don't think this works:
             #  https://github.com/matrix-org/synapse/issues/8429
@@ -469,13 +471,22 @@ class FederationServer(FederationBase):
                 logger.info("Ignoring PDU: %s", e)
                 continue
 
+            if possible_event_id != "<Unknown>":
+                if room_version.event_format != EventFormatVersions.ROOM_V1_V2:
+                    logger.info(f"""Rejecting event {possible_event_id} from {origin}
+                                because the event was made for a v1 room,
+                                while {room_id} is a {room_version} room""")
+                    msg = "Event ID incorrectly supplied in non-v1/v2 room"
+                    pdu_results[possible_event_id] = {"error": msg}
+                    continue
+
             event = event_from_pdu_json(p, room_version)
             pdus_by_room.setdefault(room_id, []).append(event)
 
             if event.origin_server_ts > newest_pdu_ts:
                 newest_pdu_ts = event.origin_server_ts
 
-        pdu_results = {}
+
 
         # we can process different rooms in parallel (which is useful if they
         # require callouts to other servers to fetch missing events), but
