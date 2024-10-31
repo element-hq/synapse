@@ -1,3 +1,70 @@
+# Synapse 1.118.0 (2024-10-29)
+
+No significant changes since 1.118.0rc1.
+
+### Python 3.8 support will be dropped in the next release
+
+Python 3.8 is now [end-of-life](https://devguide.python.org/versions/). As per our [Deprecation Policy for Platform Dependencies](https://element-hq.github.io/synapse/latest/deprecation_policy.html#policy), Synapse will be dropping support for Python 3.8 in the next release; Synapse 1.119.0.
+
+Synapse 1.118.x will be the final release to support Python 3.8. If you are running Synapse with Python 3.8, please upgrade before the 1.119.0 release, due in less than one month.
+
+### Python 3.13 and PostgreSQL 17 support
+
+On the other end of the spectrum, Synapse 1.118.0 is the first release to support [Python 3.13](https://www.python.org/downloads/release/python-3130/)! [PostgreSQL 17](https://www.postgresql.org/about/news/postgresql-17-released-2936/) is also supported as of this release.
+
+
+# Synapse 1.118.0rc1 (2024-10-22)
+
+### Features
+
+- Added the `display_name_claim` option to the JWT configuration. This option allows specifying the claim key that contains the user's display name in the JWT payload. ([\#17708](https://github.com/element-hq/synapse/issues/17708))
+- Implement [MSC4210](https://github.com/matrix-org/matrix-spec-proposals/pull/4210): Remove legacy mentions. Contributed by @tulir @ Beeper. ([\#17783](https://github.com/element-hq/synapse/issues/17783))
+
+### Bugfixes
+
+- Fix saving of PNG thumbnails, when the original image is in the CMYK color space. ([\#17736](https://github.com/element-hq/synapse/issues/17736))
+- Fix bug with sliding sync where the server would not return state that was added to the `required_state` config. ([\#17785](https://github.com/element-hq/synapse/issues/17785), [\#17805](https://github.com/element-hq/synapse/issues/17805))
+- Fix a bug in [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync that would cause rooms to stay forgotten and hidden even after rejoining. ([\#17835](https://github.com/element-hq/synapse/issues/17835))
+
+### Improved Documentation
+
+- Clarify when the `user_may_invite` and `user_may_send_3pid_invite` module callbacks are called. ([\#17627](https://github.com/element-hq/synapse/issues/17627))
+- Correct documentation to refer to the `--config-path` argument instead of `--config-file`. ([\#17802](https://github.com/element-hq/synapse/issues/17802))
+- Fix typo in `target_cache_memory_usage` docs. ([\#17825](https://github.com/element-hq/synapse/issues/17825))
+
+### Internal Changes
+
+- Slight optimization when fetching state/events for Sliding Sync. ([\#17718](https://github.com/element-hq/synapse/issues/17718))
+- Add Python 3.13 and Postgres 17 to the test matrix. ([\#17752](https://github.com/element-hq/synapse/issues/17752))
+- Test github token before running release script steps. ([\#17803](https://github.com/element-hq/synapse/issues/17803))
+- Build debian packages for new Ubuntu versions, and stop building for no longer supported versions. ([\#17824](https://github.com/element-hq/synapse/issues/17824))
+- Enable the `.org.matrix.msc4028.encrypted_event` push rule by default in accordance with [MSC4028](https://github.com/matrix-org/matrix-spec-proposals/pull/4028). Note that the corresponding experimental feature must still be switched on for this push rule to have any effect. ([\#17826](https://github.com/element-hq/synapse/issues/17826))
+- Fix some typing issues uncovered by upgrading mypy to 1.11.x. ([\#17842](https://github.com/element-hq/synapse/issues/17842))
+
+
+
+### Updates to locked dependencies
+
+* Bump mypy from 1.10.1 to 1.11.2. ([\#17842](https://github.com/element-hq/synapse/issues/17842))
+* Bump mypy-zope from 1.0.5 to 1.0.7. ([\#17827](https://github.com/element-hq/synapse/issues/17827))
+* Bump phonenumbers from 8.13.46 to 8.13.47. ([\#17797](https://github.com/element-hq/synapse/issues/17797))
+* Bump psycopg2 from 2.9.9 to 2.9.10. ([\#17843](https://github.com/element-hq/synapse/issues/17843))
+* Bump ruff from 0.6.8 to 0.6.9. ([\#17794](https://github.com/element-hq/synapse/issues/17794))
+* Bump sentry-sdk from 2.14.0 to 2.15.0. ([\#17795](https://github.com/element-hq/synapse/issues/17795))
+* Bump sentry-sdk from 2.15.0 to 2.16.0. ([\#17829](https://github.com/element-hq/synapse/issues/17829))
+* Bump sentry-sdk from 2.16.0 to 2.17.0. ([\#17844](https://github.com/element-hq/synapse/issues/17844))
+* Bump sigstore/cosign-installer from 3.6.0 to 3.7.0. ([\#17798](https://github.com/element-hq/synapse/issues/17798))
+* Bump tomli from 2.0.1 to 2.0.2. ([\#17796](https://github.com/element-hq/synapse/issues/17796))
+* Bump types-requests from 2.32.0.20240914 to 2.32.0.20241016. ([\#17841](https://github.com/element-hq/synapse/issues/17841))
+* Bump types-setuptools from 75.1.0.20240917 to 75.1.0.20241014. ([\#17828](https://github.com/element-hq/synapse/issues/17828))
+
+# Synapse 1.117.0 (2024-10-15)
+
+No significant changes since 1.117.0rc1.
+
+
+
+
 # Synapse 1.117.0rc1 (2024-10-08)
 
 ### Features
