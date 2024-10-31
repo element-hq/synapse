@@ -628,7 +628,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         room_membership_summary = self.get_success(self.store.get_room_summary(room_id))
 
         hero_user_ids = extract_heroes_from_room_summary(
-            room_membership_summary, me="@fakuser"
+            room_membership_summary, me="@fakeuser"
         )
 
         # First 5 users to join the room
@@ -686,6 +686,45 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         # First 5 users to join the room, excluding service members.
         self.assertListEqual(
             hero_user_ids, [user1_id, user4_id, user5_id, user6_id, user7_id]
+        )
+
+    def test_extract_heroes_from_room_summary_exclude_service_members_with_empty_heroes(self) -> None:
+        """
+        Test that `extract_heroes_from_room_summary(...)` will return an
+        empty set of heroes if all users have been excluded.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+
+        # Setup the room (user1 is the creator and is joined to the room)
+        room_id = self.helper.create_room_as(user1_id, tok=user1_tok)
+
+        # Exclude all users (except the creator, who is excluded from the results anyway)
+        self.helper.send_state(
+            room_id,
+            event_type=EventTypes.MSC4171FunctionalMembers,
+            body={"service_members": [user2_id, user3_id]},
+            tok=user1_tok,
+        )
+
+        self.helper.join(room_id, user2_id, tok=user2_tok)
+        self.helper.join(room_id, user3_id, tok=user3_tok)
+
+        room_membership_summary = self.get_success(
+            self.store.get_room_summary(room_id, True)
+        )
+
+        hero_user_ids = extract_heroes_from_room_summary(
+            room_membership_summary, me=user1_id
+        )
+
+        # First 5 users to join the room, excluding service members.
+        self.assertListEqual(
+            hero_user_ids, []
         )
 
     def test_extract_heroes_from_room_summary_membership_order(self) -> None:
