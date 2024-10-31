@@ -32,7 +32,7 @@ from synapse.api.errors import (
     SynapseError,
 )
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
-from synapse.types import JsonDict, Requester, UserID, create_requester, JsonValue
+from synapse.types import JsonDict, JsonValue, Requester, UserID, create_requester
 from synapse.util.caches.descriptors import cached
 from synapse.util.stringutils import parse_and_validate_mxc_uri
 
@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 MAX_DISPLAYNAME_LEN = 256
 MAX_AVATAR_URL_LEN = 1000
-# Field name length is specced at 255, value is server controlled.
-MAX_CUSTOM_FIELD_LEN = 255
+# Field name length is specced at 128.
+MAX_CUSTOM_FIELD_LEN = 128
 
 
 class ProfileHandler:

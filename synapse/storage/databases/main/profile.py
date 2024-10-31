@@ -18,9 +18,10 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+import json
+from typing import TYPE_CHECKING, Dict, Optional, Tuple, cast
 
-from psycopg2.extras import Json
+from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import ProfileFields
 from synapse.api.errors import StoreError
@@ -32,7 +33,7 @@ from synapse.storage.database import (
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
 from synapse.storage.engines import PostgresEngine
-from synapse.types import JsonDict, UserID, JsonValue
+from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -260,55 +261,61 @@ class ProfileWorkerStore(SQLBaseStore):
         )
 
     def _check_profile_size(
-        self, txn: LoggingTransaction, user_id: str, new_field_name: str, new_value: str
+        self,
+        txn: LoggingTransaction,
+        user_id: UserID,
+        new_field_name: str,
+        new_value: JsonValue,
     ) -> None:
-        # XXOXXXXXXXXXXX
-        return
-
-        # Start with 2 bytes for the braces.
-        total_bytes = 2
         # For each entry there are 4 quotes (2 each for key and value), 1 colon,
         # and 1 comma.
         PER_VALUE_EXTRA = 6
-        profile_info = self.db_pool.simple_select_one_txn(
-            txn,
-            table="profiles",
-            keyvalues={"full_user_id": user_id},
-            retcols=("displayname", "avatar_url"),
-            allow_none=True,
-        )
-        if profile_info:
-            display_name, avatar_url = profile_info
-            if display_name:
-                total_bytes += len("displayname") + len(display_name) + PER_VALUE_EXTRA
-            if avatar_url:
-                total_bytes += len("avatar_url") + len(avatar_url) + PER_VALUE_EXTRA
 
         # Add the size of the current custom profile fields, ignoring the entry
         # which will be overwritten.
         if isinstance(txn.database_engine, PostgresEngine):
             size_sql = """
-            SELECT SUM(CHAR_LENGTH(name)) + SUM(CHAR_LENGTH(value)), COUNT(name) AS total_bytes
-            FROM profile_fields
+            SELECT
+                OCTET_LENGTH((fields - ?)::text), OCTET_LENGTH(displayname), OCTET_LENGTH(avatar_url)
+            FROM profiles
             WHERE
-                user_id = ? AND name != ?
+                user_id = ?
             """
         else:
             size_sql = """
             SELECT SUM(LENGTH(name)) + SUM(LENGTH(value)), COUNT(name) AS total_bytes
-            FROM profile_fields
+            FROM profiles
             WHERE
-                user_id = ? AND name != ?
+                user_id = ?
             """
-        txn.execute(size_sql, (user_id, new_field_name))
-        row = cast(Tuple[Optional[int], int], txn.fetchone())
-        total_bytes += (row[0] or 0) + row[1] * PER_VALUE_EXTRA
+        txn.execute(
+            size_sql,
+            (
+                new_field_name,
+                user_id.localpart,
+            ),
+        )
+        row = cast(Tuple[Optional[int], Optional[int], Optional[int]], txn.fetchone())
 
-        # Add the length of the field being added.
-        total_bytes += len(new_field_name) + len(new_value) + PER_VALUE_EXTRA
+        # The values return null if the column is null.
+        total_bytes = (
+            # Discount the opening and closing braces to avoid double counting,
+            # but add one for a comma.
+            (row[0] - 1 if row[0] else 0)
+            + (
+                row[1] + len("displayname") + PER_VALUE_EXTRA
+                if new_field_name != ProfileFields.DISPLAYNAME and row[1]
+                else 0
+            )
+            + (
+                row[2] + len("avatar_url") + PER_VALUE_EXTRA
+                if new_field_name != ProfileFields.AVATAR_URL and row[2]
+                else 0
+            )
+        )
 
-        # There has been an over count of 1 via an additional comma.
-        total_bytes -= 1
+        # Add the length of the field being added + the braces.
+        total_bytes += len(encode_canonical_json({new_field_name: new_value}))
 
         if total_bytes > MAX_PROFILE_SIZE:
             raise StoreError(400, "Profile too large")
@@ -329,7 +336,7 @@ class ProfileWorkerStore(SQLBaseStore):
         def set_profile_displayname(txn: LoggingTransaction) -> None:
             if new_displayname is not None:
                 self._check_profile_size(
-                    txn, user_id.to_string(), ProfileFields.DISPLAYNAME, new_displayname
+                    txn, user_id, ProfileFields.DISPLAYNAME, new_displayname
                 )
 
             self.db_pool.simple_upsert_txn(
@@ -362,7 +369,7 @@ class ProfileWorkerStore(SQLBaseStore):
         def set_profile_avatar_url(txn: LoggingTransaction) -> None:
             if new_avatar_url is not None:
                 self._check_profile_size(
-                    txn, user_id.to_string(), ProfileFields.AVATAR_URL, new_avatar_url
+                    txn, user_id, ProfileFields.AVATAR_URL, new_avatar_url
                 )
 
             self.db_pool.simple_upsert_txn(
@@ -392,18 +399,31 @@ class ProfileWorkerStore(SQLBaseStore):
         """
 
         def set_profile_field(txn: LoggingTransaction) -> None:
-            self._check_profile_size(txn, user_id.to_string(), field_name, new_value)
+            self._check_profile_size(txn, user_id, field_name, new_value)
 
-            sql = """
-            INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, json_build_object(?, to_jsonb(?)))
-            ON CONFLICT (user_id)
-            DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
-            """
-            txn.execute(
-                sql,
-                # TODO Does new_value need to be canonical_json encoded?
-                (user_id.localpart, user_id.to_string(), field_name, Json(new_value)),
-            )
+            if isinstance(self.database_engine, PostgresEngine):
+                from psycopg2.extras import Json
+
+                sql = """
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, json_build_object(?, ?::jsonb))
+                ON CONFLICT (user_id)
+                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
+                """
+
+                txn.execute(
+                    sql,
+                    (
+                        user_id.localpart,
+                        user_id.to_string(),
+                        field_name,
+                        # encode to canonical JSON, but then pass as a JSON object
+                        # since we have passing bytes disabled at the database driver
+                        # level.
+                        Json(json.loads(encode_canonical_json(new_value))),
+                    ),
+                )
+            else:
+                raise RuntimeError("Unsupported")
 
         await self.db_pool.runInteraction("set_profile_field", set_profile_field)
 
@@ -417,10 +437,13 @@ class ProfileWorkerStore(SQLBaseStore):
         """
 
         def delete_profile_field(txn: LoggingTransaction) -> None:
-            sql = """
-            UPDATE profiles SET fields = fields - ?
-            WHERE user_id = ?
-            """
+            if isinstance(self.database_engine, PostgresEngine):
+                sql = """
+                UPDATE profiles SET fields = fields - ?
+                WHERE user_id = ?
+                """
+            else:
+                raise RuntimeError("Unsupported")
             txn.execute(
                 sql,
                 (field_name, user_id.localpart),

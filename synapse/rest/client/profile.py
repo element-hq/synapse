@@ -284,7 +284,7 @@ class UnstableProfileRestServlet(RestServlet):
 
         content = parse_json_object_from_request(request)
 
-        for field_name, new_value in content.items():
+        for field_name in content.keys():
             if len(field_name) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
@@ -331,7 +331,7 @@ class UnstableProfileRestServlet(RestServlet):
 
         content = parse_json_object_from_request(request)
 
-        for field_name, new_value in content.items():
+        for field_name in content.keys():
             if len(field_name) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE

@@ -25,12 +25,15 @@ import urllib.parse
 from http import HTTPStatus
 from typing import Any, Dict, Optional
 
+from canonicaljson import encode_canonical_json
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.errors import Codes
 from synapse.rest import admin
 from synapse.rest.client import login, profile, room
 from synapse.server import HomeServer
+from synapse.storage.databases.main.profile import MAX_PROFILE_SIZE
 from synapse.types import UserID
 from synapse.util import Clock
 
@@ -628,13 +631,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_size(self) -> None:
         """
-        Attempts to set a custom field name or value that is too long should get a 400 error.
+        Attempts to set a custom field name that is too long should get a 400 error.
         """
         # Key is missing.
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/",
-            content={"" * 100: "test"},
+            content={"": "test"},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
@@ -643,16 +646,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
-            content={"custom_field" * 100: "test"},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, 400, channel.result)
-
-        # Single value is too large.
-        channel = self.make_request(
-            "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
-            content={"custom_field": "test" * 100},
+            content={"c" * 129: "test"},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
@@ -662,40 +656,78 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """
         Attempts to set a custom field that would push the overall profile too large.
         """
-        # The maximum key and values size.
-        key = "a" * 255
-        # The first 126 work OK, len("owner") + (255 + 255 + 6) * 126 < 65536.
-        for i in range(126):
-            # Create a unique key.
-            key = f"{i:03}" + "a" * 252
-            channel = self.make_request(
-                "PUT",
-                f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-                content={key: "a" * 255},
-                access_token=self.owner_tok,
-            )
-            self.assertEqual(channel.code, 200, channel.result)
-
-        # The next one should fail.
-        key = "b" * 255
+        # Get right to the boundary:
+        #   len("displayname") + len("owner") + 5 = 21 for the displayname
+        #   1 + 65499 + 5 for key "a" = 65505
+        #   2 braces, 1 comma
+        # 3 + 21 + 65505 = 65529 < 65536.
+        key = "a"
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-            content={key: "a" * 255},
+            content={key: "a" * 65499},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Get the entire profile.
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+        canonical_json = encode_canonical_json(channel.json_body)
+        # 6 is the minimum bytes to store a value: 2 quotes, 1 colon, 1 comma, a non-empty key.
+        # Be one below that so we can prove we're at the boundary.
+        self.assertEqual(len(canonical_json), MAX_PROFILE_SIZE - 7)
+
+        # The next one should fail, note the value has a (JSON) length of 2.
+        key = "b"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: 12},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
 
-    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
-    def test_set_custom_field_invalid(self) -> None:
-        """Attempts to set an invalid value for custom_field should get a 400"""
+        # Setting an avatar or (longer) display name should not work.
         channel = self.make_request(
             "PUT",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
-            content={"custom_field": {"test": "bar"}},
+            f"/profile/{self.owner}/displayname",
+            content={"displayname": "owner1234567"},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            f"/profile/{self.owner}/avatar_url",
+            content={"avatar_url": "mxc://foo/bar"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+        # Removing a single byte should work.
+        key = "b"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: 1},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        # Finally, setting a field that already exists to a value that is <= in length should work.
+        key = "b"
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: 2},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_displayname(self) -> None:
