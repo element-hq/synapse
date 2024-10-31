@@ -81,7 +81,7 @@ pub const BASE_APPEND_OVERRIDE_RULES: &[PushRule] = &[
         ))]),
         actions: Cow::Borrowed(&[Action::Notify]),
         default: true,
-        default_enabled: false,
+        default_enabled: true,
     },
     PushRule {
         rule_id: Cow::Borrowed("global/override/.m.rule.suppress_notices"),
