@@ -303,6 +303,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         Args:
             room_id: The room ID to query
+            exclude_service_users: Should MSC4171 be used to exclude service members
         Returns:
             dict of membership states, pointing to a MemberSummary named tuple.
         """
