@@ -49,7 +49,10 @@ from synapse.types.handlers.sliding_sync import (
     SlidingSyncConfig,
     SlidingSyncResult,
 )
-from synapse.util.async_helpers import concurrently_execute
+from synapse.util.async_helpers import (
+    concurrently_execute,
+    gather_optional_coroutines,
+)
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -97,26 +100,26 @@ class SlidingSyncExtensionHandler:
         if sync_config.extensions is None:
             return SlidingSyncResult.Extensions()
 
-        to_device_response = None
+        to_device_coro = None
         if sync_config.extensions.to_device is not None:
-            to_device_response = await self.get_to_device_extension_response(
+            to_device_coro = self.get_to_device_extension_response(
                 sync_config=sync_config,
                 to_device_request=sync_config.extensions.to_device,
                 to_token=to_token,
             )
 
-        e2ee_response = None
+        e2ee_coro = None
         if sync_config.extensions.e2ee is not None:
-            e2ee_response = await self.get_e2ee_extension_response(
+            e2ee_coro = self.get_e2ee_extension_response(
                 sync_config=sync_config,
                 e2ee_request=sync_config.extensions.e2ee,
                 to_token=to_token,
                 from_token=from_token,
             )
 
-        account_data_response = None
+        account_data_coro = None
         if sync_config.extensions.account_data is not None:
-            account_data_response = await self.get_account_data_extension_response(
+            account_data_coro = self.get_account_data_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
@@ -127,9 +130,9 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
-        receipts_response = None
+        receipts_coro = None
         if sync_config.extensions.receipts is not None:
-            receipts_response = await self.get_receipts_extension_response(
+            receipts_coro = self.get_receipts_extension_response(
                 sync_config=sync_config,
                 previous_connection_state=previous_connection_state,
                 new_connection_state=new_connection_state,
@@ -141,9 +144,9 @@ class SlidingSyncExtensionHandler:
                 from_token=from_token,
             )
 
-        typing_response = None
+        typing_coro = None
         if sync_config.extensions.typing is not None:
-            typing_response = await self.get_typing_extension_response(
+            typing_coro = self.get_typing_extension_response(
                 sync_config=sync_config,
                 actual_lists=actual_lists,
                 actual_room_ids=actual_room_ids,
@@ -152,6 +155,20 @@ class SlidingSyncExtensionHandler:
                 to_token=to_token,
                 from_token=from_token,
             )
+
+        (
+            to_device_response,
+            e2ee_response,
+            account_data_response,
+            receipts_response,
+            typing_response,
+        ) = await gather_optional_coroutines(
+            to_device_coro,
+            e2ee_coro,
+            account_data_coro,
+            receipts_coro,
+            typing_coro,
+        )
 
         return SlidingSyncResult.Extensions(
             to_device=to_device_response,
