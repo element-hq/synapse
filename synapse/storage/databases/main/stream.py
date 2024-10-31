@@ -751,6 +751,48 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             if self._events_stream_cache.has_entity_changed(room_id, from_id)
         }
 
+    async def get_rooms_that_have_updates_since_sliding_sync_table(
+        self,
+        room_ids: StrCollection,
+        from_key: RoomStreamToken,
+    ) -> StrCollection:
+        """Return the rooms that probably have had updates since the given
+        token (changes that are > `from_key`)."""
+        # If the stream change cache is valid for the stream token, we can just
+        # use the result of that.
+        if from_key.stream >= self._events_stream_cache.get_earliest_known_position():
+            return self._events_stream_cache.get_entities_changed(
+                room_ids, from_key.stream
+            )
+
+        def get_rooms_that_have_updates_since_sliding_sync_table_txn(
+            txn: LoggingTransaction,
+        ) -> StrCollection:
+            sql = """
+                SELECT room_id
+                FROM sliding_sync_joined_rooms
+                WHERE {clause}
+                    AND event_stream_ordering > ?
+            """
+
+            results: Set[str] = set()
+            for batch in batch_iter(room_ids, 1000):
+                clause, args = make_in_list_sql_clause(
+                    self.database_engine, "room_id", batch
+                )
+
+                args.append(from_key.stream)
+                txn.execute(sql.format(clause=clause), args)
+
+                results.update(row[0] for row in txn)
+
+            return results
+
+        return await self.db_pool.runInteraction(
+            "get_rooms_that_have_updates_since_sliding_sync_table",
+            get_rooms_that_have_updates_since_sliding_sync_table_txn,
+        )
+
     async def paginate_room_events_by_stream_ordering(
         self,
         *,
@@ -941,6 +983,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         Returns:
             All membership changes to the current state in the token range. Events are
             sorted by `stream_ordering` ascending.
+
+            `event_id`/`sender` can be `None` when the server leaves a room (meaning
+            everyone locally left) or a state reset which removed the person from the
+            room. We can't tell the difference between the two cases with what's
+            available in the `current_state_delta_stream` table. To actually check for a
+            state reset, you need to check if a membership still exists in the room.
         """
         # Start by ruling out cases where a DB query is not necessary.
         if from_key == to_key:
@@ -1052,6 +1100,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                         membership=(
                             membership if membership is not None else Membership.LEAVE
                         ),
+                        # This will also be null for the same reasons if `s.event_id = null`
                         sender=sender,
                         # Prev event
                         prev_event_id=prev_event_id,
@@ -1469,6 +1518,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         recheck_rooms: Set[str] = set()
         min_token = end_token.stream
         for room_id, stream in uncapped_results.items():
+            if stream is None:
+                # Despite the function not directly setting None, the cache can!
+                # See: https://github.com/element-hq/synapse/issues/17726
+                continue
             if stream <= min_token:
                 results[room_id] = stream
             else:
@@ -1495,7 +1548,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
     @cachedList(cached_method_name="_get_max_event_pos", list_name="room_ids")
     async def _bulk_get_max_event_pos(
         self, room_ids: StrCollection
-    ) -> Mapping[str, int]:
+    ) -> Mapping[str, Optional[int]]:
         """Fetch the max position of a persisted event in the room."""
 
         # We need to be careful not to return positions ahead of the current
@@ -1524,7 +1577,7 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         # majority of rooms will have a latest token from before the min stream
         # pos.
 
-        def bulk_get_max_event_pos_txn(
+        def bulk_get_max_event_pos_fallback_txn(
             txn: LoggingTransaction, batched_room_ids: StrCollection
         ) -> Dict[str, int]:
             clause, args = make_in_list_sql_clause(
@@ -1547,14 +1600,40 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             txn.execute(sql, [max_pos] + args)
             return {row[0]: row[1] for row in txn}
 
+        # It's easier to look at the `sliding_sync_joined_rooms` table and avoid all of
+        # the joins and sub-queries.
+        def bulk_get_max_event_pos_from_sliding_sync_tables_txn(
+            txn: LoggingTransaction, batched_room_ids: StrCollection
+        ) -> Dict[str, int]:
+            clause, args = make_in_list_sql_clause(
+                self.database_engine, "room_id", batched_room_ids
+            )
+            sql = f"""
+                SELECT room_id, event_stream_ordering
+                FROM sliding_sync_joined_rooms
+                WHERE {clause}
+                ORDER BY event_stream_ordering DESC
+            """
+            txn.execute(sql, args)
+            return {row[0]: row[1] for row in txn}
+
         recheck_rooms: Set[str] = set()
         for batched in batch_iter(room_ids, 1000):
-            batch_results = await self.db_pool.runInteraction(
-                "_bulk_get_max_event_pos", bulk_get_max_event_pos_txn, batched
-            )
+            if await self.have_finished_sliding_sync_background_jobs():
+                batch_results = await self.db_pool.runInteraction(
+                    "bulk_get_max_event_pos_from_sliding_sync_tables_txn",
+                    bulk_get_max_event_pos_from_sliding_sync_tables_txn,
+                    batched,
+                )
+            else:
+                batch_results = await self.db_pool.runInteraction(
+                    "bulk_get_max_event_pos_fallback_txn",
+                    bulk_get_max_event_pos_fallback_txn,
+                    batched,
+                )
             for room_id, stream_ordering in batch_results.items():
                 if stream_ordering <= now_token.stream:
-                    results.update(batch_results)
+                    results[room_id] = stream_ordering
                 else:
                     recheck_rooms.add(room_id)
 

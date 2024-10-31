@@ -158,9 +158,56 @@ class TagsWorkerStore(AccountDataWorkerStore):
 
         return results
 
+    async def has_tags_changed_for_room(
+        self,
+        # Since there are multiple arguments with the same type, force keyword arguments
+        # so people don't accidentally swap the order
+        *,
+        user_id: str,
+        room_id: str,
+        from_stream_id: int,
+        to_stream_id: int,
+    ) -> bool:
+        """Check if the users tags for a room have been updated in the token range
+
+        (> `from_stream_id` and <= `to_stream_id`)
+
+        Args:
+            user_id: The user to get tags for
+            room_id: The room to get tags for
+            from_stream_id: The point in the stream to fetch from
+            to_stream_id: The point in the stream to fetch to
+
+        Returns:
+            A mapping of tags to tag content.
+        """
+
+        # Shortcut if no room has changed for the user
+        changed = self._account_data_stream_cache.has_entity_changed(
+            user_id, int(from_stream_id)
+        )
+        if not changed:
+            return False
+
+        last_change_position_for_room = await self.db_pool.simple_select_one_onecol(
+            table="room_tags_revisions",
+            keyvalues={"user_id": user_id, "room_id": room_id},
+            retcol="stream_id",
+            allow_none=True,
+        )
+
+        if last_change_position_for_room is None:
+            return False
+
+        return (
+            last_change_position_for_room > from_stream_id
+            and last_change_position_for_room <= to_stream_id
+        )
+
+    @cached(num_args=2, tree=True)
     async def get_tags_for_room(
         self, user_id: str, room_id: str
-    ) -> Dict[str, JsonDict]:
+    ) -> Mapping[str, JsonMapping]:
         """Get all the tags for the given room
 
         Args:
@@ -182,7 +229,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
         return {tag: db_to_json(content) for tag, content in rows}
 
     async def add_tag_to_room(
-        self, user_id: str, room_id: str, tag: str, content: JsonDict
+        self, user_id: str, room_id: str, tag: str, content: JsonMapping
     ) -> int:
         """Add a tag to a room for a user.
 
@@ -213,6 +260,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             await self.db_pool.runInteraction("add_tag", add_tag_txn, next_id)
 
         self.get_tags_for_user.invalidate((user_id,))
+        self.get_tags_for_room.invalidate((user_id, room_id))
 
         return self._account_data_id_gen.get_current_token()
 
@@ -237,6 +285,7 @@ class TagsWorkerStore(AccountDataWorkerStore):
             await self.db_pool.runInteraction("remove_tag", remove_tag_txn, next_id)
 
         self.get_tags_for_user.invalidate((user_id,))
+        self.get_tags_for_room.invalidate((user_id, room_id))
 
         return self._account_data_id_gen.get_current_token()
 
@@ -290,9 +339,19 @@ class TagsWorkerStore(AccountDataWorkerStore):
         rows: Iterable[Any],
     ) -> None:
         if stream_name == AccountDataStream.NAME:
-            for row in rows:
+            # Cast is safe because the `AccountDataStream` should only be giving us
+            # `AccountDataStreamRow`
+            account_data_stream_rows: List[AccountDataStream.AccountDataStreamRow] = (
+                cast(List[AccountDataStream.AccountDataStreamRow], rows)
+            )
+
+            for row in account_data_stream_rows:
                 if row.data_type == AccountDataTypes.TAG:
                     self.get_tags_for_user.invalidate((row.user_id,))
+                    if row.room_id:
+                        self.get_tags_for_room.invalidate((row.user_id, row.room_id))
+                    else:
+                        self.get_tags_for_room.invalidate((row.user_id,))
                     self._account_data_stream_cache.entity_has_changed(
                         row.user_id, token
                     )

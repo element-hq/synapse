@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import attr
 
-from synapse._pydantic_compat import HAS_PYDANTIC_V2
+from synapse._pydantic_compat import StrictBool, StrictInt, StrictStr
 from synapse.api.constants import Direction, UserTypes
 from synapse.api.errors import Codes, NotFoundError, SynapseError
 from synapse.http.servlet import (
@@ -50,16 +50,11 @@ from synapse.rest.admin._base import (
 from synapse.rest.client._base import client_patterns
 from synapse.storage.databases.main.registration import ExternalIDReuseException
 from synapse.storage.databases.main.stats import UserSortOrder
-from synapse.types import JsonDict, JsonMapping, UserID
+from synapse.types import JsonDict, JsonMapping, TaskStatus, UserID
 from synapse.types.rest import RequestBodyModel
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
-
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
-    from pydantic.v1 import StrictBool
-else:
-    from pydantic import StrictBool
 
 
 logger = logging.getLogger(__name__)
@@ -1410,3 +1405,99 @@ class UserByThreePid(RestServlet):
             raise NotFoundError("User not found")
 
         return HTTPStatus.OK, {"user_id": user_id}
+
+
+class RedactUser(RestServlet):
+    """
+    Redact all the events of a given user in the given rooms or if empty dict is provided
+    then all events in all rooms user is member of. Kicks off a background process and
+    returns an id that can be used to check on the progress of the redaction progress
+    """
+
+    PATTERNS = admin_patterns("/user/(?P<user_id>[^/]*)/redact")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._store = hs.get_datastores().main
+        self.admin_handler = hs.get_admin_handler()
+
+    class PostBody(RequestBodyModel):
+        rooms: List[StrictStr]
+        reason: Optional[StrictStr]
+        limit: Optional[StrictInt]
+
+    async def on_POST(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        # parse provided user id to check that it is valid
+        UserID.from_string(user_id)
+
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        limit = body.limit
+        if limit and limit <= 0:
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST,
+                "If limit is provided it must be a non-negative integer greater than 0.",
+            )
+
+        rooms = body.rooms
+        if not rooms:
+            current_rooms = list(await self._store.get_rooms_for_user(user_id))
+            banned_rooms = list(
+                await self._store.get_rooms_user_currently_banned_from(user_id)
+            )
+            rooms = current_rooms + banned_rooms
+
+        redact_id = await self.admin_handler.start_redact_events(
+            user_id, rooms, requester.serialize(), body.reason, limit
+        )
+
+        return HTTPStatus.OK, {"redact_id": redact_id}
+
+
+class RedactUserStatus(RestServlet):
+    """
+    Check on the progress of the redaction request represented by the provided ID, returning
+    the status of the process and a dict of events that were unable to be redacted, if any
+    """
+
+    PATTERNS = admin_patterns("/user/redact_status/(?P<redact_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.admin_handler = hs.get_admin_handler()
+
+    async def on_GET(
+        self, request: SynapseRequest, redact_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+
+        task = await self.admin_handler.get_redact_task(redact_id)
+
+        if task:
+            if task.status == TaskStatus.ACTIVE:
+                return HTTPStatus.OK, {"status": TaskStatus.ACTIVE}
+            elif task.status == TaskStatus.COMPLETE:
+                assert task.result is not None
+                failed_redactions = task.result.get("failed_redactions")
+                return HTTPStatus.OK, {
+                    "status": TaskStatus.COMPLETE,
+                    "failed_redactions": failed_redactions if failed_redactions else {},
+                }
+            elif task.status == TaskStatus.SCHEDULED:
+                return HTTPStatus.OK, {"status": TaskStatus.SCHEDULED}
+            else:
+                return HTTPStatus.OK, {
+                    "status": TaskStatus.FAILED,
+                    "error": (
+                        task.error
+                        if task.error
+                        else "Unknown error, please check the logs for more information."
+                    ),
+                }
+        else:
+            raise NotFoundError("redact id '%s' not found" % redact_id)

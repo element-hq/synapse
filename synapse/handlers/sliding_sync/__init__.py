@@ -14,7 +14,7 @@
 
 import logging
 from itertools import chain
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Set, Tuple
+from typing import TYPE_CHECKING, AbstractSet, Dict, List, Mapping, Optional, Set, Tuple
 
 from prometheus_client import Histogram
 from typing_extensions import assert_never
@@ -49,6 +49,7 @@ from synapse.types import (
     Requester,
     SlidingSyncStreamToken,
     StateMap,
+    StrCollection,
     StreamKeyType,
     StreamToken,
 )
@@ -267,7 +268,7 @@ class SlidingSyncHandler:
 
         if relevant_rooms_to_send_map:
             with start_active_span("sliding_sync.generate_room_entries"):
-                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 10)
+                await concurrently_execute(handle_room, relevant_rooms_to_send_map, 20)
 
         extensions = await self.extensions.get_extensions_response(
             sync_config=sync_config,
@@ -293,7 +294,6 @@ class SlidingSyncHandler:
             # to record rooms as having updates even if there might not actually
             # be anything new for the user (e.g. due to event filters, events
             # having happened after the user left, etc).
-            unsent_room_ids = []
             if from_token:
                 # The set of rooms that the client (may) care about, but aren't
                 # in any list range (or subscribed to).
@@ -305,15 +305,24 @@ class SlidingSyncHandler:
                 # TODO: Replace this with something faster. When we land the
                 # sliding sync tables that record the most recent event
                 # positions we can use that.
-                missing_event_map_by_room = (
-                    await self.store.get_room_events_stream_for_rooms(
-                        room_ids=missing_rooms,
-                        from_key=to_token.room_key,
-                        to_key=from_token.stream_token.room_key,
-                        limit=1,
+                unsent_room_ids: StrCollection
+                if await self.store.have_finished_sliding_sync_background_jobs():
+                    unsent_room_ids = await (
+                        self.store.get_rooms_that_have_updates_since_sliding_sync_table(
+                            room_ids=missing_rooms,
+                            from_key=from_token.stream_token.room_key,
+                        )
                     )
-                )
-                unsent_room_ids = list(missing_event_map_by_room)
+                else:
+                    missing_event_map_by_room = (
+                        await self.store.get_room_events_stream_for_rooms(
+                            room_ids=missing_rooms,
+                            from_key=to_token.room_key,
+                            to_key=from_token.stream_token.room_key,
+                            limit=1,
+                        )
+                    )
+                    unsent_room_ids = list(missing_event_map_by_room)
 
                 new_connection_state.rooms.record_unsent_rooms(
                     unsent_room_ids, from_token.stream_token.room_key
@@ -443,13 +452,11 @@ class SlidingSyncHandler:
             to_token=to_token,
         )
 
-        event_map = await self.store.get_events(list(state_ids.values()))
+        events = await self.store.get_events_as_list(list(state_ids.values()))
 
         state_map = {}
-        for key, event_id in state_ids.items():
-            event = event_map.get(event_id)
-            if event:
-                state_map[key] = event
+        for event in events:
+            state_map[(event.type, event.state_key)] = event
 
         return state_map
 
@@ -495,6 +502,26 @@ class SlidingSyncHandler:
             room_sync_config.timeline_limit,
         )
 
+        # Handle state resets. For example, if we see
+        # `room_membership_for_user_at_to_token.event_id=None and
+        # room_membership_for_user_at_to_token.membership is not None`, we should
+        # indicate to the client that a state reset happened. Perhaps we should indicate
+        # this by setting `initial: True` and empty `required_state: []`.
+        state_reset_out_of_room = False
+        if (
+            room_membership_for_user_at_to_token.event_id is None
+            and room_membership_for_user_at_to_token.membership is not None
+        ):
+            # We only expect the `event_id` to be `None` if you've been state reset out
+            # of the room (meaning you're no longer in the room). We could put this as
+            # part of the if-statement above but we want to handle every case where
+            # `event_id` is `None`.
+            assert room_membership_for_user_at_to_token.membership is Membership.LEAVE
+
+            state_reset_out_of_room = True
+
+        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+
         # Determine whether we should limit the timeline to the token range.
         #
         # We should return historical messages (before token range) in the
@@ -523,11 +550,10 @@ class SlidingSyncHandler:
         # or `limited` mean for clients that interpret them correctly. In future this
         # behavior is almost certainly going to change.
         #
-        # TODO: Also handle changes to `required_state`
         from_bound = None
         initial = True
         ignore_timeline_bound = False
-        if from_token and not newly_joined:
+        if from_token and not newly_joined and not state_reset_out_of_room:
             room_status = previous_connection_state.rooms.have_sent_room(room_id)
             if room_status.status == HaveSentRoomFlag.LIVE:
                 from_bound = from_token.stream_token.room_key
@@ -544,7 +570,6 @@ class SlidingSyncHandler:
 
             log_kv({"sliding_sync.room_status": room_status})
 
-            prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
             if prev_room_sync_config is not None:
                 # Check if the timeline limit has increased, if so ignore the
                 # timeline bound and record the change (see "XXX: Odd behavior"
@@ -554,8 +579,6 @@ class SlidingSyncHandler:
                     < room_sync_config.timeline_limit
                 ):
                     ignore_timeline_bound = True
-
-                # TODO: Check for changes in `required_state``
 
         log_kv(
             {
@@ -732,12 +755,6 @@ class SlidingSyncHandler:
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
-        # TODO: Handle state resets. For example, if we see
-        # `room_membership_for_user_at_to_token.event_id=None and
-        # room_membership_for_user_at_to_token.membership is not None`, we should
-        # indicate to the client that a state reset happened. Perhaps we should indicate
-        # this by setting `initial: True` and empty `required_state`.
-
         # Get the changes to current state in the token range from the
         # `current_state_delta_stream` table.
         #
@@ -784,32 +801,10 @@ class SlidingSyncHandler:
                 ):
                     avatar_changed = True
 
+        # We only need the room summary for calculating heroes, however if we do
+        # fetch it then we can use it to calculate `joined_count` and
+        # `invited_count`.
         room_membership_summary: Optional[Mapping[str, MemberSummary]] = None
-        empty_membership_summary = MemberSummary([], 0)
-        # We need the room summary for:
-        #  - Always for initial syncs (or the first time we send down the room)
-        #  - When the room has no name, we need `heroes`
-        #  - When the membership has changed so we need to give updated `heroes` and
-        #    `joined_count`/`invited_count`.
-        #
-        # Ideally, instead of just looking at `name_changed`, we'd check if the room
-        # name is not set but this is a good enough approximation that saves us from
-        # having to pull out the full event. This just means, we're generating the
-        # summary whenever the room name changes instead of only when it changes to
-        # `None`.
-        if initial or name_changed or membership_changed:
-            # We can't trace the function directly because it's cached and the `@cached`
-            # decorator doesn't mix with `@trace` yet.
-            with start_active_span("get_room_summary"):
-                if room_membership_for_user_at_to_token.membership in (
-                    Membership.LEAVE,
-                    Membership.BAN,
-                ):
-                    # TODO: Figure out how to get the membership summary for left/banned rooms
-                    room_membership_summary = {}
-                else:
-                    room_membership_summary = await self.store.get_room_summary(room_id)
-                    # TODO: Reverse/rewind back to the `to_token`
 
         # `heroes` are required if the room name is not set.
         #
@@ -828,10 +823,44 @@ class SlidingSyncHandler:
         # get them on initial syncs (or the first time we send down the room) or if the
         # membership has changed which may change the heroes.
         if name_event_id is None and (initial or (not initial and membership_changed)):
-            assert room_membership_summary is not None
+            # We need the room summary to extract the heroes from
+            if room_membership_for_user_at_to_token.membership != Membership.JOIN:
+                # TODO: Figure out how to get the membership summary for left/banned rooms
+                # For invite/knock rooms we don't include the information.
+                room_membership_summary = {}
+            else:
+                room_membership_summary = await self.store.get_room_summary(room_id)
+                # TODO: Reverse/rewind back to the `to_token`
+
             hero_user_ids = extract_heroes_from_room_summary(
                 room_membership_summary, me=user.to_string()
             )
+
+        # Fetch the membership counts for rooms we're joined to.
+        #
+        # Similarly to other metadata, we only need to calculate the member
+        # counts if this is an initial sync or the memberships have changed.
+        joined_count: Optional[int] = None
+        invited_count: Optional[int] = None
+        if (
+            initial or membership_changed
+        ) and room_membership_for_user_at_to_token.membership == Membership.JOIN:
+            # If we have the room summary (because we calculated heroes above)
+            # then we can simply pull the counts from there.
+            if room_membership_summary is not None:
+                empty_membership_summary = MemberSummary([], 0)
+
+                joined_count = room_membership_summary.get(
+                    Membership.JOIN, empty_membership_summary
+                ).count
+
+                invited_count = room_membership_summary.get(
+                    Membership.INVITE, empty_membership_summary
+                ).count
+            else:
+                member_counts = await self.store.get_member_counts(room_id)
+                joined_count = member_counts.get(Membership.JOIN, 0)
+                invited_count = member_counts.get(Membership.INVITE, 0)
 
         # Fetch the `required_state` for the room
         #
@@ -964,6 +993,10 @@ class SlidingSyncHandler:
                 include_others=required_state_filter.include_others,
             )
 
+        # The required state map to store in the room sync config, if it has
+        # changed.
+        changed_required_state_map: Optional[Mapping[str, AbstractSet[str]]] = None
+
         # We can return all of the state that was requested if this was the first
         # time we've sent the room down this connection.
         room_state: StateMap[EventBase] = {}
@@ -976,6 +1009,29 @@ class SlidingSyncHandler:
             )
         else:
             assert from_bound is not None
+
+            if prev_room_sync_config is not None:
+                # Check if there are any changes to the required state config
+                # that we need to handle.
+                changed_required_state_map, added_state_filter = (
+                    _required_state_changes(
+                        user.to_string(),
+                        previous_room_config=prev_room_sync_config,
+                        room_sync_config=room_sync_config,
+                        state_deltas=room_state_delta_id_map,
+                    )
+                )
+
+                if added_state_filter:
+                    # Some state entries got added, so we pull out the current
+                    # state for them. If we don't do this we'd only send down new deltas.
+                    state_ids = await self.get_current_state_ids_at(
+                        room_id=room_id,
+                        room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
+                        state_filter=added_state_filter,
+                        to_token=to_token,
+                    )
+                    room_state_delta_id_map.update(state_ids)
 
             events = await self.store.get_events(
                 state_filter.filter_state(room_state_delta_id_map).values()
@@ -1024,25 +1080,64 @@ class SlidingSyncHandler:
                     )
                 )
 
-        # Figure out the last bump event in the room
-        #
-        # By default, just choose the membership event position for any non-join membership
-        bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+        # Figure out the last bump event in the room. If the bump stamp hasn't
+        # changed we omit it from the response.
+        bump_stamp = None
+
+        always_return_bump_stamp = (
+            # We use the membership event position for any non-join
+            room_membership_for_user_at_to_token.membership != Membership.JOIN
+            # We didn't fetch any timeline events but we should still check for
+            # a bump_stamp that might be somewhere
+            or limited is None
+            # There might be a bump event somewhere before the timeline events
+            # that we fetched, that we didn't previously send down
+            or limited is True
+            # Always give the client some frame of reference if this is the
+            # first time they are seeing the room down the connection
+            or initial
+        )
+
         # If we're joined to the room, we need to find the last bump event before the
         # `to_token`
         if room_membership_for_user_at_to_token.membership == Membership.JOIN:
-            # Try and get a bump stamp, if not we just fall back to the
-            # membership token.
+            # Try and get a bump stamp
             new_bump_stamp = await self._get_bump_stamp(
-                room_id, to_token, timeline_events
+                room_id,
+                to_token,
+                timeline_events,
+                check_outside_timeline=always_return_bump_stamp,
             )
             if new_bump_stamp is not None:
                 bump_stamp = new_bump_stamp
 
-        unstable_expanded_timeline = False
-        prev_room_sync_config = previous_connection_state.room_configs.get(room_id)
+        if bump_stamp is None and always_return_bump_stamp:
+            # By default, just choose the membership event position for any non-join membership
+            bump_stamp = room_membership_for_user_at_to_token.event_pos.stream
+
+        if bump_stamp is not None and bump_stamp < 0:
+            # We never want to send down negative stream orderings, as you can't
+            # sensibly compare positive and negative stream orderings (they have
+            # different meanings).
+            #
+            # A negative bump stamp here can only happen if the stream ordering
+            # of the membership event is negative (and there are no further bump
+            # stamps), which can happen if the server leaves and deletes a room,
+            # and then rejoins it.
+            #
+            # To deal with this, we just set the bump stamp to zero, which will
+            # shove this room to the bottom of the list. This is OK as the
+            # moment a new message happens in the room it will get put into a
+            # sensible order again.
+            bump_stamp = 0
+
+        room_sync_required_state_map_to_persist = room_sync_config.required_state_map
+        if changed_required_state_map:
+            room_sync_required_state_map_to_persist = changed_required_state_map
+
         # Record the `room_sync_config` if we're `ignore_timeline_bound` (which means
         # that the `timeline_limit` has increased)
+        unstable_expanded_timeline = False
         if ignore_timeline_bound:
             # FIXME: We signal the fact that we're sending down more events to
             # the client by setting `unstable_expanded_timeline` to true (see
@@ -1051,7 +1146,7 @@ class SlidingSyncHandler:
 
             new_connection_state.room_configs[room_id] = RoomSyncConfig(
                 timeline_limit=room_sync_config.timeline_limit,
-                required_state_map=room_sync_config.required_state_map,
+                required_state_map=room_sync_required_state_map_to_persist,
             )
         elif prev_room_sync_config is not None:
             # If the result is `limited` then we need to record that the
@@ -1080,29 +1175,19 @@ class SlidingSyncHandler:
             ):
                 new_connection_state.room_configs[room_id] = RoomSyncConfig(
                     timeline_limit=room_sync_config.timeline_limit,
-                    required_state_map=room_sync_config.required_state_map,
+                    required_state_map=room_sync_required_state_map_to_persist,
                 )
 
-            # TODO: Record changes in required_state.
+            elif changed_required_state_map is not None:
+                new_connection_state.room_configs[room_id] = RoomSyncConfig(
+                    timeline_limit=room_sync_config.timeline_limit,
+                    required_state_map=room_sync_required_state_map_to_persist,
+                )
 
         else:
             new_connection_state.room_configs[room_id] = room_sync_config
 
         set_tag(SynapseTags.RESULT_PREFIX + "initial", initial)
-
-        joined_count: Optional[int] = None
-        if initial or membership_changed:
-            assert room_membership_summary is not None
-            joined_count = room_membership_summary.get(
-                Membership.JOIN, empty_membership_summary
-            ).count
-
-        invited_count: Optional[int] = None
-        if initial or membership_changed:
-            assert room_membership_summary is not None
-            invited_count = room_membership_summary.get(
-                Membership.INVITE, empty_membership_summary
-            ).count
 
         return SlidingSyncResult.RoomResult(
             name=room_name,
@@ -1130,14 +1215,23 @@ class SlidingSyncHandler:
 
     @trace
     async def _get_bump_stamp(
-        self, room_id: str, to_token: StreamToken, timeline: List[EventBase]
+        self,
+        room_id: str,
+        to_token: StreamToken,
+        timeline: List[EventBase],
+        check_outside_timeline: bool,
     ) -> Optional[int]:
-        """Get a bump stamp for the room, if we have a bump event
+        """Get a bump stamp for the room, if we have a bump event and it has
+        changed.
 
         Args:
             room_id
             to_token: The upper bound of token to return
             timeline: The list of events we have fetched.
+            limited: If the timeline was limited.
+            check_outside_timeline: Whether we need to check for bump stamp for
+                events before the timeline if we didn't find a bump stamp in
+                the timeline events.
         """
 
         # First check the timeline events we're returning to see if one of
@@ -1157,6 +1251,11 @@ class SlidingSyncHandler:
                 if new_bump_stamp > 0:
                     return new_bump_stamp
 
+        if not check_outside_timeline:
+            # If we are not a limited sync, then we know the bump stamp can't
+            # have changed.
+            return None
+
         # We can quickly query for the latest bump event in the room using the
         # sliding sync tables.
         latest_room_bump_stamp = await self.store.get_latest_bump_stamp_for_room(
@@ -1173,8 +1272,8 @@ class SlidingSyncHandler:
             # `SCHEMA_COMPAT_VERSION` and run the foreground update for
             # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots`
             # (tracked by https://github.com/element-hq/synapse/issues/17623)
-            await self.store.have_finished_sliding_sync_background_jobs()
-            and latest_room_bump_stamp is None
+            latest_room_bump_stamp is None
+            and await self.store.have_finished_sliding_sync_background_jobs()
         ):
             return None
 
@@ -1216,3 +1315,185 @@ class SlidingSyncHandler:
                     return new_bump_event_pos.stream
 
             return None
+
+
+def _required_state_changes(
+    user_id: str,
+    *,
+    previous_room_config: "RoomSyncConfig",
+    room_sync_config: RoomSyncConfig,
+    state_deltas: StateMap[str],
+) -> Tuple[Optional[Mapping[str, AbstractSet[str]]], StateFilter]:
+    """Calculates the changes between the required state room config from the
+    previous requests compared with the current request.
+
+    This does two things. First, it calculates if we need to update the room
+    config due to changes to required state. Secondly, it works out which state
+    entries we need to pull from current state and return due to the state entry
+    now appearing in the required state when it previously wasn't (on top of the
+    state deltas).
+
+    This function tries to ensure to handle the case where a state entry is
+    added, removed and then added again to the required state. In that case we
+    only want to re-send that entry down sync if it has changed.
+
+    Returns:
+        A 2-tuple of updated required state config (or None if there is no update)
+        and the state filter to use to fetch extra current state that we need to
+        return.
+    """
+
+    prev_required_state_map = previous_room_config.required_state_map
+    request_required_state_map = room_sync_config.required_state_map
+
+    if prev_required_state_map == request_required_state_map:
+        # There has been no change. Return immediately.
+        return None, StateFilter.none()
+
+    prev_wildcard = prev_required_state_map.get(StateValues.WILDCARD, set())
+    request_wildcard = request_required_state_map.get(StateValues.WILDCARD, set())
+
+    # If we were previously fetching everything ("*", "*"), always update the effective
+    # room required state config to match the request. And since we we're previously
+    # already fetching everything, we don't have to fetch anything now that they've
+    # narrowed.
+    if StateValues.WILDCARD in prev_wildcard:
+        return request_required_state_map, StateFilter.none()
+
+    # If a event type wildcard has been added or removed we don't try and do
+    # anything fancy, and instead always update the effective room required
+    # state config to match the request.
+    if request_wildcard - prev_wildcard:
+        # Some keys were added, so we need to fetch everything
+        return request_required_state_map, StateFilter.all()
+    if prev_wildcard - request_wildcard:
+        # Keys were only removed, so we don't have to fetch everything.
+        return request_required_state_map, StateFilter.none()
+
+    # Contains updates to the required state map compared with the previous room
+    # config. This has the same format as `RoomSyncConfig.required_state`
+    changes: Dict[str, AbstractSet[str]] = {}
+
+    # The set of types/state keys that we need to fetch and return to the
+    # client. Passed to `StateFilter.from_types(...)`
+    added: List[Tuple[str, Optional[str]]] = []
+
+    # First we calculate what, if anything, has been *added*.
+    for event_type in (
+        prev_required_state_map.keys() | request_required_state_map.keys()
+    ):
+        old_state_keys = prev_required_state_map.get(event_type, set())
+        request_state_keys = request_required_state_map.get(event_type, set())
+
+        if old_state_keys == request_state_keys:
+            # No change to this type
+            continue
+
+        if not request_state_keys - old_state_keys:
+            # Nothing *added*, so we skip. Removals happen below.
+            continue
+
+        # Always update changes to include the newly added keys
+        changes[event_type] = request_state_keys
+
+        if StateValues.WILDCARD in old_state_keys:
+            # We were previously fetching everything for this type, so we don't need to
+            # fetch anything new.
+            continue
+
+        # Record the new state keys to fetch for this type.
+        if StateValues.WILDCARD in request_state_keys:
+            # If we have added a wildcard then we always just fetch everything.
+            added.append((event_type, None))
+        else:
+            for state_key in request_state_keys - old_state_keys:
+                if state_key == StateValues.ME:
+                    added.append((event_type, user_id))
+                elif state_key == StateValues.LAZY:
+                    # We handle lazy loading separately (outside this function),
+                    # so don't need to explicitly add anything here.
+                    #
+                    # LAZY values should also be ignore for event types that are
+                    # not membership.
+                    pass
+                else:
+                    added.append((event_type, state_key))
+
+    added_state_filter = StateFilter.from_types(added)
+
+    # Convert the list of state deltas to map from type to state_keys that have
+    # changed.
+    changed_types_to_state_keys: Dict[str, Set[str]] = {}
+    for event_type, state_key in state_deltas:
+        changed_types_to_state_keys.setdefault(event_type, set()).add(state_key)
+
+    # Figure out what changes we need to apply to the effective required state
+    # config.
+    for event_type, changed_state_keys in changed_types_to_state_keys.items():
+        old_state_keys = prev_required_state_map.get(event_type, set())
+        request_state_keys = request_required_state_map.get(event_type, set())
+
+        if old_state_keys == request_state_keys:
+            # No change.
+            continue
+
+        if request_state_keys - old_state_keys:
+            # We've expanded the set of state keys, so we just clobber the
+            # current set with the new set.
+            #
+            # We could also ensure that we keep entries where the state hasn't
+            # changed, but are no longer in the requested required state, but
+            # that's a sufficient edge case that we can ignore (as its only a
+            # performance optimization).
+            changes[event_type] = request_state_keys
+            continue
+
+        old_state_key_wildcard = StateValues.WILDCARD in old_state_keys
+        request_state_key_wildcard = StateValues.WILDCARD in request_state_keys
+
+        if old_state_key_wildcard != request_state_key_wildcard:
+            # If a state_key wildcard has been added or removed, we always update the
+            # effective room required state config to match the request.
+            changes[event_type] = request_state_keys
+            continue
+
+        if event_type == EventTypes.Member:
+            old_state_key_lazy = StateValues.LAZY in old_state_keys
+            request_state_key_lazy = StateValues.LAZY in request_state_keys
+
+            if old_state_key_lazy != request_state_key_lazy:
+                # If a "$LAZY" has been added or removed we always update the effective room
+                # required state config to match the request.
+                changes[event_type] = request_state_keys
+                continue
+
+        # Handle "$ME" values by adding "$ME" if the state key matches the user
+        # ID.
+        if user_id in changed_state_keys:
+            changed_state_keys.add(StateValues.ME)
+
+        # At this point there are no wildcards and no additions to the set of
+        # state keys requested, only deletions.
+        #
+        # We only remove state keys from the effective state if they've been
+        # removed from the request *and* the state has changed. This ensures
+        # that if a client removes and then re-adds a state key, we only send
+        # down the associated current state event if its changed (rather than
+        # sending down the same event twice).
+        invalidated = (old_state_keys - request_state_keys) & changed_state_keys
+        if invalidated:
+            changes[event_type] = old_state_keys - invalidated
+
+    if changes:
+        # Update the required state config based on the changes.
+        new_required_state_map = dict(prev_required_state_map)
+        for event_type, state_keys in changes.items():
+            if state_keys:
+                new_required_state_map[event_type] = state_keys
+            else:
+                # Remove entries with empty state keys.
+                new_required_state_map.pop(event_type, None)
+
+        return new_required_state_map, added_state_filter
+    else:
+        return None, added_state_filter

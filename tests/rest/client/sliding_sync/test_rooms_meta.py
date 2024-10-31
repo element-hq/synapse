@@ -371,14 +371,17 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "mxc://UPDATED_DUMMY_MEDIA_ID",
             response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            1,
+
+        # We don't give extra room information to invitees
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            1,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
+
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
         )
@@ -450,15 +453,16 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             "mxc://DUMMY_MEDIA_ID",
             response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            # FIXME: The actual number should be "1" (user2) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+
+        # FIXME: We possibly want to return joined and invited counts for rooms
+        # you're banned form
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            0,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
         self.assertIsNone(
             response_body["rooms"][room_id1].get("is_dm"),
@@ -692,19 +696,15 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
             [],
         )
 
-        self.assertEqual(
-            response_body["rooms"][room_id1]["joined_count"],
-            # FIXME: The actual number should be "1" (user2) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+        # FIXME: We possibly want to return joined and invited counts for rooms
+        # you're banned form
+        self.assertNotIn(
+            "joined_count",
+            response_body["rooms"][room_id1],
         )
-        self.assertEqual(
-            response_body["rooms"][room_id1]["invited_count"],
-            # We shouldn't see user5 since they were invited after user1 was banned.
-            #
-            # FIXME: The actual number should be "1" (user3) but we currently don't
-            # support this for rooms where the user has left/been banned.
-            0,
+        self.assertNotIn(
+            "invited_count",
+            response_body["rooms"][room_id1],
         )
 
     def test_rooms_meta_heroes_incremental_sync_no_change(self) -> None:
@@ -935,7 +935,8 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         op = response_body["lists"]["foo-list"]["ops"][0]
         self.assertEqual(op["op"], "SYNC")
         self.assertEqual(op["range"], [0, 1])
-        # Note that we don't order the ops anymore, so we need to compare sets.
+        # Note that we don't sort the rooms when the range includes all of the rooms, so
+        # we just assert that the rooms are included
         self.assertIncludes(set(op["room_ids"]), {room_id1, room_id2}, exact=True)
 
         # The `bump_stamp` for room1 should point at the latest message (not the
@@ -1095,6 +1096,92 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
 
         self.assertGreater(response_body["rooms"][room_id]["bump_stamp"], 0)
 
+    def test_rooms_bump_stamp_no_change_incremental(self) -> None:
+        """Test that the bump stamp is omitted if there has been no change"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 100,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Initial sync so we expect to see a bump stamp
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+
+        # Send an event that is not in the bump events list
+        self.helper.send_event(
+            room_id1, type="org.matrix.test", content={}, tok=user1_tok
+        )
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # There hasn't been a change to the bump stamps, so we ignore it
+        self.assertNotIn("bump_stamp", response_body["rooms"][room_id1])
+
+    def test_rooms_bump_stamp_change_incremental(self) -> None:
+        """Test that the bump stamp is included if there has been a change, even
+        if its not in the timeline"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Initial sync so we expect to see a bump stamp
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+        first_bump_stamp = response_body["rooms"][room_id1]["bump_stamp"]
+
+        # Send a bump event at the start.
+        self.helper.send(room_id1, "test", tok=user1_tok)
+
+        # Send events that are not in the bump events list to fill the timeline
+        for _ in range(5):
+            self.helper.send_event(
+                room_id1, type="org.matrix.test", content={}, tok=user1_tok
+            )
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # There was a bump event in the timeline gap, so we should see the bump
+        # stamp be updated.
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+        second_bump_stamp = response_body["rooms"][room_id1]["bump_stamp"]
+
+        self.assertGreater(second_bump_stamp, first_bump_stamp)
+
     def test_rooms_bump_stamp_invites(self) -> None:
         """
         Test that `bump_stamp` is present and points to the membership event,
@@ -1139,3 +1226,113 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
         self.assertEqual(
             response_body["rooms"][room_id]["bump_stamp"], invite_pos.stream
         )
+
+    def test_rooms_meta_is_dm(self) -> None:
+        """
+        Test `rooms` `is_dm` is correctly set for DM rooms.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a DM room
+        joined_dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+            should_join_room=True,
+        )
+        invited_dm_room_id = self._create_dm_room(
+            inviter_user_id=user1_id,
+            inviter_tok=user1_tok,
+            invitee_user_id=user2_id,
+            invitee_tok=user2_tok,
+            should_join_room=False,
+        )
+
+        # Create a normal room
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Create a room that user1 is invited to
+        invite_room_id = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.invite(invite_room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 99]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+
+        # Ensure DM's are correctly marked
+        self.assertDictEqual(
+            {
+                room_id: room.get("is_dm")
+                for room_id, room in response_body["rooms"].items()
+            },
+            {
+                invite_room_id: None,
+                room_id: None,
+                invited_dm_room_id: True,
+                joined_dm_room_id: True,
+            },
+        )
+
+    def test_old_room_with_unknown_room_version(self) -> None:
+        """Test that an old room with unknown room version does not break
+        sync."""
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        # We first create a standard room, then we'll change the room version in
+        # the DB.
+        room_id = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Poke the database and update the room version to an unknown one.
+        self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_update(
+                "rooms",
+                keyvalues={"room_id": room_id},
+                updatevalues={"room_version": "unknown-room-version"},
+                desc="updated-room-version",
+            )
+        )
+
+        # Invalidate method so that it returns the currently updated version
+        # instead of the cached version.
+        self.hs.get_datastores().main.get_room_version_id.invalidate((room_id,))
+
+        # For old unknown room versions we won't have an entry in this table
+        # (due to us skipping unknown room versions in the background update).
+        self.get_success(
+            self.store.db_pool.simple_delete(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                desc="delete_sliding_room",
+            )
+        )
+
+        # Also invalidate some caches to ensure we pull things from the DB.
+        self.store._events_stream_cache._entity_to_key.pop(room_id)
+        self.store._get_max_event_pos.invalidate((room_id,))
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 5,
+                }
+            }
+        }
+        response_body, _ = self.do_sync(sync_body, tok=user1_tok)

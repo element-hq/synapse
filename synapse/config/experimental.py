@@ -448,8 +448,8 @@ class ExperimentalConfig(Config):
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
 
-        # MSC4156: Migrate server_name to via
-        self.msc4156_enabled: bool = experimental.get("msc4156_enabled", False)
-
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
+
+        # MSC4210: Remove legacy mentions
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)

@@ -1,0 +1,1 @@
+Minor speed-up of sliding sync by computing extensions results in parallel.
