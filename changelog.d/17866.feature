@@ -1,1 +1,1 @@
-Add support for filtering out "service members" from room summary responses, as described in MSC4171.
+Add experimental support for filtering out "service members" from room summary responses, as described in [MSC4171](https://github.com/matrix-org/matrix-spec-proposals/pull/4171).
