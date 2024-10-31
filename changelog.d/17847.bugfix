@@ -1,0 +1,2 @@
+Fix a bug in the admin redact endpoint where the background task would not run if a worker was specified in
+the config option `run_background_tasks_on`.
