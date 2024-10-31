@@ -56,7 +56,11 @@ from synapse.api.errors import (
     SynapseError,
     UnsupportedRoomVersionError,
 )
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, EventFormatVersions, RoomVersion
+from synapse.api.room_versions import (
+    KNOWN_ROOM_VERSIONS,
+    EventFormatVersions,
+    RoomVersion,
+)
 from synapse.crypto.event_signing import compute_event_signature
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
@@ -473,28 +477,24 @@ class FederationServer(FederationBase):
 
             if possible_event_id != "<Unknown>":
                 if room_version.event_format != EventFormatVersions.ROOM_V1_V2:
-                    logger.info(f"""Rejecting event {possible_event_id} from {origin}
-                                because the event was made for a v1 room,
-                                while {room_id} is a {room_version} room""")
-                    msg = "Event ID incorrectly supplied in non-v1/v2 room"
-                    pdu_results[possible_event_id] = {"error": msg}
+                    logger.info(f"Rejecting event {possible_event_id} from {origin} "
+                                f"because the event was made for a v1 room, "
+                                f"while {room_id} is a v{room_version.identifier} room")
+                    pdu_results[possible_event_id] = {"error": "Event ID incorrectly supplied in non-v1/v2 room"}
                     continue
 
             try:
                 event = event_from_pdu_json(p, room_version)
             except Exception as e:
                 if possible_event_id != "<Unknown>":
-                    msg = f"Failed to convert json to event"
                     pdu_results[possible_event_id] = {"error": f"Failed to convert json into event, {e}"}
-                logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, because of {e}")
+                logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, due to {e}")
                 continue
 
             pdus_by_room.setdefault(room_id, []).append(event)
 
             if event.origin_server_ts > newest_pdu_ts:
                 newest_pdu_ts = event.origin_server_ts
-
-
 
         # we can process different rooms in parallel (which is useful if they
         # require callouts to other servers to fetch missing events), but
