@@ -688,7 +688,9 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
             hero_user_ids, [user1_id, user4_id, user5_id, user6_id, user7_id]
         )
 
-    def test_extract_heroes_from_room_summary_exclude_service_members_with_empty_heroes(self) -> None:
+    def test_extract_heroes_from_room_summary_exclude_service_members_with_empty_heroes(
+        self,
+    ) -> None:
         """
         Test that `extract_heroes_from_room_summary(...)` will return an
         empty set of heroes if all users have been excluded.
@@ -723,9 +725,7 @@ class RoomSummaryTestCase(unittest.HomeserverTestCase):
         )
 
         # First 5 users to join the room, excluding service members.
-        self.assertListEqual(
-            hero_user_ids, []
-        )
+        self.assertListEqual(hero_user_ids, [])
 
     def test_extract_heroes_from_room_summary_membership_order(self) -> None:
         """
