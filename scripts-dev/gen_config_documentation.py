@@ -232,6 +232,12 @@ def section(prop: str, values: dict) -> str:
     items = lambda: globals()["items"](values)
     properties = lambda: globals()["properties"](values)
 
+    def is_simple_default() -> bool:
+        """Whether the given default is simple enough for a one-liner."""
+        if not (d := values.get("default")):
+            return True
+        return not isinstance(d, dict) and not isinstance(d, list)
+
     def default_str() -> str:
         try:
             default = values["default"]
@@ -242,6 +248,9 @@ def section(prop: str, values: dict) -> str:
                 return ""
             return "There is no default for this option."
 
+        if not is_simple_default():
+            # Show complex defaults as a code block instead.
+            return ""
         return f"Defaults to `{json.dumps(default)}`."
 
     def title() -> str:
@@ -255,6 +264,11 @@ def section(prop: str, values: dict) -> str:
     def example_str(example: Any) -> str:
         return "```yaml\n" + f"{yaml.dump({prop: example}, sort_keys=False)}" + "```\n"
 
+    def default_example() -> str:
+        if is_simple_default():
+            return ""
+        return f"\nDefault configuration:\n{example_str(values["default"])}"
+
     def examples() -> str:
         if not (examples := values.get("examples")):
             return ""
@@ -266,7 +280,15 @@ def section(prop: str, values: dict) -> str:
         else:
             return f"\nExample configuration:\n{examples_str}"
 
-    return "---\n" + title() + description() + items() + properties() + examples()
+    return (
+        "---\n"
+        + title()
+        + description()
+        + items()
+        + properties()
+        + default_example()
+        + examples()
+    )
 
 
 def main() -> None:
