@@ -903,12 +903,18 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
                     headers=Headers(
                         {
                             "Content-Type": ["application/json"],
-                            "Connection": ["close, X-Foo, X-Bar"],
+                            # Define some hop-by-hop headers (try with varying casing to
+                            # make sure we still match-up the headers)
+                            "Connection": ["close, X-fOo, X-Bar", "X-baz"],
                             # Should be removed because it's defined in the `Connection` header
                             "X-Foo": ["foo"],
                             "X-Bar": ["bar"],
+                            # (not in canonical case)
+                            "x-baZ": ["baz"],
                             # Should be removed because it's a hop-by-hop header
                             "Proxy-Authorization": "abcdef",
+                            # Should be removed because it's a hop-by-hop header (not in canonical case)
+                            "transfer-EnCoDiNg": "abcdef",
                         }
                     ),
                 )
