@@ -51,16 +51,17 @@ logger = logging.getLogger(__name__)
 # "Hop-by-hop" headers (as opposed to "end-to-end" headers) as defined by RFC2616
 # section 13.5.1 and referenced in RFC9110 section 7.6.1. These are meant to only be
 # consumed by the immediate recipient and not be forwarded on.
-HOP_BY_HOP_HEADERS = {
-    "Connection".lower(),
-    "Keep-Alive".lower(),
-    "Proxy-Authenticate".lower(),
-    "Proxy-Authorization".lower(),
-    "TE".lower(),
-    "Trailers".lower(),
-    "Transfer-Encoding".lower(),
-    "Upgrade".lower(),
+HOP_BY_HOP_HEADERS_LOWERCASE = {
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailers",
+    "transfer-encoding",
+    "upgrade",
 }
+assert all(header.lower() == header for header in HOP_BY_HOP_HEADERS_LOWERCASE)
 
 
 def parse_connection_header_value(
@@ -185,7 +186,7 @@ class ProxyResource(_AsyncResource):
 
         # The `Connection` header also defines which headers should not be copied over.
         connection_header = response_headers.getRawHeaders(b"connection")
-        extra_headers_to_remove = parse_connection_header_value(
+        extra_headers_to_remove_lowercase = parse_connection_header_value(
             connection_header[0] if connection_header else None
         )
 
@@ -193,10 +194,10 @@ class ProxyResource(_AsyncResource):
         for k, v in response_headers.getAllRawHeaders():
             # Do not copy over any hop-by-hop headers. These are meant to only be
             # consumed by the immediate recipient and not be forwarded on.
-            header_key = k.decode("ascii").lower()
+            header_key_lowercase = k.decode("ascii").lower()
             if (
-                header_key in HOP_BY_HOP_HEADERS
-                or header_key in extra_headers_to_remove
+                header_key_lowercase in HOP_BY_HOP_HEADERS_LOWERCASE
+                or header_key_lowercase in extra_headers_to_remove_lowercase
             ):
                 continue
 
