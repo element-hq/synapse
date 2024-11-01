@@ -143,6 +143,7 @@ class SyncConfig:
     filter_collection: FilterCollection
     is_guest: bool
     device_id: Optional[str]
+    exclude_service_members_from_heroes: bool
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1042,7 +1043,9 @@ class SyncHandler:
 
         # this is heavily cached, thus: fast.
         details = await self.store.get_room_summary(
-            room_id, self.should_exclude_service_members
+            room_id,
+            self.should_exclude_service_members
+            and sync_config.exclude_service_members_from_heroes,
         )
 
         name_id = state_ids.get((EventTypes.Name, ""))

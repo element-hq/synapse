@@ -151,16 +151,20 @@ class SyncRestServlet(RestServlet):
         )
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
+        exclude_service_members_from_heroes = parse_boolean(
+            request, "msc4171_exclude_service_members", default=False
+        )
 
         logger.debug(
             "/sync: user=%r, timeout=%r, since=%r, "
-            "set_presence=%r, filter_id=%r, device_id=%r",
+            "set_presence=%r, filter_id=%r, device_id=%r, exclude_service_members=%r",
             user,
             timeout,
             since,
             set_presence,
             filter_id,
             device_id,
+            exclude_service_members_from_heroes,
         )
 
         # Stream position of the last ignored users account data event for this user,
@@ -220,6 +224,7 @@ class SyncRestServlet(RestServlet):
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            exclude_service_members_from_heroes=exclude_service_members_from_heroes,
         )
 
         since_token = None
@@ -682,12 +687,16 @@ class SlidingSyncE2eeRestServlet(RestServlet):
 
         timeout = parse_integer(request, "timeout", default=0)
         since = parse_string(request, "since")
+        exclude_service_members_from_heroes = parse_boolean(
+            request, "msc4171_exclude_service_members", default=False
+        )
 
         sync_config = SyncConfig(
             user=user,
             filter_collection=self.only_member_events_filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            exclude_service_members_from_heroes=exclude_service_members_from_heroes,
         )
 
         since_token = None
@@ -886,6 +895,10 @@ class SlidingSyncRestServlet(RestServlet):
         # Position in the stream
         from_token_string = parse_string(request, "pos")
 
+        exclude_service_members_from_heroes = parse_boolean(
+            request, "msc4171_exclude_service_members", default=False
+        )
+
         from_token = None
         if from_token_string is not None:
             from_token = await SlidingSyncStreamToken.from_string(
@@ -935,6 +948,7 @@ class SlidingSyncRestServlet(RestServlet):
             lists=body.lists,
             room_subscriptions=body.room_subscriptions,
             extensions=body.extensions,
+            exclude_service_members_from_heroes=exclude_service_members_from_heroes,
         )
 
         sliding_sync_results = await self.sliding_sync_handler.wait_for_sync_for_user(

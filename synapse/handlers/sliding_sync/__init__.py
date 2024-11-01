@@ -832,7 +832,9 @@ class SlidingSyncHandler:
                 room_membership_summary = {}
             else:
                 room_membership_summary = await self.store.get_room_summary(
-                    room_id, self.should_exclude_service_members
+                    room_id,
+                    self.should_exclude_service_members
+                    and sync_config.exclude_service_members_from_heroes,
                 )
                 # TODO: Reverse/rewind back to the `to_token`
 
