@@ -32,7 +32,7 @@ from synapse.storage.database import (
     LoggingTransaction,
 )
 from synapse.storage.databases.main.roommember import ProfileInfo
-from synapse.storage.engines import PostgresEngine
+from synapse.storage.engines import PostgresEngine, Sqlite3Engine
 from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
@@ -244,6 +244,9 @@ class ProfileWorkerStore(SQLBaseStore):
             retcol="fields",
             desc="get_profile_fields",
         )
+        # The SQLite driver doesn't automatically convert JSON to
+        if isinstance(self.database_engine, Sqlite3Engine) and result:
+            result = json.loads(result)
         return result or {}
 
     async def create_profile(self, user_id: UserID) -> None:
@@ -281,20 +284,23 @@ class ProfileWorkerStore(SQLBaseStore):
             WHERE
                 user_id = ?
             """
+            txn.execute(
+                size_sql,
+                (new_field_name, user_id.localpart),
+            )
         else:
             size_sql = """
-            SELECT SUM(LENGTH(name)) + SUM(LENGTH(value)), COUNT(name) AS total_bytes
+            SELECT
+                LENGTH(json_remove(fields, ?)), LENGTH(displayname), LENGTH(avatar_url)
             FROM profiles
             WHERE
                 user_id = ?
             """
-        txn.execute(
-            size_sql,
-            (
-                new_field_name,
-                user_id.localpart,
-            ),
-        )
+            txn.execute(
+                size_sql,
+                # This will error if field_name has double quotes in it.
+                (f'$."{new_field_name}"', user_id.localpart),
+            )
         row = cast(Tuple[Optional[int], Optional[int], Optional[int]], txn.fetchone())
 
         # The values return null if the column is null.
@@ -398,14 +404,19 @@ class ProfileWorkerStore(SQLBaseStore):
             new_value: The value of the custom profile field.
         """
 
+        # Encode to canonical JSON.
+        canonical_value = encode_canonical_json(new_value)
+
         def set_profile_field(txn: LoggingTransaction) -> None:
             self._check_profile_size(txn, user_id, field_name, new_value)
 
             if isinstance(self.database_engine, PostgresEngine):
                 from psycopg2.extras import Json
 
+                # Note that the || jsonb operator is not recursive, any duplicate
+                # keys will be taken from the second value.
                 sql = """
-                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, json_build_object(?, ?::jsonb))
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_BUILD_OBJECT(?, ?::jsonb))
                 ON CONFLICT (user_id)
                 DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = COALESCE(profiles.fields, '{}'::jsonb) || EXCLUDED.fields
                 """
@@ -416,14 +427,33 @@ class ProfileWorkerStore(SQLBaseStore):
                         user_id.localpart,
                         user_id.to_string(),
                         field_name,
-                        # encode to canonical JSON, but then pass as a JSON object
-                        # since we have passing bytes disabled at the database driver
-                        # level.
-                        Json(json.loads(encode_canonical_json(new_value))),
+                        # Pass as a JSON object since we have passing bytes disabled
+                        # at the database driver.
+                        Json(json.loads(canonical_value)),
                     ),
                 )
             else:
-                raise RuntimeError("Unsupported")
+                # You may be tempted to use json_patch instead of providing the parameters
+                # twice, but that recursively merges objects instead of replacing.
+                sql = """
+                INSERT INTO profiles (user_id, full_user_id, fields) VALUES (?, ?, JSON_OBJECT(?, JSON(?)))
+                ON CONFLICT (user_id)
+                DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
+                """
+                # This will error if field_name has double quotes in it.
+                json_field_name = f'$."{field_name}"'
+
+                txn.execute(
+                    sql,
+                    (
+                        user_id.localpart,
+                        user_id.to_string(),
+                        json_field_name,
+                        canonical_value,
+                        json_field_name,
+                        canonical_value,
+                    ),
+                )
 
         await self.db_pool.runInteraction("set_profile_field", set_profile_field)
 
@@ -442,12 +472,20 @@ class ProfileWorkerStore(SQLBaseStore):
                 UPDATE profiles SET fields = fields - ?
                 WHERE user_id = ?
                 """
+                txn.execute(
+                    sql,
+                    (field_name, user_id.localpart),
+                )
             else:
-                raise RuntimeError("Unsupported")
-            txn.execute(
-                sql,
-                (field_name, user_id.localpart),
-            )
+                sql = """
+                UPDATE profiles SET fields = json_remove(fields, ?)
+                WHERE user_id = ?
+                """
+                txn.execute(
+                    sql,
+                    # This will error if field_name has double quotes in it.
+                    (f'$."{field_name}"', user_id.localpart),
+                )
 
         await self.db_pool.runInteraction("delete_profile_field", delete_profile_field)
 

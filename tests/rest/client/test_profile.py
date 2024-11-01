@@ -38,6 +38,7 @@ from synapse.types import UserID
 from synapse.util import Clock
 
 from tests import unittest
+from tests.utils import USE_POSTGRES_FOR_TESTS
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
@@ -620,6 +621,35 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_full_replace(self) -> None:
+        """Setting a field which is an object twice should fully replace that field (not be merged)."""
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={"object_field": {"test": "test"}},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+            content={"object_field": {"foo": "bar"}},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 200, channel.result)
+
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        self.assertEqual(
+            channel.json_body,
+            {"object_field": {"foo": "bar"}},
+        )
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_noauth(self) -> None:
         channel = self.make_request(
             "PUT",
@@ -658,14 +688,14 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         """
         # Get right to the boundary:
         #   len("displayname") + len("owner") + 5 = 21 for the displayname
-        #   1 + 65499 + 5 for key "a" = 65505
+        #   1 + 65498 + 5 for key "a" = 65504
         #   2 braces, 1 comma
-        # 3 + 21 + 65505 = 65529 < 65536.
+        # 3 + 21 + 65498 = 65522 < 65536.
         key = "a"
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-            content={key: "a" * 65499},
+            content={key: "a" * 65498},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -678,16 +708,22 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.result)
         canonical_json = encode_canonical_json(channel.json_body)
-        # 6 is the minimum bytes to store a value: 2 quotes, 1 colon, 1 comma, a non-empty key.
+        # 6 is the minimum bytes to store a value: 4 quotes, 1 colon, 1 comma, an empty key.
         # Be one below that so we can prove we're at the boundary.
-        self.assertEqual(len(canonical_json), MAX_PROFILE_SIZE - 7)
+        self.assertEqual(len(canonical_json), MAX_PROFILE_SIZE - 8)
+
+        # Postgres stores JSONB with whitespace, while SQLite doesn't.
+        if USE_POSTGRES_FOR_TESTS:
+            ADDITIONAL_CHARS = 0
+        else:
+            ADDITIONAL_CHARS = 1
 
         # The next one should fail, note the value has a (JSON) length of 2.
         key = "b"
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-            content={key: 12},
+            content={key: "1" + "a" * ADDITIONAL_CHARS},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
@@ -696,7 +732,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"/profile/{self.owner}/displayname",
-            content={"displayname": "owner1234567"},
+            content={"displayname": "owner12345678" + "a" * ADDITIONAL_CHARS},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
@@ -714,17 +750,17 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-            content={key: 1},
+            content={key: "" + "a" * ADDITIONAL_CHARS},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
 
         # Finally, setting a field that already exists to a value that is <= in length should work.
-        key = "b"
+        key = "a"
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
-            content={key: 2},
+            content={key: ""},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
