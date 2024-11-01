@@ -30,19 +30,19 @@ from tests.unittest import TestCase
 class ProxyTests(TestCase):
     @parameterized.expand(
         [
-            [b"close, X-Foo, X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close, X-Foo, X-Bar", {"close", "x-foo", "x-bar"}],
             # No whitespace
-            [b"close,X-Foo,X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close,X-Foo,X-Bar", {"close", "x-foo", "x-bar"}],
             # More whitespace
-            [b"close,    X-Foo,      X-Bar", {"Close", "X-Foo", "X-Bar"}],
+            [b"close,    X-Foo,      X-Bar", {"close", "x-foo", "x-bar"}],
             # "close" directive in not the first position
-            [b"X-Foo, X-Bar, close", {"X-Foo", "X-Bar", "Close"}],
+            [b"X-Foo, X-Bar, close", {"x-foo", "x-bar", "close"}],
             # Normalizes header capitalization
-            [b"keep-alive, x-fOo, x-bAr", {"Keep-Alive", "X-Foo", "X-Bar"}],
+            [b"keep-alive, x-fOo, x-bAr", {"keep-alive", "x-foo", "x-bar"}],
             # Handles header names with whitespace
             [
                 b"keep-alive, x  foo, x bar",
-                {"Keep-Alive", "X  foo", "X bar"},
+                {"keep-alive", "x  foo", "x bar"},
             ],
         ]
     )

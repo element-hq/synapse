@@ -52,24 +52,15 @@ logger = logging.getLogger(__name__)
 # section 13.5.1 and referenced in RFC9110 section 7.6.1. These are meant to only be
 # consumed by the immediate recipient and not be forwarded on.
 HOP_BY_HOP_HEADERS = {
-    "Connection",
-    "Keep-Alive",
-    "Proxy-Authenticate",
-    "Proxy-Authorization",
-    "TE",
-    "Trailers",
-    "Transfer-Encoding",
-    "Upgrade",
+    "Connection".lower(),
+    "Keep-Alive".lower(),
+    "Proxy-Authenticate".lower(),
+    "Proxy-Authorization".lower(),
+    "TE".lower(),
+    "Trailers".lower(),
+    "Transfer-Encoding".lower(),
+    "Upgrade".lower(),
 }
-
-if hasattr(Headers, "_canonicalNameCaps"):
-    # Twisted < 24.7.0rc1
-    _canonicalHeaderName = Headers()._canonicalNameCaps  # type: ignore[attr-defined]
-else:
-    # Twisted >= 24.7.0rc1
-    # But note that `_encodeName` still exists on prior versions,
-    # it just encodes differently
-    _canonicalHeaderName = Headers()._encodeName
 
 
 def parse_connection_header_value(
@@ -92,12 +83,12 @@ def parse_connection_header_value(
 
     Returns:
         The set of header names that should not be copied over from the remote response.
-        The keys are capitalized in canonical capitalization.
+        The keys are lowercased.
     """
     extra_headers_to_remove: Set[str] = set()
     if connection_header_value:
         extra_headers_to_remove = {
-            _canonicalHeaderName(connection_option.strip()).decode("ascii")
+            connection_option.decode("ascii").strip().lower()
             for connection_option in connection_header_value.split(b",")
         }
 
@@ -202,7 +193,7 @@ class ProxyResource(_AsyncResource):
         for k, v in response_headers.getAllRawHeaders():
             # Do not copy over any hop-by-hop headers. These are meant to only be
             # consumed by the immediate recipient and not be forwarded on.
-            header_key = k.decode("ascii")
+            header_key = k.decode("ascii").lower()
             if (
                 header_key in HOP_BY_HOP_HEADERS
                 or header_key in extra_headers_to_remove
