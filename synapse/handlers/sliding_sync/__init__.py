@@ -1463,8 +1463,9 @@ def _required_state_changes(
             - invalidated_state_keys
         )
 
-        # Always update changes to include the newly added keys, use the new requested
-        # set with whatever hasn't been invalidated from the previous set.
+        # Always update changes to include the newly added keys (we've expanded the set
+        # of state keys), use the new requested set with whatever hasn't been
+        # invalidated from the previous set.
         changes[event_type] = request_state_keys | inheritable_previous_state_keys
         # Limit the number of state_keys we should remember sending down the connection
         # for each (room_id, user_id). We don't want to store and pull out too much data
@@ -1545,47 +1546,8 @@ def _required_state_changes(
             old_state_keys - request_state_keys
         ) & changed_state_keys
 
-        # We've expanded the set of state keys, ...
+        # We've expanded the set of state keys, ... (already handled above)
         if request_state_keys - old_state_keys:
-            # Figure out which state keys we should remember sending down the connection
-            inheritable_previous_state_keys = (
-                # Retain the previous state_keys that we've sent down before.
-                # Wildcard and lazy state keys are not sticky from previous requests.
-                (old_state_keys - {StateValues.WILDCARD, StateValues.LAZY})
-                - invalidated_state_keys
-            )
-
-            # We've expanded the set of state keys, use the new requested set
-            # with whatever hasn't been invalidated from the previous set.
-            changes[event_type] = request_state_keys | inheritable_previous_state_keys
-            # Limit the number of state_keys we should remember sending down the connection
-            # for each (room_id, user_id). We don't want to store and pull out too much data
-            # in the database. This is a happy-medium between remembering nothing and
-            # everything. We can avoid sending redundant state down the connection most of
-            # the time given that most rooms don't have 100 members anyway and it takes a
-            # while to cycle through 100 members.
-            #
-            # Only remember up to (MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER)
-            if len(changes[event_type]) > MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
-                # Reset back to only the requested state keys
-                changes[event_type] = request_state_keys
-
-                # Skip if there isn't any room to fill in the rest with previous state keys
-                if len(request_state_keys) < MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER:
-                    # Fill the rest with previous state_keys. Ideally, we could sort
-                    # these by recency but it's just a set so just pick an arbitrary
-                    # subset (good enough).
-                    changes[event_type] = changes[event_type] | set(
-                        itertools.islice(
-                            inheritable_previous_state_keys,
-                            # Just taking the difference isn't perfect as there could be
-                            # overlap in the keys between the requested and previous but we
-                            # will decide to just take the easy route for now and avoid
-                            # additional set operations to figure it out.
-                            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
-                            - len(request_state_keys),
-                        )
-                    )
             continue
 
         old_state_key_wildcard = StateValues.WILDCARD in old_state_keys
