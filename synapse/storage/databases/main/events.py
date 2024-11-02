@@ -1686,7 +1686,7 @@ class PersistEventsStore:
                 """
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         stream_id,
                         self._instance_name,
@@ -1699,17 +1699,17 @@ class PersistEventsStore:
                         state_key,
                     )
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
             # Now we actually update the current_state_events table
 
             txn.execute_batch(
                 "DELETE FROM current_state_events"
                 " WHERE room_id = ? AND type = ? AND state_key = ?",
-                (
+                [
                     (room_id, etype, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
-                ),
+                ],
             )
 
             # We include the membership in the current state table, hence we do
@@ -1799,11 +1799,11 @@ class PersistEventsStore:
             txn.execute_batch(
                 "DELETE FROM local_current_membership"
                 " WHERE room_id = ? AND user_id = ?",
-                (
+                [
                     (room_id, state_key)
                     for etype, state_key in itertools.chain(to_delete, to_insert)
                     if etype == EventTypes.Member and self.is_mine_id(state_key)
-                ),
+                ],
             )
 
         if to_insert:
@@ -1863,10 +1863,10 @@ class PersistEventsStore:
             txn.execute_batch(
                 f"""
                 INSERT INTO sliding_sync_membership_snapshots
-                    (room_id, user_id, sender, membership_event_id, membership, event_stream_ordering, event_instance_name
+                    (room_id, user_id, sender, membership_event_id, membership, forgotten, event_stream_ordering, event_instance_name
                     {("," + ", ".join(sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""})
                 VALUES (
-                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?,
                     (SELECT stream_ordering FROM events WHERE event_id = ?),
                     (SELECT COALESCE(instance_name, 'master') FROM events WHERE event_id = ?)
                     {("," + ", ".join("?" for _ in sliding_sync_snapshot_values)) if sliding_sync_snapshot_values else ""}
@@ -1876,6 +1876,7 @@ class PersistEventsStore:
                     sender = EXCLUDED.sender,
                     membership_event_id = EXCLUDED.membership_event_id,
                     membership = EXCLUDED.membership,
+                    forgotten = EXCLUDED.forgotten,
                     event_stream_ordering = EXCLUDED.event_stream_ordering
                     {("," + ", ".join(f"{key} = EXCLUDED.{key}" for key in sliding_sync_snapshot_keys)) if sliding_sync_snapshot_keys else ""}
                 """,
@@ -1886,6 +1887,9 @@ class PersistEventsStore:
                         membership_info.sender,
                         membership_info.membership_event_id,
                         membership_info.membership,
+                        # Since this is a new membership, it isn't forgotten anymore (which
+                        # matches how Synapse currently thinks about the forgotten status)
+                        0,
                         # XXX: We do not use `membership_info.membership_event_stream_ordering` here
                         # because it is an unreliable value. See XXX note above.
                         membership_info.membership_event_id,
@@ -2901,6 +2905,9 @@ class PersistEventsStore:
                     "sender": event.sender,
                     "membership_event_id": event.event_id,
                     "membership": event.membership,
+                    # Since this is a new membership, it isn't forgotten anymore (which
+                    # matches how Synapse currently thinks about the forgotten status)
+                    "forgotten": 0,
                     "event_stream_ordering": event.internal_metadata.stream_ordering,
                     "event_instance_name": event.internal_metadata.instance_name,
                 }
@@ -3201,7 +3208,7 @@ class PersistEventsStore:
         if notifiable_events:
             txn.execute_batch(
                 sql,
-                (
+                [
                     (
                         event.room_id,
                         event.internal_metadata.stream_ordering,
@@ -3209,18 +3216,18 @@ class PersistEventsStore:
                         event.event_id,
                     )
                     for event in notifiable_events
-                ),
+                ],
             )
 
         # Now we delete the staging area for *all* events that were being
         # persisted.
         txn.execute_batch(
             "DELETE FROM event_push_actions_staging WHERE event_id = ?",
-            (
+            [
                 (event.event_id,)
                 for event, _ in all_events_and_contexts
                 if event.internal_metadata.is_notifiable()
-            ),
+            ],
         )
 
     def _remove_push_actions_for_event_id_txn(
