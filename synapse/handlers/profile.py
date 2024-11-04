@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 MAX_DISPLAYNAME_LEN = 256
 MAX_AVATAR_URL_LEN = 1000
-# Field name length is specced at 128.
-MAX_CUSTOM_FIELD_LEN = 128
+# Field name length is specced at 255 bytes.
+MAX_CUSTOM_FIELD_LEN = 255
 
 
 class ProfileHandler:

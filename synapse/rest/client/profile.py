@@ -285,7 +285,12 @@ class UnstableProfileRestServlet(RestServlet):
         content = parse_json_object_from_request(request)
 
         for field_name in content.keys():
-            if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+            if not field_name:
+                raise SynapseError(
+                    400, "Field name too short", errcode=Codes.INVALID_PARAM
+                )
+
+            if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
                 )
@@ -332,7 +337,12 @@ class UnstableProfileRestServlet(RestServlet):
         content = parse_json_object_from_request(request)
 
         for field_name in content.keys():
-            if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+            if not field_name:
+                raise SynapseError(
+                    400, "Field name too short", errcode=Codes.INVALID_PARAM
+                )
+
+            if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
                     400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
                 )
@@ -429,10 +439,10 @@ class UnstableProfileFieldRestServlet(RestServlet):
         is_admin = await self.auth.is_server_admin(requester)
 
         if not field_name:
-            raise SynapseError(400, "Field name too short", errcode=Codes.TOO_LARGE)
+            raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
 
-        if len(field_name) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
+        if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+            raise SynapseError(400, "Field name too long", errcode=Codes.INVALID_PARAM)
 
         content = parse_json_object_from_request(request)
         try:
@@ -479,7 +489,10 @@ class UnstableProfileFieldRestServlet(RestServlet):
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
 
-        if len(field_name) > MAX_CUSTOM_FIELD_LEN:
+        if not field_name:
+            raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
+
+        if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
             raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
 
         propagate = _read_propagate(self.hs, request)
