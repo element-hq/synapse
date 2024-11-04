@@ -68,6 +68,7 @@ class SlidingSyncConfig(SlidingSyncBody):
 
     user: UserID
     requester: Requester
+    exclude_service_members_from_heroes: bool
 
     # Pydantic config
     class Config:
