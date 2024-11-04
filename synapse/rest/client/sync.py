@@ -157,7 +157,7 @@ class SyncRestServlet(RestServlet):
             user.to_string(), ExperimentalFeature.MSC4222
         ):
             use_state_after = parse_boolean(
-                request, "org.matrix.use_state_after", default=False
+                request, "org.matrix.msc4222.use_state_after", default=False
             )
 
         logger.debug(
@@ -576,7 +576,7 @@ class SyncRestServlet(RestServlet):
         # We either include a `state` or `state_after` field depending on
         # whether the client has opted in to the newer `state_after` behavior.
         if sync_config.use_state_after:
-            state_key_name = "org.matrix.state_after"
+            state_key_name = "org.matrix.msc4222.state_after"
         else:
             state_key_name = "state"
 
