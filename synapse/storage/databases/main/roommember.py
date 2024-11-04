@@ -337,12 +337,12 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 FROM current_state_events
                 WHERE type = 'm.room.member' AND room_id = ?
                     AND membership IS NOT NULL
-                    AND %s
+                    AND {}
                 ORDER BY
                     CASE membership WHEN ? THEN 1 WHEN ? THEN 2 WHEN ? THEN 3 ELSE 4 END ASC,
                     event_stream_ordering ASC
                 LIMIT ?
-            """ % (exclude_users_clause)
+            """.format(exclude_users_clause)
 
             txn.execute(
                 sql,
