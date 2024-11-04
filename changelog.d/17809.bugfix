@@ -1,0 +1,1 @@
+Fix bug with sliding sync where `$LAZY`-loading room members would not return `required_state` membership in incremental syncs.
