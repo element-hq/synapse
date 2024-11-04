@@ -33,6 +33,7 @@ from synapse.api.constants import (
 )
 from synapse.api.room_versions import RoomVersions
 from synapse.handlers.sliding_sync import (
+    MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
     RoomsForUserType,
     RoomSyncConfig,
     StateValues,
@@ -3320,6 +3321,32 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "simple_retain_previous_state_keys",
+                """Test adding a state key to the config and retaining a previously sent state_key""",
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={"type": {"state_key1"}},
+                    request_required_state_map={"type": {"state_key2", "state_key3"}},
+                    state_deltas={("type", "state_key2"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # We've added a key so we should persist the changed required state
+                        # config.
+                        #
+                        # Retain `state_key1` from the `previous_required_state_map`
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        # We should see the new state_keys added
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                    expected_without_state_deltas=(
+                        {"type": {"state_key1", "state_key2", "state_key3"}},
+                        StateFilter.from_types(
+                            [("type", "state_key2"), ("type", "state_key3")]
+                        ),
+                    ),
+                ),
+            ),
+            (
                 "simple_remove_type",
                 """
                 Test removing a type from the config when there are a matching state
@@ -3725,6 +3752,249 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
+                "state_key_lazy_keep_previous_memberships_and_no_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response without any timeline events.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # We're not requesting any specific `EventTypes.Member` now but
+                        # since that state hasn't changed, nothing should change (we
+                        # should still keep track that we've sent specific
+                        # `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_lazy_keep_previous_memberships_with_new_memberships",
+                """
+                This test mimics a request with lazy-loading room members enabled where
+                we have previously sent down user2 and user3's membership events and now
+                we're sending down another response with a new event from user4.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={
+                        EventTypes.Member: {StateValues.LAZY, "@user4:test"}
+                    },
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                ),
+            ),
+            (
+                "state_key_expand_lazy_keep_previous_memberships",
+                """
+                Test expanding the `required_state` to lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {"@user2:test", "@user3:test"}
+                    },
+                    request_required_state_map={EventTypes.Member: {StateValues.LAZY}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since `StateValues.LAZY` was added, we should persist the
+                        # changed required state config.
+                        {
+                            EventTypes.Member: {
+                                StateValues.LAZY,
+                                "@user2:test",
+                                "@user3:test",
+                            }
+                        },
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_retract_lazy_keep_previous_memberships_no_new_memberships",
+                """
+                Test retracting the `required_state` to no longer lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Remove `EventTypes.Member` since there's been a change to that
+                        # state, (persist the change to required state). That way next
+                        # time, they request `EventTypes.Member`, we see that we haven't
+                        # sent it before and send the new state. (if we were tracking
+                        # that we sent any other state, we should still keep track
+                        # that).
+                        #
+                        # This acts the same as the `simple_remove_type` test. It's
+                        # possible that we could remember the specific `state_keys` that
+                        # we have sent down before but this currently just acts the same
+                        # as if a whole `type` was removed. Perhaps it's good that we
+                        # "garbage collect" and forget what we've sent before for a
+                        # given `type`  when the client stops caring about a certain
+                        # `type`.
+                        {},
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                    expected_without_state_deltas=(
+                        # `EventTypes.Member` is no longer requested but since that
+                        # state hasn't changed, nothing should change (we should still
+                        # keep track that we've sent `EventTypes.Member` before).
+                        None,
+                        # We don't need to request anything more if they are requesting
+                        # less state now
+                        StateFilter.none(),
+                    ),
+                ),
+            ),
+            (
+                "state_key_retract_lazy_keep_previous_memberships_with_new_memberships",
+                """
+                Test retracting the `required_state` to no longer lazy-loading room members.
+                """,
+                RequiredStateChangesTestParameters(
+                    previous_required_state_map={
+                        EventTypes.Member: {
+                            StateValues.LAZY,
+                            "@user2:test",
+                            "@user3:test",
+                        }
+                    },
+                    request_required_state_map={EventTypes.Member: {"@user4:test"}},
+                    state_deltas={(EventTypes.Member, "@user2:test"): "$event_id"},
+                    expected_with_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        #
+                        # Also remove "@user2:test" since that state has changed and is no
+                        # longer being requested anymore. Since something was removed,
+                        # we also should persist the changed to required state. That way next
+                        # time, they request "@user2:test", we see that we haven't sent
+                        # it before and send the new state. (we should still keep track
+                        # that we've sent specific `EventTypes.Member` before)
+                        {
+                            EventTypes.Member: {
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                    expected_without_state_deltas=(
+                        # Since "@user4:test" was added, we should persist the changed
+                        # required state config.
+                        {
+                            EventTypes.Member: {
+                                "@user2:test",
+                                "@user3:test",
+                                "@user4:test",
+                            }
+                        },
+                        # We should see the new state_keys added
+                        StateFilter.from_types([(EventTypes.Member, "@user4:test")]),
+                    ),
+                ),
+            ),
+            (
                 "type_wildcard_with_state_key_wildcard_to_explicit_state_keys",
                 """
                 Test switching from a wildcard ("*", "*") to explicit state keys
@@ -3824,7 +4094,7 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                 ),
             ),
             (
-                "state_key_wildcard_to_explicit_state_keys",
+                "explicit_state_keys_to_wildcard_state_key",
                 """Test switching from a wildcard to explicit state keys with a concrete type""",
                 RequiredStateChangesTestParameters(
                     previous_required_state_map={
@@ -3837,11 +4107,18 @@ class RequiredStateChangesTestCase(unittest.TestCase):
                     # request. And we need to request all of the state for that type
                     # because we previously, only sent down a few keys.
                     expected_with_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {"type1": {StateValues.WILDCARD, "state_key2", "state_key3"}},
                         StateFilter.from_types([("type1", None)]),
                     ),
                     expected_without_state_deltas=(
-                        {"type1": {StateValues.WILDCARD}},
+                        {
+                            "type1": {
+                                StateValues.WILDCARD,
+                                "state_key1",
+                                "state_key2",
+                                "state_key3",
+                            }
+                        },
                         StateFilter.from_types([("type1", None)]),
                     ),
                 ),
@@ -3857,14 +4134,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         # Without `state_deltas`
         changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.request_required_state_map,
-            ),
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
             state_deltas={},
         )
 
@@ -3882,14 +4153,8 @@ class RequiredStateChangesTestCase(unittest.TestCase):
         # With `state_deltas`
         changed_required_state_map, added_state_filter = _required_state_changes(
             user_id="@user:test",
-            previous_room_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.previous_required_state_map,
-            ),
-            room_sync_config=RoomSyncConfig(
-                timeline_limit=0,
-                required_state_map=test_parameters.request_required_state_map,
-            ),
+            prev_required_state_map=test_parameters.previous_required_state_map,
+            request_required_state_map=test_parameters.request_required_state_map,
             state_deltas=test_parameters.state_deltas,
         )
 
@@ -3902,4 +4167,122 @@ class RequiredStateChangesTestCase(unittest.TestCase):
             added_state_filter,
             test_parameters.expected_with_state_deltas[1],
             "added_state_filter does not match (with state_deltas)",
+        )
+
+    @parameterized.expand(
+        [
+            # Test with a normal arbitrary type (no special meaning)
+            ("arbitrary_type", "type", set()),
+            # Test with membership
+            ("membership", EventTypes.Member, set()),
+            # Test with lazy-loading room members
+            ("lazy_loading_membership", EventTypes.Member, {StateValues.LAZY}),
+        ]
+    )
+    def test_limit_retained_previous_state_keys(
+        self,
+        _test_label: str,
+        event_type: str,
+        extra_state_keys: Set[str],
+    ) -> None:
+        """
+        Test that we limit the number of state_keys that we remember but always include
+        the state_keys that we've just requested.
+        """
+        previous_required_state_map = {
+            event_type: {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
+            }
+            | extra_state_keys
+        }
+        request_required_state_map = {
+            event_type: {f"state_key{i}" for i in range(50)} | extra_state_keys
+        }
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # We should only remember up to the maximum number of state keys
+        self.assertGreaterEqual(
+            len(changed_required_state_map[event_type]),
+            # Most of the time this will be `MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER` but
+            # because we are just naively selecting enough previous state_keys to fill
+            # the limit, there might be some overlap in what's added back which means we
+            # might have slightly less than the limit.
+            #
+            # `extra_state_keys` overlaps in the previous and requested
+            # `required_state_map` so we might see this this scenario.
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - len(extra_state_keys),
+        )
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map[event_type],
+            request_required_state_map[event_type],
+        )
+        # And the rest is filled with the previous state keys
+        #
+        # We can't assert the exact state_keys since we don't know the order so we just
+        # check that they all start with "prev_" and that we have the correct amount.
+        remaining_state_keys = (
+            changed_required_state_map[event_type]
+            - request_required_state_map[event_type]
+        )
+        self.assertGreater(
+            len(remaining_state_keys),
+            0,
+        )
+        assert all(
+            state_key.startswith("prev_") for state_key in remaining_state_keys
+        ), "Remaining state_keys should be the previous state_keys"
+
+    def test_request_more_state_keys_than_remember_limit(self) -> None:
+        """
+        Test requesting more state_keys than fit in our limit to remember from previous
+        requests.
+        """
+        previous_required_state_map = {
+            "type": {
+                # Prefix the state_keys we've "prev_"iously sent so they are easier to
+                # identify in our assertions.
+                f"prev_state_key{i}"
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER - 30)
+            }
+        }
+        request_required_state_map = {
+            "type": {
+                f"state_key{i}"
+                # Requesting more than the MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER
+                for i in range(MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER + 20)
+            }
+        }
+        # Ensure that we are requesting more than the limit
+        self.assertGreater(
+            len(request_required_state_map["type"]),
+            MAX_NUMBER_PREVIOUS_STATE_KEYS_TO_REMEMBER,
+        )
+
+        # (function under test)
+        changed_required_state_map, added_state_filter = _required_state_changes(
+            user_id="@user:test",
+            prev_required_state_map=previous_required_state_map,
+            request_required_state_map=request_required_state_map,
+            state_deltas={},
+        )
+        assert changed_required_state_map is not None
+
+        # Should include all of the requested state
+        self.assertIncludes(
+            changed_required_state_map["type"],
+            request_required_state_map["type"],
+            exact=True,
         )
