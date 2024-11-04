@@ -151,18 +151,30 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
     def test_claim_one_time_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname
         device_id = "xyz"
-        keys = {"alg1:k1": "key1"}
-
         res = self.get_success(
             self.handler.upload_keys_for_user(
-                local_user, device_id, {"one_time_keys": keys}
+                local_user, device_id, {"one_time_keys": {"alg1:k1": "key1"}}
             )
         )
         self.assertDictEqual(
             res, {"one_time_key_counts": {"alg1": 1, "signed_curve25519": 0}}
         )
 
-        res2 = self.get_success(
+        # Keys should be returned in the order they were uploaded. To test, advance time
+        # a little, then upload a second key with an earlier key ID; it should get
+        # returned second.
+        self.reactor.advance(1)
+        res = self.get_success(
+            self.handler.upload_keys_for_user(
+                local_user, device_id, {"one_time_keys": {"alg1:k0": "key0"}}
+            )
+        )
+        self.assertDictEqual(
+            res, {"one_time_key_counts": {"alg1": 2, "signed_curve25519": 0}}
+        )
+
+        # now claim both keys back. They should be in the same order
+        res = self.get_success(
             self.handler.claim_one_time_keys(
                 {local_user: {device_id: {"alg1": 1}}},
                 self.requester,
@@ -171,10 +183,25 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(
-            res2,
+            res,
             {
                 "failures": {},
                 "one_time_keys": {local_user: {device_id: {"alg1:k1": "key1"}}},
+            },
+        )
+        res = self.get_success(
+            self.handler.claim_one_time_keys(
+                {local_user: {device_id: {"alg1": 1}}},
+                self.requester,
+                timeout=None,
+                always_include_fallback_keys=False,
+            )
+        )
+        self.assertEqual(
+            res,
+            {
+                "failures": {},
+                "one_time_keys": {local_user: {device_id: {"alg1:k0": "key0"}}},
             },
         )
 
@@ -335,6 +362,48 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
                 self.assertEqual(
                     counts_by_alg, expected_counts_by_alg, f"{user_id}:{device_id}"
                 )
+
+    def test_claim_one_time_key_bulk_ordering(self) -> None:
+        """Keys returned by the bulk claim call should be returned in the correct order"""
+
+        # Alice has lots of keys, uploaded in a specific order
+        alice = f"@alice:{self.hs.hostname}"
+        alice_dev = "alice_dev_1"
+
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                alice,
+                alice_dev,
+                {"one_time_keys": {"alg1:k20": 20, "alg1:k21": 21, "alg1:k22": 22}},
+            )
+        )
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                alice,
+                alice_dev,
+                {"one_time_keys": {"alg1:k10": 10, "alg1:k11": 11, "alg1:k12": 12}},
+            )
+        )
+
+        # Now claim some, and check we get the right ones.
+        claim_res = self.get_success(
+            self.handler.claim_one_time_keys(
+                {alice: {alice_dev: {"alg1": 2}}},
+                self.requester,
+                timeout=None,
+                always_include_fallback_keys=False,
+            )
+        )
+        # We should get the first-uploaded keys, even though they have later key ids
+        self.assertEqual(
+            claim_res,
+            {
+                "failures": {},
+                "one_time_keys": {
+                    "@alice:test": {"alice_dev_1": {"alg1:k20": 20, "alg1:k21": 21}}
+                },
+            },
+        )
 
     def test_fallback_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname
