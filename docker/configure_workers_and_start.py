@@ -135,6 +135,14 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         },
         "worker_extra_conf": "enable_media_repo: true",
     },
+    "admin": {
+      "app": "synapse.app.generic_worker",
+      "listener_resources": ["replication", "admin"],
+      "endpoint_patterns": ["^/_synapse/admin/v2/rooms/.*$"],
+      "shared_extra_conf": {},
+      "worker_extra_conf": "",
+
+    },
     "appservice": {
         "app": "synapse.app.generic_worker",
         "listener_resources": [],
@@ -574,6 +582,7 @@ def is_sharding_allowed_for_worker_type(worker_type: str) -> bool:
         "receipts",
         "typing",
         "to_device",
+        "admin"
     ]
 
 
@@ -1076,6 +1085,7 @@ def main(args: List[str], environ: MutableMapping[str, str]) -> None:
             # Split type names by comma, ignoring whitespace.
             worker_types = split_and_strip_string(worker_types_env, ",")
             requested_worker_types = parse_worker_types(worker_types)
+            log(f"requested_worker_types {requested_worker_types}")
 
         # Always regenerate all other config files
         log("Generating worker config files")
