@@ -1096,6 +1096,92 @@ class SlidingSyncRoomsMetaTestCase(SlidingSyncBase):
 
         self.assertGreater(response_body["rooms"][room_id]["bump_stamp"], 0)
 
+    def test_rooms_bump_stamp_no_change_incremental(self) -> None:
+        """Test that the bump stamp is omitted if there has been no change"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 100,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Initial sync so we expect to see a bump stamp
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+
+        # Send an event that is not in the bump events list
+        self.helper.send_event(
+            room_id1, type="org.matrix.test", content={}, tok=user1_tok
+        )
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # There hasn't been a change to the bump stamps, so we ignore it
+        self.assertNotIn("bump_stamp", response_body["rooms"][room_id1])
+
+    def test_rooms_bump_stamp_change_incremental(self) -> None:
+        """Test that the bump stamp is included if there has been a change, even
+        if its not in the timeline"""
+
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+
+        room_id1 = self.helper.create_room_as(
+            user1_id,
+            tok=user1_tok,
+        )
+
+        # Make the Sliding Sync request
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 2,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Initial sync so we expect to see a bump stamp
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+        first_bump_stamp = response_body["rooms"][room_id1]["bump_stamp"]
+
+        # Send a bump event at the start.
+        self.helper.send(room_id1, "test", tok=user1_tok)
+
+        # Send events that are not in the bump events list to fill the timeline
+        for _ in range(5):
+            self.helper.send_event(
+                room_id1, type="org.matrix.test", content={}, tok=user1_tok
+            )
+
+        response_body, from_token = self.do_sync(
+            sync_body, since=from_token, tok=user1_tok
+        )
+
+        # There was a bump event in the timeline gap, so we should see the bump
+        # stamp be updated.
+        self.assertIn("bump_stamp", response_body["rooms"][room_id1])
+        second_bump_stamp = response_body["rooms"][room_id1]["bump_stamp"]
+
+        self.assertGreater(second_bump_stamp, first_bump_stamp)
+
     def test_rooms_bump_stamp_invites(self) -> None:
         """
         Test that `bump_stamp` is present and points to the membership event,

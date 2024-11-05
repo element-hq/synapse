@@ -711,6 +711,27 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         return {row[0] for row in txn}
 
+    async def get_rooms_user_currently_banned_from(
+        self, user_id: str
+    ) -> FrozenSet[str]:
+        """Returns a set of room_ids the user is currently banned from.
+
+        If a remote user only returns rooms this server is currently
+        participating in.
+        """
+        room_ids = await self.db_pool.simple_select_onecol(
+            table="current_state_events",
+            keyvalues={
+                "type": EventTypes.Member,
+                "membership": Membership.BAN,
+                "state_key": user_id,
+            },
+            retcol="room_id",
+            desc="get_rooms_user_currently_banned_from",
+        )
+
+        return frozenset(room_ids)
+
     @cached(max_entries=500000, iterable=True)
     async def get_rooms_for_user(self, user_id: str) -> FrozenSet[str]:
         """Returns a set of room_ids the user is currently joined to.
@@ -1354,6 +1375,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                 keyvalues={"user_id": user_id, "room_id": room_id},
                 updatevalues={"forgotten": 1},
             )
+            # Handle updating the `sliding_sync_membership_snapshots` table
             self.db_pool.simple_update_txn(
                 txn,
                 table="sliding_sync_membership_snapshots",

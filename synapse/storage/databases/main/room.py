@@ -1175,7 +1175,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 SET quarantined_by = ?
                 WHERE media_origin = ? AND media_id = ?
             """,
-            ((quarantined_by, origin, media_id) for origin, media_id in remote_mxcs),
+            [(quarantined_by, origin, media_id) for origin, media_id in remote_mxcs],
         )
         total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 

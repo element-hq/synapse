@@ -1287,7 +1287,7 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `max_cache_memory_usage`: Sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted. They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in the setting below, or until the `min_cache_ttl` is hit. Defaults to `null`.
+  * `max_cache_memory_usage`: Sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted. They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in the setting below, or until the `min_cache_ttl` is hit. Defaults to `null`.
 
   * `target_cache_memory_usage`: Sets a rough target for the desired memory usage of the caches. Defaults to `null`.
 
@@ -3396,6 +3396,8 @@ This setting has the following sub-options:
 
 * `subject_claim` (string|null): Name of the claim containing a unique identifier for the user. Defaults to `"sub"`.
 
+* `display_name_claim` (string|null): Name of the claim containing the display name for the user. If provided, the display name will be set to the value of this claim upon first login. Defaults to `null`.
+
 * `issuer` (string|null): The issuer to validate the "iss" claim against. If provided the "iss" claim will be required and validated for all JSON web tokens. Defaults to `null`.
 
 * `audiences` (array|null): A list of audiences to validate the "aud" claim against. If provided the "aud" claim will be required and validated for all JSON web tokens. Note that if the "aud" claim is included in a JSON web token then validation will fail without configuring audiences. Defaults to `null`.
@@ -3407,6 +3409,7 @@ jwt_config:
   secret: provided-by-your-issuer
   algorithm: provided-by-your-issuer
   subject_claim: name_of_claim
+  display_name_claim: name_of_claim
   issuer: provided-by-your-issuer
   audiences:
   - provided-by-your-issuer
