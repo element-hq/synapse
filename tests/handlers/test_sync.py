@@ -32,7 +32,13 @@ from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.federation.federation_base import event_from_pdu_json
-from synapse.handlers.sync import SyncConfig, SyncRequestKey, SyncResult, SyncVersion
+from synapse.handlers.sync import (
+    SyncConfig,
+    SyncRequestKey,
+    SyncResult,
+    SyncVersion,
+    TimelineBatch,
+)
 from synapse.rest import admin
 from synapse.rest.client import knock, login, room
 from synapse.server import HomeServer
@@ -1155,3 +1161,104 @@ def generate_sync_config(
         device_id=device_id,
         use_state_after=use_state_after,
     )
+
+
+class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
+    """Tests Sync Handler state behavior when using `use_state_after."""
+
+    servlets = [
+        admin.register_servlets,
+        knock.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.sync_handler = self.hs.get_sync_handler()
+        self.store = self.hs.get_datastores().main
+
+        # AuthBlocking reads from the hs' config on initialization. We need to
+        # modify its config instead of the hs'
+        self.auth_blocking = self.hs.get_auth_blocking()
+
+    def test_initial_sync_multiple_deltas(self) -> None:
+        """Test that if multiple state deltas have happened during processing of
+        a full state sync we return the correct state"""
+
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Create a room as the user and set some custom state.
+        joined_room = self.helper.create_room_as(user, tok=tok)
+
+        first_state = self.helper.send_state(
+            joined_room, event_type="m.test_event", body={"num": 1}, tok=tok
+        )
+
+        # Take a snapshot of the stream token, to simulate doing an initial sync
+        # at this point.
+        end_stream_token = self.hs.get_event_sources().get_current_token()
+
+        # Send some state *after* the stream token
+        self.helper.send_state(
+            joined_room, event_type="m.test_event", body={"num": 2}, tok=tok
+        )
+
+        # Calculating the full state will return the first state, and not the
+        # second.
+        state = self.get_success(
+            self.sync_handler._compute_state_delta_for_full_sync(
+                room_id=joined_room,
+                sync_config=generate_sync_config(user, use_state_after=True),
+                batch=TimelineBatch(
+                    prev_batch=end_stream_token, events=[], limited=True
+                ),
+                end_token=end_stream_token,
+                members_to_fetch=None,
+                timeline_state={},
+                joined=True,
+            )
+        )
+        self.assertEqual(state[("m.test_event", "")], first_state["event_id"])
+
+    def test_incremental_sync_multiple_deltas(self) -> None:
+        """Test that if multiple state deltas have happened since an incremental
+        state sync we return the correct state"""
+
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Create a room as the user and set some custom state.
+        joined_room = self.helper.create_room_as(user, tok=tok)
+
+        # Take a snapshot of the stream token, to simulate doing an incremental sync
+        # from this point.
+        since_token = self.hs.get_event_sources().get_current_token()
+
+        self.helper.send_state(
+            joined_room, event_type="m.test_event", body={"num": 1}, tok=tok
+        )
+
+        # Send some state *after* the stream token
+        second_state = self.helper.send_state(
+            joined_room, event_type="m.test_event", body={"num": 2}, tok=tok
+        )
+
+        end_stream_token = self.hs.get_event_sources().get_current_token()
+
+        # Calculating the incrementals state will return the second state, and not the
+        # first.
+        state = self.get_success(
+            self.sync_handler._compute_state_delta_for_incremental_sync(
+                room_id=joined_room,
+                sync_config=generate_sync_config(user, use_state_after=True),
+                batch=TimelineBatch(
+                    prev_batch=end_stream_token, events=[], limited=True
+                ),
+                since_token=since_token,
+                end_token=end_stream_token,
+                members_to_fetch=None,
+                timeline_state={},
+            )
+        )
+        self.assertEqual(state[("m.test_event", "")], second_state["event_id"])
