@@ -377,6 +377,8 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
                 {"one_time_keys": {"alg1:k20": 20, "alg1:k21": 21, "alg1:k22": 22}},
             )
         )
+        # Advance time by 1s, to ensure that there is a difference in upload time.
+        self.reactor.advance(1)
         self.get_success(
             self.handler.upload_keys_for_user(
                 alice,
