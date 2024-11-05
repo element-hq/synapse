@@ -1142,7 +1142,7 @@ def generate_sync_config(
         user_id: user who is syncing.
         device_id: device that is syncing. Defaults to "device_id".
         filter_collection: filter to apply. Defaults to the default filter (ie,
-        return everything, with a default limit)
+            return everything, with a default limit)
         use_state_after: whether the `use_state_after` flag was set.
     """
     if filter_collection is None:
