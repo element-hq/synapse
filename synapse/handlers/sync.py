@@ -1409,7 +1409,11 @@ class SyncHandler:
                 )
                 if deltas:
                     mutable_state_ids = dict(state_ids)
-                    for delta in deltas:
+
+                    # We iterate over the deltas backwards so that if there are
+                    # multiple changes of the same type/state_key we'll
+                    # correctly pick the earliest delta.
+                    for delta in reversed(deltas):
                         if delta.prev_event_id:
                             mutable_state_ids[(delta.event_type, delta.state_key)] = (
                                 delta.prev_event_id
