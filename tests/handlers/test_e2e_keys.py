@@ -396,16 +396,13 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
                 always_include_fallback_keys=False,
             )
         )
-        # We should get the first-uploaded keys, even though they have later key ids
-        self.assertEqual(
-            claim_res,
-            {
-                "failures": {},
-                "one_time_keys": {
-                    "@alice:test": {"alice_dev_1": {"alg1:k20": 20, "alg1:k21": 21}}
-                },
-            },
-        )
+        # We should get the first-uploaded keys, even though they have later key ids.
+        # We should get a random set of two of k20, k21, k22.
+        self.assertEqual(claim_res["failures"], {})
+        claimed_keys = claim_res["one_time_keys"]["@alice:test"]["alice_dev_1"]
+        self.assertEqual(len(claimed_keys), 2)
+        for key_id in claimed_keys.keys():
+            self.assertIn(key_id, ["alg1:k20", "alg1:k21", "alg1:k22"])
 
     def test_fallback_key(self) -> None:
         local_user = "@boris:" + self.hs.hostname
