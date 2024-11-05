@@ -168,6 +168,32 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             self._un_partial_stated_rooms_stream_id_gen.advance(instance_name, token)
         return super().process_replication_position(stream_name, instance_name, token)
 
+    async def block_room(self, room_id: str, user_id: str) -> None:
+        """Marks the room as blocked.
+
+        Can be called multiple times (though we'll only track the last user to
+        block this room).
+
+        Can be called on a room unknown to this homeserver.
+
+        Args:
+            room_id: Room to block
+            user_id: Who blocked it
+        """
+        await self.db_pool.simple_upsert(
+            table="blocked_rooms",
+            keyvalues={"room_id": room_id},
+            values={},
+            insertion_values={"user_id": user_id},
+            desc="block_room",
+        )
+        await self.db_pool.runInteraction(
+            "block_room_invalidation",
+            self._invalidate_cache_and_stream,
+            self.is_room_blocked,
+            (room_id,),
+        )
+
     async def store_room(
         self,
         room_id: str,
@@ -2493,31 +2519,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         )
         return next_id
 
-    async def block_room(self, room_id: str, user_id: str) -> None:
-        """Marks the room as blocked.
-
-        Can be called multiple times (though we'll only track the last user to
-        block this room).
-
-        Can be called on a room unknown to this homeserver.
-
-        Args:
-            room_id: Room to block
-            user_id: Who blocked it
-        """
-        await self.db_pool.simple_upsert(
-            table="blocked_rooms",
-            keyvalues={"room_id": room_id},
-            values={},
-            insertion_values={"user_id": user_id},
-            desc="block_room",
-        )
-        await self.db_pool.runInteraction(
-            "block_room_invalidation",
-            self._invalidate_cache_and_stream,
-            self.is_room_blocked,
-            (room_id,),
-        )
 
     async def unblock_room(self, room_id: str) -> None:
         """Remove the room from blocking list.

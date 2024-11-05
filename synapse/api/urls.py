@@ -39,6 +39,7 @@ SERVER_KEY_PREFIX = "/_matrix/key"
 MEDIA_R0_PREFIX = "/_matrix/media/r0"
 MEDIA_V3_PREFIX = "/_matrix/media/v3"
 LEGACY_MEDIA_PREFIX = "/_matrix/media/v1"
+ADMIN_PREFIX = "/_synapse/admin"
 
 
 class ConsentURIBuilder:
