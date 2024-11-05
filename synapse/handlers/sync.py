@@ -1553,6 +1553,9 @@ class SyncHandler:
                     # this, so we just skip it for now.
                     continue
 
+                # Note that deltas are in stream ordering, so if there are
+                # multiple deltas for a given type/state_key we'll always pick
+                # the latest one.
                 delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
 
             return delta_state_ids
