@@ -28,12 +28,13 @@ from twisted.web.resource import Resource
 import synapse
 import synapse.events
 from synapse.api.urls import (
+    ADMIN_PREFIX,
     CLIENT_API_PREFIX,
     FEDERATION_PREFIX,
     LEGACY_MEDIA_PREFIX,
     MEDIA_R0_PREFIX,
     MEDIA_V3_PREFIX,
-    SERVER_KEY_PREFIX, ADMIN_PREFIX,
+    SERVER_KEY_PREFIX,
 )
 from synapse.app import _base
 from synapse.app._base import (
@@ -52,7 +53,7 @@ from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource
-from synapse.rest.admin import register_servlets_for_media_repo, AdminRestResource
+from synapse.rest.admin import AdminRestResource, register_servlets_for_media_repo
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree

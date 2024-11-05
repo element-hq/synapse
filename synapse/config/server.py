@@ -191,7 +191,7 @@ KNOWN_RESOURCES = {
     "openid",
     "replication",
     "static",
-    "admin"
+    "admin",
 }
 
 

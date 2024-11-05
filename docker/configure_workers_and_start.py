@@ -136,12 +136,11 @@ WORKERS_CONFIG: Dict[str, Dict[str, Any]] = {
         "worker_extra_conf": "enable_media_repo: true",
     },
     "admin": {
-      "app": "synapse.app.generic_worker",
-      "listener_resources": ["replication", "admin"],
-      "endpoint_patterns": ["^/_synapse/admin/v2/rooms/.*$"],
-      "shared_extra_conf": {},
-      "worker_extra_conf": "",
-
+        "app": "synapse.app.generic_worker",
+        "listener_resources": ["replication", "admin"],
+        "endpoint_patterns": ["^/_synapse/admin/v2/rooms/.*$"],
+        "shared_extra_conf": {},
+        "worker_extra_conf": "",
     },
     "appservice": {
         "app": "synapse.app.generic_worker",
@@ -582,7 +581,7 @@ def is_sharding_allowed_for_worker_type(worker_type: str) -> bool:
         "receipts",
         "typing",
         "to_device",
-        "admin"
+        "admin",
     ]
 
 

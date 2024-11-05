@@ -2519,7 +2519,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         )
         return next_id
 
-
     async def unblock_room(self, room_id: str) -> None:
         """Remove the room from blocking list.
 
