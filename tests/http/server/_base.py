@@ -386,22 +386,25 @@ class Deferred__await__Patch:
             # block.
             try:
                 while True:
-                    yield Deferred___next__(deferred, gen)
+                    # We've hit a new await point (or the deferred has
+                    # completed), handle it.
+                    handle_next_iteration(deferred)
+
+                    # Continue on.
+                    yield gen.send(None)
             except StopIteration as e:
                 # We need to convert `StopIteration` into a normal return.
                 return e.value
 
-        def Deferred___next__(
+        def handle_next_iteration(
             deferred: "Deferred[T]",
-            gen: Generator["Deferred[T]", None, T],
-        ) -> "Deferred[T]":
+        ) -> None:
             """Intercepts `await`s on `Deferred`s and rigs them to block once we have
             seen enough of them.
 
             Args:
                 deferred: The deferred that we've captured and are intercepting
                     `await` calls within.
-                gen: The associated generator to get the next await point.
 
             `gen.send(None)` will normally:
                 * return `self` if the `Deferred` is unresolved, in which case
@@ -413,7 +416,7 @@ class Deferred__await__Patch:
             """
             if not self._block_new_awaits:
                 # We're no longer blocking awaits points
-                return gen.send(None)
+                return
 
             self.awaits_seen += 1
 
@@ -440,7 +443,7 @@ class Deferred__await__Patch:
                 # Don't log the stack. It's been seen before in a previous run.
                 self._previous_stack = stack
 
-                return gen.send(None)
+                return
 
             # We want to block at the current `await`.
             if deferred.called and not deferred.paused:
@@ -463,7 +466,7 @@ class Deferred__await__Patch:
 
                 # Continue iterating on the deferred now that we've blocked it
                 # again.
-                return gen.send(None)
+                return
 
             # This `Deferred` does not have a result yet.
             # The `await` will block normally, so we don't have to do anything.
@@ -475,7 +478,7 @@ class Deferred__await__Patch:
             )
             self._previous_stack = stack
 
-            return gen.send(None)
+            return
 
         return mock.patch.object(Deferred, "__await__", new=Deferred___await__)
 
