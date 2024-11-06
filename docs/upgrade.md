@@ -117,6 +117,17 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.119.0
+
+## Minimum supported Python version
+
+The minimum supported Python version has been increased from v3.8 to v3.9.
+You will need Python 3.9 to run Synapse v1.119.0 (due out Nov 7th, 2024).
+
+If you use current versions of the Matrix.org-distributed Debian
+packages or Docker images, no action is required.
+
+
 # Upgrading to v1.111.0
 
 ## New worker endpoints for authenticated client and federation media
