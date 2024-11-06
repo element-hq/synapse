@@ -590,6 +590,8 @@ class Notifier:
         without waking up any of the normal user event streams"""
         self.notify_replication()
 
+    # FIXME: Should this be renamed to `wait_for_activity`? This listens for new events
+    # and when one-time keys are claimed which doesn't correspond to an event.
     async def wait_for_events(
         self,
         user_id: str,
@@ -899,6 +901,43 @@ class Notifier:
         """Notify the callbacks that a lock has been released."""
         for cb in self._lock_released_callback:
             cb(instance_name, lock_name, lock_key)
+
+    def notify_one_time_keys_changed(
+        self,
+        users: Union[StrCollection, Collection[UserID]],
+    ) -> None:
+        """
+        Used by handlers to inform the notifier that a one-time key has been
+        claimed or uploaded
+        """
+        # Bail early if there is nothing to do
+        if not users:
+            return
+
+        time_now_ms = self.clock.time_msec()
+        current_token = self.event_sources.get_current_token()
+        listeners: List["Deferred[StreamToken]"] = []
+        for user in users:
+            user_stream = self.user_to_user_stream.get(str(user))
+            if user_stream is None:
+                continue
+
+            try:
+                listeners.extend(
+                    user_stream.update_and_fetch_deferreds(current_token, time_now_ms)
+                )
+            except Exception:
+                logger.exception("Failed to notify listener")
+
+        # We resolve all these deferreds in one go so that we only need to
+        # call `PreserveLoggingContext` once, as it has a bunch of overhead
+        # (to calculate performance stats)
+        with PreserveLoggingContext():
+            for listener in listeners:
+                listener.callback(current_token)
+
+        # FIXME: How can we poke the replication so that other workers also see the
+        # one-time key change
 
 
 @attr.s(auto_attribs=True)
