@@ -418,7 +418,7 @@ class ProfileHandler:
 
     async def get_profile_field(
         self, target_user: UserID, field_name: str
-    ) -> Optional[str]:
+    ) -> JsonValue:
         """
         Fetch a user's profile from the database for local users and over federation
         for remote users.
@@ -536,7 +536,7 @@ class ProfileHandler:
 
         just_field = args.get("field", None)
 
-        response = {}
+        response: JsonDict = {}
         try:
             if just_field is None or just_field == ProfileFields.DISPLAYNAME:
                 response["displayname"] = await self.store.get_profile_displayname(user)

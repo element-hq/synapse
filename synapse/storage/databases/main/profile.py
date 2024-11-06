@@ -210,9 +210,7 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_avatar_url",
         )
 
-    async def get_profile_field(
-        self, user_id: UserID, field_name: str
-    ) -> Optional[str]:
+    async def get_profile_field(self, user_id: UserID, field_name: str) -> JsonValue:
         """
         Get a custom profile field for a user.
 
@@ -223,10 +221,54 @@ class ProfileWorkerStore(SQLBaseStore):
         Returns:
             The string value if the field exists, otherwise raises 404.
         """
-        result = await self.get_profile_fields(user_id)
-        if field_name not in result:
-            raise StoreError(404, "No row found")
-        return result[field_name]
+
+        def get_profile_field(txn: LoggingTransaction) -> JsonValue:
+            # This will error if field_name has double quotes in it.
+            field_path = f'$."{field_name}"'
+
+            if isinstance(self.database_engine, PostgresEngine):
+                sql = """
+                SELECT JSONB_PATH_EXISTS(fields, ?), JSONB_EXTRACT_PATH(fields, ?)
+                FROM profiles
+                WHERE user_id = ?
+                """
+                txn.execute(
+                    sql,
+                    (field_path, field_name, user_id.localpart),
+                )
+
+                # Test exists first since value being None is used for both
+                # missing and a null JSON value.
+                exists, value = cast(Tuple[bool, JsonValue], txn.fetchone())
+                if not exists:
+                    raise StoreError(404, "No row found")
+                return value
+
+            else:
+                sql = """
+                SELECT JSON_TYPE(fields, ?), JSON_EXTRACT(fields, ?)
+                FROM profiles
+                WHERE user_id = ?
+                """
+                txn.execute(
+                    sql,
+                    (field_path, field_path, user_id.localpart),
+                )
+
+                # If value_type is None, then the value did not exist.
+                value_type, value = cast(
+                    Tuple[Optional[str], JsonValue], txn.fetchone()
+                )
+                if not value_type:
+                    raise StoreError(404, "No row found")
+                # If value_type is object or array, then need to deserialize the JSON.
+                # Scalar values are properly returned directly.
+                if value_type in ("object", "array"):
+                    assert isinstance(value, str)
+                    return json.loads(value)
+                return value
+
+        return await self.db_pool.runInteraction("get_profile_field", get_profile_field)
 
     async def get_profile_fields(self, user_id: UserID) -> Dict[str, str]:
         """

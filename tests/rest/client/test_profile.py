@@ -592,15 +592,19 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_non_string(self) -> None:
+        """Non-string fields are supported for custom fields."""
+        fields = {
+            "bool_field": True,
+            "array_field": ["test"],
+            "object_field": {"test": "test"},
+            "numeric_field": 1,
+            "null_field": None,
+        }
+
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
-            content={
-                "bool_field": True,
-                "array_field": ["test"],
-                "object_field": {"test": "test"},
-                "numeric_field": 1,
-            },
+            content=fields,
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 200, channel.result)
@@ -610,15 +614,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {
-                "bool_field": True,
-                "array_field": ["test"],
-                "object_field": {"test": "test"},
-                "numeric_field": 1,
-            },
-        )
+        self.assertEqual(channel.json_body, fields)
+
+        # Check getting individual fields works.
+        for key, value in fields.items():
+            channel = self.make_request(
+                "GET",
+                f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            )
+            self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+            self.assertEqual(channel.json_body, {key: value})
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_full_replace(self) -> None:
@@ -673,10 +678,20 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 400, channel.result)
 
         # Single key is too large.
+        key = "c" * 500
+        channel = self.make_request(
+            "PUT",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+
+        # Key doesn't match body.
         channel = self.make_request(
             "PUT",
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
-            content={"c" * 129: "test"},
+            content={"diff_key": "test"},
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)

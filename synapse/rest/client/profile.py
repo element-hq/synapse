@@ -36,7 +36,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
-from synapse.types import JsonDict, UserID
+from synapse.types import JsonDict, JsonValue, UserID
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -423,7 +423,7 @@ class UnstableProfileFieldRestServlet(RestServlet):
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
         if field_name == ProfileFields.DISPLAYNAME:
-            field_value = await self.profile_handler.get_displayname(user)
+            field_value: JsonValue = await self.profile_handler.get_displayname(user)
         elif field_name == ProfileFields.AVATAR_URL:
             field_value = await self.profile_handler.get_avatar_url(user)
         else:
