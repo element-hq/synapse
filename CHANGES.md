@@ -2,11 +2,6 @@
 
 No significant changes since 1.118.0rc1.
 
-
-
-
-# Synapse 1.118.0rc1 (2024-10-22)
-
 ### Python 3.8 support will be dropped in the next release
 
 Python 3.8 is now [end-of-life](https://devguide.python.org/versions/). As per our [Deprecation Policy for Platform Dependencies](https://element-hq.github.io/synapse/latest/deprecation_policy.html#policy), Synapse will be dropping support for Python 3.8 in the next release; Synapse 1.119.0.
@@ -16,6 +11,9 @@ Synapse 1.118.x will be the final release to support Python 3.8. If you are runn
 ### Python 3.13 and PostgreSQL 17 support
 
 On the other end of the spectrum, Synapse 1.118.0 is the first release to support [Python 3.13](https://www.python.org/downloads/release/python-3130/)! [PostgreSQL 17](https://www.postgresql.org/about/news/postgresql-17-released-2936/) is also supported as of this release.
+
+
+# Synapse 1.118.0rc1 (2024-10-22)
 
 ### Features
 

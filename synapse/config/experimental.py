@@ -450,3 +450,6 @@ class ExperimentalConfig(Config):
 
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
+
+        # MSC4222: Adding `state_after` to sync v2
+        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
