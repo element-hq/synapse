@@ -99,24 +99,24 @@ set_output("trial_test_matrix", test_matrix)
 
 # First calculate the various sytest jobs.
 #
-# For each type of test we only run on focal on PRs
+# For each type of test we only run on bullseye on PRs
 
 
 sytest_tests = [
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "postgres",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "multi-postgres",
         "workers": "workers",
     },
     {
-        "sytest-tag": "focal",
+        "sytest-tag": "bullseye",
         "postgres": "multi-postgres",
         "workers": "workers",
         "reactor": "asyncio",
@@ -127,11 +127,11 @@ if not IS_PR:
     sytest_tests.extend(
         [
             {
-                "sytest-tag": "focal",
+                "sytest-tag": "bullseye",
                 "reactor": "asyncio",
             },
             {
-                "sytest-tag": "focal",
+                "sytest-tag": "bullseye",
                 "postgres": "postgres",
                 "reactor": "asyncio",
             },
