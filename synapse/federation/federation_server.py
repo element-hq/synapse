@@ -477,17 +477,25 @@ class FederationServer(FederationBase):
                 logger.info("Ignoring PDU: %s", e)
                 continue
 
+            # An event should only have an event_id at this point if it's for a v1/v2 like room.
+            # In future room versions, the `event_id` is derived from the event canonical JSON.
+            #
+            # So if we see a `event_id` but the room version doesn't support
+            # v1/v2 events, then it's invalid and we should reject it.
             if possible_event_id != _UNKNOWN_EVENT_ID:
                 if room_version.event_format != EventFormatVersions.ROOM_V1_V2:
                     logger.info(f"Rejecting event {possible_event_id} from {origin} "
                                 f"because the event was made for a v1 room, "
                                 f"while {room_id} is a v{room_version.identifier} room")
-                    pdu_results[possible_event_id] = {"error": "Event ID incorrectly supplied in non-v1/v2 room"}
+                    pdu_results[possible_event_id] = {"error": "Event ID should not be supplied in non-v1/v2 room"}
                     continue
 
             try:
                 event = event_from_pdu_json(p, room_version)
             except Exception as e:
+                # We can only provide feedback to the federating server if we can determine what the event_id is
+                # but since we we failed to parse the event, we can't derive the `event_id` so there is nothing
+                # to use as the `pdu_results` key. Best we can do is just log for our own record and move on.
                 if possible_event_id != _UNKNOWN_EVENT_ID:
                     pdu_results[possible_event_id] = {"error": f"Failed to convert json into event, {e}"}
                 logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, due to {e}")
