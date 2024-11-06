@@ -3,7 +3,7 @@
 ### Features
 
 - Support [MSC4151](https://github.com/matrix-org/matrix-spec-proposals/pull/4151)'s stable report room API. ([\#17374](https://github.com/element-hq/synapse/issues/17374))
-- Add experimental support for [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222). ([\#17888](https://github.com/element-hq/synapse/issues/17888))
+- Add experimental support for [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) (Adding `state_after` to sync v2). ([\#17888](https://github.com/element-hq/synapse/issues/17888))
 
 ### Bugfixes
 
@@ -16,7 +16,6 @@
 
 ### Internal Changes
 
-- Bump actions/download-artifact and actions/upload-artifact from v3 -> v4. ([\#17657](https://github.com/element-hq/synapse/issues/17657))
 - Add a test for downloading and thumbnailing a CMYK JPEG. ([\#17786](https://github.com/element-hq/synapse/issues/17786))
 - Refactor database calls to remove `Generator` usage. ([\#17813](https://github.com/element-hq/synapse/issues/17813), [\#17814](https://github.com/element-hq/synapse/issues/17814), [\#17815](https://github.com/element-hq/synapse/issues/17815), [\#17816](https://github.com/element-hq/synapse/issues/17816), [\#17817](https://github.com/element-hq/synapse/issues/17817), [\#17818](https://github.com/element-hq/synapse/issues/17818), [\#17890](https://github.com/element-hq/synapse/issues/17890))
 - Include the destination in the error of 'Destination mismatch' on federation requests. ([\#17830](https://github.com/element-hq/synapse/issues/17830))
@@ -30,21 +29,16 @@
 
 ### Updates to locked dependencies
 
-* Bump actions/download-artifact from 3 to 4.1.7 in /.github/workflows. ([\#17657](https://github.com/element-hq/synapse/issues/17657))
-* Bump anyhow from 1.0.89 to 1.0.90. ([\#17858](https://github.com/element-hq/synapse/issues/17858))
-* Bump anyhow from 1.0.90 to 1.0.91. ([\#17876](https://github.com/element-hq/synapse/issues/17876))
-* Bump anyhow from 1.0.91 to 1.0.92. ([\#17901](https://github.com/element-hq/synapse/issues/17901))
+* Bump actions/download-artifact & actions/upload-artifact from 3 to 4 in /.github/workflows. ([\#17657](https://github.com/element-hq/synapse/issues/17657))
+* Bump anyhow from 1.0.89 to 1.0.92. ([\#17858](https://github.com/element-hq/synapse/issues/17858), [\#17876](https://github.com/element-hq/synapse/issues/17876), [\#17901](https://github.com/element-hq/synapse/issues/17901))
 * Bump bytes from 1.7.2 to 1.8.0. ([\#17877](https://github.com/element-hq/synapse/issues/17877))
 * Bump cryptography from 43.0.1 to 43.0.3. ([\#17853](https://github.com/element-hq/synapse/issues/17853))
 * Bump mypy-zope from 1.0.7 to 1.0.8. ([\#17898](https://github.com/element-hq/synapse/issues/17898))
-* Bump phonenumbers from 8.13.47 to 8.13.48. ([\#17880](https://github.com/element-hq/synapse/issues/17880))
-* Bump phonenumbers from 8.13.48 to 8.13.49. ([\#17899](https://github.com/element-hq/synapse/issues/17899))
+* Bump phonenumbers from 8.13.47 to 8.13.49. ([\#17880](https://github.com/element-hq/synapse/issues/17880), [\#17899](https://github.com/element-hq/synapse/issues/17899))
 * Bump python-multipart from 0.0.12 to 0.0.16. ([\#17879](https://github.com/element-hq/synapse/issues/17879))
 * Bump regex from 1.11.0 to 1.11.1. ([\#17874](https://github.com/element-hq/synapse/issues/17874))
-* Bump ruff from 0.6.9 to 0.7.1. ([\#17868](https://github.com/element-hq/synapse/issues/17868))
-* Bump ruff from 0.7.1 to 0.7.2. ([\#17897](https://github.com/element-hq/synapse/issues/17897))
-* Bump serde from 1.0.210 to 1.0.213. ([\#17875](https://github.com/element-hq/synapse/issues/17875))
-* Bump serde from 1.0.213 to 1.0.214. ([\#17900](https://github.com/element-hq/synapse/issues/17900))
+* Bump ruff from 0.6.9 to 0.7.2. ([\#17868](https://github.com/element-hq/synapse/issues/17868), [\#17897](https://github.com/element-hq/synapse/issues/17897))
+* Bump serde from 1.0.210 to 1.0.214. ([\#17875](https://github.com/element-hq/synapse/issues/17875), [\#17900](https://github.com/element-hq/synapse/issues/17900))
 * Bump serde_json from 1.0.128 to 1.0.132. ([\#17857](https://github.com/element-hq/synapse/issues/17857))
 * Bump types-psycopg2 from 2.9.21.20240819 to 2.9.21.20241019. ([\#17855](https://github.com/element-hq/synapse/issues/17855))
 * Bump types-setuptools from 75.1.0.20241014 to 75.2.0.20241019. ([\#17856](https://github.com/element-hq/synapse/issues/17856))
