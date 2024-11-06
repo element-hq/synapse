@@ -29,7 +29,7 @@ from typing import Collection, Optional, Sequence, Set
 DISTS = (
     "debian:bullseye",  # (EOL ~2024-07) (our EOL forced by Python 3.9 is 2025-10-05)
     "debian:bookworm",  # (EOL not specified yet) (our EOL forced by Python 3.11 is 2027-10-24)
-    "debian:sid",  # (EOL not specified yet) (our EOL forced by Python 3.11 is 2027-10-24)
+    "debian:sid",  # (rolling distro, no EOL)
     "ubuntu:jammy",  # 22.04 LTS (EOL 2027-04) (our EOL forced by Python 3.10 is 2026-10-04)
     "ubuntu:noble",  # 24.04 LTS (EOL 2029-06)
     "ubuntu:oracular",  # 24.10 (EOL 2025-07)
