@@ -1,3 +1,54 @@
+# Synapse 1.119.0rc1 (2024-11-06)
+
+### Features
+
+- Support [MSC4151](https://github.com/matrix-org/matrix-spec-proposals/pull/4151)'s stable report room API. ([\#17374](https://github.com/element-hq/synapse/issues/17374))
+- Add experimental support for [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222). ([\#17888](https://github.com/element-hq/synapse/issues/17888))
+
+### Bugfixes
+
+- Fix bug with sliding sync where `$LAZY`-loading room members would not return `required_state` membership in incremental syncs. ([\#17809](https://github.com/element-hq/synapse/issues/17809))
+- Check if user has membership in a room before tagging it. Contributed by Lama Alosaimi. ([\#17839](https://github.com/element-hq/synapse/issues/17839))
+- Fix a bug in the admin redact endpoint where the background task would not run if a worker was specified in
+  the config option `run_background_tasks_on`. ([\#17847](https://github.com/element-hq/synapse/issues/17847))
+- Fix bug where some presence and typing timeouts can expire early. ([\#17850](https://github.com/element-hq/synapse/issues/17850))
+- Fix detection when the built Rust library was outdated when using source installations. ([\#17861](https://github.com/element-hq/synapse/issues/17861))
+
+### Internal Changes
+
+- Bump actions/download-artifact and actions/upload-artifact from v3 -> v4. ([\#17657](https://github.com/element-hq/synapse/issues/17657))
+- Add a test for downloading and thumbnailing a CMYK JPEG. ([\#17786](https://github.com/element-hq/synapse/issues/17786))
+- Refactor database calls to remove `Generator` usage. ([\#17813](https://github.com/element-hq/synapse/issues/17813), [\#17814](https://github.com/element-hq/synapse/issues/17814), [\#17815](https://github.com/element-hq/synapse/issues/17815), [\#17816](https://github.com/element-hq/synapse/issues/17816), [\#17817](https://github.com/element-hq/synapse/issues/17817), [\#17818](https://github.com/element-hq/synapse/issues/17818), [\#17890](https://github.com/element-hq/synapse/issues/17890))
+- Include the destination in the error of 'Destination mismatch' on federation requests. ([\#17830](https://github.com/element-hq/synapse/issues/17830))
+- The nix flake inside the repository no longer tracks nixpkgs/master to not catch the latest bugs from a PR merged 5 minutes ago. ([\#17852](https://github.com/element-hq/synapse/issues/17852))
+- Minor speed-up of sliding sync by computing extensions results in parallel. ([\#17884](https://github.com/element-hq/synapse/issues/17884))
+- Bump the default Python version in the Synapse Dockerfile from 3.11 -> 3.12. ([\#17887](https://github.com/element-hq/synapse/issues/17887))
+- Remove usage of internal header encoding API. ([\#17894](https://github.com/element-hq/synapse/issues/17894))
+- Use unique name for each os.arch variant when uploading Wheel artifacts. ([\#17905](https://github.com/element-hq/synapse/issues/17905))
+
+
+
+### Updates to locked dependencies
+
+* Bump actions/download-artifact from 3 to 4.1.7 in /.github/workflows. ([\#17657](https://github.com/element-hq/synapse/issues/17657))
+* Bump anyhow from 1.0.89 to 1.0.90. ([\#17858](https://github.com/element-hq/synapse/issues/17858))
+* Bump anyhow from 1.0.90 to 1.0.91. ([\#17876](https://github.com/element-hq/synapse/issues/17876))
+* Bump anyhow from 1.0.91 to 1.0.92. ([\#17901](https://github.com/element-hq/synapse/issues/17901))
+* Bump bytes from 1.7.2 to 1.8.0. ([\#17877](https://github.com/element-hq/synapse/issues/17877))
+* Bump cryptography from 43.0.1 to 43.0.3. ([\#17853](https://github.com/element-hq/synapse/issues/17853))
+* Bump mypy-zope from 1.0.7 to 1.0.8. ([\#17898](https://github.com/element-hq/synapse/issues/17898))
+* Bump phonenumbers from 8.13.47 to 8.13.48. ([\#17880](https://github.com/element-hq/synapse/issues/17880))
+* Bump phonenumbers from 8.13.48 to 8.13.49. ([\#17899](https://github.com/element-hq/synapse/issues/17899))
+* Bump python-multipart from 0.0.12 to 0.0.16. ([\#17879](https://github.com/element-hq/synapse/issues/17879))
+* Bump regex from 1.11.0 to 1.11.1. ([\#17874](https://github.com/element-hq/synapse/issues/17874))
+* Bump ruff from 0.6.9 to 0.7.1. ([\#17868](https://github.com/element-hq/synapse/issues/17868))
+* Bump ruff from 0.7.1 to 0.7.2. ([\#17897](https://github.com/element-hq/synapse/issues/17897))
+* Bump serde from 1.0.210 to 1.0.213. ([\#17875](https://github.com/element-hq/synapse/issues/17875))
+* Bump serde from 1.0.213 to 1.0.214. ([\#17900](https://github.com/element-hq/synapse/issues/17900))
+* Bump serde_json from 1.0.128 to 1.0.132. ([\#17857](https://github.com/element-hq/synapse/issues/17857))
+* Bump types-psycopg2 from 2.9.21.20240819 to 2.9.21.20241019. ([\#17855](https://github.com/element-hq/synapse/issues/17855))
+* Bump types-setuptools from 75.1.0.20241014 to 75.2.0.20241019. ([\#17856](https://github.com/element-hq/synapse/issues/17856))
+
 # Synapse 1.118.0 (2024-10-29)
 
 No significant changes since 1.118.0rc1.
