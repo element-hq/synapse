@@ -122,7 +122,7 @@ stacking them up. You can monitor the currently running background updates with
 ## Minimum supported Python version
 
 The minimum supported Python version has been increased from v3.8 to v3.9.
-You will need Python 3.9+ to run Synapse v1.119.0 (due out Nov 6th, 2024).
+You will need Python 3.9+ to run Synapse v1.119.0 (due out Nov 7th, 2024).
 
 If you use current versions of the Matrix.org-distributed Docker images, no action is required.
 Please note that support for Ubuntu `focal` was dropped as well since it uses Python 3.8.
