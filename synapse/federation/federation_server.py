@@ -133,6 +133,8 @@ last_pdu_ts_metric = Gauge(
 # federation.
 _INBOUND_EVENT_HANDLING_LOCK_NAME = "federation_inbound_pdu"
 
+_UNKNOWN_EVENT_ID = "<Unknown>"
+
 
 class FederationServer(FederationBase):
     def __init__(self, hs: "HomeServer"):
@@ -452,7 +454,7 @@ class FederationServer(FederationBase):
             # We try and pull out an event ID so that if later checks fail we
             # can log something sensible. We don't mandate an event ID here in
             # case future event formats get rid of the key.
-            possible_event_id = p.get("event_id", "<Unknown>")
+            possible_event_id = p.get("event_id", _UNKNOWN_EVENT_ID)
 
             # Now we get the room ID so that we can check that we know the
             # version of the room.
@@ -475,7 +477,7 @@ class FederationServer(FederationBase):
                 logger.info("Ignoring PDU: %s", e)
                 continue
 
-            if possible_event_id != "<Unknown>":
+            if possible_event_id != _UNKNOWN_EVENT_ID:
                 if room_version.event_format != EventFormatVersions.ROOM_V1_V2:
                     logger.info(f"Rejecting event {possible_event_id} from {origin} "
                                 f"because the event was made for a v1 room, "
@@ -486,7 +488,7 @@ class FederationServer(FederationBase):
             try:
                 event = event_from_pdu_json(p, room_version)
             except Exception as e:
-                if possible_event_id != "<Unknown>":
+                if possible_event_id != _UNKNOWN_EVENT_ID:
                     pdu_results[possible_event_id] = {"error": f"Failed to convert json into event, {e}"}
                 logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, due to {e}")
                 continue
