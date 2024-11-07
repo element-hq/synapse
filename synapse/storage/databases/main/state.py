@@ -681,7 +681,9 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         context: EventContext,
     ) -> None:
         """Update the state group for a partial state event"""
-        async with self._un_partial_stated_events_stream_id_gen.get_next() as un_partial_state_event_stream_id:
+        async with (
+            self._un_partial_stated_events_stream_id_gen.get_next() as un_partial_state_event_stream_id
+        ):
             await self.db_pool.runInteraction(
                 "update_state_for_partial_state_event",
                 self._update_state_for_partial_state_event_txn,

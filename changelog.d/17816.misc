@@ -1,0 +1,1 @@
+Refactor database calls to remove `Generator` usage.
