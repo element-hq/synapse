@@ -484,10 +484,14 @@ class FederationServer(FederationBase):
             # v1/v2 events, then it's invalid and we should reject it.
             if possible_event_id != _UNKNOWN_EVENT_ID:
                 if room_version.event_format != EventFormatVersions.ROOM_V1_V2:
-                    logger.info(f"Rejecting event {possible_event_id} from {origin} "
-                                f"because the event was made for a v1 room, "
-                                f"while {room_id} is a v{room_version.identifier} room")
-                    pdu_results[possible_event_id] = {"error": "Event ID should not be supplied in non-v1/v2 room"}
+                    logger.info(
+                        f"Rejecting event {possible_event_id} from {origin} "
+                        f"because the event was made for a v1 room, "
+                        f"while {room_id} is a v{room_version.identifier} room"
+                    )
+                    pdu_results[possible_event_id] = {
+                        "error": "Event ID should not be supplied in non-v1/v2 room"
+                    }
                     continue
 
             try:
@@ -497,8 +501,12 @@ class FederationServer(FederationBase):
                 # but since we we failed to parse the event, we can't derive the `event_id` so there is nothing
                 # to use as the `pdu_results` key. Best we can do is just log for our own record and move on.
                 if possible_event_id != _UNKNOWN_EVENT_ID:
-                    pdu_results[possible_event_id] = {"error": f"Failed to convert json into event, {e}"}
-                logger.warning("Failed to parse event {possible_event_id} in transaction from {origin}, due to {e}")
+                    pdu_results[possible_event_id] = {
+                        "error": f"Failed to convert json into event, {e}"
+                    }
+                logger.warning(
+                    "Failed to parse event {possible_event_id} in transaction from {origin}, due to {e}"
+                )
                 continue
 
             pdus_by_room.setdefault(room_id, []).append(event)
