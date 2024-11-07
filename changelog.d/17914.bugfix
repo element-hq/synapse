@@ -1,0 +1,1 @@
+Limit event fetches in test to prevent stack size from growing too large.
