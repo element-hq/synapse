@@ -320,12 +320,17 @@ class ConcurrentlyExecuteTest(TestCase):
                 await concurrently_execute(callback, [1], 2)
             except _TestException as e:
                 tb = traceback.extract_tb(e.__traceback__)
-                # we expect to see "caller", "concurrently_execute", "callback",
-                # and some magic from inside ensureDeferred that happens when .fail
-                # is called.
+
+                # Remove twisted internals from the stack, as we don't care
+                # about the precise details.
+                tb = [t for t in tb if "/twisted/" not in t.filename]
+
+                # we expect to see "caller", "concurrently_execute" at the top of the stack
                 self.assertEqual(tb[0].name, "caller")
                 self.assertEqual(tb[1].name, "concurrently_execute")
-                self.assertEqual(tb[-2].name, "callback")
+                # ... some stack frames from the implementation of `concurrently_execute` ...
+                # and at the bottom of the stack we expect to see "callback"
+                self.assertEqual(tb[-1].name, "callback")
             else:
                 self.fail("No exception thrown")
 
