@@ -73,7 +73,7 @@ class StateDeltasStore(SQLBaseStore):
         self.db_pool.updates.register_background_index_update(
             update_name="current_state_delta_stream_room_index",
             index_name="current_state_delta_stream_room_idx",
-            table="",
+            table="current_state_delta_stream",
             columns=("room_id", "stream_id"),
         )
 
