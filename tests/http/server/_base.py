@@ -377,7 +377,16 @@ class Deferred__await__Patch:
             deferred: "Deferred[T]",
         ) -> Generator["Deferred[T]", None, T]:
             """Intercepts calls to `__await__`, which returns a generator
-            yielding deferreds that we await on"""
+            yielding deferreds that we await on.
+
+            The generator for `__await__` will normally:
+                * return `self` if the `Deferred` is unresolved, in which case
+                   `coroutine.send()` will return the `Deferred`, and
+                   `_defer.inlineCallbacks` will stop running the coroutine until the
+                   `Deferred` is resolved.
+                * raise a `StopIteration(result)`, containing the result of the `await`.
+                * raise another exception, which will come out of the `await`.
+            """
 
             # Get the original generator.
             gen = self._original_Deferred__await__(deferred)
@@ -405,14 +414,6 @@ class Deferred__await__Patch:
             Args:
                 deferred: The deferred that we've captured and are intercepting
                     `await` calls within.
-
-            `gen.send(None)` will normally:
-                * return `self` if the `Deferred` is unresolved, in which case
-                   `coroutine.send()` will return the `Deferred`, and
-                   `_defer.inlineCallbacks` will stop running the coroutine until the
-                   `Deferred` is resolved.
-                * raise a `StopIteration(result)`, containing the result of the `await`.
-                * raise another exception, which will come out of the `await`.
             """
             if not self._block_new_awaits:
                 # We're no longer blocking awaits points
