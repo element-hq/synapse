@@ -25,7 +25,9 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.api.constants import EventTypes
+from synapse.api.errors import NotFoundError
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase, make_event_from_dict
 from synapse.rest import admin
@@ -83,6 +85,55 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+    def test_accept_valid_pdus_and_ignore_invalid(self) -> None:
+        user = self.register_user("nex", "test")
+        tok = self.login("nex", "test")
+        room_id = self.helper.create_room_as("nex", tok=tok)
+
+        builder = self.hs.get_event_builder_factory().for_room_version(
+            RoomVersions.V10,
+            {
+                "type": EventTypes.Message,
+                "sender": user,
+                "room_id": room_id,
+                "content": {"body": "hello i am nexy", "msgtype": "m.text"},
+            },
+        )
+        event1, _ = self.get_success(
+            self.hs.get_event_creation_handler().create_new_client_event(builder)
+        )
+        event2, _ = self.get_success(
+            self.hs.get_event_creation_handler().create_new_client_event(
+                builder, prev_event_ids=[event1.event_id]
+            )
+        )
+
+        event1_json = event1.get_pdu_json()
+        event2_json = event2.get_pdu_json()
+
+        logging.info("Purposefully adding event id that shouldn't be there")
+        event2_json["event_id"] = event2.event_id
+
+        channel = self.make_signed_federation_request(
+            "PUT",
+            "/_matrix/federation/v1/send/txn",
+            {"pdus": [event1_json, event2_json]},
+        )
+        body = channel.json_body
+        logging.info(f"Response body: {body}")
+        self.assertTrue(body["pdus"][event1.event_id] == {})
+        self.assertTrue(body["pdus"][event2.event_id]["error"] != "")
+        result = self.get_success(
+            self.hs.get_storage_controllers().main.get_event(event1.event_id)
+        )
+        self.assertEqual(result.event_id, event1.event_id)
+
+        # Make sure the corrupt event isn't persisted
+        self.get_failure(
+            self.hs.get_storage_controllers().main.get_event(event2.event_id),
+            NotFoundError,
+        )
 
 
 class ServerACLsTestCase(unittest.TestCase):
