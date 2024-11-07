@@ -87,43 +87,54 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(500, channel.code, channel.result)
 
     def test_accept_valid_pdus_and_ignore_invalid(self) -> None:
-        user = self.register_user("nex", "test")
-        tok = self.login("nex", "test")
-        room_id = self.helper.create_room_as("nex", tok=tok)
+        user = self.register_user("user1", "test")
+        tok = self.login("user1", "test")
+        room_id = self.helper.create_room_as("user1", tok=tok)
 
-        builder = self.hs.get_event_builder_factory().for_room_version(
-            RoomVersions.V10,
-            {
-                "type": EventTypes.Message,
-                "sender": user,
-                "room_id": room_id,
-                "content": {"body": "hello i am nexy", "msgtype": "m.text"},
-            },
-        )
-        event1, _ = self.get_success(
-            self.hs.get_event_creation_handler().create_new_client_event(builder)
-        )
-        event2, _ = self.get_success(
-            self.hs.get_event_creation_handler().create_new_client_event(
-                builder, prev_event_ids=[event1.event_id]
+        def builder(message):
+            return self.hs.get_event_builder_factory().for_room_version(
+                RoomVersions.V10,
+                {
+                    "type": EventTypes.Message,
+                    "sender": user,
+                    "room_id": room_id,
+                    "content": {"body": message, "msgtype": "m.text"},
+                }
             )
-        )
+        def make_event(message):
+            event, _ = self.get_success(
+                self.hs.get_event_creation_handler().create_new_client_event(
+                    builder(message), 
+                )
+            )
+            return event
 
+        event1 = make_event("event1")
+        event2 = make_event("event2")
+        event3 = make_event("event3")
         event1_json = event1.get_pdu_json()
         event2_json = event2.get_pdu_json()
+        event3_json = event3.get_pdu_json()
+        logging.info(event1_json)
 
-        logging.info("Purposefully adding event id that shouldn't be there")
+        # Purposely adding event id that shouldn't be there
         event2_json["event_id"] = event2.event_id
 
         channel = self.make_signed_federation_request(
             "PUT",
             "/_matrix/federation/v1/send/txn",
-            {"pdus": [event1_json, event2_json]},
+            {"pdus": [event1_json, event2_json, event3_json]},
         )
         body = channel.json_body
-        logging.info(f"Response body: {body}")
-        self.assertTrue(body["pdus"][event1.event_id] == {})
-        self.assertTrue(body["pdus"][event2.event_id]["error"] != "")
+        # Ensure the response indicates an error for the corrupt event
+        # and that it indicates success for valid events
+        pdus: JsonDict = body["pdus"]
+        self.assertIncludes(set(pdus.keys()), {event1.event_id, event2.event_id, event3.event_id})
+        self.assertEqual(pdus[event1.event_id], {})
+        self.assertNotEqual(body["pdus"][event2.event_id]["error"], "")
+        self.assertEqual(pdus[event3.event_id], {})
+
+        # Make sure other valid events from the send transaction were persisted successfully
         result = self.get_success(
             self.hs.get_storage_controllers().main.get_event(event1.event_id)
         )
@@ -134,6 +145,12 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             self.hs.get_storage_controllers().main.get_event(event2.event_id),
             NotFoundError,
         )
+
+        # Verify that we continue looking at events that come after the corrupted one
+        result = self.get_success(
+            self.hs.get_storage_controllers().main.get_event(event3.event_id)
+        )
+        self.assertEqual(result.event_id, event3.event_id)
 
 
 class ServerACLsTestCase(unittest.TestCase):
