@@ -583,8 +583,8 @@ jobs:
           - python-version: "3.9"
             postgres-version: "11"
 
-          - python-version: "3.11"
-            postgres-version: "15"
+          - python-version: "3.13"
+            postgres-version: "17"
 
     services:
       postgres:
