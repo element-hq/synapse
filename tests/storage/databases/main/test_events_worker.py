@@ -454,7 +454,7 @@ class DatabaseOutageTestCase(unittest.HomeserverTestCase):
             event_deferreds = []
             # Limit the number of event_ids otherwise the total stack size grows too
             # large for our custom twisted patch.
-            for event_id in self.event_ids[0:17]:
+            for event_id in self.event_ids[0:10]:
                 event_deferreds.append(ensureDeferred(self.store.get_event(event_id)))
 
             # We should have maxed out on event fetcher threads
