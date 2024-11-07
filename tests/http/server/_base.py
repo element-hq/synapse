@@ -448,7 +448,7 @@ class Deferred__await__Patch:
             # We want to block at the current `await`.
             if deferred.called and not deferred.paused:
                 # This `Deferred` already has a result. We chain a new,
-                # unresolved, `Deferred` for to the end of this Deferred that it
+                # unresolved, `Deferred` to the end of this Deferred that it
                 # will wait on. This blocks the coroutine that did this `await`.
                 # We queue it up for unblocking later.
                 new_deferred: "Deferred[T]" = Deferred()
