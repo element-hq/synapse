@@ -323,7 +323,9 @@ class ConcurrentlyExecuteTest(TestCase):
 
                 # Remove twisted internals from the stack, as we don't care
                 # about the precise details.
-                tb = [t for t in tb if "/twisted/" not in t.filename]
+                tb = traceback.StackSummary(
+                    t for t in tb if "/twisted/" not in t.filename
+                )
 
                 # we expect to see "caller", "concurrently_execute" at the top of the stack
                 self.assertEqual(tb[0].name, "caller")
