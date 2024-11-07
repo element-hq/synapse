@@ -54,6 +54,16 @@ class StateDeltasStore(SQLBaseStore):
     # attribute. TODO: can we get static analysis to enforce this?
     _curr_state_delta_stream_cache: StreamChangeCache
 
+    def __init__(self, database, db_conn, hs):
+        super().__init__(database, db_conn, hs)
+
+        self.db_pool.updates.register_background_index_update(
+            update_name="current_state_delta_stream_room_index",
+            index_name="current_state_delta_stream_room_idx",
+            table="current_state_delta_stream",
+            columns=("room_id", "stream_id"),
+        )
+
     async def get_partial_current_state_deltas(
         self, prev_stream_id: int, max_stream_id: int
     ) -> Tuple[int, List[StateDelta]]:
