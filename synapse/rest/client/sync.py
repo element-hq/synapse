@@ -229,7 +229,7 @@ class SyncRestServlet(RestServlet):
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
-            use_state_after=use_state_after,
+            use_state_after=True,
         )
 
         since_token = None

@@ -572,10 +572,10 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         Returns:
             Map from type/state_key to event ID.
         """
+        if state_filter is None:
+            state_filter = StateFilter.all()
 
-        where_clause, where_args = (
-            state_filter or StateFilter.all()
-        ).make_sql_filter_clause()
+        where_clause, where_args = (state_filter).make_sql_filter_clause()
 
         if not where_clause:
             # We delegate to the cached version
@@ -584,7 +584,7 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
         def _get_filtered_current_state_ids_txn(
             txn: LoggingTransaction,
         ) -> StateMap[str]:
-            results = StateMapWrapper(state_filter=state_filter or StateFilter.all())
+            results = StateMapWrapper(state_filter=state_filter)
 
             sql = """
                 SELECT type, state_key, event_id FROM current_state_events
