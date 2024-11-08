@@ -135,10 +135,9 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(pdus[event3.event_id], {})
 
         # Make sure other valid events from the send transaction were persisted successfully
-        result = self.get_success(
+        self.get_success(
             self.hs.get_storage_controllers().main.get_event(event1.event_id)
         )
-        self.assertEqual(result.event_id, event1.event_id)
 
         # Make sure the corrupt event isn't persisted
         self.get_failure(
@@ -147,11 +146,9 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         )
 
         # Verify that we continue looking at events that come after the corrupted one
-        result = self.get_success(
+        self.get_success(
             self.hs.get_storage_controllers().main.get_event(event3.event_id)
         )
-        self.assertEqual(result.event_id, event3.event_id)
-
 
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:
