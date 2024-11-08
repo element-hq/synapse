@@ -238,7 +238,7 @@ class StateStorageController:
             state_filter = StateFilter.all()
 
         await_full_state = True
-        if state_filter.must_await_full_state(self._is_mine_id):
+        if not state_filter.must_await_full_state(self._is_mine_id):
             await_full_state = False
 
         event_to_groups = await self.get_state_group_for_events(
