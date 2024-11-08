@@ -58,7 +58,6 @@ from synapse.api.errors import (
 )
 from synapse.api.room_versions import (
     KNOWN_ROOM_VERSIONS,
-    EventFormatVersions,
     RoomVersion,
 )
 from synapse.crypto.event_signing import compute_event_signature

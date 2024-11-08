@@ -30,6 +30,7 @@ from synapse.api.errors import NotFoundError
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase, make_event_from_dict
+from synapse.events.builder import EventBuilder
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -91,7 +92,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         tok = self.login("user1", "test")
         room_id = self.helper.create_room_as("user1", tok=tok)
 
-        def builder(message):
+        def builder(message: str) -> EventBuilder:
             return self.hs.get_event_builder_factory().for_room_version(
                 RoomVersions.V10,
                 {
@@ -99,12 +100,13 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
                     "sender": user,
                     "room_id": room_id,
                     "content": {"body": message, "msgtype": "m.text"},
-                }
+                },
             )
-        def make_event(message):
+
+        def make_event(message: str) -> EventBase:
             event, _ = self.get_success(
                 self.hs.get_event_creation_handler().create_new_client_event(
-                    builder(message), 
+                    builder(message),
                 )
             )
             return event
@@ -129,7 +131,9 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         # Ensure the response indicates an error for the corrupt event
         # and that it indicates success for valid events
         pdus: JsonDict = body["pdus"]
-        self.assertIncludes(set(pdus.keys()), {event1.event_id, event2.event_id, event3.event_id})
+        self.assertIncludes(
+            set(pdus.keys()), {event1.event_id, event2.event_id, event3.event_id}
+        )
         self.assertEqual(pdus[event1.event_id], {})
         self.assertNotEqual(body["pdus"][event2.event_id]["error"], "")
         self.assertEqual(pdus[event3.event_id], {})
@@ -149,6 +153,7 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.get_success(
             self.hs.get_storage_controllers().main.get_event(event3.event_id)
         )
+
 
 class ServerACLsTestCase(unittest.TestCase):
     def test_blocked_server(self) -> None:

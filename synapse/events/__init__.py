@@ -410,7 +410,9 @@ class FrozenEventV2(EventBase):
 
         # So if we see a `event_id` but the room version doesn't support
         # v1/v2 events, then it's invalid and we should reject it.
-        assert ("event_id" not in event_dict), "Event ID should not be supplied in non-v1/v2 room"
+        assert (
+            "event_id" not in event_dict
+        ), "Event ID should not be supplied in non-v1/v2 room"
 
         unsigned = dict(event_dict.pop("unsigned", {}))
 
