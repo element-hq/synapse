@@ -1262,3 +1262,35 @@ class SyncStateAfterTestCase(tests.unittest.HomeserverTestCase):
             )
         )
         self.assertEqual(state[("m.test_event", "")], second_state["event_id"])
+
+    def test_incremental_sync_lazy_loaded_no_timeline(self) -> None:
+        """Test that lazy-loading with an empty timeline doesn't return the full
+        state.
+
+        There was a bug where an empty state filter would cause the DB to return
+        the full state, rather than an empty set.
+        """
+        user = self.register_user("user", "password")
+        tok = self.login("user", "password")
+
+        # Create a room as the user and set some custom state.
+        joined_room = self.helper.create_room_as(user, tok=tok)
+
+        since_token = self.hs.get_event_sources().get_current_token()
+        end_stream_token = self.hs.get_event_sources().get_current_token()
+
+        state = self.get_success(
+            self.sync_handler._compute_state_delta_for_incremental_sync(
+                room_id=joined_room,
+                sync_config=generate_sync_config(user, use_state_after=True),
+                batch=TimelineBatch(
+                    prev_batch=end_stream_token, events=[], limited=True
+                ),
+                since_token=since_token,
+                end_token=end_stream_token,
+                members_to_fetch=set(),
+                timeline_state={},
+            )
+        )
+
+        self.assertEqual(state, {})
