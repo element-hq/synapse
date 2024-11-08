@@ -1,4 +1,10 @@
-# Synapse 1.119.0rc1 (2024-11-06)
+# Synapse 1.119.0rc1 (2024-11-11)
+
+### Python 3.8 support dropped
+
+Python 3.8 is no longer supported by Synapse. The minimum supported Python version is now 3.9.
+
+If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or greater) before upgrading Synapse.
 
 ### Features
 
@@ -13,9 +19,12 @@
   the config option `run_background_tasks_on`. ([\#17847](https://github.com/element-hq/synapse/issues/17847))
 - Fix bug where some presence and typing timeouts can expire early. ([\#17850](https://github.com/element-hq/synapse/issues/17850))
 - Fix detection when the built Rust library was outdated when using source installations. ([\#17861](https://github.com/element-hq/synapse/issues/17861))
+- Fix a long-standing bug in Synapse which could cause one-time keys to be issued in the incorrect order, causing message decryption failures. ([\#17903](https://github.com/element-hq/synapse/pull/17903))
+- Fix experimental support for [MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222) (Adding `state_after` to sync v2) where we would return the full state on incremental syncs when using lazy loaded members and there were no new events in the timeline. ([\#17915](https://github.com/element-hq/synapse/pull/17915))
 
 ### Internal Changes
 
+- Remove support for python 3.8. ([\#17908](https://github.com/element-hq/synapse/issues/17908))
 - Add a test for downloading and thumbnailing a CMYK JPEG. ([\#17786](https://github.com/element-hq/synapse/issues/17786))
 - Refactor database calls to remove `Generator` usage. ([\#17813](https://github.com/element-hq/synapse/issues/17813), [\#17814](https://github.com/element-hq/synapse/issues/17814), [\#17815](https://github.com/element-hq/synapse/issues/17815), [\#17816](https://github.com/element-hq/synapse/issues/17816), [\#17817](https://github.com/element-hq/synapse/issues/17817), [\#17818](https://github.com/element-hq/synapse/issues/17818), [\#17890](https://github.com/element-hq/synapse/issues/17890))
 - Include the destination in the error of 'Destination mismatch' on federation requests. ([\#17830](https://github.com/element-hq/synapse/issues/17830))
@@ -24,8 +33,9 @@
 - Bump the default Python version in the Synapse Dockerfile from 3.11 -> 3.12. ([\#17887](https://github.com/element-hq/synapse/issues/17887))
 - Remove usage of internal header encoding API. ([\#17894](https://github.com/element-hq/synapse/issues/17894))
 - Use unique name for each os.arch variant when uploading Wheel artifacts. ([\#17905](https://github.com/element-hq/synapse/issues/17905))
-
-
+- Fix tests to run with latest Twisted. ([\#17906](https://github.com/element-hq/synapse/pull/17906), [\#17907](https://github.com/element-hq/synapse/pull/17907), [\#17911](https://github.com/element-hq/synapse/pull/17911))
+- Update version constraint to allow the latest poetry-core 1.9.1. ([\#17902](https://github.com/element-hq/synapse/pull/17902))
+- Update the portdb CI to use Python 3.13 and Postgres 17 as latest dependencies. ([\#17909](https://github.com/element-hq/synapse/pull/17909))
 
 ### Updates to locked dependencies
 
