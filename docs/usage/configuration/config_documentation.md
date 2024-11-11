@@ -1890,6 +1890,26 @@ unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_mat
 after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
 this will change to true in a future Synapse release.
 
+In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
+case-by-case breakdown describes whether media downloads are permitted:
+
+* `enable_authenticated_media = False`:
+  * unauthenticated client or homeserver requesting local media: allowed
+  * unauthenticated client or homeserver requesting remote media: allowed as long as the media is in the cache,
+    or as long as the remote homeserver does not require authentication to retrieve the media
+* `enable_authenticated_media = True`:
+  * unauthenticated client or homeserver requesting local media:
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+  * unauthenticated client or homeserver requesting remote media: the same as for local media;
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+
+It is especially notable that media downloaded before this option existed (in older Synapse versions), or whilst this option was set to `False`,
+will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to `True`.
+This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
+those older clients or homeservers will not be cut off from media they can already see.
+
 Example configuration:
 ```yaml
 enable_authenticated_media: true
