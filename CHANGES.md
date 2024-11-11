@@ -1,4 +1,6 @@
-# Synapse 1.119.0rc1 (2024-11-11)
+# Synapse 1.119.0rc2 (2024-11-11)
+
+Note that due to packaging issues there was no v1.119.0rc1.
 
 ### Python 3.8 support dropped
 
@@ -37,6 +39,7 @@ If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or gre
 - Update version constraint to allow the latest poetry-core 1.9.1. ([\#17902](https://github.com/element-hq/synapse/pull/17902))
 - Update the portdb CI to use Python 3.13 and Postgres 17 as latest dependencies. ([\#17909](https://github.com/element-hq/synapse/pull/17909))
 - Add an index to `current_state_delta_stream` table. ([\#17912](https://github.com/element-hq/synapse/issues/17912))
+- Fix building and attaching release artifacts during the release process. ([\#17921](https://github.com/element-hq/synapse/issues/17921))
 
 ### Updates to locked dependencies
 
