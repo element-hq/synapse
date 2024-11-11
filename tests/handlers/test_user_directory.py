@@ -796,7 +796,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
-        async def allow_all(user_profile: UserProfile) -> bool:
+        async def allow_all(user_profile: UserProfile, requester_id: str) -> bool:
             # Allow all users.
             return False
 
@@ -810,7 +810,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(s["results"]), 1)
 
         # Configure a spam checker that filters all users.
-        async def block_all(user_profile: UserProfile) -> bool:
+        async def block_all(user_profile: UserProfile, requester_id: str) -> bool:
             # All users are spammy.
             return True
 
