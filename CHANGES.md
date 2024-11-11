@@ -2,7 +2,7 @@
 
 ### Python 3.8 support dropped
 
-Python 3.8 is no longer supported by Synapse. The minimum supported Python version is now 3.9.
+Python 3.8 is [end-of-life](https://devguide.python.org/versions/) and is no longer supported by Synapse. The minimum supported Python version is now 3.9.
 
 If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or greater) before upgrading Synapse.
 
