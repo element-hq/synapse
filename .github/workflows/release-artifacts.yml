@@ -94,7 +94,7 @@ jobs:
       - name: Upload debs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: debs
+          name: debs-${{ matrix.distro }}
           path: debs/*
 
   build-wheels:
@@ -196,7 +196,12 @@ jobs:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v4
       - name: Build a tarball for the debs
-        run: tar -cvJf debs.tar.xz debs
+        # We need to merge all the debs uploads into one folder, then compress
+        # that.
+        run: |
+          mkdir debs
+          mv debs*/* debs/
+          tar -cvJf debs.tar.xz debs
       - name: Attach to release
         uses: softprops/action-gh-release@a929a66f232c1b11af63782948aa2210f981808a  # PR#109
         env:
@@ -204,7 +209,7 @@ jobs:
         with:
           files: |
             Sdist/*
-            Wheel/*
+            Wheel*/*
             debs.tar.xz
           # if it's not already published, keep the release as a draft.
           draft: true
