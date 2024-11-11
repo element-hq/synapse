@@ -1,1 +1,0 @@
-Fix detection when the built Rust library was outdated when using source installations.
