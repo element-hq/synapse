@@ -91,10 +91,19 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+      - name: Artifact name
+        id: artifact-name
+        # We can't have colons in the upload name of the artifact, so we convert
+        # e.g. `debian:sid` to `sid`.
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
+
       - name: Upload debs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: debs-${{ matrix.distro }}
+          name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
           path: debs/*
 
   build-wheels:
