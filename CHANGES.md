@@ -36,6 +36,7 @@ If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or gre
 - Fix tests to run with latest Twisted. ([\#17906](https://github.com/element-hq/synapse/pull/17906), [\#17907](https://github.com/element-hq/synapse/pull/17907), [\#17911](https://github.com/element-hq/synapse/pull/17911))
 - Update version constraint to allow the latest poetry-core 1.9.1. ([\#17902](https://github.com/element-hq/synapse/pull/17902))
 - Update the portdb CI to use Python 3.13 and Postgres 17 as latest dependencies. ([\#17909](https://github.com/element-hq/synapse/pull/17909))
+- Add an index to `current_state_delta_stream` table. ([\#17912](https://github.com/element-hq/synapse/issues/17912))
 
 ### Updates to locked dependencies
 
