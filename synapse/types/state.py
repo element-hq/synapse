@@ -68,14 +68,22 @@ class StateFilter:
     include_others: bool = False
 
     def __attrs_post_init__(self) -> None:
-        # If `include_others` is set we canonicalise the filter by removing
-        # wildcards from the types dictionary
         if self.include_others:
+            # If `include_others` is set we canonicalise the filter by removing
+            # wildcards from the types dictionary
+
             # this is needed to work around the fact that StateFilter is frozen
             object.__setattr__(
                 self,
                 "types",
                 immutabledict({k: v for k, v in self.types.items() if v is not None}),
+            )
+        else:
+            # Otherwise we remove entries where the value is the empty set.
+            object.__setattr__(
+                self,
+                "types",
+                immutabledict({k: v for k, v in self.types.items() if v is None or v}),
             )
 
     @staticmethod
