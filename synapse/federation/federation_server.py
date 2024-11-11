@@ -479,9 +479,11 @@ class FederationServer(FederationBase):
             try:
                 event = event_from_pdu_json(p, room_version)
             except Exception as e:
-                # We can only provide feedback to the federating server if we can determine what the event_id is
-                # but since we failed to parse the event, we can't derive the `event_id` so there is nothing
-                # to use as the `pdu_results` key. Best we can do is just log for our own record and move on.
+                # We can only provide feedback to the federating server if we can
+                # determine what the `event_id` is but since we failed to parse the
+                # event, we can't derive the `event_id` so there is nothing to use as
+                # the `pdu_results` key. Best we can do is just log for our own record
+                # and move on.
                 if possible_event_id != _UNKNOWN_EVENT_ID:
                     pdu_results[possible_event_id] = {
                         "error": f"Failed to convert JSON into event: {e}"

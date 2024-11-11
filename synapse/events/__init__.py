@@ -405,14 +405,15 @@ class FrozenEventV2(EventBase):
             for name, sigs in event_dict.pop("signatures", {}).items()
         }
 
-        # An event should only have an event_id at this point if it's for a v1/v2 like room.
-        # In future room versions, the `event_id` is derived from the event canonical JSON.
-
-        # So if we see a `event_id` but the room version doesn't support
-        # v1/v2 events, then it's invalid and we should reject it.
+        # In newer room versions (3+), the `event_id` is derived from a hash of the
+        # event canonical JSON, so it should not be explicitly provided in the event
+        # dictionary.
+        #
+        # If we see an `event_id` in a newer room version, then it's an invalid event
+        # and we should reject it.
         assert (
             "event_id" not in event_dict
-        ), "Event ID should not be supplied in non-v1/v2 room"
+        ), "Event ID should not be provided for events in non-v1/v2 room versions"
 
         unsigned = dict(event_dict.pop("unsigned", {}))
 

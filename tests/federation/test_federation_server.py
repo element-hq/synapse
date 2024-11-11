@@ -88,6 +88,11 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         self.assertEqual(500, channel.code, channel.result)
 
     def test_accept_valid_pdus_and_ignore_invalid(self) -> None:
+        """
+        Test to make sure that old v1/v2 formatted events (that include `event_id`) are
+        rejected from a newer room version that don't support it but we still accept
+        properly formatted/valid events from the same batch.
+        """
         user = self.register_user("user1", "test")
         tok = self.login("user1", "test")
         room_id = self.helper.create_room_as("user1", tok=tok)
@@ -117,9 +122,8 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         event1_json = event1.get_pdu_json()
         event2_json = event2.get_pdu_json()
         event3_json = event3.get_pdu_json()
-        logging.info(event1_json)
 
-        # Purposely adding event id that shouldn't be there
+        # Purposely adding `event_id` that shouldn't be there
         event2_json["event_id"] = event2.event_id
 
         channel = self.make_signed_federation_request(
@@ -132,10 +136,12 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
         # and that it indicates success for valid events
         pdus: JsonDict = body["pdus"]
         self.assertIncludes(
-            set(pdus.keys()), {event1.event_id, event2.event_id, event3.event_id}
+            set(pdus.keys()),
+            {event1.event_id, event2.event_id, event3.event_id},
+            exact=True,
         )
         self.assertEqual(pdus[event1.event_id], {})
-        self.assertNotEqual(body["pdus"][event2.event_id]["error"], "")
+        self.assertNotEqual(pdus[event2.event_id]["error"], "")
         self.assertEqual(pdus[event3.event_id], {})
 
         # Make sure other valid events from the send transaction were persisted successfully
