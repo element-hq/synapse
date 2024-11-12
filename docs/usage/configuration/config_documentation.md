@@ -1434,7 +1434,7 @@ number of entries that can be stored.
    Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry
    durations.
      * `max_cache_memory_usage` sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-        They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in
+        They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in
         the setting below, or until the `min_cache_ttl` is hit. There is no default value for this option.
      * `target_cache_memory_usage` sets a rough target for the desired memory usage of the caches. There is no default value
         for this option.
@@ -1889,6 +1889,26 @@ When set to true, all subsequent media uploads will be marked as authenticated, 
 unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
 after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
 this will change to true in a future Synapse release.
+
+In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
+case-by-case breakdown describes whether media downloads are permitted:
+
+* `enable_authenticated_media = False`:
+  * unauthenticated client or homeserver requesting local media: allowed
+  * unauthenticated client or homeserver requesting remote media: allowed as long as the media is in the cache,
+    or as long as the remote homeserver does not require authentication to retrieve the media
+* `enable_authenticated_media = True`:
+  * unauthenticated client or homeserver requesting local media:
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+  * unauthenticated client or homeserver requesting remote media: the same as for local media;
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+
+It is especially notable that media downloaded before this option existed (in older Synapse versions), or whilst this option was set to `False`,
+will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to `True`.
+This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
+those older clients or homeservers will not be cut off from media they can already see.
 
 Example configuration:
 ```yaml

@@ -447,3 +447,9 @@ class ExperimentalConfig(Config):
 
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
+
+        # MSC4210: Remove legacy mentions
+        self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
+
+        # MSC4222: Adding `state_after` to sync v2
+        self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
