@@ -1520,7 +1520,7 @@ class SyncHandler:
         if sync_config.use_state_after:
             delta_state_ids: MutableStateMap[str] = {}
 
-            if members_to_fetch is not None:
+            if members_to_fetch:
                 # We're lazy-loading, so the client might need some more member
                 # events to understand the events in this timeline. So we always
                 # fish out all the member events corresponding to the timeline
