@@ -719,7 +719,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             "GET",
             self.url + "?order_by=bar",
@@ -3696,7 +3696,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     @parameterized.expand(["GET", "DELETE"])
     def test_invalid_parameter(self, method: str) -> None:
         """If parameters are invalid, an error is returned."""
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             method,
             self.url + "?order_by=bar",
