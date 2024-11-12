@@ -245,7 +245,7 @@ this callback.
 _First introduced in Synapse v1.37.0_
 
 ```python
-async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) -> bool
+async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -> bool
 ```
 
 Called when computing search results in the user directory. The module must return a
