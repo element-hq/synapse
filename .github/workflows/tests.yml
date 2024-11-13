@@ -245,7 +245,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-            toolchain: nightly-2022-12-01
+            toolchain: nightly-2023-12-28
             components: clippy
       - uses: Swatinem/rust-cache@v2
 
@@ -263,7 +263,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           # We use nightly so that it correctly groups together imports
-          toolchain: nightly-2022-12-01
+          toolchain: nightly-2023-12-28
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
 
