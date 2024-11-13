@@ -285,6 +285,13 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11200"><a class="header" href="#upgrading-to-v11200">Upgrading to v1.120.0</a></h1>
+<h2 id="removal-of-experimental-msc3886-feature"><a class="header" href="#removal-of-experimental-msc3886-feature">Removal of experimental MSC3886 feature</a></h2>
+<p><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3886">MSC3886</a>
+has been closed (and will not enter the Matrix spec). As such, we are
+removing the experimental support for it in this release.</p>
+<p>The <code>experimental_features.msc3886_endpoint</code> configuration option has
+been removed.</p>
 <h1 id="upgrading-to-v11190"><a class="header" href="#upgrading-to-v11190">Upgrading to v1.119.0</a></h1>
 <h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.8 to v3.9.
