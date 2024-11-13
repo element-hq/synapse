@@ -235,9 +235,9 @@ class UserServlet(SCIMServlet):
 
             threepids = await self.store.user_get_threepids(user_id)
 
-            default_display_name = body.get("displayName", "")
+            display_name = body.get("displayName", "")
             await self.profile_handler.set_displayname(
-                user_id_obj, requester, default_display_name, True
+                user_id_obj, requester, display_name, True
             )
 
             avatar_url = body["photos"][0]["value"] if body.get("photos") else ""
