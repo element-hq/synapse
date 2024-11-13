@@ -467,13 +467,6 @@ class ServiceProviderConfigServlet(SCIMServlet):
                     type="oauthbearertoken",
                     primary=True,
                 ),
-                AuthenticationScheme(
-                    name="HTTP Basic",
-                    description="Authentication scheme using the HTTP Basic Standard",
-                    spec_uri="http://www.rfc-editor.org/info/rfc2617",
-                    documentation_uri="https://element-hq.github.io/synapse/latest/modules/password_auth_provider_callbacks.html",
-                    type="httpbasic",
-                ),
             ],
         )
         return HTTPStatus.OK, spc.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE)
