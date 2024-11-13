@@ -241,6 +241,15 @@ SECTION_HEADERS = {
 INDENT = "  "
 
 
+has_error = False
+
+
+def error(text: str) -> None:
+    global has_error
+    print(f"ERROR: {text}", file=sys.stderr)
+    has_error = True
+
+
 def indent(text: str, first_line: bool = True) -> str:
     """Indents each non-empty line of the given text."""
     text = re.sub(r"(\n)([^\n])", r"\1" + INDENT + r"\2", text)
@@ -349,6 +358,7 @@ def sub_section(prop: str, values: dict) -> str:
 
     def description() -> str:
         if not (description := values.get("description")):
+            error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
 
         return f"{description}{p(default(), sep())}\n"
@@ -402,6 +412,7 @@ def section(prop: str, values: dict) -> str:
 
     def description() -> str:
         if not (description := values.get("description")):
+            error(f"missing description for {prop}")
             return "MISSING DESCRIPTION\n"
         return f"\n{a(em(type_str()))}{description}{p(default_str(), sep())}\n"
 
@@ -455,6 +466,10 @@ def main() -> None:
 
     sections = (section(k, v) for k, v in schema["properties"].items())
     print(HEADER + "".join(sections), end="")
+
+    if has_error:
+        print("There were errors.", file=sys.stderr)
+        exit(2)
 
 
 if __name__ == "__main__":
