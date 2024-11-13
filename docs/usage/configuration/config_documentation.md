@@ -131,7 +131,7 @@ Define your homeserver name and other base options.
 
 The `server_name` name will appear at the end of usernames and room addresses created on your server. For example if the `server_name` was example.com, usernames on your server would be in the format `@user:example.com`
 
-In most cases you should avoid using a matrix specific subdomain such as matrix.example.com or synapse.example.com as the `server_name` for the same reasons you wouldn’t use user@email.example.com as your email address. See [here](../../delegate.md) for information on how to host Synapse on a subdomain while preserving a clean `server_name`.
+In most cases you should avoid using a matrix specific subdomain such as matrix.example.com or synapse.example.com as the `server_name` for the same reasons you wouldn't use user@email.example.com as your email address. See [here](../../delegate.md) for information on how to host Synapse on a subdomain while preserving a clean `server_name`.
 
 The `server_name` cannot be changed later so it is important to configure this correctly before you start Synapse. It should be all lowercase and may contain an explicit port.
 
@@ -166,7 +166,7 @@ web_client_location: https://riot.example.com/
 ---
 ### `public_baseurl`
 
-*(string|null)* The public-facing base URL that clients use to access this Homeserver (not including _matrix/...). This is the same URL a user might enter into the “Custom Homeserver URL” field on their client. If you use Synapse with a reverse proxy, this should be the URL to reach Synapse via the proxy. Otherwise, it should be the URL to reach Synapse’s client HTTP listener (see [`listeners`](#listeners) below).
+*(string|null)* The public-facing base URL that clients use to access this Homeserver (not including _matrix/...). This is the same URL a user might enter into the "Custom Homeserver URL" field on their client. If you use Synapse with a reverse proxy, this should be the URL to reach Synapse via the proxy. Otherwise, it should be the URL to reach Synapse's client HTTP listener (see [`listeners`](#listeners) below).
 
 If unset or null, `https://<server_name>/` is used.
 
@@ -226,9 +226,9 @@ This setting has the following sub-options:
 
 * `enabled` (boolean|string): Set to false to disable presence tracking on this homeserver.
 
-  Can also be set to a special value of “untracked” which ignores updates received via clients and federation, while still accepting updates from the [module API](../../modules/index.md).
+  Can also be set to a special value of "untracked" which ignores updates received via clients and federation, while still accepting updates from the [module API](../../modules/index.md).
 
-  *The “untracked” option was added in Synapse 1.96.0.*
+  *The "untracked" option was added in Synapse 1.96.0.*
 
   Defaults to `true`.
 
@@ -261,7 +261,7 @@ limit_profile_requests_to_users_who_share_rooms: true
 ---
 ### `include_profile_data_on_invite`
 
-*(boolean)* Use this option to prevent a user’s profile data from being retrieved and displayed in a room until they have joined it. By default, a user’s profile data is included in an invite event, regardless of the values of the above two settings, and whether or not the users share a server. Defaults to `true`.
+*(boolean)* Use this option to prevent a user's profile data from being retrieved and displayed in a room until they have joined it. By default, a user's profile data is included in an invite event, regardless of the values of the above two settings, and whether or not the users share a server. Defaults to `true`.
 
 Example configuration:
 ```yaml
@@ -270,7 +270,7 @@ include_profile_data_on_invite: false
 ---
 ### `allow_public_rooms_without_auth`
 
-*(boolean)* If set to true, removes the need for authentication to access the server’s public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
+*(boolean)* If set to true, removes the need for authentication to access the server's public rooms directory through the client API, meaning that anyone can query the room directory. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -279,7 +279,7 @@ allow_public_rooms_without_auth: true
 ---
 ### `allow_public_rooms_over_federation`
 
-*(boolean)* If set to true, allows any other homeserver to fetch the server’s public rooms directory via federation. Defaults to `false`.
+*(boolean)* If set to true, allows any other homeserver to fetch the server's public rooms directory via federation. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -317,7 +317,7 @@ gc_thresholds:
 ---
 ### `gc_min_interval`
 
-*(array)* The minimum time in seconds between each GC for a generation, regardless of the GC thresholds. This ensures that we don’t do GC too frequently. A value of `[1s, 10s, 30s]` indicates that a second must pass between consecutive generation 0 GCs, etc.
+*(array)* The minimum time in seconds between each GC for a generation, regardless of the GC thresholds. This ensures that we don't do GC too frequently. A value of `[1s, 10s, 30s]` indicates that a second must pass between consecutive generation 0 GCs, etc.
 
 Default configuration:
 ```yaml
@@ -436,7 +436,7 @@ Valid resource names are:
 
 * `replication`: the HTTP replication API (/_synapse/replication). See [here](../../workers.md).
 
-* `static`: static resources under synapse/static (/_matrix/static). (Mostly useful for “fallback authentication”.)
+* `static`: static resources under synapse/static (/_matrix/static). (Mostly useful for "fallback authentication".)
 
 * `health`: the [health check endpoint](../../reverse_proxy.md#health-check-endpoint). This endpoint is by default active for all other resources and does not have to be activated separately. This is only useful if you want to use the health endpoint explicitly on a dedicated port or for [workers](../../workers.md) and containers without listener e.g. [application services](../../workers.md#notifying-application-services).
 
@@ -448,7 +448,7 @@ Options for each entry include:
 
 * `tag` (string|null): An alias for the port in the logger name. If set the tag is logged instead of the port. Default to `None`, is optional and only valid for listener with `type: http`. See the docs [request log format](../administration/request_log.md).
 
-* `bind_addresses` (array|null): A list of local addresses to listen on. The default is “all local interfaces“.
+* `bind_addresses` (array|null): A list of local addresses to listen on. The default is "all local interfaces".
 
 * `type` (string): The type of listener. Normally `http`, but other valid options are [`manhole`](../../manhole.md) and [`metrics`](../../metrics-howto.md).
 
@@ -568,7 +568,7 @@ dummy_events_threshold: 5
 ---
 ### `delete_stale_devices_after`
 
-An optional duration. If set, Synapse will run a daily background task to log out and delete any device that hasn’t been accessed for more than the specified amount of time.
+An optional duration. If set, Synapse will run a daily background task to log out and delete any device that hasn't been accessed for more than the specified amount of time.
 
 A value of null means devices are never pruned.
 
@@ -611,7 +611,7 @@ This setting has the following sub-options:
 
 * `enable_tls` (boolean): By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `smtp_host`. If this option is set to false, TLS will not be used. Defaults to `true`.
 
-* `notif_from` (string|null): Defines the “From” address to use when sending emails. It must be set if email sending is enabled. The placeholder `%(app)s` will be replaced by the application name, which is normally set in `app_name`, but may be overridden by the Matrix client application. Note that the placeholder must be written `%(app)s`, including the trailing ‘s’. Defaults to `null`.
+* `notif_from` (string|null): Defines the "From" address to use when sending emails. It must be set if email sending is enabled. The placeholder `%(app)s` will be replaced by the application name, which is normally set in `app_name`, but may be overridden by the Matrix client application. Note that the placeholder must be written `%(app)s`, including the trailing ‘s'. Defaults to `null`.
 
 * `app_name` (string): Defines the default value for `%(app)s` in `notif_from` and email subjects. Defaults to `"Matrix"`.
 
@@ -631,29 +631,29 @@ This setting has the following sub-options:
 
 * `invite_client_location` (string|null): The web client location to direct users to during an invite. This is passed to the identity server as the `org.matrix.web_client_location` key. If null or unset no guidance is given to the identity server. Defaults to `null`.
 
-* `subjects` (object): Subjects to use when sending emails from Synapse. The placeholder `%(app)s` will be replaced with the value of the `app_name` setting, or by a value dictated by the Matrix client application. In addition, each subject can use the following placeholders: `%(person)s`, which will be replaced by the displayname of the user(s) that sent the message(s), e.g. “Alice and Bob”, and `%(room)s`, which will be replaced by the name of the room the message(s) have been sent to, e.g. “My super room”. In addition, emails related to account administration will can use the `%(server_name)s` placeholder, which will be replaced by the value of the `server_name` setting in your Synapse configuration.
+* `subjects` (object): Subjects to use when sending emails from Synapse. The placeholder `%(app)s` will be replaced with the value of the `app_name` setting, or by a value dictated by the Matrix client application. In addition, each subject can use the following placeholders: `%(person)s`, which will be replaced by the displayname of the user(s) that sent the message(s), e.g. "Alice and Bob", and `%(room)s`, which will be replaced by the name of the room the message(s) have been sent to, e.g. "My super room". In addition, emails related to account administration will can use the `%(server_name)s` placeholder, which will be replaced by the value of the `server_name` setting in your Synapse configuration.
 
   This setting has the following sub-options:
 
   * `message_from_person_in_room` (string): Subject to use to notify about one message from one or more user(s) in a room which has a name. Defaults to `"[%(app)s] You have a message on %(app)s from %(person)s in the %(room)s room..."`.
 
-  * `message_from_person` (string): Subject to use to notify about one message from one or more user(s) in a room which doesn’t have a name. Defaults to `"[%(app)s] You have a message on %(app)s from %(person)s..."`.
+  * `message_from_person` (string): Subject to use to notify about one message from one or more user(s) in a room which doesn't have a name. Defaults to `"[%(app)s] You have a message on %(app)s from %(person)s..."`.
 
-  * `messages_from_person` (string): Subject to use to notify about multiple messages from one or more users in a room which doesn’t have a name. Defaults to `"[%(app)s] You have messages on %(app)s from %(person)s..."`.
+  * `messages_from_person` (string): Subject to use to notify about multiple messages from one or more users in a room which doesn't have a name. Defaults to `"[%(app)s] You have messages on %(app)s from %(person)s..."`.
 
   * `messages_in_room` (string): Subject to use to notify about multiple messages in a room which has a name. Defaults to `"[%(app)s] You have messages on %(app)s in the %(room)s room..."`.
 
   * `messages_in_room_and_others` (string): Subject to use to notify about multiple messages in multiple rooms. Defaults to `"[%(app)s] You have messages on %(app)s in the %(room)s room and others..."`.
 
-  * `messages_from_person_and_others` (string): Subject to use to notify about multiple messages from multiple persons in multiple rooms. This is similar to the setting above except it’s used when the room in which the notification was triggered has no name. Defaults to `"[%(app)s] You have messages on %(app)s from %(person)s and others..."`.
+  * `messages_from_person_and_others` (string): Subject to use to notify about multiple messages from multiple persons in multiple rooms. This is similar to the setting above except it's used when the room in which the notification was triggered has no name. Defaults to `"[%(app)s] You have messages on %(app)s from %(person)s and others..."`.
 
   * `invite_from_person_to_room` (string): Subject to use to notify about an invite to a room which has a name. Defaults to `"[%(app)s] %(person)s has invited you to join the %(room)s room on %(app)s..."`.
 
-  * `invite_from_person` (string): Subject to use to notify about an invite to a room which doesn’t have a name. Defaults to `"[%(app)s] %(person)s has invited you to chat on %(app)s..."`.
+  * `invite_from_person` (string): Subject to use to notify about an invite to a room which doesn't have a name. Defaults to `"[%(app)s] %(person)s has invited you to chat on %(app)s..."`.
 
   * `password_reset` (string): Subject to use when sending a password reset email. Defaults to `"[%(server_name)s] Password reset"`.
 
-  * `email_validation` (string): Subject to use when sending a verification email to assert an address’s ownership. Defaults to `"[%(server_name)s] Validate your email"`.
+  * `email_validation` (string): Subject to use when sending a verification email to assert an address's ownership. Defaults to `"[%(server_name)s] Validate your email"`.
 
 Example configuration:
 ```yaml
@@ -822,7 +822,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room “complexity” will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained.
 
 This setting has the following sub-options:
 
@@ -839,7 +839,7 @@ Example configuration:
 limit_remote_rooms:
   enabled: true
   complexity: 0.5
-  complexity_error: "I can\u2019t let you do that, Dave."
+  complexity_error: I can't let you do that, Dave.
   admins_can_join: true
 ```
 ---
@@ -854,7 +854,7 @@ require_membership_for_aliases: false
 ---
 ### `allow_per_room_profiles`
 
-*(boolean)* Whether to allow per-room membership profiles through the sending of membership events with profile information that differs from the target’s global profile. Defaults to `true`.
+*(boolean)* Whether to allow per-room membership profiles through the sending of membership events with profile information that differs from the target's global profile. Defaults to `true`.
 
 Example configuration:
 ```yaml
@@ -865,7 +865,7 @@ allow_per_room_profiles: false
 
 The largest permissible file size in bytes for a user avatar. Defaults to no restriction. Use M for MB and K for KB.
 
-Note that user avatar changes will not work if this is set without using Synapse’s media repository.
+Note that user avatar changes will not work if this is set without using Synapse's media repository.
 
 Defaults to `null`.
 
@@ -878,7 +878,7 @@ max_avatar_size: 10M
 
 *(array|null)* The MIME types allowed for user avatars. Defaults to no restriction.
 
-Note that user avatar changes will not work if this is set without using Synapse’s media repository.
+Note that user avatar changes will not work if this is set without using Synapse's media repository.
 
 Defaults to `null`.
 
@@ -905,7 +905,7 @@ redaction_retention_period: 28d
 ---
 ### `forgotten_room_retention_period`
 
-How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it’s disabled. Defaults to `null`.
+How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled. Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -914,7 +914,7 @@ forgotten_room_retention_period: 28d
 ---
 ### `user_ips_max_age`
 
-How long to track users’ last seen time and IPs in the database. Set to `null` to disable clearing out of old rows. Defaults to `"28d"`.
+How long to track users' last seen time and IPs in the database. Set to `null` to disable clearing out of old rows. Defaults to `"28d"`.
 
 Example configuration:
 ```yaml
@@ -969,7 +969,7 @@ templates:
 
 Room admins and mods can define a retention period for their rooms using the `m.room.retention` state event, and server admins can cap this period by setting the `allowed_lifetime_min` and `allowed_lifetime_max` config options.
 
-If this feature is enabled, Synapse will regularly look for and purge events which are older than the room’s maximum retention period. Synapse will also filter events received over federation so that events that should have been purged are ignored and not stored again.
+If this feature is enabled, Synapse will regularly look for and purge events which are older than the room's maximum retention period. Synapse will also filter events received over federation so that events that should have been purged are ignored and not stored again.
 
 The message retention policies feature is disabled by default. You can read more about this feature [here](../../message_retention_policies.md).
 
@@ -981,23 +981,23 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `min_lifetime`: Minimum message retention time of the default message retention policy. Synapse doesn’t take this option into account yet. Defaults to `null`.
+  * `min_lifetime`: Minimum message retention time of the default message retention policy. Synapse doesn't take this option into account yet. Defaults to `null`.
 
   * `max_lifetime`: Maximum message retention time of the default message retention policy. Defaults to `null`.
 
-* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that’s beyond this bound, Synapse will cap the room’s policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_min`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
 
-* `allowed_lifetime_max`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that’s beyond this bound, Synapse will cap the room’s policy to these limits when running purge jobs. Defaults to `null`.
+* `allowed_lifetime_max`: Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs. Defaults to `null`.
 
 * `purge_jobs` (array|null): Server admins can define the settings of the background jobs purging the events whose lifetime has expired under the `purge_jobs` section.
 
   If no configuration is provided for this option, a single job will be set up to delete expired events in every room daily.
 
-  Each job’s configuration defines which range of message lifetimes the job takes care of. For example, if `shortest_max_lifetime` is "2d" and `longest_max_lifetime` is "3d", the job will handle purging expired events in rooms whose state defines a `max_lifetime` that’s both higher than 2 days, and lower than or equal to 3 days. Both the minimum and the maximum value of a range are optional, e.g. a job with no `shortest_max_lifetime` and a `longest_max_lifetime` of "3d" will handle every room with a retention policy whose `max_lifetime` is lower than or equal to three days.
+  Each job's configuration defines which range of message lifetimes the job takes care of. For example, if `shortest_max_lifetime` is "2d" and `longest_max_lifetime` is "3d", the job will handle purging expired events in rooms whose state defines a `max_lifetime` that's both higher than 2 days, and lower than or equal to 3 days. Both the minimum and the maximum value of a range are optional, e.g. a job with no `shortest_max_lifetime` and a `longest_max_lifetime` of "3d" will handle every room with a retention policy whose `max_lifetime` is lower than or equal to three days.
 
-  The rationale for this per-job configuration is that some rooms might have a retention policy with a low `max_lifetime`, where history needs to be purged of outdated messages on a more frequent basis than for the rest of the rooms (e.g. every 12h), but not want that purge to be performed by a job that’s iterating over every room it knows, which could be heavy on the server.
+  The rationale for this per-job configuration is that some rooms might have a retention policy with a low `max_lifetime`, where history needs to be purged of outdated messages on a more frequent basis than for the rest of the rooms (e.g. every 12h), but not want that purge to be performed by a job that's iterating over every room it knows, which could be heavy on the server.
 
-  If any purge job is configured, it is strongly recommended to have at least a single job with neither `shortest_max_lifetime` nor `longest_max_lifetime` set, or one job without `shortest_max_lifetime` and one job without `longest_max_lifetime` set. Otherwise some rooms might be ignored, even if `allowed_lifetime_min` and `allowed_lifetime_max` are set, because capping a room’s policy to these values is done after the policies are retrieved from Synapse’s database (which is done using the range specified in a purge job’s configuration).
+  If any purge job is configured, it is strongly recommended to have at least a single job with neither `shortest_max_lifetime` nor `longest_max_lifetime` set, or one job without `shortest_max_lifetime` and one job without `longest_max_lifetime` set. Otherwise some rooms might be ignored, even if `allowed_lifetime_min` and `allowed_lifetime_max` are set, because capping a room's policy to these values is done after the policies are retrieved from Synapse's database (which is done using the range specified in a purge job's configuration).
 
   Defaults to `null`.
 
@@ -1119,7 +1119,7 @@ Options related to federation.
 
 *(array)* Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.
 
-Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a “private federation”, where a group of servers all whitelist each other and have the same whitelist.
+Note: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a "private federation", where a group of servers all whitelist each other and have the same whitelist.
 
 Defaults to `[]`.
 
@@ -1159,7 +1159,7 @@ federation_whitelist_endpoint_enabled: true
 ---
 ### `federation_metrics_domains`
 
-*(array)* Report prometheus metrics on the age of PDUs being sent to and received from the given domains. This can be used to give an idea of “delay” on inbound and outbound federation, though be aware that any delay can be due to problems at either end or with the intermediate network. Defaults to `[]`.
+*(array)* Report prometheus metrics on the age of PDUs being sent to and received from the given domains. This can be used to give an idea of "delay" on inbound and outbound federation, though be aware that any delay can be due to problems at either end or with the intermediate network. Defaults to `[]`.
 
 Example configuration:
 ```yaml
@@ -1251,7 +1251,7 @@ event_cache_size: 15K
 ---
 ### `caches`
 
-*(object)* A cache “factor” is a multiplier that can be applied to each of Synapse’s caches in order to increase or decrease the maximum number of entries that can be stored.
+*(object)* A cache "factor" is a multiplier that can be applied to each of Synapse's caches in order to increase or decrease the maximum number of entries that can be stored.
 
 This setting has the following sub-options:
 
@@ -1269,7 +1269,7 @@ This setting has the following sub-options:
 
   These can also be set through environment variables comprised of `SYNAPSE_CACHE_FACTOR_` + the name of the cache in capital letters and underscores. Setting by environment variable takes priority over setting through the config file. Ex. `SYNAPSE_CACHE_FACTOR_GET_USERS_WHO_SHARE_ROOM_WITH_USER=2.0`
 
-  Some caches have ‘*’ and other characters that are not alphanumeric or underscores. These caches can be named with or without the special characters stripped. For example, to specify the cache factor for `*stateGroupCache*` via an environment variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
+  Some caches have ‘*' and other characters that are not alphanumeric or underscores. These caches can be named with or without the special characters stripped. For example, to specify the cache factor for `*stateGroupCache*` via an environment variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
 
   Defaults to `{}`.
 
@@ -1354,7 +1354,7 @@ database:
 ---
 ### `databases`
 
-*(object)* The `databases` option allows specifying a mapping between certain database tables and database host details, spreading the load of a single Synapse instance across multiple database backends. This is often referred to as “database sharding”. This option is only supported for PostgreSQL database backends.
+*(object)* The `databases` option allows specifying a mapping between certain database tables and database host details, spreading the load of a single Synapse instance across multiple database backends. This is often referred to as "database sharding". This option is only supported for PostgreSQL database backends.
 
 **Important note:** This is a supported option, but is not currently used in production by the Matrix.org Foundation. Proceed with caution and always make backups.
 
@@ -1387,7 +1387,7 @@ To migrate an existing database configuration (e.g. all tables on a single datab
 
 3. Copy over the necessary tables and sequences from one database to the other. Tables relating to database migrations, schemas, schema versions and background updates should **not** be copied.
 
-   As an example, say that you’d like to split out the "state" data store from an existing database which currently contains all data stores.
+   As an example, say that you'd like to split out the "state" data store from an existing database which currently contains all data stores.
 
    Simply copy the tables and sequences defined above for the "state" datastore from the existing database to the secondary database. As noted above, additional tables will be created in the secondary database when Synapse is started.
 
@@ -1481,7 +1481,7 @@ rc_message:
 ---
 ### `rc_registration`
 
-*(object)* This option ratelimits registration requests based on the client’s IP address.
+*(object)* This option ratelimits registration requests based on the client's IP address.
 
 This setting has the following sub-options:
 
@@ -1505,7 +1505,7 @@ rc_registration:
 ---
 ### `rc_registration_token_validity`
 
-*(object)* This option checks the validity of registration tokens that ratelimits requests based on the client’s IP address.
+*(object)* This option checks the validity of registration tokens that ratelimits requests based on the client's IP address.
 
 This setting has the following sub-options:
 
@@ -1533,7 +1533,7 @@ rc_registration_token_validity:
 
 This setting has the following sub-options:
 
-* `address` (object): Ratelimits login requests based on the client’s IP address. Defaults to `{"per_second": 0.003, "burst_count": 5}`.
+* `address` (object): Ratelimits login requests based on the client's IP address. Defaults to `{"per_second": 0.003, "burst_count": 5}`.
 
   This setting has the following sub-options:
 
@@ -1730,7 +1730,7 @@ rc_invites:
 ---
 ### `rc_third_party_invite`
 
-*(object)* This option ratelimits 3PID invites (i.e. invites sent to a third-party ID such as an email address or a phone number) based on the account that’s sending the invite.
+*(object)* This option ratelimits 3PID invites (i.e. invites sent to a third-party ID such as an email address or a phone number) based on the account that's sending the invite.
 
 This setting has the following sub-options:
 
@@ -1754,7 +1754,7 @@ rc_third_party_invite:
 ---
 ### `rc_media_create`
 
-*(object)* This option ratelimits creation of MXC URIs via the `/_matrix/media/v1/create` endpoint based on the account that’s creating the media.
+*(object)* This option ratelimits creation of MXC URIs via the `/_matrix/media/v1/create` endpoint based on the account that's creating the media.
 
 This setting has the following sub-options:
 
@@ -1900,7 +1900,7 @@ media_storage_providers:
 
 *(string|integer)* The largest allowed upload size in bytes.
 
-If you are using a reverse proxy you may also need to set this value in your reverse proxy’s config. Notably Nginx has a small max body size by default. See [here](../../reverse_proxy.md) for more on using a reverse proxy with Synapse.
+If you are using a reverse proxy you may also need to set this value in your reverse proxy's config. Notably Nginx has a small max body size by default. See [here](../../reverse_proxy.md) for more on using a reverse proxy with Synapse.
 
 Defaults to `"50M"`.
 
@@ -1920,7 +1920,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-*(string|integer)* Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given “bucket” is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized – if the bucket is full, i.e. a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains. See also `remote_media_download_per_second` which determines the rate at which the “bucket” is emptied and thus has available space to authorize new requests. Defaults to `"500MiB"`.
+*(string|integer)* Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized – if the bucket is full, i.e. a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests. Defaults to `"500MiB"`.
 
 Example configuration:
 ```yaml
@@ -1929,7 +1929,7 @@ remote_media_download_burst_count: 200M
 ---
 ### `remote_media_download_per_second`
 
-*(string|integer)* Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads – this configuration option determines the rate at which the “bucket” (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it’s capacity, no more requests will be allowed until a number of bytes has “drained” from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`. Defaults to `"87KiB"`.
+*(string|integer)* Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads – this configuration option determines the rate at which the "bucket" (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has "drained" from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`. Defaults to `"87KiB"`.
 
 Example configuration:
 ```yaml
@@ -2020,7 +2020,7 @@ thumbnail_sizes:
 
 Purging media files will be the carried out by the media worker (that is, the worker that has the `enable_media_repo` homeserver config option set to `true`). This may be the main process.
 
-The `media_retention.local_media_lifetime` and `media_retention.remote_media_lifetime` config options control whether media will be purged if it has not been accessed in a given amount of time. Note that media is “accessed” when loaded in a room in a client, or otherwise downloaded by a local or remote user. If the media has never been accessed, the media’s creation time is used instead. Both thumbnails and the original media will be removed. If either of these options are unset, then media of that type will not be purged.
+The `media_retention.local_media_lifetime` and `media_retention.remote_media_lifetime` config options control whether media will be purged if it has not been accessed in a given amount of time. Note that media is "accessed" when loaded in a room in a client, or otherwise downloaded by a local or remote user. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If either of these options are unset, then media of that type will not be purged.
 
 Local or cached remote media that has been [quarantined](../../admin_api/media_admin_api.md#quarantining-media-in-a-room) will not be deleted. Similarly, local media that has been marked as [protected from quarantine](../../admin_api/media_admin_api.md#protecting-media-from-being-quarantined) will not be deleted.
 
@@ -2157,7 +2157,7 @@ url_preview_accept_language:
 
 This setting has the following sub-options:
 
-* `disable_default_providers` (boolean): Do not use Synapse’s default list of oEmbed providers. Defaults to `false`.
+* `disable_default_providers` (boolean): Do not use Synapse's default list of oEmbed providers. Defaults to `false`.
 
 * `additional_providers` (array): Additional files with oEmbed configuration (each should be in the form of providers.json). Defaults to `[]`.
 
@@ -2176,7 +2176,7 @@ See [here](../../CAPTCHA_SETUP.md) for full details on setting up captcha.
 ---
 ### `recaptcha_public_key`
 
-*(string|null)* This homeserver’s ReCAPTCHA public key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
+*(string|null)* This homeserver's ReCAPTCHA public key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2185,7 +2185,7 @@ recaptcha_public_key: YOUR_PUBLIC_KEY
 ---
 ### `recaptcha_private_key`
 
-*(string|null)* This homeserver’s ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
+*(string|null)* This homeserver's ReCAPTCHA private key. Must be specified if [`enable_registration_captcha`](#enable_registration_captcha) is enabled. Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2298,7 +2298,7 @@ Registration can be rate-limited using the parameters in the [Ratelimiting](#rat
 
 *(boolean)* Enable registration for new users.
 
-It is highly recommended that if you enable registration, you set one or more or the following options, to avoid abuse of your server by “bots”:
+It is highly recommended that if you enable registration, you set one or more or the following options, to avoid abuse of your server by "bots":
 
 * [`enable_registration_captcha`](#enable_registration_captcha)
 * [`registrations_require_3pid`](#registrations_require_3pid)
@@ -2612,7 +2612,7 @@ auto_join_rooms_for_guests: false
 ---
 ### `inhibit_user_in_use_error`
 
-*(boolean)* Whether to inhibit errors raised when registering a new account if the user ID already exists. If turned on, requests to `/register/available` will always show a user ID as available, and Synapse won’t raise an error when starting a registration with a user ID that already exists. However, Synapse will still raise an error if the registration completes and the username conflicts. Defaults to `false`.
+*(boolean)* Whether to inhibit errors raised when registering a new account if the user ID already exists. If turned on, requests to `/register/available` will always show a user ID as available, and Synapse won't raise an error when starting a registration with a user ID that already exists. However, Synapse will still raise an error if the registration completes and the username conflicts. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -2626,7 +2626,7 @@ Config options related to user session management.
 ---
 ### `session_lifetime`
 
-*(string)* Time that a user’s session remains valid for, after they log in.
+*(string)* Time that a user's session remains valid for, after they log in.
 
 Note that this is not currently compatible with guest logins.
 
@@ -2690,7 +2690,7 @@ The amount of time to allow a user-interactive authentication session to be acti
 
 This defaults to 0, meaning the user is queried for their credentials before every action, but this can be overridden to allow a single validation to be re-used. This weakens the protections afforded by the user-interactive authentication process, by allowing for multiple (and potentially different) operations to use the same validation session.
 
-This is ignored for potentially “dangerous” operations (including deactivating an account, modifying an account password, adding a 3PID, and minting additional login tokens).
+This is ignored for potentially "dangerous" operations (including deactivating an account, modifying an account password, adding a 3PID, and minting additional login tokens).
 
 Use the `session_timeout` sub-option here to change the time allowed for credential validation.
 
@@ -2744,7 +2744,7 @@ enable_metrics: true
 
 An optional `environment` field can be used to specify an environment. This allows for log maintenance based on different environments, ensuring better organization and analysis.
 
-NOTE: While attempts are made to ensure that the logs don’t contain any sensitive information, this cannot be guaranteed. By enabling this option the sentry server may therefore receive sensitive information, and it in turn may then disseminate sensitive information through insecure notification channels if so configured.
+NOTE: While attempts are made to ensure that the logs don't contain any sensitive information, this cannot be guaranteed. By enabling this option the sentry server may therefore receive sensitive information, and it in turn may then disseminate sensitive information through insecure notification channels if so configured.
 
 This setting has the following sub-options:
 
@@ -2842,11 +2842,11 @@ room_prejoin_state:
 ---
 ### `track_puppeted_user_ips`
 
-*(boolean)* We record the IP address of clients used to access the API for various reasons, including displaying it to the user in the “Where you’re signed in” dialog.
+*(boolean)* We record the IP address of clients used to access the API for various reasons, including displaying it to the user in the "Where you're signed in" dialog.
 
 By default, when puppeting another user via the admin API, the client IP address is recorded against the user who created the access token (ie, the admin user), and *not* the puppeted user.
 
-Set this option to true to also record the IP address against the puppeted user. (This also means that the puppeted user will count as an “active” user for the purpose of monthly active user tracking – see `limit_usage_by_mau` etc above.)
+Set this option to true to also record the IP address against the puppeted user. (This also means that the puppeted user will count as an "active" user for the purpose of monthly active user tracking – see `limit_usage_by_mau` etc above.)
 
 Defaults to `false`.
 
@@ -2933,7 +2933,7 @@ signing_key_path: CONFDIR/SERVERNAME.signing.key
 ---
 ### `old_signing_keys`
 
-*(object)* The keys that the server used to sign messages with but won’t use to sign new messages.
+*(object)* The keys that the server used to sign messages with but won't use to sign new messages.
 
 It is possible to build an entry from an old `signing.key` file using the `export_signing_key` script which is provided with synapse.
 
@@ -3033,14 +3033,14 @@ This setting has the following sub-options:
 
 * `idp_name` (string): A user-facing name for this identity provider, which is used to offer the user a choice of login mechanisms.
 
-* `idp_icon` (string|null): An optional icon for this identity provider, which is presented by clients and Synapse’s own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.)
+* `idp_icon` (string|null): An optional icon for this identity provider, which is presented by clients and Synapse's own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.)
 
 * `idp_brand`: An optional brand for this identity provider, allowing clients to style the login flow according to the identity provider in question. See the [spec](https://spec.matrix.org/latest/) for possible options here.
 
 * `sp_config` (object|null): Configuration for the pysaml2 Service Provider. See pysaml2 docs for format of config. Default values will be used for the `entityid` and `service` settings, so it is not normally necessary to specify them unless you need to override them. Here are a few useful sub-options for configuring pysaml:
-  * `metadata`: Point this to the IdP’s metadata. You must provide either a local file via the `local` attribute or (preferably) a URL via the `remote` attribute.
+  * `metadata`: Point this to the IdP's metadata. You must provide either a local file via the `local` attribute or (preferably) a URL via the `remote` attribute.
   * `accepted_time_diff: 3`: Allowed clock difference in seconds between the homeserver and IdP. Defaults to 0.
-  * `service`: By default, the user has to go to our login page first. If you’d like to allow IdP-initiated login, set `allow_unsolicited` to true under `sp` in the `service` section. Defaults to `null`.
+  * `service`: By default, the user has to go to our login page first. If you'd like to allow IdP-initiated login, set `allow_unsolicited` to true under `sp` in the `service` section. Defaults to `null`.
 
 * `config_path` (string|null): Specify a separate pysaml2 configuration file. Defaults to `null`.
 
@@ -3050,9 +3050,9 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `module` (string): The custom module’s class.
+  * `module` (string): The custom module's class.
 
-  * `config` (object): Custom configuration values for the module. Use the values provided in the example if you are using the built-in user_mapping_provider, or provide your own config values for a custom class if you are using one. This section will be passed as a Python dictionary to the module’s `parse_config` method. The built-in provider takes the following two options:
+  * `config` (object): Custom configuration values for the module. Use the values provided in the example if you are using the built-in user_mapping_provider, or provide your own config values for a custom class if you are using one. This section will be passed as a Python dictionary to the module's `parse_config` method. The built-in provider takes the following two options:
     * `mxid_source_attribute`: The SAML attribute (after mapping via the attribute maps) to use to derive the Matrix ID from. It is "uid" by default. Note: This used to be configured by the `saml2_config.mxid_source_attribute option`. If that is still defined, its value will be used instead.
     * `mxid_mapping`: The mapping system to use for mapping the saml attribute onto a matrix ID. Options include: `hexencode` (which maps unpermitted characters to `=xx`) and `dotreplace` (which replaces unpermitted characters with `.`). The default is `hexencode`. Note: This used to be configured by the `saml2_config.mxid_mapping option`. If that is still defined, its value will be used instead.
 
@@ -3159,23 +3159,23 @@ Defaults to `[]`.
 
 Options for each entry include:
 
-* `idp_id` (string): A unique identifier for this identity provider. Used internally by Synapse; should be a single word such as “github”. Note that, if this is changed, users authenticating via that provider will no longer be recognised as the same user! (Use "oidc" here if you are migrating from an old `oidc_config` configuration.)
+* `idp_id` (string): A unique identifier for this identity provider. Used internally by Synapse; should be a single word such as "github". Note that, if this is changed, users authenticating via that provider will no longer be recognised as the same user! (Use "oidc" here if you are migrating from an old `oidc_config` configuration.)
 
 * `idp_name` (string): A user-facing name for this identity provider, which is used to offer the user a choice of login mechanisms.
 
-* `idp_icon` (string): An optional icon for this identity provider, which is presented by clients and Synapse’s own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.)
+* `idp_icon` (string): An optional icon for this identity provider, which is presented by clients and Synapse's own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.)
 
 * `idp_brand` (string): An optional brand for this identity provider, allowing clients to style the login flow according to the identity provider in question. See the [spec](https://spec.matrix.org/latest/) for possible options here.
 
 * `discover` (boolean): Set to false to disable the use of the OIDC discovery mechanism to discover endpoints. Defaults to true.
 
-* `issuer` (string): Required. The OIDC issuer. Used to validate tokens and (if discovery is enabled) to discover the provider’s endpoints.
+* `issuer` (string): Required. The OIDC issuer. Used to validate tokens and (if discovery is enabled) to discover the provider's endpoints.
 
 * `client_id` (string): Required. OAuth2 client id to use.
 
 * `client_secret` (string|null): OAuth2 client secret to use. May be omitted if `client_secret_jwt_key` is given, or if `client_auth_method` is `none`. Must be omitted if `client_secret_path` is specified.
 
-* `client_secret_path` (string|null): Path to the OAuth2 client secret to use. With that it’s not necessary to leak secrets into the config file itself. Mutually exclusive with `client_secret`. Can be omitted if `client_secret_jwt_key` is specified.
+* `client_secret_path` (string|null): Path to the OAuth2 client secret to use. With that it's not necessary to leak secrets into the config file itself. Mutually exclusive with `client_secret`. Can be omitted if `client_secret_jwt_key` is specified.
 
   *Added in Synapse 1.91.0.*
 
@@ -3227,7 +3227,7 @@ Options for each entry include:
 
   * `module` (string): The class name of a custom mapping module. Default is `synapse.handlers.oidc.JinjaOidcMappingProvider`. See [OpenID Mapping Providers](../../sso_mapping_providers.md#openid-mapping-providers) for information on implementing a custom mapping provider.
 
-  * `config` (object): Configuration for the mapping provider module. This section will be passed as a Python dictionary to the user mapping provider module’s `parse_config` method.
+  * `config` (object): Configuration for the mapping provider module. This section will be passed as a Python dictionary to the user mapping provider module's `parse_config` method.
 
     For the default provider, the following settings are available:
 
@@ -3239,13 +3239,13 @@ Options for each entry include:
 
       *Deprecated in Synapse v1.75.0.*
 
-    * `picture_template`: Jinja2 template for an url for the user’s profile picture. Defaults to `{{ user.picture }}`, which OpenID Connect compliant providers should provide and has to refer to a direct image file such as PNG, JPEG, or GIF image file.
+    * `picture_template`: Jinja2 template for an url for the user's profile picture. Defaults to `{{ user.picture }}`, which OpenID Connect compliant providers should provide and has to refer to a direct image file such as PNG, JPEG, or GIF image file.
 
       This replaces and overrides `picture_claim`.
 
       Currently only supported in monolithic (single-process) server configurations where the media repository runs within the Synapse process.
 
-    * `picture_claim`: name of the claim containing an url for the user’s profile picture. Defaults to "picture", which OpenID Connect compliant providers should provide and has to refer to a direct image file such as PNG, JPEG, or GIF image file.
+    * `picture_claim`: name of the claim containing an url for the user's profile picture. Defaults to "picture", which OpenID Connect compliant providers should provide and has to refer to a direct image file such as PNG, JPEG, or GIF image file.
 
       Currently only supported in monolithic (single-process) server configurations where the media repository runs within the Synapse process.
 
@@ -3253,7 +3253,7 @@ Options for each entry include:
 
     * `localpart_template`: Jinja2 template for the localpart of the MXID. If this is not set, the user will be prompted to choose their own username (see the documentation for the `sso_auth_account_details.html` template). This template can use the `localpart_from_email` filter.
 
-    * `confirm_localpart`: Whether to prompt the user to validate (or change) the generated localpart (see the documentation for the “sso_auth_account_details.html” template), instead of registering the account right away.
+    * `confirm_localpart`: Whether to prompt the user to validate (or change) the generated localpart (see the documentation for the "sso_auth_account_details.html" template), instead of registering the account right away.
 
     * `display_name_template`: Jinja2 template for the display name to set on first login. If unset, no displayname will be set.
 
@@ -3310,7 +3310,7 @@ This setting has the following sub-options:
 
 * `idp_name` (string): A user-facing name for this identity provider, which is used to offer the user a choice of login mechanisms.
 
-* `idp_icon` (string|null): An optional icon for this identity provider, which is presented by clients and Synapse’s own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.) Defaults to `null`.
+* `idp_icon` (string|null): An optional icon for this identity provider, which is presented by clients and Synapse's own IdP picker page. If given, must be an MXC URI of the format `mxc://<server-name>/<media-id>`. (An easy way to obtain such an MXC URI is to upload an image to an (unencrypted) room and then copy the URL from the source of the event.) Defaults to `null`.
 
 * `idp_brand` (string|null): An optional brand for this identity provider, allowing clients to style the login flow according to the identity provider in question. See the [spec](https://spec.matrix.org/latest/) for possible options here. Defaults to `null`.
 
@@ -3324,7 +3324,7 @@ This setting has the following sub-options:
 
 * `enable_registration` (boolean): Set to `false` to disable automatic registration of new users. This allows the CAS SSO flow to be limited to sign in only, rather than automatically registering users that have a valid SSO login but do not have a pre-registered account. Defaults to `true`.
 
-* `allow_numeric_ids` (boolean): Set to `true` allow numeric user IDs. This allows CAS SSO flow to provide user IDs composed of numbers only. These identifiers will be prefixed by the letter “u” by default. The prefix can be configured using the `numeric_ids_prefix` option. Be careful to choose the prefix correctly to avoid any possible conflicts (e.g. user 1234 becomes u1234 when a user u1234 already exists). Defaults to `false`.
+* `allow_numeric_ids` (boolean): Set to `true` allow numeric user IDs. This allows CAS SSO flow to provide user IDs composed of numbers only. These identifiers will be prefixed by the letter "u" by default. The prefix can be configured using the `numeric_ids_prefix` option. Be careful to choose the prefix correctly to avoid any possible conflicts (e.g. user 1234 becomes u1234 when a user u1234 already exists). Defaults to `false`.
 
 * `numeric_ids_prefix` (string): The prefix you wish to add in front of a numeric user ID when the `allow_numeric_ids` option is set to `true`. Only alphanumeric characters are allowed.
 
@@ -3359,11 +3359,11 @@ This setting has the following sub-options:
 
   WARNING: An entry such as "https://my.client" is insecure, because it will also match "https://my.client.evil.site", exposing your users to phishing attacks from evil.site. To avoid this, include a slash after the hostname: "https://my.client/".
 
-  The login fallback page (used by clients that don’t natively support the required login flows) is whitelisted in addition to any URLs in this list. By default, this list contains only the login fallback page.
+  The login fallback page (used by clients that don't natively support the required login flows) is whitelisted in addition to any URLs in this list. By default, this list contains only the login fallback page.
 
   Defaults to `null`.
 
-* `update_profile_information` (boolean): Use this setting to keep a user’s profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
+* `update_profile_information` (boolean): Use this setting to keep a user's profile fields in sync with information from the identity provider. Currently only syncing the displayname is supported. Fields are checked on every SSO login, and are updated if necessary. Note that enabling this option will override user profile information, regardless of whether users have opted-out of syncing that information when first signing in. Defaults to `false`.
 
 Example configuration:
 ```yaml
@@ -3437,7 +3437,7 @@ This setting has the following sub-options:
 
   * `require_digit` (boolean): Whether a password must contain at least one digit. Defaults to `false`.
 
-  * `require_symbol` (boolean): Whether a password must contain at least one symbol. A symbol is any character that’s not a number or a letter. Defaults to `false`.
+  * `require_symbol` (boolean): Whether a password must contain at least one symbol. A symbol is any character that's not a number or a letter. Defaults to `false`.
 
   * `require_lowercase` (boolean): Whether a password must contain at least one lowercase letter. Defaults to `false`.
 
@@ -3524,7 +3524,7 @@ This setting has the following sub-options:
 
 * `search_all_users` (boolean): Defines whether to search all users visible to your homeserver at the time the search is performed. If set to true, will return all users known to the homeserver matching the search query. If false, search results will only contain users visible in public rooms and users sharing a room with the requester.
 
-  NB. If you set this to true, and the last time the user_directory search indexes were (re)built was before Synapse 1.44, you’ll have to rebuild the indexes in order to search through all known users.
+  NB. If you set this to true, and the last time the user_directory search indexes were (re)built was before Synapse 1.44, you'll have to rebuild the indexes in order to search through all known users.
 
   These indexes are built the first time Synapse starts; admins can manually trigger a rebuild via the API following the instructions [for running background updates](../administration/admin_api/background_updates.md#run), set to true to return search results containing all known users, even if that user does not share a room with the requester.
 
@@ -3553,9 +3553,9 @@ This setting has the following sub-options:
 
 * `template_dir` (string): Gives the location of the templates for the HTML forms. This directory should contain one subdirectory per language (eg, `en`, `fr`), and each language directory should contain the policy document (named as <version>.html) and a success page (success.html).
 
-* `version` (number): Specifies the “current” version of the policy document. It defines the version to be served by the consent resource if there is no `v` parameter.
+* `version` (number): Specifies the "current" version of the policy document. It defines the version to be served by the consent resource if there is no `v` parameter.
 
-* `server_notice_content` (object): If enabled, will send a user a “Server Notice” asking them to consent to the privacy policy. The [`server_notices` section](#server_notices) must also be configured for this to work. Notices will *not* be sent to guest users unless `send_server_notice_to_guests` is set to true.
+* `server_notice_content` (object): If enabled, will send a user a "Server Notice" asking them to consent to the privacy policy. The [`server_notices` section](#server_notices) must also be configured for this to work. Notices will *not* be sent to guest users unless `send_server_notice_to_guests` is set to true.
 
   This setting has the following sub-options:
 
@@ -3664,7 +3664,7 @@ This setting is an optional list of 0 or more rules. By default, no list is prov
 
 Otherwise, requests to create aliases are matched against each rule in order. The first rule that matches decides if the request is allowed or denied. If no rule matches, the request is denied. In particular, this means that configuring an empty list of rules will deny every alias creation request.
 
-Each of the glob patterns is optional, defaulting to `*` (“match anything”). Note that the patterns match against fully qualified IDs, e.g. against `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead of `alice`, `room` and `abcedgghijk`.
+Each of the glob patterns is optional, defaulting to `*` ("match anything"). Note that the patterns match against fully qualified IDs, e.g. against `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead of `alice`, `room` and `abcedgghijk`.
 
 Each rule is a YAML object containing four fields, each of which is an optional string
 
@@ -3723,7 +3723,7 @@ Otherwise, requests to publish a room are matched against each rule in order. Th
 
 Requests to create a public (public as in published to the room directory) room which violates the configured rules will result in the room being created but not published to the room directory.
 
-Each of the glob patterns is optional, defaulting to `*` (“match anything”). Note that the patterns match against fully qualified IDs, e.g. against `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead of `alice`, `room` and `abcedgghijk`.
+Each of the glob patterns is optional, defaulting to `*` ("match anything"). Note that the patterns match against fully qualified IDs, e.g. against `@alice:example.com`, `#room:example.com` and `!abcdefghijk:example.com` instead of `alice`, `room` and `abcedgghijk`.
 
 Each rule is a YAML object containing four fields, each of which is an optional string.
 
@@ -3733,7 +3733,7 @@ Options for each entry include:
 
 * `user_id` (string|null): Glob pattern that matches against the user publishing the room.
 
-* `alias` (string|null): Glob pattern that matches against one of published room’s aliases.
+* `alias` (string|null): Glob pattern that matches against one of published room's aliases.
   - If the room has no aliases, the alias match fails unless `alias` is unspecified or `*`.
   - If the room has exactly one alias, the alias match succeeds if the `alias` pattern matches that alias.
   - If the room has two or more aliases, the alias match succeeds if the pattern matches at least one of the aliases.
@@ -3870,7 +3870,7 @@ This setting has the following sub-options:
 
 * `force_tracing_for_users` (array): A list of the matrix IDs of users whose requests will always be traced, even if the tracing system would otherwise drop the traces due to probabilistic sampling. Defaults to `[]`.
 
-* `jaeger_config` (object): Jaeger can be configured to sample traces at different rates. All configuration options provided by Jaeger can be set here. Jaeger’s configuration is mostly related to trace sampling which is documented [here](https://www.jaegertracing.io/docs/latest/sampling/). Defaults to `{}`.
+* `jaeger_config` (object): Jaeger can be configured to sample traces at different rates. All configuration options provided by Jaeger can be set here. Jaeger's configuration is mostly related to trace sampling which is documented [here](https://www.jaegertracing.io/docs/latest/sampling/). Defaults to `{}`.
 
 Example configuration:
 ```yaml
@@ -3928,7 +3928,7 @@ start_pushers: false
 ---
 ### `pusher_instances`
 
-*(array)* It is possible to scale the processes that handle sending push notifications to [sygnal](https://github.com/matrix-org/sygnal) and email by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it’s [`worker_name`](#worker_name) to a `pusher_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them. Ensure the main process and all pusher workers are restarted after changing this option. Defaults to `[]`.
+*(array)* It is possible to scale the processes that handle sending push notifications to [sygnal](https://github.com/matrix-org/sygnal) and email by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to a `pusher_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them. Ensure the main process and all pusher workers are restarted after changing this option. Defaults to `[]`.
 
 Example configurations:
 ```yaml
@@ -3957,7 +3957,7 @@ send_federation: false
 ---
 ### `federation_sender_instances`
 
-*(array)* It is possible to scale the processes that handle sending outbound federation requests by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it’s [`worker_name`](#worker_name) to a `federation_sender_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them.
+*(array)* It is possible to scale the processes that handle sending outbound federation requests by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to a `federation_sender_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them.
 
 The way that the load balancing works is any outbound federation request will be assigned to a federation sender worker based on the hash of the destination server name. This means that all requests being sent to the same destination will be processed by the same worker instance. Multiple `federation_sender_instances` are useful if there is a federation with multiple servers.
 
@@ -4243,7 +4243,7 @@ worker_daemonize: true
 ---
 ### `worker_pid_file`
 
-*(string|null)* When running a worker as a daemon, we need a place to store the [PID](https://en.wikipedia.org/wiki/Process_identifier) of the worker. This option defines the location of that “pid file”.
+*(string|null)* When running a worker as a daemon, we need a place to store the [PID](https://en.wikipedia.org/wiki/Process_identifier) of the worker. This option defines the location of that "pid file".
 
 This option is required if `worker_daemonize` is `true` and ignored otherwise.
 
@@ -4315,7 +4315,7 @@ This setting has the following sub-options:
 
 * `only_from_local_users` (boolean): Whether to only automatically accept invites from users on this homeserver. Defaults to `false`.
 
-* `worker_to_run_on` (string|null): Which worker to run this module on. This must match the “worker_name”. If not set or `null`, invites will be accepted on the main process. Defaults to `null`.
+* `worker_to_run_on` (string|null): Which worker to run this module on. This must match the "worker_name". If not set or `null`, invites will be accepted on the main process. Defaults to `null`.
 
 Example configuration:
 ```yaml
