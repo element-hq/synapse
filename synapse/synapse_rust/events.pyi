@@ -114,4 +114,20 @@ def event_visible_to_server(
     partial_state_invisible: bool,
     memberships: List[Tuple[str, str]],
 ) -> bool:
-    """Whether the server is allowed to see the unredacted event"""
+    """Determine whether the server is allowed to see the unredacted event.
+
+    Args:
+        sender: The sender of the event.
+        target_server_name: The server we want to send the event to.
+        history_visibility: The history_visibility value at the event.
+        erased_senders: A mapping of users and whether they have requested erasure. If a
+            user is not in the map, it is treated as though they haven't requested erasure.
+        partial_state_invisible: Whether the event should be treated as invisible due to
+            the partial state status of the room.
+        memberships: A list of membership state information at the event for users
+            matching the `target_server_name`. Each list item must contain a tuple of
+            (state_key, membership).
+
+    Returns:
+        Whether the server is allowed to see the unredacted event.
+    """
