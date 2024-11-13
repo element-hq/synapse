@@ -2166,7 +2166,7 @@ enable_registration_captcha: true
 ---
 ### `recaptcha_siteverify_api`
 
-*(string)* The API endpoint to use for verifying `m.login.recaptcha` responses. Defaults to `https://www.recaptcha.net/recaptcha/api/siteverify`. Defaults to `"https://www.recaptcha.net/recaptcha/api/siteverify"`.
+*(string)* The API endpoint to use for verifying `m.login.recaptcha` responses. Defaults to `"https://www.recaptcha.net/recaptcha/api/siteverify"`.
 
 Example configuration:
 ```yaml

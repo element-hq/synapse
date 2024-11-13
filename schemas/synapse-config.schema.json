@@ -1670,7 +1670,7 @@
     },
     "recaptcha_siteverify_api": {
       "type": "string",
-      "description": "The API endpoint to use for verifying `m.login.recaptcha` responses. Defaults to `https://www.recaptcha.net/recaptcha/api/siteverify`.",
+      "description": "The API endpoint to use for verifying `m.login.recaptcha` responses.",
       "default": "https://www.recaptcha.net/recaptcha/api/siteverify",
       "examples": ["https://my.recaptcha.site"]
     },
