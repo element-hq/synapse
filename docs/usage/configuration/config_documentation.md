@@ -1834,7 +1834,7 @@ enable_media_repo: false
 ---
 ### `media_store_path`
 
-*(string|null)* Directory where uploaded images and attachments are stored. Defaults to `null`.
+*(string)* Directory where uploaded images and attachments are stored. Defaults to `"media_store"`.
 
 Example configuration:
 ```yaml
