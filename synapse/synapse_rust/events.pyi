@@ -10,7 +10,7 @@
 # See the GNU Affero General Public License for more details:
 # <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-from typing import Optional
+from typing import List, Mapping, Optional, Tuple
 
 from synapse.types import JsonDict
 
@@ -105,3 +105,13 @@ class EventInternalMetadata:
 
     def is_notifiable(self) -> bool:
         """Whether this event can trigger a push notification"""
+
+def event_visible_to_server(
+    sender: str,
+    target_server_name: str,
+    history_visibility: str,
+    erased_senders: Mapping[str, bool],
+    partial_state_invisible: bool,
+    memberships: List[Tuple[str, str]],
+) -> bool:
+    """Whether the server is allowed to see the unredacted event"""

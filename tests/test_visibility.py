@@ -82,7 +82,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
                 inject_member_event(
                     self.hs,
                     TEST_ROOM_ID,
-                    "@user%i:%s" % (i, "test_server" if i == 5 else "other_server"),
+                    "@user%i:%s" % (i, "test-server" if i == 5 else "other-server"),
                     "join",
                     extra_content={"a": "b"},
                 )
@@ -92,7 +92,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
-                "test_server",
+                "test-server",
                 "hs",
                 events_to_filter,
                 redact=True,
@@ -116,13 +116,13 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
             inject_member_event(
                 self.hs,
                 TEST_ROOM_ID,
-                "@resident:remote_hs",
+                "@resident:remote-hs",
                 "join",
             )
         )
         self.get_success(
             inject_visibility_event(
-                self.hs, TEST_ROOM_ID, "@resident:remote_hs", "joined"
+                self.hs, TEST_ROOM_ID, "@resident:remote-hs", "joined"
             )
         )
 
@@ -131,7 +131,7 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
             self.get_success(
                 filter_events_for_server(
                     self._storage_controllers,
-                    "remote_hs",
+                    "remote-hs",
                     "hs",
                     [outlier],
                     redact=True,
@@ -144,14 +144,14 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
 
         # it should also work when there are other events in the list
         evt = self.get_success(
-            inject_message_event(self.hs, TEST_ROOM_ID, "@unerased:local_hs")
+            inject_message_event(self.hs, TEST_ROOM_ID, "@unerased:local-hs")
         )
 
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
-                "remote_hs",
-                "local_hs",
+                "remote-hs",
+                "local-hs",
                 [outlier, evt],
                 redact=True,
                 filter_out_erased_senders=True,
@@ -168,8 +168,8 @@ class FilterEventsForServerTestCase(unittest.HomeserverTestCase):
         filtered = self.get_success(
             filter_events_for_server(
                 self._storage_controllers,
-                "other_server",
-                "local_hs",
+                "other-server",
+                "local-hs",
                 [outlier, evt],
                 redact=True,
                 filter_out_erased_senders=True,
