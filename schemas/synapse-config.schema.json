@@ -1211,10 +1211,6 @@
     "rc_admin_redaction": {
       "$ref": "#/$defs/rc",
       "description": "This option sets ratelimiting redactions by room admins. If this is not explicitly set then it uses the same ratelimiting as per `rc_message`. This is useful to allow room admins to deal with abuse quickly.",
-      "default": {
-        "per_second": 1.0,
-        "burst_count": 50
-      },
       "examples": [
         {
           "per_second": 1,
@@ -1290,7 +1286,7 @@
       "properties": {
         "per_room": {
           "$ref": "#/$defs/rc",
-          "description": "Appplies to the room of the invitation.",
+          "description": "Applies to the room of the invitation.",
           "default": {
             "per_second": 0.3,
             "burst_count": 10
@@ -1336,27 +1332,15 @@
       "default": {
         "per_second": 0.2,
         "burst_count": 10
-      },
-      "examples": [
-        {
-          "per_second": 0.2,
-          "burst_count": 10
-        }
-      ]
+      }
     },
     "rc_media_create": {
       "$ref": "#/$defs/rc",
       "description": "This option ratelimits creation of MXC URIs via the `/_matrix/media/v1/create` endpoint based on the account that's creating the media.",
       "default": {
-        "per_second": 10.0,
+        "per_second": 10,
         "burst_count": 50
-      },
-      "examples": [
-        {
-          "per_second": 10.0,
-          "burst_count": 50
-        }
-      ]
+      }
     },
     "rc_federation": {
       "type": "object",
@@ -1547,15 +1531,6 @@
         { "width": 320, "height": 240, "method": "scale" },
         { "width": 640, "height": 480, "method": "scale" },
         { "width": 800, "height": 600, "method": "scale" }
-      ],
-      "examples": [
-        [
-          { "width": 32, "height": 32, "method": "crop" },
-          { "width": 96, "height": 96, "method": "crop" },
-          { "width": 320, "height": 240, "method": "scale" },
-          { "width": 640, "height": 480, "method": "scale" },
-          { "width": 800, "height": 600, "method": "scale" }
-        ]
       ]
     },
     "media_retention": {

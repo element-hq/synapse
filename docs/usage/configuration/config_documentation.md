@@ -1581,13 +1581,6 @@ This setting has the following sub-options:
 
 * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
 
-Default configuration:
-```yaml
-rc_admin_redaction:
-  per_second: 1.0
-  burst_count: 50
-```
-
 Example configuration:
 ```yaml
 rc_admin_redaction:
@@ -1690,7 +1683,7 @@ _Changed in version 1.63:_ added the `per_issuer` limit.
 
 This setting has the following sub-options:
 
-* `per_room` (object): Appplies to the room of the invitation. Defaults to `{"per_second": 0.3, "burst_count": 10}`.
+* `per_room` (object): Applies to the room of the invitation. Defaults to `{"per_second": 0.3, "burst_count": 10}`.
 
   This setting has the following sub-options:
 
@@ -1744,13 +1737,6 @@ rc_third_party_invite:
   per_second: 0.2
   burst_count: 10
 ```
-
-Example configuration:
-```yaml
-rc_third_party_invite:
-  per_second: 0.2
-  burst_count: 10
-```
 ---
 ### `rc_media_create`
 
@@ -1765,14 +1751,7 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_media_create:
-  per_second: 10.0
-  burst_count: 50
-```
-
-Example configuration:
-```yaml
-rc_media_create:
-  per_second: 10.0
+  per_second: 10
   burst_count: 50
 ```
 ---
@@ -1975,26 +1954,6 @@ Options for each entry include:
 * `method` (string): Method to fit the thumbnail dimensions. Current options are `crop` and `scale`.
 
 Default configuration:
-```yaml
-thumbnail_sizes:
-- width: 32
-  height: 32
-  method: crop
-- width: 96
-  height: 96
-  method: crop
-- width: 320
-  height: 240
-  method: scale
-- width: 640
-  height: 480
-  method: scale
-- width: 800
-  height: 600
-  method: scale
-```
-
-Example configuration:
 ```yaml
 thumbnail_sizes:
 - width: 32
@@ -3797,7 +3756,7 @@ The default power levels for each preset are:
 "m.room.power_levels": 100
 "m.room.history_visibility": 100
 "m.room.canonical_alias": 50
-"m.room.": 50
+"m.room.avatar": 50
 "m.room.tombstone": 100
 "m.room.server_acl": 100
 "m.room.encryption": 100
