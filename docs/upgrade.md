@@ -117,6 +117,17 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.120.0
+
+## Removal of experimental MSC3886 feature
+
+[MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886)
+has been closed (and will not enter the Matrix spec). As such, we are
+removing the experimental support for it in this release.
+
+The `experimental_features.msc3886_endpoint` configuration option has
+been removed.
+
 # Upgrading to v1.119.0
 
 ## Minimum supported Python version
