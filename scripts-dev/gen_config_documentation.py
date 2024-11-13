@@ -309,7 +309,8 @@ def type_str(values: dict) -> str:
         return ""
     if not isinstance(t, list):
         t = [t]
-    return f"({"|".join(t)})"
+    joined = "|".join(t)
+    return f"({joined})"
 
 
 def items(values: dict) -> str:
@@ -410,7 +411,8 @@ def section(prop: str, values: dict) -> str:
     def default_example() -> str:
         if is_simple_default():
             return ""
-        return f"\nDefault configuration:\n{example_str(values["default"])}"
+        default_cfg = example_str(values["default"])
+        return f"\nDefault configuration:\n{default_cfg}"
 
     def examples() -> str:
         if not (examples := values.get("examples")):
