@@ -12,13 +12,14 @@
  * <https://www.gnu.org/licenses/agpl-3.0.html>.
  */
 
+use std::collections::HashMap;
+
 use pyo3::{
     exceptions::{PyAssertionError, PyValueError},
     pyfunction, PyResult,
 };
 use ruma_common::OwnedUserId;
 use ruma_events::room::{history_visibility::HistoryVisibility, member::MembershipState};
-use std::collections::HashMap;
 
 /// Return whether the target server is allowed to see the event.
 ///

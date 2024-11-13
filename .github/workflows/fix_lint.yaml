@@ -20,7 +20,7 @@ jobs:
         with:
           # We use nightly so that `fmt` correctly groups together imports, and
           # clippy correctly fixes up the benchmarks.
-          toolchain: nightly-2022-12-01
+          toolchain: nightly-2023-12-28
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
 
