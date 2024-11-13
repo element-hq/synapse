@@ -63,7 +63,7 @@ impl TryFrom<&str> for UserID {
             return Err(IdentifierError::IncorrectSigil);
         }
 
-        if let None = s.find(':') {
+        if s.find(':').is_none() {
             return Err(IdentifierError::MissingColon);
         }
 
