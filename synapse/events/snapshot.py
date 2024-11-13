@@ -269,7 +269,8 @@ class EventContext(UnpersistedEventContextBase):
         if self.rejected:
             raise RuntimeError("Attempt to access state_ids of rejected event")
 
-        assert self._state_delta_due_to_event is not None
+        if self._state_delta_due_to_event is None:
+            return None
 
         prev_state_ids = await self.get_prev_state_ids(state_filter)
 
@@ -300,7 +301,8 @@ class EventContext(UnpersistedEventContextBase):
             this tuple.
         """
 
-        assert self.state_group_before_event is not None
+        if self.state_group_before_event is None:
+            return {}
         return await self._storage.state.get_state_ids_for_group(
             self.state_group_before_event, state_filter
         )
