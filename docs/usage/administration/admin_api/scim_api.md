@@ -14,7 +14,7 @@ It might be removed someday in favor of an implementation in the [Matrix Authent
 
 ## Installation
 
-SCIM support for Synapse requires python 3.9+. The `matrix-synapse` package should be installed with the `scim` extra. e.g. with `pip install matrix-synapse[scim]`.
+SCIM support for Synapse requires python 3.9+. The `matrix-synapse` package should be installed with the `scim` extra. e.g. with `pip install matrix-synapse[scim]`. For compatibility reasons, the SCIM support cannot be included in the `all` extra, so you need to explicitly use the `scim` extra to enable the API.
 
 Then it must be explicitly enabled by configuration:
 

@@ -300,8 +300,6 @@ all = [
     "pysaml2",
     # oidc and jwt
     "authlib",
-    # scim
-    "scim2-models",
     # url-preview
     "lxml",
     # sentry
