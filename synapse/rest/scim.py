@@ -115,6 +115,7 @@ class SCIMServlet(RestServlet):
     def make_error_response(
         self, status: Union[int, HTTPStatus], message: str
     ) -> Tuple[Union[int, HTTPStatus], JsonDict]:
+        """Create a SCIM Error object intended to be returned as HTTP response."""
         return (
             status,
             Error(
@@ -124,6 +125,7 @@ class SCIMServlet(RestServlet):
         )
 
     def parse_search_request(self, request: SynapseRequest) -> "SearchRequest":
+        """Build a SCIM SearchRequest object from the HTTP request arguments."""
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
         return SearchRequest(
             attributes=parse_strings_from_args(args, "attributes"),
@@ -135,6 +137,10 @@ class SCIMServlet(RestServlet):
         )
 
     async def get_scim_user(self, user_id: str) -> "User":
+        """Create a SCIM User object from a synapse user_id.
+
+        The objects are intended be used as HTTP responses."""
+
         user_id_obj = UserID.from_string(user_id)
         user = await self.store.get_user_by_id(user_id)
         profile = await self.store.get_profileinfo(user_id_obj)
@@ -190,11 +196,22 @@ class SCIMServlet(RestServlet):
 
 
 class UserServlet(SCIMServlet):
+    """Servlet implementing the SCIM /Users/* endpoints.
+
+    Details are available on RFC7644:
+    https://datatracker.ietf.org/doc/html/rfc7644#section-3.2
+    """
+
     PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Users/(?P<user_id>[^/]*)")]
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[Union[int, HTTPStatus], JsonDict]:
+        """Implement the RFC7644 'Retrieving a Known Resource' endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-3.4.1"""
+
         await assert_requester_is_admin(self.auth, request)
         try:
             user = await self.get_scim_user(user_id)
@@ -211,6 +228,11 @@ class UserServlet(SCIMServlet):
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[Union[int, HTTPStatus], Union[str, JsonDict]]:
+        """Implement the RFC7644 resource deletion endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-3.6"""
+
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         deactivate_account_handler = self.hs.get_deactivate_account_handler()
@@ -226,6 +248,11 @@ class UserServlet(SCIMServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 resource replacement endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-3.5.1"""
+
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
@@ -293,9 +320,20 @@ class UserServlet(SCIMServlet):
 
 
 class UserListServlet(SCIMServlet):
+    """Servlet implementing the SCIM /Users endpoint.
+
+    Details are available on RFC7644:
+    https://datatracker.ietf.org/doc/html/rfc7644#section-3.2
+    """
+
     PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Users/?$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 resource query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-3.4.2"""
+
         try:
             await assert_requester_is_admin(self.auth, request)
             req = self.parse_search_request(request)
@@ -320,6 +358,11 @@ class UserListServlet(SCIMServlet):
             return self.make_error_response(exc.code, exc.msg)
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 resource creation endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-3.3"""
+
         try:
             requester = await self.auth.get_user_by_req(request)
             await assert_user_is_admin(self.auth, requester)
@@ -383,6 +426,11 @@ class ServiceProviderConfigServlet(SCIMServlet):
     PATTERNS = [re.compile(f"^{SCIM_PREFIX}/ServiceProviderConfig$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 mandatory ServiceProviderConfig query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
+
         spc = ServiceProviderConfig(
             meta=Meta(
                 resource_type="ServiceProviderConfig",
@@ -448,7 +496,10 @@ class SchemaListServlet(BaseSchemaServlet):
     PATTERNS = [re.compile(f"^{SCIM_PREFIX}/Schemas$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
-        """Return the list of schemas provided by the synapse SCIM implementation."""
+        """Implement the RFC7644 mandatory Schema list query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
 
         req = self.parse_search_request(request)
         start_index = req.start_index or 0
@@ -471,7 +522,10 @@ class SchemaServlet(BaseSchemaServlet):
     async def on_GET(
         self, request: SynapseRequest, schema_id: str
     ) -> Tuple[int, JsonDict]:
-        """Given an id, return a schema provided by the synapse SCIM implementation."""
+        """Implement the RFC7644 mandatory Schema query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
 
         try:
             return HTTPStatus.OK, self.schemas[schema_id].model_dump(
@@ -507,6 +561,11 @@ class ResourceTypeListServlet(BaseResourceTypeServlet):
     PATTERNS = [re.compile(f"^{SCIM_PREFIX}/ResourceTypes$")]
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 mandatory ResourceType list query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
+
         req = self.parse_search_request(request)
         start_index = req.start_index or 0
         stop_index = start_index + req.count if req.count else None
@@ -530,6 +589,11 @@ class ResourceTypeServlet(BaseResourceTypeServlet):
     async def on_GET(
         self, request: SynapseRequest, resource_type: str
     ) -> Tuple[int, JsonDict]:
+        """Implement the RFC7644 mandatory ResourceType query endpoint.
+
+        As defined in:
+        https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
+
         resource_types = {
             "User": self.resource_type.model_dump(
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE
