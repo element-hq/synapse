@@ -4,6 +4,8 @@ from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
 import synapse.rest.scim
+from synapse.config import ConfigError
+from synapse.config.homeserver import HomeServerConfig
 from synapse.rest.client import login
 from synapse.rest.scim import HAS_SCIM2
 from synapse.server import HomeServer
@@ -11,6 +13,58 @@ from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase, skip_unless
+from tests.utils import default_config
+
+
+@skip_unless(HAS_SCIM2, "requires scim2-models")
+class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets_for_client_rest_resource,
+        synapse.rest.scim.register_servlets,
+        login.register_servlets,
+    ]
+    url = "/_matrix/client/unstable/coop.yaal/scim"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+        self.admin_user_id = self.register_user(
+            "admin", "pass", admin=True, displayname="admin display name"
+        )
+        self.admin_user_tok = self.login("admin", "pass")
+        self.user_user_id = self.register_user(
+            "user", "pass", admin=False, displayname="user display name"
+        )
+
+    def test_disabled_by_default(self) -> None:
+        """
+        Without explicitly enabled by configuration, the SCIM API endpoint should be
+        disabled.
+        """
+        channel = self.make_request(
+            "GET",
+            f"{self.url}/Users/{self.user_user_id}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(404, channel.code, msg=channel.json_body)
+
+    def test_exclusive_with_msc3861(self) -> None:
+        """
+        Without explicitly enabled by configuration, the SCIM API endpoint should be
+        disabled.
+        """
+
+        config_dict = {
+            "experimental_features": {
+                "msc4098": True,
+                "msc3861": {"enabled": True},
+            },
+            **default_config("test"),
+        }
+
+        with self.assertRaises(ConfigError):
+            config = HomeServerConfig()
+            config.parse_config_dict(config_dict, "", "")
 
 
 @skip_unless(HAS_SCIM2, "requires scim2-models")
@@ -21,6 +75,11 @@ class UserProvisioningTestCase(HomeserverTestCase):
         login.register_servlets,
     ]
     url = "/_matrix/client/unstable/coop.yaal/scim"
+
+    def default_config(self) -> JsonDict:
+        conf = super().default_config()
+        conf.setdefault("experimental_features", {}).setdefault("msc4098", True)
+        return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
@@ -487,6 +546,11 @@ class SCIMMetadataTestCase(HomeserverTestCase):
         login.register_servlets,
     ]
     url = "/_matrix/client/unstable/coop.yaal/scim"
+
+    def default_config(self) -> JsonDict:
+        conf = super().default_config()
+        conf.setdefault("experimental_features", {}).setdefault("msc4098", True)
+        return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main

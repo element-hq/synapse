@@ -420,6 +420,15 @@ class ExperimentalConfig(Config):
             "msc4069_profile_inhibit_propagation", False
         )
 
+        # MSC4098: SCIM provisioning API
+        self.msc4098_enabled = experimental.get("msc4098", False)
+        if self.msc4098_enabled and self.msc3861.enabled:
+            raise ConfigError(
+                "MSC3861 and MSC4098 are mutually exclusive. Please disable one or the"
+                "other.",
+                ("experimental", "msc4098"),
+            )
+
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)
 

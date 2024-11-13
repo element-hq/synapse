@@ -87,6 +87,9 @@ class SCIMResource(JsonResource):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+    if not hs.config.experimental.msc4098_enabled:
+        return
+
     SchemaListServlet(hs).register(http_server)
     SchemaServlet(hs).register(http_server)
     ResourceTypeListServlet(hs).register(http_server)
