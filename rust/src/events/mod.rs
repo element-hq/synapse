@@ -25,7 +25,7 @@ use pyo3::{
     wrap_pyfunction, Bound, PyResult, Python,
 };
 
-mod filter;
+pub mod filter;
 mod internal_metadata;
 
 /// Called when registering modules with python.
