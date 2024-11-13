@@ -396,6 +396,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
             access_token=self.admin_user_tok,
         )
         self.assertEqual(204, channel.code)
+        self.assertTrue(self.store.is_user_erased("@user:test"))
 
     def test_delete_invalid_user(self) -> None:
         """
