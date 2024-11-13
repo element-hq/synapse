@@ -266,7 +266,7 @@ class UserServlet(SCIMServlet):
         await assert_user_is_admin(self.auth, requester)
 
         body = parse_json_object_from_request(request)
-        user: User = User.model_validate(
+        user = User.model_validate(
             body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
         )
 
@@ -383,7 +383,7 @@ class UserListServlet(SCIMServlet):
             await assert_user_is_admin(self.auth, requester)
 
             body = parse_json_object_from_request(request)
-            user: User = User.model_validate(
+            user = User.model_validate(
                 body, scim_ctx=Context.RESOURCE_CREATION_REQUEST
             )
 
