@@ -713,7 +713,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2022-12-01
+            toolchain: nightly-2022-12-01
       - uses: Swatinem/rust-cache@v2
 
       - run: cargo bench --no-run
