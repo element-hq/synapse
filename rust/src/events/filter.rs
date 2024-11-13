@@ -15,8 +15,13 @@
 use std::collections::HashMap;
 
 use pyo3::{exceptions::PyValueError, pyfunction, PyResult};
-use ruma_common::OwnedUserId;
-use ruma_events::room::{history_visibility::HistoryVisibility, member::MembershipState};
+
+use crate::{
+    identifier::UserID,
+    matrix_const::{
+        HISTORY_VISIBILITY_INVITED, HISTORY_VISIBILITY_JOINED, MEMBERSHIP_INVITE, MEMBERSHIP_JOIN,
+    },
+};
 
 #[pyfunction(name = "event_visible_to_server")]
 pub fn event_visible_to_server_py(
@@ -66,31 +71,31 @@ pub fn event_visible_to_server(
         return Ok(false);
     }
 
-    let history_visibility = HistoryVisibility::from(history_visibility);
-    if history_visibility != HistoryVisibility::Invited
-        && history_visibility != HistoryVisibility::Joined
+    if history_visibility != HISTORY_VISIBILITY_INVITED
+        && history_visibility != HISTORY_VISIBILITY_JOINED
     {
         return Ok(true);
     }
 
     let mut visible = false;
     for (state_key, membership) in memberships {
-        let state_key = OwnedUserId::try_from(state_key.clone())
+        let state_key = UserID::try_from(state_key.as_ref())
             .map_err(|e| anyhow::anyhow!(format!("invalid user_id ({state_key}): {e}")))?;
-        if state_key.server_name().as_str() != target_server_name {
+        if state_key.server_name() != target_server_name {
             return Err(anyhow::anyhow!(
-                "state_key does not match target_server_name",
+                "state_key.server_name ({}) does not match target_server_name ({target_server_name})",
+                state_key.server_name()
             ));
         }
 
-        match MembershipState::from(membership) {
-            MembershipState::Invite => {
-                if history_visibility == HistoryVisibility::Invited {
+        match membership.as_str() {
+            MEMBERSHIP_INVITE => {
+                if history_visibility == HISTORY_VISIBILITY_INVITED {
                     visible = true;
                     break;
                 }
             }
-            MembershipState::Join => {
+            MEMBERSHIP_JOIN => {
                 visible = true;
                 break;
             }
