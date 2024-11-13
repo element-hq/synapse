@@ -211,10 +211,9 @@ class UserServlet(SCIMServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
         deactivate_account_handler = self.hs.get_deactivate_account_handler()
-        is_admin = await self.auth.is_server_admin(requester)
         try:
             await deactivate_account_handler.deactivate_account(
-                user_id, erase_data=True, requester=requester, by_admin=is_admin
+                user_id, erase_data=True, requester=requester, by_admin=True
             )
         except SynapseError as exc:
             return self.make_error_response(exc.code, exc.msg)
