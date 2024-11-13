@@ -128,9 +128,9 @@ class SCIMServlet(RestServlet):
         return SearchRequest(
             attributes=parse_strings_from_args(args, "attributes"),
             excluded_attributes=parse_strings_from_args(args, "excludedAttributes"),
-            start_index=parse_integer(request, "startIndex", default=1, negative=True),
+            start_index=parse_integer(request, "startIndex", default=1, negative=False),
             count=parse_integer(
-                request, "count", default=self.default_nb_items_per_page, negative=True
+                request, "count", default=self.default_nb_items_per_page, negative=False
             ),
         )
 
