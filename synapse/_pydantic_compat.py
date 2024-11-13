@@ -30,9 +30,9 @@ except ImportError:
 
     pydantic_version = importlib.metadata.version("pydantic")
 
-HAS_PYDANTIC_V2: bool = Version(pydantic_version).major == 2
+PYDANTIC_VERSION: Version = Version(pydantic_version)
 
-if TYPE_CHECKING or HAS_PYDANTIC_V2:
+if TYPE_CHECKING or PYDANTIC_VERSION.major == 2:
     from pydantic.v1 import (
         BaseModel,
         Extra,
@@ -74,7 +74,7 @@ else:
     from pydantic.typing import get_args
 
 __all__ = (
-    "HAS_PYDANTIC_V2",
+    "PYDANTIC_VERSION",
     "BaseModel",
     "constr",
     "conbytes",
