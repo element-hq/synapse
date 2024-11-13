@@ -263,7 +263,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           # We use nightly so that it correctly groups together imports
-          toolchain: nightly-2023-12-25
+          toolchain: nightly-2023-11-25
           components: rustfmt
       - uses: Swatinem/rust-cache@v2
 
