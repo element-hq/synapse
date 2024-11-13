@@ -661,7 +661,7 @@
     },
     "limit_remote_rooms": {
       "type": "object",
-      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained.",
+      "description": "When this option is enabled, the room \"complexity\" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.",
       "properties": {
         "enabled": {
           "type": "boolean",
