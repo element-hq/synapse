@@ -402,12 +402,6 @@ class UserListServlet(SCIMServlet):
                 default_display_name=user.display_name,
             )
 
-            await register._create_registration_details(
-                user_id,
-                {},
-                should_issue_refresh_token=True,
-            )
-
             now_ts = self.hs.get_clock().time_msec()
             if user.emails:
                 for email in user.emails:
