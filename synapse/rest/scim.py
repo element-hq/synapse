@@ -266,28 +266,34 @@ class UserServlet(SCIMServlet):
         await assert_user_is_admin(self.auth, requester)
 
         body = parse_json_object_from_request(request)
+        user: User = User.model_validate(
+            body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
+        )
+
         try:
             user_id_obj = UserID.from_string(user_id)
 
             threepids = await self.store.user_get_threepids(user_id)
 
-            display_name = body.get("displayName", "")
             await self.profile_handler.set_displayname(
-                user_id_obj, requester, display_name, True
+                user_id_obj, requester, user.display_name or "", True
             )
 
-            avatar_url = body["photos"][0]["value"] if body.get("photos") else ""
-            await self.profile_handler.set_avatar_url(
-                user_id_obj, requester, avatar_url, True
-            )
+            if user.photos and user.photos[0].value:
+                await self.profile_handler.set_avatar_url(
+                    user_id_obj, requester, str(user.photos[0].value), True
+                )
 
             if threepids is not None:
-                new_threepids = {
-                    ("email", email["value"]) for email in body["emails"]
-                } | {
-                    ("msisdn", phone_number["value"])
-                    for phone_number in body["phoneNumbers"]
+                new_email_threepids = {
+                    ("email", email.value) for email in user.emails or [] if email.value
                 }
+                new_phone_number_threepids = {
+                    ("msisdn", phone_number.value)
+                    for phone_number in user.phone_numbers or []
+                    if phone_number.value
+                }
+                new_threepids = new_email_threepids | new_phone_number_threepids
                 # get changed threepids (added and removed)
                 cur_threepids = {
                     (threepid.medium, threepid.address)
@@ -377,50 +383,52 @@ class UserListServlet(SCIMServlet):
             await assert_user_is_admin(self.auth, requester)
 
             body = parse_json_object_from_request(request)
+            user: User = User.model_validate(
+                body, scim_ctx=Context.RESOURCE_CREATION_REQUEST
+            )
 
             from synapse.rest.client.register import RegisterRestServlet
 
             register = RegisterRestServlet(self.hs)
 
-            registration_arguments = {
-                "by_admin": True,
-                "approved": True,
-                "localpart": body["userName"],
-            }
-
-            if password := body.get("password"):
-                registration_arguments["password_hash"] = await self.auth_handler.hash(
-                    password
-                )
-
-            if display_name := body.get("displayName"):
-                registration_arguments["default_display_name"] = display_name
-
+            password_hash = (
+                await self.auth_handler.hash(user.password) if user.password else None
+            )
             user_id = await register.registration_handler.register_user(
-                **registration_arguments
+                by_admin=True,
+                approved=True,
+                localpart=user.user_name,
+                password_hash=password_hash,
+                default_display_name=user.display_name,
             )
 
             await register._create_registration_details(
                 user_id,
-                body,
+                {},
                 should_issue_refresh_token=True,
             )
 
             now_ts = self.hs.get_clock().time_msec()
-            for email in body.get("emails", []):
-                await self.store.user_add_threepid(
-                    user_id, "email", email["value"], now_ts, now_ts
-                )
+            if user.emails:
+                for email in user.emails:
+                    if email.value:
+                        await self.store.user_add_threepid(
+                            user_id, "email", email.value, now_ts, now_ts
+                        )
 
-            for phone_number in body.get("phoneNumbers", []):
-                await self.store.user_add_threepid(
-                    user_id, "msisdn", phone_number["value"], now_ts, now_ts
-                )
+            if user.phone_numbers:
+                for phone_number in user.phone_numbers:
+                    if phone_number.value:
+                        await self.store.user_add_threepid(
+                            user_id, "msisdn", phone_number.value, now_ts, now_ts
+                        )
 
-            avatar_url = body["photos"][0]["value"] if body.get("photos") else None
-            if avatar_url:
+            if user.photos and user.photos[0].value:
                 await self.profile_handler.set_avatar_url(
-                    UserID.from_string(user_id), requester, avatar_url, True
+                    UserID.from_string(user_id),
+                    requester,
+                    str(user.photos[0].value),
+                    True,
                 )
 
             user = await self.get_scim_user(user_id)

@@ -456,6 +456,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "phoneNumbers": [{"value": "+1-11112222"}],
             "emails": [{"value": "newmail@mydomain.tld"}],
+            "userName": "user",
             "displayName": "new display name",
             "photos": [
                 {
@@ -516,6 +517,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "phoneNumbers": [{"value": "+1-11112222"}],
             "emails": [{"value": "newmail@mydomain.tld"}],
+            "userName": "user",
             "displayName": "new display name",
             "photos": [
                 {
