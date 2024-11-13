@@ -314,6 +314,9 @@ def sep(values: dict) -> str:
 
 def type_str(values: dict) -> str:
     """Type of the current value."""
+    if t := values.get("io.element.type_name"):
+        # Allow custom overrides for the type name, for documentation clarity
+        return f"({t})"
     if not (t := values.get("type")):
         return ""
     if not isinstance(t, list):

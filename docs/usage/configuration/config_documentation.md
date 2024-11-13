@@ -619,7 +619,7 @@ This setting has the following sub-options:
 
 * `notif_for_new_users` (boolean): Set to false to disable automatic subscription to email notifications for new users. Defaults to `true`.
 
-* `notif_delay_before_mail` (string): The time to wait before emailing about a notification. This gives the user a chance to view the message via push or an open client.
+* `notif_delay_before_mail` (duration): The time to wait before emailing about a notification. This gives the user a chance to view the message via push or an open client.
 
   _New in Synapse 1.99.0._
 
@@ -627,7 +627,7 @@ This setting has the following sub-options:
 
 * `client_base_url` (string): Custom URL for client links within the email notifications.  (This setting used to be called `riot_base_url`; the old name is still supported for backwards-compatibility but is now deprecated.) Defaults to `"https://matrix.to"`.
 
-* `validation_token_lifetime` (string): Configures the time that a validation email will expire after sending. Defaults to `"1h"`.
+* `validation_token_lifetime` (duration): Configures the time that a validation email will expire after sending. Defaults to `"1h"`.
 
 * `invite_client_location` (string|null): The web client location to direct users to during an invite. This is passed to the identity server as the `org.matrix.web_client_location` key. If null or unset no guidance is given to the identity server. Defaults to `null`.
 
@@ -1007,7 +1007,7 @@ This setting has the following sub-options:
 
   * `longest_max_lifetime`: Apply job to rooms that have a `max_lifetime` lower than or equal to `shortest_max_lifetime`. A value of `null` never excludes any room.
 
-  * `interval` (string): How often to run the job.
+  * `interval` (duration): How often to run the job.
 
 Example configuration:
 ```yaml
@@ -1196,21 +1196,21 @@ The following options are related to configuring timeout and retry logic for one
 
 This setting has the following sub-options:
 
-* `client_timeout` (string): Timeout for the federation requests. Defaults to `"60s"`.
+* `client_timeout` (duration): Timeout for the federation requests. Defaults to `"60s"`.
 
-* `max_short_retry_delay` (string): Maximum delay to be used for the short retry algo. Defaults to `"2s"`.
+* `max_short_retry_delay` (duration): Maximum delay to be used for the short retry algo. Defaults to `"2s"`.
 
-* `max_long_retry_delay` (string): Maximum delay to be used for the long retry algo. Defaults to `"60s"`.
+* `max_long_retry_delay` (duration): Maximum delay to be used for the long retry algo. Defaults to `"60s"`.
 
 * `max_short_retries` (integer): Maximum number of retries for the short retry algo. Defaults to `3`.
 
 * `max_long_retries` (integer): Maximum number of retries for the long retry algo. Defaults to `10`.
 
-* `destination_min_retry_interval` (string): The initial backoff, after the first request fails. Defaults to `"10m"`.
+* `destination_min_retry_interval` (duration): The initial backoff, after the first request fails. Defaults to `"10m"`.
 
 * `destination_retry_multiplier` (integer): How much we multiply the backoff by after each subsequent fail. Defaults to `2`.
 
-* `destination_max_retry_interval` (string): A cap on the backoff. Defaults to `"1w"`.
+* `destination_max_retry_interval` (duration): A cap on the backoff. Defaults to `"1w"`.
 
 Example configuration:
 ```yaml
@@ -1232,7 +1232,7 @@ Options related to caching.
 ---
 ### `event_cache_size`
 
-*(string|integer)* The number of events to cache in memory. Defaults to 10K. Like other caches, this is affected by `caches.global_factor` (see below).
+*(size)* The number of events to cache in memory. Defaults to 10K. Like other caches, this is affected by `caches.global_factor` (see below).
 
 For example, the default is 10K and the global_factor default is 0.5.
 
@@ -1275,9 +1275,9 @@ This setting has the following sub-options:
 
 * `expire_caches` (boolean): Controls whether cache entries are evicted after a specified time period. Set to false to disable this feature. Note that never expiring caches may result in excessive memory usage. Defaults to `true`.
 
-* `cache_entry_ttl` (string): If `expire_caches` is enabled, this flag controls how long an entry can be in a cache without having been accessed before being evicted. Defaults to `"30m"`.
+* `cache_entry_ttl` (duration): If `expire_caches` is enabled, this flag controls how long an entry can be in a cache without having been accessed before being evicted. Defaults to `"30m"`.
 
-* `sync_response_cache_duration` (string): Controls how long the results of a /sync request are cached for after a successful response is returned. A higher duration can help clients with intermittent connections, at the cost of higher memory usage. A value of zero means that sync responses are not cached.
+* `sync_response_cache_duration` (duration): Controls how long the results of a /sync request are cached for after a successful response is returned. A higher duration can help clients with intermittent connections, at the cost of higher memory usage. A value of zero means that sync responses are not cached.
 
   *Changed in Synapse 1.62.0*: The default was changed from 0 to 2m.
 
@@ -1858,7 +1858,7 @@ max_pending_media_uploads: 5
 ---
 ### `unused_expiration_time`
 
-*(string)* How long to wait in milliseconds before expiring created media IDs. Defaults to `"24h"`.
+*(duration)* How long to wait in milliseconds before expiring created media IDs. Defaults to `"24h"`.
 
 Example configuration:
 ```yaml
@@ -1898,7 +1898,7 @@ media_storage_providers:
 ---
 ### `max_upload_size`
 
-*(string|integer)* The largest allowed upload size in bytes.
+*(byte size)* The largest allowed upload size in bytes.
 
 If you are using a reverse proxy you may also need to set this value in your reverse proxy's config. Notably Nginx has a small max body size by default. See [here](../../reverse_proxy.md) for more on using a reverse proxy with Synapse.
 
@@ -1911,7 +1911,7 @@ max_upload_size: 60M
 ---
 ### `max_image_pixels`
 
-*(string|integer)* Maximum number of pixels that will be thumbnailed. Defaults to `"32M"`.
+*(byte size)* Maximum number of pixels that will be thumbnailed. Defaults to `"32M"`.
 
 Example configuration:
 ```yaml
@@ -1920,7 +1920,7 @@ max_image_pixels: 35M
 ---
 ### `remote_media_download_burst_count`
 
-*(string|integer)* Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized – if the bucket is full, i.e. a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests. Defaults to `"500MiB"`.
+*(byte size)* Remote media downloads are ratelimited using a [leaky bucket algorithm](https://en.wikipedia.org/wiki/Leaky_bucket), where a given "bucket" is keyed to the IP address of the requester when requesting remote media downloads. This configuration option sets the size of the bucket against which the size in bytes of downloads are penalized – if the bucket is full, i.e. a given number of bytes have already been downloaded, further downloads will be denied until the bucket drains. See also `remote_media_download_per_second` which determines the rate at which the "bucket" is emptied and thus has available space to authorize new requests. Defaults to `"500MiB"`.
 
 Example configuration:
 ```yaml
@@ -1929,7 +1929,7 @@ remote_media_download_burst_count: 200M
 ---
 ### `remote_media_download_per_second`
 
-*(string|integer)* Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads – this configuration option determines the rate at which the "bucket" (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has "drained" from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`. Defaults to `"87KiB"`.
+*(byte size)* Works in conjunction with `remote_media_download_burst_count` to ratelimit remote media downloads – this configuration option determines the rate at which the "bucket" (see above) leaks in bytes per second. As requests are made to download remote media, the size of those requests in bytes is added to the bucket, and once the bucket has reached it's capacity, no more requests will be allowed until a number of bytes has "drained" from the bucket. This setting determines the rate at which bytes drain from the bucket, with the practical effect that the larger the number, the faster the bucket leaks, allowing for more bytes downloaded over a shorter period of time. Defaults to 87KiB per second. See also `remote_media_download_burst_count`. Defaults to `"87KiB"`.
 
 Example configuration:
 ```yaml
@@ -2121,7 +2121,7 @@ url_preview_url_blacklist:
 ---
 ### `max_spider_size`
 
-*(string|integer)* The largest allowed URL preview spidering size in bytes. Defaults to `"10M"`.
+*(byte size)* The largest allowed URL preview spidering size in bytes. Defaults to `"10M"`.
 
 Example configuration:
 ```yaml
@@ -2273,7 +2273,7 @@ turn_password: TURNSERVER_PASSWORD
 ---
 ### `turn_user_lifetime`
 
-*(string)* How long generated TURN credentials last. Defaults to `"1h"`.
+*(duration)* How long generated TURN credentials last. Defaults to `"1h"`.
 
 Example configuration:
 ```yaml
@@ -2626,7 +2626,7 @@ Config options related to user session management.
 ---
 ### `session_lifetime`
 
-*(string)* Time that a user's session remains valid for, after they log in.
+*(duration)* Time that a user's session remains valid for, after they log in.
 
 Note that this is not currently compatible with guest logins.
 
@@ -2641,7 +2641,7 @@ session_lifetime: 24h
 ---
 ### `refreshable_access_token_lifetime`
 
-*(string)* Time that an access token remains valid for, if the session is using refresh tokens.
+*(duration)* Time that an access token remains valid for, if the session is using refresh tokens.
 
 For more information about refresh tokens, please see the [manual](user_authentication/refresh_tokens.md).
 
@@ -2658,7 +2658,7 @@ refreshable_access_token_lifetime: 10m
 ---
 ### `refresh_token_lifetime`
 
-*(string)* Time that a refresh token remains valid for (provided that it is not exchanged for another one first). This option can be used to automatically log-out inactive sessions. Please see the manual for more information.
+*(duration)* Time that a refresh token remains valid for (provided that it is not exchanged for another one first). This option can be used to automatically log-out inactive sessions. Please see the manual for more information.
 
 Note also that this is calculated at login time and refresh time: changes are not applied to existing sessions until they are refreshed.
 
@@ -2671,7 +2671,7 @@ refresh_token_lifetime: 24h
 ---
 ### `nonrefreshable_access_token_lifetime`
 
-*(string)* Time that an access token remains valid for, if the session is NOT using refresh tokens.
+*(duration)* Time that an access token remains valid for, if the session is NOT using refresh tokens.
 
 Please note that not all clients support refresh tokens, so setting this to a short value may be inconvenient for some users who will then be logged out frequently.
 
@@ -2714,7 +2714,7 @@ This setting has the following sub-options:
 
 * `require_ui_auth` (boolean): Require user-interactive authentication. Defaults to `true`.
 
-* `token_timeout` (string): Duration of time the generated token is valid. Defaults to `"5m"`.
+* `token_timeout` (duration): Duration of time the generated token is valid. Defaults to `"5m"`.
 
 Example configuration:
 ```yaml
@@ -2949,7 +2949,7 @@ old_signing_keys:
 ---
 ### `key_refresh_interval`
 
-*(string)* How long key response published by this server is valid for. Used to set the `valid_until_ts` in `/key/v2` APIs. Determines how quickly servers will query to check which keys are still valid. Defaults to `"1d"`.
+*(duration)* How long key response published by this server is valid for. Used to set the `valid_until_ts` in `/key/v2` APIs. Determines how quickly servers will query to check which keys are still valid. Defaults to `"1d"`.
 
 Example configuration:
 ```yaml
@@ -3044,7 +3044,7 @@ This setting has the following sub-options:
 
 * `config_path` (string|null): Specify a separate pysaml2 configuration file. Defaults to `null`.
 
-* `saml_session_lifetime` (string): The lifetime of a SAML session. This defines how long a user has to complete the authentication process, if `allow_unsolicited` is unset. Defaults to `"15m"`.
+* `saml_session_lifetime` (duration): The lifetime of a SAML session. This defines how long a user has to complete the authentication process, if `allow_unsolicited` is unset. Defaults to `"15m"`.
 
 * `user_mapping_provider` (object): Using this option, an external module can be provided as a custom solution to mapping attributes returned from a saml provider onto a matrix user.
 
@@ -3475,7 +3475,7 @@ This setting has the following sub-options:
 
 * `group_unread_count_by_room` (boolean): When a push notification is received, an unread count is also sent. This number can either be calculated as the number of unread messages for the user, or the number of *rooms* the user has unread messages in. If true, push clients will see the number of rooms with unread messages in them. Set to false to instead send the number of unread messages. Defaults to `true`.
 
-* `jitter_delay` (string): Delays push notifications by a random amount up to the given duration. Useful for mitigating timing attacks. Optional.
+* `jitter_delay` (duration): Delays push notifications by a random amount up to the given duration. Useful for mitigating timing attacks. Optional.
 
   _Added in Synapse 1.84.0._
 

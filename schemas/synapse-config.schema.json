@@ -3439,9 +3439,9 @@
     }
   },
   "$defs": {
-    "bytes": { "type": ["string", "integer"] },
-    "duration": { "type": "string" },
-    "size": { "type": ["string", "integer"] },
+    "bytes": { "type": ["string", "integer"], "io.element.type_name": "byte size" },
+    "duration": { "type": "string", "io.element.type_name": "duration" },
+    "size": { "type": ["string", "integer"], "io.element.type_name": "size" },
     "3pidmedium": { "type": "string", "enum": ["email", "msisdn"] },
     "rc": {
       "type": "object",
