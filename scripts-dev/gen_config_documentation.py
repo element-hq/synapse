@@ -439,6 +439,14 @@ def section(prop: str, values: dict) -> str:
         else:
             return f"\nExample configuration:\n{examples_str}"
 
+    def post_description() -> str:
+        # Sometimes it's helpful to have a description after the list of fields,
+        # e.g. with a subsection that consists only of text.
+        # This helps with that.
+        if not (description := values.get("io.element.post_description")):
+            return ""
+        return f"\n{description}\n\n"
+
     return (
         "---\n"
         + header()
@@ -448,6 +456,7 @@ def section(prop: str, values: dict) -> str:
         + properties()
         + default_example()
         + examples()
+        + post_description()
     )
 
 

@@ -979,6 +979,7 @@
     "caches": {
       "type": "object",
       "description": "A cache \"factor\" is a multiplier that can be applied to each of Synapse's caches in order to increase or decrease the maximum number of entries that can be stored.",
+      "io.element.post_description": "### Reloading cache factors\n\nThe cache factors (i.e. `caches.global_factor` and `caches.per_cache_factors`)  may be reloaded at any time by sending a\n[`SIGHUP`](https://en.wikipedia.org/wiki/SIGHUP) signal to Synapse using e.g.\n\n```commandline\nkill -HUP [PID_OF_SYNAPSE_PROCESS]\n```\n\nIf you are running multiple workers, you must individually update the worker\nconfig file and send this signal to each worker process.\n\nIf you're using the [example systemd service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)\nfile in Synapse's `contrib` directory, you can send a `SIGHUP` signal by using\n`systemctl reload matrix-synapse`.",
       "properties": {
         "global_factor": {
           "type": "number",
