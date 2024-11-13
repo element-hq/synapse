@@ -2419,7 +2419,7 @@ default_identity_server: https://matrix.org
 ---
 ### `account_threepid_delegates`
 
-*(string|null)* Delegate verification of phone numbers to an identity server.
+*(object)* Delegate verification of phone numbers to an identity server.
 
 When a user wishes to add a phone number to their account, we need to verify that they actually own that phone number, which requires sending them a text message (SMS). Currently Synapse does not support sending those texts itself and instead delegates the task to an identity server. The base URI for the identity server to be used is specified by the `account_threepid_delegates.msisdn` option.
 
@@ -2431,7 +2431,11 @@ If this is left unspecified, Synapse will not allow users to add phone numbers t
 
 *Removed in Synapse 1.66.0*: The `email` option has been removed. If present, Synapse will report a configuration error on startup.
 
-Defaults to `null`.
+Defaults to `{}`.
+
+This setting has the following sub-options:
+
+* `msisdn` (string|null): Identity server base URI for MSISDN (phone numbers). See above.
 
 Example configuration:
 ```yaml
