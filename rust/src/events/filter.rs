@@ -14,12 +14,29 @@
 
 use std::collections::HashMap;
 
-use pyo3::{
-    exceptions::{PyAssertionError, PyValueError},
-    pyfunction, PyResult,
-};
+use pyo3::{exceptions::PyValueError, pyfunction, PyResult};
 use ruma_common::OwnedUserId;
 use ruma_events::room::{history_visibility::HistoryVisibility, member::MembershipState};
+
+#[pyfunction(name = "event_visible_to_server")]
+pub fn event_visible_to_server_py(
+    sender: String,
+    target_server_name: String,
+    history_visibility: String,
+    erased_senders: HashMap<String, bool>,
+    partial_state_invisible: bool,
+    memberships: Vec<(String, String)>, // (state_key, membership)
+) -> PyResult<bool> {
+    event_visible_to_server(
+        sender,
+        target_server_name,
+        history_visibility,
+        erased_senders,
+        partial_state_invisible,
+        memberships,
+    )
+    .map_err(|e| PyValueError::new_err(format!("{e}")))
+}
 
 /// Return whether the target server is allowed to see the event.
 ///
@@ -31,7 +48,6 @@ use ruma_events::room::{history_visibility::HistoryVisibility, member::Membershi
 ///   - E was created by this homeserver, AND:
 ///       - the partial state at E has world readable or shared history vis, OR
 ///       - the partial state at E says that the target server is in the room.
-#[pyfunction]
 pub fn event_visible_to_server(
     sender: String,
     target_server_name: String,
@@ -39,7 +55,7 @@ pub fn event_visible_to_server(
     erased_senders: HashMap<String, bool>,
     partial_state_invisible: bool,
     memberships: Vec<(String, String)>, // (state_key, membership)
-) -> PyResult<bool> {
+) -> anyhow::Result<bool> {
     if let Some(&erased) = erased_senders.get(&sender) {
         if erased {
             return Ok(false);
@@ -60,9 +76,9 @@ pub fn event_visible_to_server(
     let mut visible = false;
     for (state_key, membership) in memberships {
         let state_key = OwnedUserId::try_from(state_key.clone())
-            .map_err(|e| PyValueError::new_err(format!("invalid user_id ({state_key}): {e}")))?;
+            .map_err(|e| anyhow::anyhow!(format!("invalid user_id ({state_key}): {e}")))?;
         if state_key.server_name().as_str() != target_server_name {
-            return Err(PyAssertionError::new_err(
+            return Err(anyhow::anyhow!(
                 "state_key does not match target_server_name",
             ));
         }
