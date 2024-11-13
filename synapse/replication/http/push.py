@@ -48,7 +48,7 @@ class ReplicationRemovePusherRestServlet(ReplicationEndpoint):
 
     """
 
-    NAME = "add_user_account_data"
+    NAME = "remove_pusher"
     PATH_ARGS = ("user_id",)
     CACHE = False
 

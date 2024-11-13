@@ -1047,6 +1047,7 @@ class JWTTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
         login.register_servlets,
+        profile.register_servlets,
     ]
 
     jwt_secret = "secret"
@@ -1201,6 +1202,30 @@ class JWTTestCase(unittest.HomeserverTestCase):
         channel = self.jwt_login({"username": "frog"})
         self.assertEqual(channel.code, 200, msg=channel.result)
         self.assertEqual(channel.json_body["user_id"], "@frog:test")
+
+    @override_config(
+        {"jwt_config": {**base_config, "display_name_claim": "display_name"}}
+    )
+    def test_login_custom_display_name(self) -> None:
+        """Test setting a custom display name."""
+        localpart = "pinkie"
+        user_id = f"@{localpart}:test"
+        display_name = "Pinkie Pie"
+
+        # Perform the login, specifying a custom display name.
+        channel = self.jwt_login({"sub": localpart, "display_name": display_name})
+        self.assertEqual(channel.code, 200, msg=channel.result)
+        self.assertEqual(channel.json_body["user_id"], user_id)
+
+        # Fetch the user's display name and check that it was set correctly.
+        access_token = channel.json_body["access_token"]
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/v3/profile/{user_id}/displayname",
+            access_token=access_token,
+        )
+        self.assertEqual(channel.code, 200, msg=channel.result)
+        self.assertEqual(channel.json_body["displayname"], display_name)
 
     def test_login_no_token(self) -> None:
         params = {"type": "org.matrix.login.jwt"}

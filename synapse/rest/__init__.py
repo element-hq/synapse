@@ -2,7 +2,7 @@
 # This file is licensed under the Affero General Public License (AGPL) version 3.
 #
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -31,6 +31,7 @@ from synapse.rest.client import (
     auth,
     auth_issuer,
     capabilities,
+    delayed_events,
     devices,
     directory,
     events,
@@ -81,6 +82,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
     room.register_deprecated_servlets,
     events.register_servlets,
     room.register_servlets,
+    delayed_events.register_servlets,
     login.register_servlets,
     profile.register_servlets,
     presence.register_servlets,

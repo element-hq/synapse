@@ -4,7 +4,7 @@
 # Copyright 2019 The Matrix.org Foundation C.I.C.
 # Copyright 2017 Vector Creations Ltd
 # Copyright 2014-2016 OpenMarket Ltd
-# Copyright (C) 2023 New Vector, Ltd
+# Copyright (C) 2023-2024 New Vector, Ltd
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -2291,6 +2291,106 @@ class RoomMessageFilterTestCase(RoomBase):
         self.assertEqual(len(chunk), 2, [event["content"] for event in chunk])
 
 
+class RoomDelayedEventTestCase(RoomBase):
+    """Tests delayed events."""
+
+    user_id = "@sid1:red"
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.room_id = self.helper.create_room_as(self.user_id)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_invalid_event(self) -> None:
+        """Test sending a delayed event with invalid content."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertNotIn("org.matrix.msc4140.errcode", channel.json_body)
+
+    def test_delayed_event_unsupported_by_default(self) -> None:
+        """Test that sending a delayed event is unsupported with the default config."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            "M_MAX_DELAY_UNSUPPORTED",
+            channel.json_body.get("org.matrix.msc4140.errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "1000"})
+    def test_delayed_event_exceeds_max_delay(self) -> None:
+        """Test that sending a delayed event fails if its delay is longer than allowed."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            "M_MAX_DELAY_EXCEEDED",
+            channel.json_body.get("org.matrix.msc4140.errcode"),
+            channel.json_body,
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_delayed_event_with_negative_delay(self) -> None:
+        """Test that sending a delayed event fails if its delay is negative."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=-2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.BAD_REQUEST, channel.code, channel.result)
+        self.assertEqual(
+            Codes.INVALID_PARAM, channel.json_body["errcode"], channel.json_body
+        )
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_message_event(self) -> None:
+        """Test sending a valid delayed message event."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/send/m.room.message/mid1?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"body": "test", "msgtype": "m.text"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+    @unittest.override_config({"max_event_delay_duration": "24h"})
+    def test_send_delayed_state_event(self) -> None:
+        """Test sending a valid delayed state event."""
+        channel = self.make_request(
+            "PUT",
+            (
+                "rooms/%s/state/m.room.topic/?org.matrix.msc4140.delay=2000"
+                % self.room_id
+            ).encode("ascii"),
+            {"topic": "This is a topic"},
+        )
+        self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
+
+
 class RoomSearchTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
@@ -2792,6 +2892,68 @@ class RoomMembershipReasonTestCase(unittest.HomeserverTestCase):
         event_content = channel.json_body
 
         self.assertEqual(event_content.get("reason"), reason, channel.result)
+
+
+class RoomForgottenTestCase(unittest.HomeserverTestCase):
+    """
+    Test forget/forgotten rooms
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    def test_room_not_forgotten_after_unban(self) -> None:
+        """
+        Test what happens when someone is banned from a room, they forget the room, and
+        some time later are unbanned.
+
+        Currently, when they are unbanned, the room isn't forgotten anymore which may or
+        may not be expected.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # User1 is banned and forgets the room
+        self.helper.ban(room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+        # User1 forgets the room
+        self.get_success(self.store.forget(user1_id, room_id))
+
+        # The room should show up as forgotten
+        forgotten_room_ids = self.get_success(
+            self.store.get_forgotten_rooms_for_user(user1_id)
+        )
+        self.assertIncludes(forgotten_room_ids, {room_id}, exact=True)
+
+        # Unban user1
+        self.helper.change_membership(
+            room=room_id,
+            src=user2_id,
+            targ=user1_id,
+            membership=Membership.LEAVE,
+            tok=user2_tok,
+        )
+
+        # Room is no longer forgotten because it's a new membership
+        #
+        # XXX: Is this how we actually want it to behave? It seems like ideally, the
+        # room forgotten status should only be reset when the user decides to join again
+        # (or is invited/knocks). This way the room remains forgotten for any ban/leave
+        # transitions.
+        forgotten_room_ids = self.get_success(
+            self.store.get_forgotten_rooms_for_user(user1_id)
+        )
+        self.assertIncludes(forgotten_room_ids, set(), exact=True)
 
 
 class LabelsTestCase(unittest.HomeserverTestCase):

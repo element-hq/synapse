@@ -61,7 +61,13 @@ from synapse.logging.context import (
     current_context,
     make_deferred_yieldable,
 )
-from synapse.logging.opentracing import start_active_span, tag_args, trace
+from synapse.logging.opentracing import (
+    SynapseTags,
+    set_tag,
+    start_active_span,
+    tag_args,
+    trace,
+)
 from synapse.metrics.background_process_metrics import (
     run_as_background_process,
     wrap_as_background_process,
@@ -525,6 +531,7 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event
 
+    @trace
     async def get_events(
         self,
         event_ids: Collection[str],
@@ -556,6 +563,11 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             A mapping from event_id to event.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         events = await self.get_events_as_list(
             event_ids,
             redact_behaviour=redact_behaviour,
@@ -603,6 +615,10 @@ class EventsWorkerStore(SQLBaseStore):
             Note that the returned list may be smaller than the list of event
             IDs if not all events could be fetched.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
 
         if not event_ids:
             return []
@@ -723,10 +739,11 @@ class EventsWorkerStore(SQLBaseStore):
 
         return events
 
+    @trace
     @cancellable
     async def get_unredacted_events_from_cache_or_db(
         self,
-        event_ids: Iterable[str],
+        event_ids: Collection[str],
         allow_rejected: bool = False,
     ) -> Dict[str, EventCacheEntry]:
         """Fetch a bunch of events from the cache or the database.
@@ -748,6 +765,11 @@ class EventsWorkerStore(SQLBaseStore):
         Returns:
             map from event id to result
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         # Shortcut: check if we have any events in the *in memory* cache - this function
         # may be called repeatedly for the same event so at this point we cannot reach
         # out to any external cache for performance reasons. The external cache is
@@ -936,7 +958,7 @@ class EventsWorkerStore(SQLBaseStore):
             events, update_metrics=update_metrics
         )
 
-        missing_event_ids = (e for e in events if e not in event_map)
+        missing_event_ids = [e for e in events if e not in event_map]
         event_map.update(
             await self._get_events_from_external_cache(
                 events=missing_event_ids,
@@ -946,8 +968,9 @@ class EventsWorkerStore(SQLBaseStore):
 
         return event_map
 
+    @trace
     async def _get_events_from_external_cache(
-        self, events: Iterable[str], update_metrics: bool = True
+        self, events: Collection[str], update_metrics: bool = True
     ) -> Dict[str, EventCacheEntry]:
         """Fetch events from any configured external cache.
 
@@ -957,6 +980,10 @@ class EventsWorkerStore(SQLBaseStore):
             events: list of event_ids to fetch
             update_metrics: Whether to update the cache hit ratio metrics
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "events.length",
+            str(len(events)),
+        )
         event_map = {}
 
         for event_id in events:
@@ -1222,6 +1249,7 @@ class EventsWorkerStore(SQLBaseStore):
                 with PreserveLoggingContext():
                     self.hs.get_reactor().callFromThread(fire_errback, e)
 
+    @trace
     async def _get_events_from_db(
         self, event_ids: Collection[str]
     ) -> Dict[str, EventCacheEntry]:
@@ -1240,6 +1268,11 @@ class EventsWorkerStore(SQLBaseStore):
             map from event id to result. May return extra events which
             weren't asked for.
         """
+        set_tag(
+            SynapseTags.FUNC_ARG_PREFIX + "event_ids.length",
+            str(len(event_ids)),
+        )
+
         fetched_event_ids: Set[str] = set()
         fetched_events: Dict[str, _EventRow] = {}
 
@@ -2466,6 +2499,76 @@ class EventsWorkerStore(SQLBaseStore):
         )
 
         self.invalidate_get_event_cache_after_txn(txn, event_id)
+
+    async def get_events_sent_by_user_in_room(
+        self, user_id: str, room_id: str, limit: int, filter: Optional[List[str]] = None
+    ) -> Optional[List[str]]:
+        """
+        Get a list of event ids of events sent by the user in the specified room
+
+        Args:
+            user_id: user ID to search against
+            room_id: room ID of the room to search for events in
+            filter: type of events to filter for
+            limit: maximum number of event ids to return
+        """
+
+        def _get_events_by_user_in_room_txn(
+            txn: LoggingTransaction,
+            user_id: str,
+            room_id: str,
+            filter: Optional[List[str]],
+            batch_size: int,
+            offset: int,
+        ) -> Tuple[Optional[List[str]], int]:
+            if filter:
+                base_clause, args = make_in_list_sql_clause(
+                    txn.database_engine, "type", filter
+                )
+                clause = f"AND {base_clause}"
+                parameters = (user_id, room_id, *args, batch_size, offset)
+            else:
+                clause = ""
+                parameters = (user_id, room_id, batch_size, offset)
+
+            sql = f"""
+                    SELECT event_id FROM events
+                    WHERE sender = ? AND room_id = ?
+                    {clause}
+                    ORDER BY received_ts DESC
+                    LIMIT ?
+                    OFFSET ?
+                  """
+            txn.execute(sql, parameters)
+            res = txn.fetchall()
+            if res:
+                events = [row[0] for row in res]
+            else:
+                events = None
+
+            return events, offset + batch_size
+
+        offset = 0
+        batch_size = 100
+        if batch_size > limit:
+            batch_size = limit
+
+        selected_ids: List[str] = []
+        while offset < limit:
+            res, offset = await self.db_pool.runInteraction(
+                "get_events_by_user",
+                _get_events_by_user_in_room_txn,
+                user_id,
+                room_id,
+                filter,
+                batch_size,
+                offset,
+            )
+            if res:
+                selected_ids = selected_ids + res
+            else:
+                break
+        return selected_ids
 
     async def have_finished_sliding_sync_background_jobs(self) -> bool:
         """Return if it's safe to use the sliding sync membership tables."""
