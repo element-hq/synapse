@@ -370,7 +370,7 @@ and mounting it to <code>/var/synapse</code> should be taken into consideration.
 <p>System requirements:</p>
 <ul>
 <li>POSIX-compliant system (tested on Linux &amp; OS X)</li>
-<li>Python 3.8 or later, up to Python 3.11.</li>
+<li>Python 3.9 or later, up to Python 3.13.</li>
 <li>At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org</li>
 </ul>
 <p>If building on an uncommon architecture for which pre-built wheels are
@@ -1873,7 +1873,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.118.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.119.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1891,6 +1891,12 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11190"><a class="header" href="#upgrading-to-v11190">Upgrading to v1.119.0</a></h1>
+<h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
+<p>The minimum supported Python version has been increased from v3.8 to v3.9.
+You will need Python 3.9+ to run Synapse v1.119.0 (due out Nov 7th, 2024).</p>
+<p>If you use current versions of the Matrix.org-distributed Docker images, no action is required.
+Please note that support for Ubuntu <code>focal</code> was dropped as well since it uses Python 3.8.</p>
 <h1 id="upgrading-to-v11110"><a class="header" href="#upgrading-to-v11110">Upgrading to v1.111.0</a></h1>
 <h2 id="new-worker-endpoints-for-authenticated-client-and-federation-media"><a class="header" href="#new-worker-endpoints-for-authenticated-client-and-federation-media">New worker endpoints for authenticated client and federation media</a></h2>
 <p><a href="./workers.html#synapseappmedia_repository">Media repository workers</a> handling
@@ -1932,7 +1938,7 @@ The standard <code>username</code> property should be used instead. See the
 <a href="https://spec.matrix.org/v1.7/application-service-api/#server-admin-style-permissions">Application Service specification</a>
 for more information.</p>
 <h1 id="upgrading-to-v1880"><a class="header" href="#upgrading-to-v1880">Upgrading to v1.88.0</a></h1>
-<h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
+<h2 id="minimum-supported-python-version-1"><a class="header" href="#minimum-supported-python-version-1">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.7 to v3.8.
 You will need Python 3.8 to run Synapse v1.88.0 (due out July 18th, 2023).</p>
 <p>If you use current versions of the Matrix.org-distributed Debian
@@ -12664,6 +12670,7 @@ basis. The currently supported features are:</p>
 <li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3881">MSC3881</a>: enable remotely toggling push notifications
 for another client</li>
 <li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3575">MSC3575</a>: enable experimental sliding sync support</li>
+<li><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/4222">MSC4222</a>: adding <code>state_after</code> to sync v2</li>
 </ul>
 <p>To use it, you will need to authenticate by providing an <code>access_token</code>
 for a server admin: see <a href="admin_api/../usage/administration/admin_api/">Admin API</a>.</p>
@@ -15578,6 +15585,8 @@ for more information.</p>
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
 <h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
+local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. </p>
 <p>The API is </p>
 <pre><code>POST /_synapse/admin/v1/user/$user_id/redact
 
@@ -17005,7 +17014,7 @@ anything was broken. They are slower than the unit tests but will
 typically catch more errors.</p>
 <p>The following command will let you run the integration test with the most common
 configuration:</p>
-<pre><code class="language-sh">$ docker run --rm -it -v /path/where/you/have/cloned/the/repository\:/src:ro -v /path/to/where/you/want/logs\:/logs matrixdotorg/sytest-synapse:focal
+<pre><code class="language-sh">$ docker run --rm -it -v /path/where/you/have/cloned/the/repository\:/src:ro -v /path/to/where/you/want/logs\:/logs matrixdotorg/sytest-synapse:bullseye
 </code></pre>
 <p>(Note that the paths must be full paths! You could also write <code>$(realpath relative/path)</code> if needed.)</p>
 <p>This configuration should generally cover your needs.</p>

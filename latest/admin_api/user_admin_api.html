@@ -1332,6 +1332,8 @@ for more information.</p>
 </code></pre>
 <p><em>Added in Synapse 1.72.0.</em></p>
 <h2 id="redact-all-the-events-of-a-user"><a class="header" href="#redact-all-the-events-of-a-user">Redact all the events of a user</a></h2>
+<p>This endpoint allows an admin to redact the events of a given user. There are no restrictions on redactions for a 
+local user. By default, we puppet the user who sent the message to redact it themselves. Redactions for non-local users are issued using the admin user, and will fail in rooms where the admin user is not admin/does not have the specified power level to issue redactions. </p>
 <p>The API is </p>
 <pre><code>POST /_synapse/admin/v1/user/$user_id/redact
 
