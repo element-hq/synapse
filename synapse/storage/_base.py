@@ -112,6 +112,7 @@ class SQLBaseStore(metaclass=ABCMeta):
             self._attempt_to_invalidate_cache(
                 "get_number_joined_users_in_room", (room_id,)
             )
+            self._attempt_to_invalidate_cache("get_member_counts", (room_id,))
             self._attempt_to_invalidate_cache("get_local_users_in_room", (room_id,))
 
             # There's no easy way of invalidating this cache for just the users
@@ -126,12 +127,16 @@ class SQLBaseStore(metaclass=ABCMeta):
             self._attempt_to_invalidate_cache(
                 "_get_rooms_for_local_user_where_membership_is_inner", (user_id,)
             )
+            self._attempt_to_invalidate_cache(
+                "get_sliding_sync_rooms_for_user", (user_id,)
+            )
 
         # Purge other caches based on room state.
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_partial_current_state_ids", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
     def _invalidate_state_caches_all(self, room_id: str) -> None:
         """Invalidates caches that are based on the current state, but does
@@ -150,6 +155,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_current_hosts_in_room", (room_id,))
         self._attempt_to_invalidate_cache("get_users_in_room_with_profiles", (room_id,))
         self._attempt_to_invalidate_cache("get_number_joined_users_in_room", (room_id,))
+        self._attempt_to_invalidate_cache("get_member_counts", (room_id,))
         self._attempt_to_invalidate_cache("get_local_users_in_room", (room_id,))
         self._attempt_to_invalidate_cache("does_pair_of_users_share_a_room", None)
         self._attempt_to_invalidate_cache("get_user_in_room_with_profile", None)
@@ -160,6 +166,7 @@ class SQLBaseStore(metaclass=ABCMeta):
         self._attempt_to_invalidate_cache("get_room_summary", (room_id,))
         self._attempt_to_invalidate_cache("get_room_type", (room_id,))
         self._attempt_to_invalidate_cache("get_room_encryption", (room_id,))
+        self._attempt_to_invalidate_cache("get_sliding_sync_rooms_for_user", None)
 
     def _attempt_to_invalidate_cache(
         self, cache_name: str, key: Optional[Collection[Any]]

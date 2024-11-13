@@ -761,6 +761,19 @@ email:
     password_reset: "[%(server_name)s] Password reset"
     email_validation: "[%(server_name)s] Validate your email"
 ```
+---
+### `max_event_delay_duration`
+
+The maximum allowed duration by which sent events can be delayed, as per
+[MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140).
+Must be a positive value if set.
+
+Defaults to no duration (`null`), which disallows sending delayed events.
+
+Example configuration:
+```yaml
+max_event_delay_duration: 24h
+```
 
 ## Homeserver blocking
 Useful options for Synapse admins.
@@ -1421,7 +1434,7 @@ number of entries that can be stored.
    Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry
    durations.
      * `max_cache_memory_usage` sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted.
-        They will continue to be evicted until the memory usage drops below the `target_memory_usage`, set in
+        They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in
         the setting below, or until the `min_cache_ttl` is hit. There is no default value for this option.
      * `target_cache_memory_usage` sets a rough target for the desired memory usage of the caches. There is no default value
         for this option.
@@ -1877,6 +1890,26 @@ unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_mat
 after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
 this will change to true in a future Synapse release.
 
+In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
+case-by-case breakdown describes whether media downloads are permitted:
+
+* `enable_authenticated_media = False`:
+  * unauthenticated client or homeserver requesting local media: allowed
+  * unauthenticated client or homeserver requesting remote media: allowed as long as the media is in the cache,
+    or as long as the remote homeserver does not require authentication to retrieve the media
+* `enable_authenticated_media = True`:
+  * unauthenticated client or homeserver requesting local media:
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+  * unauthenticated client or homeserver requesting remote media: the same as for local media;
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+
+It is especially notable that media downloaded before this option existed (in older Synapse versions), or whilst this option was set to `False`,
+will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to `True`.
+This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
+those older clients or homeservers will not be cut off from media they can already see.
+
 Example configuration:
 ```yaml
 enable_authenticated_media: true
@@ -2315,6 +2348,22 @@ Example configuration:
 ```yaml
 turn_shared_secret: "YOUR_SHARED_SECRET"
 ```
+---
+### `turn_shared_secret_path`
+
+An alternative to [`turn_shared_secret`](#turn_shared_secret):
+allows the shared secret to be specified in an external file.
+
+The file should be a plain text file, containing only the shared secret.
+Synapse reads the shared secret from the given file once at startup.
+
+Example configuration:
+```yaml
+turn_shared_secret_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.116.0._
+
 ---
 ### `turn_username` and `turn_password`
 
@@ -3693,6 +3742,8 @@ Additional sub-options for this setting include:
    Required if `enabled` is set to true.
 * `subject_claim`: Name of the claim containing a unique identifier for the user.
    Optional, defaults to `sub`.
+* `display_name_claim`: Name of the claim containing the display name for the user. Optional.
+   If provided, the display name will be set to the value of this claim upon first login.
 * `issuer`: The issuer to validate the "iss" claim against. Optional. If provided the
    "iss" claim will be required and validated for all JSON web tokens.
 * `audiences`: A list of audiences to validate the "aud" claim against. Optional.
@@ -3707,6 +3758,7 @@ jwt_config:
     secret: "provided-by-your-issuer"
     algorithm: "provided-by-your-issuer"
     subject_claim: "name_of_claim"
+    display_name_claim: "name_of_claim"
     issuer: "provided-by-your-issuer"
     audiences:
         - "provided-by-your-issuer"
@@ -4339,7 +4391,13 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them.
+balanced across them. 
+
+The way that the load balancing works is any outbound federation request will be assigned 
+to a federation sender worker based on the hash of the destination server name. This
+means that all requests being sent to the same destination will be processed by the same
+worker instance. Multiple `federation_sender_instances` are useful if there is a federation
+with multiple servers.
 
 This configuration setting must be shared between all workers handling federation
 sending, and if changed all federation sender workers must be stopped at the same time
@@ -4489,6 +4547,9 @@ This setting has the following sub-options:
 * `path`: The full path to a local Unix socket file. **If this is used, `host` and
  `port` are ignored.** Defaults to `/tmp/redis.sock'
 * `password`: Optional password if configured on the Redis instance.
+* `password_path`: Alternative to `password`, reading the password from an
+   external file. The file should be a plain text file, containing only the
+   password. Synapse reads the password from the given file once at startup.
 * `dbid`: Optional redis dbid if needs to connect to specific redis logical db.
 * `use_tls`: Whether to use tls connection. Defaults to false.
 * `certificate_file`: Optional path to the certificate file
@@ -4502,13 +4563,16 @@ This setting has the following sub-options:
 
   _Changed in Synapse 1.85.0: Added path option to use a local Unix socket_
 
+  _Changed in Synapse 1.116.0: Added password\_path_
+
 Example configuration:
 ```yaml
 redis:
   enabled: true
   host: localhost
   port: 6379
-  password: <secret_password>
+  password_path: <path_to_the_password_file>
+  # OR password: <secret_password>
   dbid: <dbid>
   #use_tls: True
   #certificate_file: <path_to_the_certificate_file>

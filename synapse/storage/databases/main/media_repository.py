@@ -729,10 +729,10 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
 
             txn.execute_batch(
                 sql,
-                (
+                [
                     (time_ms, media_origin, media_id)
                     for media_origin, media_id in remote_media
-                ),
+                ],
             )
 
             sql = (
@@ -740,7 +740,7 @@ class MediaRepositoryStore(MediaRepositoryBackgroundUpdateStore):
                 " WHERE media_id = ?"
             )
 
-            txn.execute_batch(sql, ((time_ms, media_id) for media_id in local_media))
+            txn.execute_batch(sql, [(time_ms, media_id) for media_id in local_media])
 
         await self.db_pool.runInteraction(
             "update_cached_last_access_time", update_cache_txn

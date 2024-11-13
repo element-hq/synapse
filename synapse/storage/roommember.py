@@ -40,6 +40,34 @@ class RoomsForUser:
 
 
 @attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
+class RoomsForUserSlidingSync:
+    room_id: str
+    sender: Optional[str]
+    membership: str
+    event_id: Optional[str]
+    event_pos: PersistedEventPosition
+    room_version_id: str
+
+    has_known_state: bool
+    room_type: Optional[str]
+    is_encrypted: bool
+
+
+@attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
+class RoomsForUserStateReset:
+    """A version of `RoomsForUser` that supports optional sender and event ID
+    fields, to handle state resets. State resets can affect room membership
+    without a corresponding event so that information isn't always available."""
+
+    room_id: str
+    sender: Optional[str]
+    membership: str
+    event_id: Optional[str]
+    event_pos: PersistedEventPosition
+    room_version_id: str
+
+
+@attr.s(slots=True, frozen=True, weakref_slot=False, auto_attribs=True)
 class GetRoomsForUserWithStreamOrdering:
     room_id: str
     event_pos: PersistedEventPosition

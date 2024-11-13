@@ -18,14 +18,16 @@ import logging
 from itertools import chain
 from typing import (
     TYPE_CHECKING,
-    Any,
+    AbstractSet,
     Dict,
     List,
     Literal,
     Mapping,
     Optional,
     Set,
+    Tuple,
     Union,
+    cast,
 )
 
 import attr
@@ -38,6 +40,7 @@ from synapse.api.constants import (
     EventTypes,
     Membership,
 )
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
 from synapse.events import StrippedStateEvent
 from synapse.events.utils import parse_stripped_state_event
 from synapse.logging.opentracing import start_active_span, trace
@@ -46,9 +49,13 @@ from synapse.storage.databases.main.state import (
     Sentinel as StateSentinel,
 )
 from synapse.storage.databases.main.stream import CurrentStateDeltaMembership
+from synapse.storage.roommember import (
+    RoomsForUser,
+    RoomsForUserSlidingSync,
+    RoomsForUserStateReset,
+)
 from synapse.types import (
     MutableStateMap,
-    PersistedEventPosition,
     RoomStreamToken,
     StateMap,
     StrCollection,
@@ -73,6 +80,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Sentinel(enum.Enum):
+    # defining a sentinel in this way allows mypy to correctly handle the
+    # type of a dictionary lookup and subsequent type narrowing.
+    UNSET_SENTINEL = object()
+
+
+# Helper definition for the types that we might return. We do this to avoid
+# copying data between types (which can be expensive for many rooms).
+RoomsForUserType = Union[RoomsForUserStateReset, RoomsForUser, RoomsForUserSlidingSync]
+
+
 @attr.s(auto_attribs=True, slots=True, frozen=True)
 class SlidingSyncInterestedRooms:
     """The set of rooms and metadata a client is interested in based on their
@@ -88,60 +106,42 @@ class SlidingSyncInterestedRooms:
             includes the rooms that *may* have relevant updates. Rooms not
             in this map will definitely not have room updates (though
             extensions may have updates in these rooms).
+        newly_joined_rooms: The set of rooms that were joined in the token range
+            and the user is still joined to at the end of this range.
+        newly_left_rooms: The set of rooms that we left in the token range
+            and are still "leave" at the end of this range.
+        dm_room_ids: The set of rooms the user consider as direct-message (DM) rooms
     """
 
     lists: Mapping[str, SlidingSyncResult.SlidingWindowList]
     relevant_room_map: Mapping[str, RoomSyncConfig]
     relevant_rooms_to_send_map: Mapping[str, RoomSyncConfig]
     all_rooms: Set[str]
-    room_membership_for_user_map: Mapping[str, "_RoomMembershipForUser"]
+    room_membership_for_user_map: Mapping[str, RoomsForUserType]
 
+    newly_joined_rooms: AbstractSet[str]
+    newly_left_rooms: AbstractSet[str]
+    dm_room_ids: AbstractSet[str]
 
-class Sentinel(enum.Enum):
-    # defining a sentinel in this way allows mypy to correctly handle the
-    # type of a dictionary lookup and subsequent type narrowing.
-    UNSET_SENTINEL = object()
-
-
-@attr.s(slots=True, frozen=True, auto_attribs=True)
-class _RoomMembershipForUser:
-    """
-    Attributes:
-        room_id: The room ID of the membership event
-        event_id: The event ID of the membership event
-        event_pos: The stream position of the membership event
-        membership: The membership state of the user in the room
-        sender: The person who sent the membership event
-        newly_joined: Whether the user newly joined the room during the given token
-            range and is still joined to the room at the end of this range.
-        newly_left: Whether the user newly left (or kicked) the room during the given
-            token range and is still "leave" at the end of this range.
-        is_dm: Whether this user considers this room as a direct-message (DM) room
-    """
-
-    room_id: str
-    # Optional because state resets can affect room membership without a corresponding event.
-    event_id: Optional[str]
-    # Even during a state reset which removes the user from the room, we expect this to
-    # be set because `current_state_delta_stream` will note the position that the reset
-    # happened.
-    event_pos: PersistedEventPosition
-    # Even during a state reset which removes the user from the room, we expect this to
-    # be set to `LEAVE` because we can make that assumption based on the situaton (see
-    # `get_current_state_delta_membership_changes_for_user(...)`)
-    membership: str
-    # Optional because state resets can affect room membership without a corresponding event.
-    sender: Optional[str]
-    newly_joined: bool
-    newly_left: bool
-    is_dm: bool
-
-    def copy_and_replace(self, **kwds: Any) -> "_RoomMembershipForUser":
-        return attr.evolve(self, **kwds)
+    @staticmethod
+    def empty() -> "SlidingSyncInterestedRooms":
+        return SlidingSyncInterestedRooms(
+            lists={},
+            relevant_room_map={},
+            relevant_rooms_to_send_map={},
+            all_rooms=set(),
+            room_membership_for_user_map={},
+            newly_joined_rooms=set(),
+            newly_left_rooms=set(),
+            dm_room_ids=set(),
+        )
 
 
 def filter_membership_for_sync(
-    *, user_id: str, room_membership_for_user: _RoomMembershipForUser
+    *,
+    user_id: str,
+    room_membership_for_user: RoomsForUserType,
+    newly_left: bool,
 ) -> bool:
     """
     Returns True if the membership event should be included in the sync response,
@@ -154,7 +154,6 @@ def filter_membership_for_sync(
 
     membership = room_membership_for_user.membership
     sender = room_membership_for_user.sender
-    newly_left = room_membership_for_user.newly_left
 
     # We want to allow everything except rooms the user has left unless `newly_left`
     # because we want everything that's *still* relevant to the user. We include
@@ -195,12 +194,394 @@ class SlidingSyncRoomLists:
         from_token: Optional[StreamToken],
     ) -> SlidingSyncInterestedRooms:
         """Fetch the set of rooms that match the request"""
-
-        room_membership_for_user_map = (
-            await self.get_room_membership_for_user_at_to_token(
-                sync_config.user, to_token, from_token
-            )
+        has_lists = sync_config.lists is not None and len(sync_config.lists) > 0
+        has_room_subscriptions = (
+            sync_config.room_subscriptions is not None
+            and len(sync_config.room_subscriptions) > 0
         )
+
+        if not has_lists and not has_room_subscriptions:
+            return SlidingSyncInterestedRooms.empty()
+
+        if await self.store.have_finished_sliding_sync_background_jobs():
+            return await self._compute_interested_rooms_new_tables(
+                sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                to_token=to_token,
+                from_token=from_token,
+            )
+        else:
+            # FIXME: This can be removed once we bump `SCHEMA_COMPAT_VERSION` and run the
+            # foreground update for
+            # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked by
+            # https://github.com/element-hq/synapse/issues/17623)
+            return await self._compute_interested_rooms_fallback(
+                sync_config=sync_config,
+                previous_connection_state=previous_connection_state,
+                to_token=to_token,
+                from_token=from_token,
+            )
+
+    @trace
+    async def _compute_interested_rooms_new_tables(
+        self,
+        sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> SlidingSyncInterestedRooms:
+        """Implementation of `compute_interested_rooms` using new sliding sync db tables."""
+        user_id = sync_config.user.to_string()
+
+        # Assemble sliding window lists
+        lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
+        # Keep track of the rooms that we can display and need to fetch more info about
+        relevant_room_map: Dict[str, RoomSyncConfig] = {}
+        # The set of room IDs of all rooms that could appear in any list. These
+        # include rooms that are outside the list ranges.
+        all_rooms: Set[str] = set()
+
+        # Note: this won't include rooms the user has left themselves. We add back
+        # `newly_left` rooms below. This is more efficient than fetching all rooms and
+        # then filtering out the old left rooms.
+        room_membership_for_user_map = await self.store.get_sliding_sync_rooms_for_user(
+            user_id
+        )
+
+        # Remove invites from ignored users
+        ignored_users = await self.store.ignored_users(user_id)
+        if ignored_users:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            # Make a copy so we don't run into an error: `dictionary changed size during
+            # iteration`, when we remove items
+            for room_id in list(room_membership_for_user_map.keys()):
+                room_for_user_sliding_sync = room_membership_for_user_map[room_id]
+                if (
+                    room_for_user_sliding_sync.membership == Membership.INVITE
+                    and room_for_user_sliding_sync.sender in ignored_users
+                ):
+                    room_membership_for_user_map.pop(room_id, None)
+
+        changes = await self._get_rewind_changes_to_current_membership_to_token(
+            sync_config.user, room_membership_for_user_map, to_token=to_token
+        )
+        if changes:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            for room_id, change in changes.items():
+                if change is None:
+                    # Remove rooms that the user joined after the `to_token`
+                    room_membership_for_user_map.pop(room_id, None)
+                    continue
+
+                existing_room = room_membership_for_user_map.get(room_id)
+                if existing_room is not None:
+                    # Update room membership events to the point in time of the `to_token`
+                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_id=room_id,
+                        sender=change.sender,
+                        membership=change.membership,
+                        event_id=change.event_id,
+                        event_pos=change.event_pos,
+                        room_version_id=change.room_version_id,
+                        # We keep the state of the room though
+                        has_known_state=existing_room.has_known_state,
+                        room_type=existing_room.room_type,
+                        is_encrypted=existing_room.is_encrypted,
+                    )
+
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, from_token=from_token, to_token=to_token
+        )
+        dm_room_ids = await self._get_dm_rooms_for_user(user_id)
+
+        # Add back `newly_left` rooms (rooms left in the from -> to token range).
+        #
+        # We do this because `get_sliding_sync_rooms_for_user(...)` doesn't include
+        # rooms that the user left themselves as it's more efficient to add them back
+        # here than to fetch all rooms and then filter out the old left rooms. The user
+        # only leaves a room once in a blue moon so this barely needs to run.
+        #
+        missing_newly_left_rooms = (
+            newly_left_room_map.keys() - room_membership_for_user_map.keys()
+        )
+        if missing_newly_left_rooms:
+            # TODO: It would be nice to avoid these copies
+            room_membership_for_user_map = dict(room_membership_for_user_map)
+            for room_id in missing_newly_left_rooms:
+                newly_left_room_for_user = newly_left_room_map[room_id]
+                # This should be a given
+                assert newly_left_room_for_user.membership == Membership.LEAVE
+
+                # Add back `newly_left` rooms
+                #
+                # Check for membership and state in the Sliding Sync tables as it's just
+                # another membership
+                newly_left_room_for_user_sliding_sync = (
+                    await self.store.get_sliding_sync_room_for_user(user_id, room_id)
+                )
+                # If the membership exists, it's just a normal user left the room on
+                # their own
+                if newly_left_room_for_user_sliding_sync is not None:
+                    room_membership_for_user_map[room_id] = (
+                        newly_left_room_for_user_sliding_sync
+                    )
+
+                    change = changes.get(room_id)
+                    if change is not None:
+                        # Update room membership events to the point in time of the `to_token`
+                        room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                            room_id=room_id,
+                            sender=change.sender,
+                            membership=change.membership,
+                            event_id=change.event_id,
+                            event_pos=change.event_pos,
+                            room_version_id=change.room_version_id,
+                            # We keep the state of the room though
+                            has_known_state=newly_left_room_for_user_sliding_sync.has_known_state,
+                            room_type=newly_left_room_for_user_sliding_sync.room_type,
+                            is_encrypted=newly_left_room_for_user_sliding_sync.is_encrypted,
+                        )
+
+                # If we are `newly_left` from the room but can't find any membership,
+                # then we have been "state reset" out of the room
+                else:
+                    # Get the state at the time. We can't read from the Sliding Sync
+                    # tables because the user has no membership in the room according to
+                    # the state (thanks to the state reset).
+                    #
+                    # Note: `room_type` never changes, so we can just get current room
+                    # type
+                    room_type = await self.store.get_room_type(room_id)
+                    has_known_state = room_type is not ROOM_UNKNOWN_SENTINEL
+                    if isinstance(room_type, StateSentinel):
+                        room_type = None
+
+                    # Get the encryption status at the time of the token
+                    is_encrypted = await self.get_is_encrypted_for_room_at_token(
+                        room_id,
+                        newly_left_room_for_user.event_pos.to_room_stream_token(),
+                    )
+
+                    room_membership_for_user_map[room_id] = RoomsForUserSlidingSync(
+                        room_id=room_id,
+                        sender=newly_left_room_for_user.sender,
+                        membership=newly_left_room_for_user.membership,
+                        event_id=newly_left_room_for_user.event_id,
+                        event_pos=newly_left_room_for_user.event_pos,
+                        room_version_id=newly_left_room_for_user.room_version_id,
+                        has_known_state=has_known_state,
+                        room_type=room_type,
+                        is_encrypted=is_encrypted,
+                    )
+
+        if sync_config.lists:
+            sync_room_map = room_membership_for_user_map
+            with start_active_span("assemble_sliding_window_lists"):
+                for list_key, list_config in sync_config.lists.items():
+                    # Apply filters
+                    filtered_sync_room_map = sync_room_map
+                    if list_config.filters is not None:
+                        filtered_sync_room_map = await self.filter_rooms_using_tables(
+                            user_id,
+                            sync_room_map,
+                            previous_connection_state,
+                            list_config.filters,
+                            to_token,
+                            dm_room_ids,
+                        )
+
+                    # Find which rooms are partially stated and may need to be filtered out
+                    # depending on the `required_state` requested (see below).
+                    partial_state_rooms = await self.store.get_partial_rooms()
+
+                    # Since creating the `RoomSyncConfig` takes some work, let's just do it
+                    # once.
+                    room_sync_config = RoomSyncConfig.from_room_config(list_config)
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        filtered_sync_room_map = {
+                            room_id: room
+                            for room_id, room in filtered_sync_room_map.items()
+                            if room_id not in partial_state_rooms
+                        }
+
+                    all_rooms.update(filtered_sync_room_map)
+
+                    ops: List[SlidingSyncResult.SlidingWindowList.Operation] = []
+
+                    if list_config.ranges:
+                        # Optimization: If we are asking for the full range, we don't
+                        # need to sort the list.
+                        if (
+                            # We're looking for a single range that covers the entire list
+                            len(list_config.ranges) == 1
+                            # Range starts at 0
+                            and list_config.ranges[0][0] == 0
+                            # And the range extends to the end of the list or more. Each
+                            # side is inclusive.
+                            and list_config.ranges[0][1]
+                            >= len(filtered_sync_room_map) - 1
+                        ):
+                            sorted_room_info: List[RoomsForUserType] = list(
+                                filtered_sync_room_map.values()
+                            )
+                        else:
+                            # Sort the list
+                            sorted_room_info = await self.sort_rooms(
+                                # Cast is safe because RoomsForUserSlidingSync is part
+                                # of the `RoomsForUserType` union. Why can't it detect this?
+                                cast(
+                                    Dict[str, RoomsForUserType], filtered_sync_room_map
+                                ),
+                                to_token,
+                                # We only need to sort the rooms up to the end
+                                # of the largest range. Both sides of range are
+                                # inclusive so we `+ 1`.
+                                limit=max(range[1] + 1 for range in list_config.ranges),
+                            )
+
+                        for range in list_config.ranges:
+                            room_ids_in_list: List[str] = []
+
+                            # We're going to loop through the sorted list of rooms starting
+                            # at the range start index and keep adding rooms until we fill
+                            # up the range or run out of rooms.
+                            #
+                            # Both sides of range are inclusive so we `+ 1`
+                            max_num_rooms = range[1] - range[0] + 1
+                            for room_membership in sorted_room_info[range[0] :]:
+                                room_id = room_membership.room_id
+
+                                if len(room_ids_in_list) >= max_num_rooms:
+                                    break
+
+                                # Take the superset of the `RoomSyncConfig` for each room.
+                                #
+                                # Update our `relevant_room_map` with the room we're going
+                                # to display and need to fetch more info about.
+                                existing_room_sync_config = relevant_room_map.get(
+                                    room_id
+                                )
+                                if existing_room_sync_config is not None:
+                                    room_sync_config = existing_room_sync_config.combine_room_sync_config(
+                                        room_sync_config
+                                    )
+
+                                relevant_room_map[room_id] = room_sync_config
+
+                                room_ids_in_list.append(room_id)
+
+                            ops.append(
+                                SlidingSyncResult.SlidingWindowList.Operation(
+                                    op=OperationType.SYNC,
+                                    range=range,
+                                    room_ids=room_ids_in_list,
+                                )
+                            )
+
+                    lists[list_key] = SlidingSyncResult.SlidingWindowList(
+                        count=len(filtered_sync_room_map),
+                        ops=ops,
+                    )
+
+        if sync_config.room_subscriptions:
+            with start_active_span("assemble_room_subscriptions"):
+                # TODO: It would be nice to avoid these copies
+                room_membership_for_user_map = dict(room_membership_for_user_map)
+
+                # Find which rooms are partially stated and may need to be filtered out
+                # depending on the `required_state` requested (see below).
+                partial_state_rooms = await self.store.get_partial_rooms()
+
+                # Fetch any rooms that we have not already fetched from the database.
+                subscription_sliding_sync_rooms = (
+                    await self.store.get_sliding_sync_room_for_user_batch(
+                        user_id,
+                        sync_config.room_subscriptions.keys()
+                        - room_membership_for_user_map.keys(),
+                    )
+                )
+                room_membership_for_user_map.update(subscription_sliding_sync_rooms)
+
+                for (
+                    room_id,
+                    room_subscription,
+                ) in sync_config.room_subscriptions.items():
+                    # Check if we have a membership for the room, but didn't pull it out
+                    # above. This could be e.g. a leave that we don't pull out by
+                    # default.
+                    current_room_entry = room_membership_for_user_map.get(room_id)
+                    if not current_room_entry:
+                        # TODO: Handle rooms the user isn't in.
+                        continue
+
+                    all_rooms.add(room_id)
+
+                    # Take the superset of the `RoomSyncConfig` for each room.
+                    room_sync_config = RoomSyncConfig.from_room_config(
+                        room_subscription
+                    )
+
+                    # Exclude partially-stated rooms if we must wait for the room to be
+                    # fully-stated
+                    if room_sync_config.must_await_full_state(self.is_mine_id):
+                        if room_id in partial_state_rooms:
+                            continue
+
+                    # Update our `relevant_room_map` with the room we're going to display
+                    # and need to fetch more info about.
+                    existing_room_sync_config = relevant_room_map.get(room_id)
+                    if existing_room_sync_config is not None:
+                        room_sync_config = (
+                            existing_room_sync_config.combine_room_sync_config(
+                                room_sync_config
+                            )
+                        )
+
+                    relevant_room_map[room_id] = room_sync_config
+
+        # Filtered subset of `relevant_room_map` for rooms that may have updates
+        # (in the event stream)
+        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, relevant_room_map
+        )
+
+        return SlidingSyncInterestedRooms(
+            lists=lists,
+            relevant_room_map=relevant_room_map,
+            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
+            all_rooms=all_rooms,
+            room_membership_for_user_map=room_membership_for_user_map,
+            newly_joined_rooms=newly_joined_room_ids,
+            newly_left_rooms=set(newly_left_room_map),
+            dm_room_ids=dm_room_ids,
+        )
+
+    async def _compute_interested_rooms_fallback(
+        self,
+        sync_config: SlidingSyncConfig,
+        previous_connection_state: "PerConnectionState",
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> SlidingSyncInterestedRooms:
+        """Fallback code when the database background updates haven't completed yet."""
+
+        (
+            room_membership_for_user_map,
+            newly_joined_room_ids,
+            newly_left_room_ids,
+        ) = await self.get_room_membership_for_user_at_to_token(
+            sync_config.user, to_token, from_token
+        )
+
+        dm_room_ids = await self._get_dm_rooms_for_user(sync_config.user.to_string())
 
         # Assemble sliding window lists
         lists: Dict[str, SlidingSyncResult.SlidingWindowList] = {}
@@ -215,6 +596,7 @@ class SlidingSyncRoomLists:
                 sync_room_map = await self.filter_rooms_relevant_for_sync(
                     user=sync_config.user,
                     room_membership_for_user_map=room_membership_for_user_map,
+                    newly_left_room_ids=newly_left_room_ids,
                 )
 
                 for list_key, list_config in sync_config.lists.items():
@@ -224,20 +606,18 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map = await self.filter_rooms(
                             sync_config.user,
                             sync_room_map,
+                            previous_connection_state,
                             list_config.filters,
                             to_token,
+                            dm_room_ids,
                         )
 
                     # Find which rooms are partially stated and may need to be filtered out
                     # depending on the `required_state` requested (see below).
-                    partial_state_room_map = (
-                        await self.store.is_partial_state_room_batched(
-                            filtered_sync_room_map.keys()
-                        )
-                    )
+                    partial_state_rooms = await self.store.get_partial_rooms()
 
                     # Since creating the `RoomSyncConfig` takes some work, let's just do it
-                    # once and make a copy whenever we need it.
+                    # once.
                     room_sync_config = RoomSyncConfig.from_room_config(list_config)
 
                     # Exclude partially-stated rooms if we must wait for the room to be
@@ -246,7 +626,7 @@ class SlidingSyncRoomLists:
                         filtered_sync_room_map = {
                             room_id: room
                             for room_id, room in filtered_sync_room_map.items()
-                            if not partial_state_room_map.get(room_id)
+                            if room_id not in partial_state_rooms
                         }
 
                     all_rooms.update(filtered_sync_room_map)
@@ -306,9 +686,7 @@ class SlidingSyncRoomLists:
             with start_active_span("assemble_room_subscriptions"):
                 # Find which rooms are partially stated and may need to be filtered out
                 # depending on the `required_state` requested (see below).
-                partial_state_room_map = await self.store.is_partial_state_room_batched(
-                    sync_config.room_subscriptions.keys()
-                )
+                partial_state_rooms = await self.store.get_partial_rooms()
 
                 for (
                     room_id,
@@ -340,7 +718,7 @@ class SlidingSyncRoomLists:
                     # Exclude partially-stated rooms if we must wait for the room to be
                     # fully-stated
                     if room_sync_config.must_await_full_state(self.is_mine_id):
-                        if partial_state_room_map.get(room_id):
+                        if room_id in partial_state_rooms:
                             continue
 
                     all_rooms.add(room_id)
@@ -356,6 +734,32 @@ class SlidingSyncRoomLists:
                         )
 
                     relevant_room_map[room_id] = room_sync_config
+
+        # Filtered subset of `relevant_room_map` for rooms that may have updates
+        # (in the event stream)
+        relevant_rooms_to_send_map = await self._filter_relevant_rooms_to_send(
+            previous_connection_state, from_token, relevant_room_map
+        )
+
+        return SlidingSyncInterestedRooms(
+            lists=lists,
+            relevant_room_map=relevant_room_map,
+            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
+            all_rooms=all_rooms,
+            room_membership_for_user_map=room_membership_for_user_map,
+            newly_joined_rooms=newly_joined_room_ids,
+            newly_left_rooms=newly_left_room_ids,
+            dm_room_ids=dm_room_ids,
+        )
+
+    async def _filter_relevant_rooms_to_send(
+        self,
+        previous_connection_state: PerConnectionState,
+        from_token: Optional[StreamToken],
+        relevant_room_map: Dict[str, RoomSyncConfig],
+    ) -> Dict[str, RoomSyncConfig]:
+        """Filters the `relevant_room_map` down to those rooms that may have
+        updates we need to fetch and return."""
 
         # Filtered subset of `relevant_room_map` for rooms that may have updates
         # (in the event stream)
@@ -416,77 +820,33 @@ class SlidingSyncRoomLists:
                         if room_id in rooms_should_send
                     }
 
-        return SlidingSyncInterestedRooms(
-            lists=lists,
-            relevant_room_map=relevant_room_map,
-            relevant_rooms_to_send_map=relevant_rooms_to_send_map,
-            all_rooms=all_rooms,
-            room_membership_for_user_map=room_membership_for_user_map,
-        )
+        return relevant_rooms_to_send_map
 
     @trace
-    async def get_room_membership_for_user_at_to_token(
+    async def _get_rewind_changes_to_current_membership_to_token(
         self,
         user: UserID,
+        rooms_for_user: Mapping[str, RoomsForUserType],
         to_token: StreamToken,
-        from_token: Optional[StreamToken],
-    ) -> Dict[str, _RoomMembershipForUser]:
+    ) -> Mapping[str, Optional[RoomsForUser]]:
         """
-        Fetch room IDs that the user has had membership in (the full room list including
-        long-lost left rooms that will be filtered, sorted, and sliced).
-
-        We're looking for rooms where the user has had any sort of membership in the
-        token range (> `from_token` and <= `to_token`)
-
-        In order for bans/kicks to not show up, you need to `/forget` those rooms. This
-        doesn't modify the event itself though and only adds the `forgotten` flag to the
-        `room_memberships` table in Synapse. There isn't a way to tell when a room was
-        forgotten at the moment so we can't factor it into the token range.
+        Takes the current set of rooms for a user (retrieved after the given
+        token), and returns the changes needed to "rewind" it to match the set of
+        memberships *at that token* (<= `to_token`).
 
         Args:
             user: User to fetch rooms for
-            to_token: The token to fetch rooms up to.
-            from_token: The point in the stream to sync from.
+            rooms_for_user: The set of rooms for the user after the `to_token`.
+            to_token: The token to rewind to
 
         Returns:
-            A dictionary of room IDs that the user has had membership in along with
-            membership information in that room at the time of `to_token`.
+            The changes to apply to rewind the the current memberships.
         """
-        user_id = user.to_string()
-
-        # First grab a current snapshot rooms for the user
-        # (also handles forgotten rooms)
-        room_for_user_list = await self.store.get_rooms_for_local_user_where_membership_is(
-            user_id=user_id,
-            # We want to fetch any kind of membership (joined and left rooms) in order
-            # to get the `event_pos` of the latest room membership event for the
-            # user.
-            membership_list=Membership.LIST,
-            excluded_rooms=self.rooms_to_exclude_globally,
-        )
-
         # If the user has never joined any rooms before, we can just return an empty list
-        if not room_for_user_list:
+        if not rooms_for_user:
             return {}
 
-        # Our working list of rooms that can show up in the sync response
-        sync_room_id_set = {
-            # Note: The `room_for_user` we're assigning here will need to be fixed up
-            # (below) because they are potentially from the current snapshot time
-            # instead from the time of the `to_token`.
-            room_for_user.room_id: _RoomMembershipForUser(
-                room_id=room_for_user.room_id,
-                event_id=room_for_user.event_id,
-                event_pos=room_for_user.event_pos,
-                membership=room_for_user.membership,
-                sender=room_for_user.sender,
-                # We will update these fields below to be accurate
-                newly_joined=False,
-                newly_left=False,
-                is_dm=False,
-            )
-            for room_for_user in room_for_user_list
-        }
+        user_id = user.to_string()
 
         # Get the `RoomStreamToken` that represents the spot we queried up to when we got
         # our membership snapshot from `get_rooms_for_local_user_where_membership_is()`.
@@ -494,7 +854,7 @@ class SlidingSyncRoomLists:
         # First, we need to get the max stream_ordering of each event persister instance
         # that we queried events from.
         instance_to_max_stream_ordering_map: Dict[str, int] = {}
-        for room_for_user in room_for_user_list:
+        for room_for_user in rooms_for_user.values():
             instance_name = room_for_user.event_pos.instance_name
             stream_ordering = room_for_user.event_pos.stream
 
@@ -521,18 +881,14 @@ class SlidingSyncRoomLists:
             ),
         )
 
-        # Since we fetched the users room list at some point in time after the from/to
+        # Since we fetched the users room list at some point in time after the
         # tokens, we need to revert/rewind some membership changes to match the point in
         # time of the `to_token`. In particular, we need to make these fixups:
         #
-        # - 1a) Remove rooms that the user joined after the `to_token`
-        # - 1b) Add back rooms that the user left after the `to_token`
-        # - 1c) Update room membership events to the point in time of the `to_token`
-        # - 2) Figure out which rooms are `newly_left` rooms (> `from_token` and <= `to_token`)
-        # - 3) Figure out which rooms are `newly_joined` (> `from_token` and <= `to_token`)
-        # - 4) Figure out which rooms are DM's
+        # - a) Remove rooms that the user joined after the `to_token`
+        # - b) Update room membership events to the point in time of the `to_token`
 
-        # 1) Fetch membership changes that fall in the range from `to_token` up to
+        # Fetch membership changes that fall in the range from `to_token` up to
         # `membership_snapshot_token`
         #
         # If our `to_token` is already the same or ahead of the latest room membership
@@ -549,7 +905,15 @@ class SlidingSyncRoomLists:
                 )
             )
 
-        # 1) Assemble a list of the first membership event after the `to_token` so we can
+        if not current_state_delta_membership_changes_after_to_token:
+            # There have been no membership changes, so we can early return.
+            return {}
+
+        # Otherwise we're about to make changes to `rooms_for_user`, so we turn
+        # it into a mutable dict.
+        changes: Dict[str, Optional[RoomsForUser]] = {}
+
+        # Assemble a list of the first membership event after the `to_token` so we can
         # step backward to the previous membership that would apply to the from/to
         # range.
         first_membership_change_by_room_id_after_to_token: Dict[
@@ -561,8 +925,6 @@ class SlidingSyncRoomLists:
                 membership_change.room_id, membership_change
             )
 
-        # 1) Fixup
-        #
         # Since we fetched a snapshot of the users room list at some point in time after
         # the from/to tokens, we need to revert/rewind some membership changes to match
         # the point in time of the `to_token`.
@@ -572,7 +934,7 @@ class SlidingSyncRoomLists:
         ) in first_membership_change_by_room_id_after_to_token.items():
             # 1a) Remove rooms that the user joined after the `to_token`
             if first_membership_change_after_to_token.prev_event_id is None:
-                sync_room_id_set.pop(room_id, None)
+                changes[room_id] = None
             # 1b) 1c) From the first membership event after the `to_token`, step backward to the
             # previous membership that would apply to the from/to range.
             else:
@@ -583,25 +945,177 @@ class SlidingSyncRoomLists:
                     first_membership_change_after_to_token.prev_event_pos is not None
                     and first_membership_change_after_to_token.prev_membership
                     is not None
+                    and first_membership_change_after_to_token.prev_sender is not None
                 ):
-                    sync_room_id_set[room_id] = _RoomMembershipForUser(
+                    # We need to know the room version ID, which we normally we
+                    # can get from the current membership, but if we don't have
+                    # that then we need to query the DB.
+                    current_membership = rooms_for_user.get(room_id)
+                    if current_membership is not None:
+                        room_version_id = current_membership.room_version_id
+                    else:
+                        room_version_id = await self.store.get_room_version_id(room_id)
+
+                    changes[room_id] = RoomsForUser(
                         room_id=room_id,
                         event_id=first_membership_change_after_to_token.prev_event_id,
                         event_pos=first_membership_change_after_to_token.prev_event_pos,
                         membership=first_membership_change_after_to_token.prev_membership,
                         sender=first_membership_change_after_to_token.prev_sender,
-                        # We will update these fields below to be accurate
-                        newly_joined=False,
-                        newly_left=False,
-                        is_dm=False,
+                        room_version_id=room_version_id,
                     )
                 else:
                     # If we can't find the previous membership event, we shouldn't
                     # include the room in the sync response since we can't determine the
                     # exact membership state and shouldn't rely on the current snapshot.
-                    sync_room_id_set.pop(room_id, None)
+                    changes[room_id] = None
 
-        # 2) Fetch membership changes that fall in the range from `from_token` up to `to_token`
+        return changes
+
+    @trace
+    async def get_room_membership_for_user_at_to_token(
+        self,
+        user: UserID,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[Dict[str, RoomsForUserType], AbstractSet[str], AbstractSet[str]]:
+        """
+        Fetch room IDs that the user has had membership in (the full room list including
+        long-lost left rooms that will be filtered, sorted, and sliced).
+
+        We're looking for rooms where the user has had any sort of membership in the
+        token range (> `from_token` and <= `to_token`)
+
+        In order for bans/kicks to not show up, you need to `/forget` those rooms. This
+        doesn't modify the event itself though and only adds the `forgotten` flag to the
+        `room_memberships` table in Synapse. There isn't a way to tell when a room was
+        forgotten at the moment so we can't factor it into the token range.
+
+        Args:
+            user: User to fetch rooms for
+            to_token: The token to fetch rooms up to.
+            from_token: The point in the stream to sync from.
+
+        Returns:
+            A 3-tuple of:
+              - A dictionary of room IDs that the user has had membership in along with
+                membership information in that room at the time of `to_token`.
+              - Set of newly joined rooms
+              - Set of newly left rooms
+        """
+        user_id = user.to_string()
+
+        # First grab a current snapshot rooms for the user
+        # (also handles forgotten rooms)
+        room_for_user_list = await self.store.get_rooms_for_local_user_where_membership_is(
+            user_id=user_id,
+            # We want to fetch any kind of membership (joined and left rooms) in order
+            # to get the `event_pos` of the latest room membership event for the
+            # user.
+            membership_list=Membership.LIST,
+            excluded_rooms=self.rooms_to_exclude_globally,
+        )
+
+        # We filter out unknown room versions before we try and load any
+        # metadata about the room. They shouldn't go down sync anyway, and their
+        # metadata may be in a broken state.
+        room_for_user_list = [
+            room_for_user
+            for room_for_user in room_for_user_list
+            if room_for_user.room_version_id in KNOWN_ROOM_VERSIONS
+        ]
+
+        # Remove invites from ignored users
+        ignored_users = await self.store.ignored_users(user_id)
+        if ignored_users:
+            room_for_user_list = [
+                room_for_user
+                for room_for_user in room_for_user_list
+                if not (
+                    room_for_user.membership == Membership.INVITE
+                    and room_for_user.sender in ignored_users
+                )
+            ]
+
+        (
+            newly_joined_room_ids,
+            newly_left_room_map,
+        ) = await self._get_newly_joined_and_left_rooms(
+            user_id, to_token=to_token, from_token=from_token
+        )
+
+        # If the user has never joined any rooms before, we can just return an empty
+        # list. We also have to check the `newly_left_room_map` in case someone was
+        # state reset out of all of the rooms they were in.
+        if not room_for_user_list and not newly_left_room_map:
+            return {}, set(), set()
+
+        # Since we fetched the users room list at some point in time after the
+        # tokens, we need to revert/rewind some membership changes to match the point in
+        # time of the `to_token`.
+        rooms_for_user: Dict[str, RoomsForUserType] = {
+            room.room_id: room for room in room_for_user_list
+        }
+        changes = await self._get_rewind_changes_to_current_membership_to_token(
+            user, rooms_for_user, to_token
+        )
+        for room_id, change_room_for_user in changes.items():
+            if change_room_for_user is None:
+                rooms_for_user.pop(room_id, None)
+            else:
+                rooms_for_user[room_id] = change_room_for_user
+
+        # Ensure we have entries for rooms that the user has been "state reset"
+        # out of. These are rooms appear in the `newly_left_rooms` map but
+        # aren't in the `rooms_for_user` map.
+        for room_id, newly_left_room_for_user in newly_left_room_map.items():
+            # If we already know about the room, it's not a state reset
+            if room_id in rooms_for_user:
+                continue
+
+            # This should be true if it's a state reset
+            assert newly_left_room_for_user.membership is Membership.LEAVE
+            assert newly_left_room_for_user.event_id is None
+            assert newly_left_room_for_user.sender is None
+
+            rooms_for_user[room_id] = newly_left_room_for_user
+
+        return rooms_for_user, newly_joined_room_ids, set(newly_left_room_map)
+
+    @trace
+    async def _get_newly_joined_and_left_rooms(
+        self,
+        user_id: str,
+        to_token: StreamToken,
+        from_token: Optional[StreamToken],
+    ) -> Tuple[AbstractSet[str], Mapping[str, RoomsForUserStateReset]]:
+        """Fetch the sets of rooms that the user newly joined or left in the
+        given token range.
+
+        Note: there may be rooms in the newly left rooms where the user was
+        "state reset" out of the room, and so that room would not be part of the
+        "current memberships" of the user.
+
+        Returns:
+            A 2-tuple of newly joined room IDs and a map of newly_left room
+            IDs to the `RoomsForUserStateReset` entry.
+
+            We're using `RoomsForUserStateReset` but that doesn't necessarily mean the
+            user was state reset of the rooms. It's just that the `event_id`/`sender`
+            are optional and we can't tell the difference between the server leaving the
+            room when the user was the last person participating in the room and left or
+            was state reset out of the room. To actually check for a state reset, you
+            need to check if a membership still exists in the room.
+        """
+        newly_joined_room_ids: Set[str] = set()
+        newly_left_room_map: Dict[str, RoomsForUserStateReset] = {}
+
+        # We need to figure out the
+        #
+        # - 1) Figure out which rooms are `newly_left` rooms (> `from_token` and <= `to_token`)
+        # - 2) Figure out which rooms are `newly_joined` (> `from_token` and <= `to_token`)
+
+        # 1) Fetch membership changes that fall in the range from `from_token` up to `to_token`
         current_state_delta_membership_changes_in_from_to_range = []
         if from_token:
             current_state_delta_membership_changes_in_from_to_range = (
@@ -613,7 +1127,7 @@ class SlidingSyncRoomLists:
                 )
             )
 
-        # 2) Assemble a list of the last membership events in some given ranges. Someone
+        # 1) Assemble a list of the last membership events in some given ranges. Someone
         # could have left and joined multiple times during the given range but we only
         # care about end-result so we grab the last one.
         last_membership_change_by_room_id_in_from_to_range: Dict[
@@ -646,9 +1160,9 @@ class SlidingSyncRoomLists:
             if membership_change.membership != Membership.JOIN:
                 has_non_join_event_by_room_id_in_from_to_range[room_id] = True
 
-        # 2) Fixup
+        # 1) Fixup
         #
-        # 3) We also want to assemble a list of possibly newly joined rooms. Someone
+        # 2) We also want to assemble a list of possibly newly joined rooms. Someone
         # could have left and joined multiple times during the given range but we only
         # care about whether they are joined at the end of the token range so we are
         # working with the last membership even in the token range.
@@ -658,46 +1172,23 @@ class SlidingSyncRoomLists:
         ) in last_membership_change_by_room_id_in_from_to_range.values():
             room_id = last_membership_change_in_from_to_range.room_id
 
-            # 3)
+            # 2)
             if last_membership_change_in_from_to_range.membership == Membership.JOIN:
                 possibly_newly_joined_room_ids.add(room_id)
 
-            # 2) Figure out newly_left rooms (> `from_token` and <= `to_token`).
+            # 1) Figure out newly_left rooms (> `from_token` and <= `to_token`).
             if last_membership_change_in_from_to_range.membership == Membership.LEAVE:
-                # 2) Mark this room as `newly_left`
+                # 1) Mark this room as `newly_left`
+                newly_left_room_map[room_id] = RoomsForUserStateReset(
+                    room_id=room_id,
+                    sender=last_membership_change_in_from_to_range.sender,
+                    membership=Membership.LEAVE,
+                    event_id=last_membership_change_in_from_to_range.event_id,
+                    event_pos=last_membership_change_in_from_to_range.event_pos,
+                    room_version_id=await self.store.get_room_version_id(room_id),
+                )
 
-                # If we're seeing a membership change here, we should expect to already
-                # have it in our snapshot but if a state reset happens, it wouldn't have
-                # shown up in our snapshot but appear as a change here.
-                existing_sync_entry = sync_room_id_set.get(room_id)
-                if existing_sync_entry is not None:
-                    # Normal expected case
-                    sync_room_id_set[room_id] = existing_sync_entry.copy_and_replace(
-                        newly_left=True
-                    )
-                else:
-                    # State reset!
-                    logger.warn(
-                        "State reset detected for room_id %s with %s who is no longer in the room",
-                        room_id,
-                        user_id,
-                    )
-                    # Even though a state reset happened which removed the person from
-                    # the room, we still add it the list so the user knows they left the
-                    # room. Downstream code can check for a state reset by looking for
-                    # `event_id=None and membership is not None`.
-                    sync_room_id_set[room_id] = _RoomMembershipForUser(
-                        room_id=room_id,
-                        event_id=last_membership_change_in_from_to_range.event_id,
-                        event_pos=last_membership_change_in_from_to_range.event_pos,
-                        membership=last_membership_change_in_from_to_range.membership,
-                        sender=last_membership_change_in_from_to_range.sender,
-                        newly_joined=False,
-                        newly_left=True,
-                        is_dm=False,
-                    )
-
-        # 3) Figure out `newly_joined`
+        # 2) Figure out `newly_joined`
         for room_id in possibly_newly_joined_room_ids:
             has_non_join_in_from_to_range = (
                 has_non_join_event_by_room_id_in_from_to_range.get(room_id, False)
@@ -706,9 +1197,7 @@ class SlidingSyncRoomLists:
             # also some non-join in the range, we know they `newly_joined`.
             if has_non_join_in_from_to_range:
                 # We found a `newly_joined` room (we left and joined within the token range)
-                sync_room_id_set[room_id] = sync_room_id_set[room_id].copy_and_replace(
-                    newly_joined=True
-                )
+                newly_joined_room_ids.add(room_id)
             else:
                 prev_event_id = first_membership_change_by_room_id_in_from_to_range[
                     room_id
@@ -720,20 +1209,23 @@ class SlidingSyncRoomLists:
                 if prev_event_id is None:
                     # We found a `newly_joined` room (we are joining the room for the
                     # first time within the token range)
-                    sync_room_id_set[room_id] = sync_room_id_set[
-                        room_id
-                    ].copy_and_replace(newly_joined=True)
+                    newly_joined_room_ids.add(room_id)
                 # Last resort, we need to step back to the previous membership event
                 # just before the token range to see if we're joined then or not.
                 elif prev_membership != Membership.JOIN:
                     # We found a `newly_joined` room (we left before the token range
                     # and joined within the token range)
-                    sync_room_id_set[room_id] = sync_room_id_set[
-                        room_id
-                    ].copy_and_replace(newly_joined=True)
+                    newly_joined_room_ids.add(room_id)
 
-        # 4) Figure out which rooms the user considers to be direct-message (DM) rooms
-        #
+        return newly_joined_room_ids, newly_left_room_map
+
+    @trace
+    async def _get_dm_rooms_for_user(
+        self,
+        user_id: str,
+    ) -> AbstractSet[str]:
+        """Get the set of DM rooms for the user."""
+
         # We're using global account data (`m.direct`) instead of checking for
         # `is_direct` on membership events because that property only appears for
         # the invitee membership event (doesn't show up for the inviter).
@@ -755,20 +1247,15 @@ class SlidingSyncRoomLists:
                         if isinstance(room_id, str):
                             dm_room_id_set.add(room_id)
 
-        # 4) Fixup
-        for room_id in sync_room_id_set:
-            sync_room_id_set[room_id] = sync_room_id_set[room_id].copy_and_replace(
-                is_dm=room_id in dm_room_id_set
-            )
-
-        return sync_room_id_set
+        return dm_room_id_set
 
     @trace
     async def filter_rooms_relevant_for_sync(
         self,
         user: UserID,
-        room_membership_for_user_map: Dict[str, _RoomMembershipForUser],
-    ) -> Dict[str, _RoomMembershipForUser]:
+        room_membership_for_user_map: Dict[str, RoomsForUserType],
+        newly_left_room_ids: AbstractSet[str],
+    ) -> Dict[str, RoomsForUserType]:
         """
         Filter room IDs that should/can be listed for this user in the sync response (the
         full room list that will be further filtered, sorted, and sliced).
@@ -789,6 +1276,7 @@ class SlidingSyncRoomLists:
         Args:
             user: User that is syncing
             room_membership_for_user_map: Room membership for the user
+            newly_left_room_ids: The set of room IDs we have newly left
 
         Returns:
             A dictionary of room IDs that should be listed in the sync response along
@@ -803,6 +1291,7 @@ class SlidingSyncRoomLists:
             if filter_membership_for_sync(
                 user_id=user_id,
                 room_membership_for_user=room_membership_for_user,
+                newly_left=room_id in newly_left_room_ids,
             )
         }
 
@@ -811,9 +1300,9 @@ class SlidingSyncRoomLists:
     async def check_room_subscription_allowed_for_user(
         self,
         room_id: str,
-        room_membership_for_user_map: Dict[str, _RoomMembershipForUser],
+        room_membership_for_user_map: Dict[str, RoomsForUserType],
         to_token: StreamToken,
-    ) -> Optional[_RoomMembershipForUser]:
+    ) -> Optional[RoomsForUserType]:
         """
         Check whether the user is allowed to see the room based on whether they have
         ever had membership in the room or if the room is `world_readable`.
@@ -878,7 +1367,7 @@ class SlidingSyncRoomLists:
     async def _bulk_get_stripped_state_for_rooms_from_sync_room_map(
         self,
         room_ids: StrCollection,
-        sync_room_map: Dict[str, _RoomMembershipForUser],
+        sync_room_map: Dict[str, RoomsForUserType],
     ) -> Dict[str, Optional[StateMap[StrippedStateEvent]]]:
         """
         Fetch stripped state for a list of room IDs. Stripped state is only
@@ -975,7 +1464,7 @@ class SlidingSyncRoomLists:
             "room_encryption",
         ],
         room_ids: Set[str],
-        sync_room_map: Dict[str, _RoomMembershipForUser],
+        sync_room_map: Dict[str, RoomsForUserType],
         to_token: StreamToken,
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
@@ -1139,10 +1628,12 @@ class SlidingSyncRoomLists:
     async def filter_rooms(
         self,
         user: UserID,
-        sync_room_map: Dict[str, _RoomMembershipForUser],
+        sync_room_map: Dict[str, RoomsForUserType],
+        previous_connection_state: PerConnectionState,
         filters: SlidingSyncConfig.SlidingSyncList.Filters,
         to_token: StreamToken,
-    ) -> Dict[str, _RoomMembershipForUser]:
+        dm_room_ids: AbstractSet[str],
+    ) -> Dict[str, RoomsForUserType]:
         """
         Filter rooms based on the sync request.
 
@@ -1152,11 +1643,14 @@ class SlidingSyncRoomLists:
                 information in the room at the time of `to_token`.
             filters: Filters to apply
             to_token: We filter based on the state of the room at this token
+            dm_room_ids: Set of room IDs that are DMs for the user
 
         Returns:
             A filtered dictionary of room IDs along with membership information in the
             room at the time of `to_token`.
         """
+        user_id = user.to_string()
+
         room_id_to_stripped_state_map: Dict[
             str, Optional[StateMap[StrippedStateEvent]]
         ] = {}
@@ -1171,14 +1665,14 @@ class SlidingSyncRoomLists:
                     filtered_room_id_set = {
                         room_id
                         for room_id in filtered_room_id_set
-                        if sync_room_map[room_id].is_dm
+                        if room_id in dm_room_ids
                     }
                 else:
                     # Only non-DM rooms please
                     filtered_room_id_set = {
                         room_id
                         for room_id in filtered_room_id_set
-                        if not sync_room_map[room_id].is_dm
+                        if room_id not in dm_room_ids
                     }
 
         if filters.spaces is not None:
@@ -1266,12 +1760,14 @@ class SlidingSyncRoomLists:
                         and room_type not in filters.room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
                     if (
                         filters.not_room_types is not None
                         and room_type in filters.not_room_types
                     ):
                         filtered_room_id_set.remove(room_id)
+                        continue
 
         if filters.room_name_like is not None:
             with start_active_span("filters.room_name_like"):
@@ -1288,27 +1784,246 @@ class SlidingSyncRoomLists:
                 # )
                 raise NotImplementedError()
 
+        # Filter by room tags according to the users account data
         if filters.tags is not None or filters.not_tags is not None:
             with start_active_span("filters.tags"):
-                raise NotImplementedError()
+                # Fetch the user tags for their rooms
+                room_tags = await self.store.get_tags_for_user(user_id)
+                room_id_to_tag_name_set: Dict[str, Set[str]] = {
+                    room_id: set(tags.keys()) for room_id, tags in room_tags.items()
+                }
+
+                if filters.tags is not None:
+                    tags_set = set(filters.tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms that don't have one of the tags in the filter
+                        if room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            tags_set
+                        )
+                    }
+
+                if filters.not_tags is not None:
+                    not_tags_set = set(filters.not_tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms if they have any of the tags in the filter
+                        if not room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            not_tags_set
+                        )
+                    }
+
+        # Keep rooms if the user has been state reset out of it but we previously sent
+        # down the connection before. We want to make sure that we send these down to
+        # the client regardless of filters so they find out about the state reset.
+        #
+        # We don't always have access to the state in a room after being state reset if
+        # no one else locally on the server is participating in the room so we patch
+        # these back in manually.
+        state_reset_out_of_room_id_set = {
+            room_id
+            for room_id in sync_room_map.keys()
+            if sync_room_map[room_id].event_id is None
+            and previous_connection_state.rooms.have_sent_room(room_id).status
+            != HaveSentRoomFlag.NEVER
+        }
 
         # Assemble a new sync room map but only with the `filtered_room_id_set`
-        return {room_id: sync_room_map[room_id] for room_id in filtered_room_id_set}
+        return {
+            room_id: sync_room_map[room_id]
+            for room_id in filtered_room_id_set | state_reset_out_of_room_id_set
+        }
+
+    @trace
+    async def filter_rooms_using_tables(
+        self,
+        user_id: str,
+        sync_room_map: Mapping[str, RoomsForUserSlidingSync],
+        previous_connection_state: PerConnectionState,
+        filters: SlidingSyncConfig.SlidingSyncList.Filters,
+        to_token: StreamToken,
+        dm_room_ids: AbstractSet[str],
+    ) -> Dict[str, RoomsForUserSlidingSync]:
+        """
+        Filter rooms based on the sync request.
+
+        Args:
+            user: User to filter rooms for
+            sync_room_map: Dictionary of room IDs to sort along with membership
+                information in the room at the time of `to_token`.
+            filters: Filters to apply
+            to_token: We filter based on the state of the room at this token
+            dm_room_ids: Set of room IDs which are DMs
+            room_tags: Mapping of room ID to tags
+
+        Returns:
+            A filtered dictionary of room IDs along with membership information in the
+            room at the time of `to_token`.
+        """
+
+        filtered_room_id_set = set(sync_room_map.keys())
+
+        # Filter for Direct-Message (DM) rooms
+        if filters.is_dm is not None:
+            with start_active_span("filters.is_dm"):
+                if filters.is_dm:
+                    # Intersect with the DM room set
+                    filtered_room_id_set &= dm_room_ids
+                else:
+                    # Remove DMs
+                    filtered_room_id_set -= dm_room_ids
+
+        if filters.spaces is not None:
+            with start_active_span("filters.spaces"):
+                raise NotImplementedError()
+
+        # Filter for encrypted rooms
+        if filters.is_encrypted is not None:
+            filtered_room_id_set = {
+                room_id
+                for room_id in filtered_room_id_set
+                # Remove rooms if we can't figure out what the encryption status is
+                if sync_room_map[room_id].has_known_state
+                # Or remove if it doesn't match the filter
+                and sync_room_map[room_id].is_encrypted == filters.is_encrypted
+            }
+
+        # Filter for rooms that the user has been invited to
+        if filters.is_invite is not None:
+            with start_active_span("filters.is_invite"):
+                # Make a copy so we don't run into an error: `Set changed size during
+                # iteration`, when we filter out and remove items
+                for room_id in filtered_room_id_set.copy():
+                    room_for_user = sync_room_map[room_id]
+                    # If we're looking for invite rooms, filter out rooms that the user is
+                    # not invited to and vice versa
+                    if (
+                        filters.is_invite
+                        and room_for_user.membership != Membership.INVITE
+                    ) or (
+                        not filters.is_invite
+                        and room_for_user.membership == Membership.INVITE
+                    ):
+                        filtered_room_id_set.remove(room_id)
+
+        # Filter by room type (space vs room, etc). A room must match one of the types
+        # provided in the list. `None` is a valid type for rooms which do not have a
+        # room type.
+        if filters.room_types is not None or filters.not_room_types is not None:
+            with start_active_span("filters.room_types"):
+                # Make a copy so we don't run into an error: `Set changed size during
+                # iteration`, when we filter out and remove items
+                for room_id in filtered_room_id_set.copy():
+                    # Remove rooms if we can't figure out what room type it is
+                    if not sync_room_map[room_id].has_known_state:
+                        filtered_room_id_set.remove(room_id)
+                        continue
+
+                    room_type = sync_room_map[room_id].room_type
+
+                    if (
+                        filters.room_types is not None
+                        and room_type not in filters.room_types
+                    ):
+                        filtered_room_id_set.remove(room_id)
+                        continue
+
+                    if (
+                        filters.not_room_types is not None
+                        and room_type in filters.not_room_types
+                    ):
+                        filtered_room_id_set.remove(room_id)
+                        continue
+
+        if filters.room_name_like is not None:
+            with start_active_span("filters.room_name_like"):
+                # TODO: The room name is a bit more sensitive to leak than the
+                # create/encryption event. Maybe we should consider a better way to fetch
+                # historical state before implementing this.
+                #
+                # room_id_to_create_content = await self._bulk_get_partial_current_state_content_for_rooms(
+                #     content_type="room_name",
+                #     room_ids=filtered_room_id_set,
+                #     to_token=to_token,
+                #     sync_room_map=sync_room_map,
+                #     room_id_to_stripped_state_map=room_id_to_stripped_state_map,
+                # )
+                raise NotImplementedError()
+
+        # Filter by room tags according to the users account data
+        if filters.tags is not None or filters.not_tags is not None:
+            with start_active_span("filters.tags"):
+                # Fetch the user tags for their rooms
+                room_tags = await self.store.get_tags_for_user(user_id)
+                room_id_to_tag_name_set: Dict[str, Set[str]] = {
+                    room_id: set(tags.keys()) for room_id, tags in room_tags.items()
+                }
+
+                if filters.tags is not None:
+                    tags_set = set(filters.tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms that don't have one of the tags in the filter
+                        if room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            tags_set
+                        )
+                    }
+
+                if filters.not_tags is not None:
+                    not_tags_set = set(filters.not_tags)
+                    filtered_room_id_set = {
+                        room_id
+                        for room_id in filtered_room_id_set
+                        # Remove rooms if they have any of the tags in the filter
+                        if not room_id_to_tag_name_set.get(room_id, set()).intersection(
+                            not_tags_set
+                        )
+                    }
+
+        # Keep rooms if the user has been state reset out of it but we previously sent
+        # down the connection before. We want to make sure that we send these down to
+        # the client regardless of filters so they find out about the state reset.
+        #
+        # We don't always have access to the state in a room after being state reset if
+        # no one else locally on the server is participating in the room so we patch
+        # these back in manually.
+        state_reset_out_of_room_id_set = {
+            room_id
+            for room_id in sync_room_map.keys()
+            if sync_room_map[room_id].event_id is None
+            and previous_connection_state.rooms.have_sent_room(room_id).status
+            != HaveSentRoomFlag.NEVER
+        }
+
+        # Assemble a new sync room map but only with the `filtered_room_id_set`
+        return {
+            room_id: sync_room_map[room_id]
+            for room_id in filtered_room_id_set | state_reset_out_of_room_id_set
+        }
 
     @trace
     async def sort_rooms(
         self,
-        sync_room_map: Dict[str, _RoomMembershipForUser],
+        sync_room_map: Dict[str, RoomsForUserType],
         to_token: StreamToken,
-    ) -> List[_RoomMembershipForUser]:
+        limit: Optional[int] = None,
+    ) -> List[RoomsForUserType]:
         """
         Sort by `stream_ordering` of the last event that the user should see in the
         room. `stream_ordering` is unique so we get a stable sort.
+
+        If `limit` is specified then sort may return fewer entries, but will
+        always return at least the top N rooms. This is useful as we don't always
+        need to sort the full list, but are just interested in the top N.
 
         Args:
             sync_room_map: Dictionary of room IDs to sort along with membership
                 information in the room at the time of `to_token`.
             to_token: We sort based on the events in the room at this token (<= `to_token`)
+            limit: The number of rooms that we need to return from the top of the list.
 
         Returns:
             A sorted list of room IDs by `stream_ordering` along with membership information.
@@ -1318,8 +2033,23 @@ class SlidingSyncRoomLists:
         # user should see in the room (<= `to_token`)
         last_activity_in_room_map: Dict[str, int] = {}
 
+        # Same as above, except for positions that we know are in the event
+        # stream cache.
+        cached_positions: Dict[str, int] = {}
+
+        earliest_cache_position = (
+            self.store._events_stream_cache.get_earliest_known_position()
+        )
+
         for room_id, room_for_user in sync_room_map.items():
-            if room_for_user.membership != Membership.JOIN:
+            if room_for_user.membership == Membership.JOIN:
+                # For joined rooms check the stream change cache.
+                cached_position = (
+                    self.store._events_stream_cache.get_max_pos_of_last_change(room_id)
+                )
+                if cached_position is not None:
+                    cached_positions[room_id] = cached_position
+            else:
                 # If the user has left/been invited/knocked/been banned from a
                 # room, they shouldn't see anything past that point.
                 #
@@ -1328,6 +2058,48 @@ class SlidingSyncRoomLists:
                 # `invite`/`world_readable` history visibility, see
                 # https://github.com/matrix-org/matrix-spec-proposals/pull/3575#discussion_r1653045932
                 last_activity_in_room_map[room_id] = room_for_user.event_pos.stream
+
+                # If the stream position is in range of the stream change cache
+                # we can include it.
+                if room_for_user.event_pos.stream > earliest_cache_position:
+                    cached_positions[room_id] = room_for_user.event_pos.stream
+
+        # If we are only asked for the top N rooms, and we have enough from
+        # looking in the stream change cache, then we can return early. This
+        # is because the cache must include all entries above
+        # `.get_earliest_known_position()`.
+        if limit is not None and len(cached_positions) >= limit:
+            # ... but first we need to handle the case where the cached max
+            # position is greater than the to_token, in which case we do
+            # actually query the DB. This should happen rarely, so can do it in
+            # a loop.
+            for room_id, position in list(cached_positions.items()):
+                if position > to_token.room_key.stream:
+                    result = await self.store.get_last_event_pos_in_room_before_stream_ordering(
+                        room_id, to_token.room_key
+                    )
+                    if (
+                        result is not None
+                        and result[1].stream > earliest_cache_position
+                    ):
+                        # We have a stream position in the cached range.
+                        cached_positions[room_id] = result[1].stream
+                    else:
+                        # No position in the range, so we remove the entry.
+                        cached_positions.pop(room_id)
+
+        if limit is not None and len(cached_positions) >= limit:
+            return sorted(
+                (
+                    room
+                    for room in sync_room_map.values()
+                    if room.room_id in cached_positions
+                ),
+                # Sort by the last activity (stream_ordering) in the room
+                key=lambda room_info: cached_positions[room_info.room_id],
+                # We want descending order
+                reverse=True,
+            )
 
         # For fully-joined rooms, we find the latest activity at/before the
         # `to_token`.
@@ -1351,3 +2123,46 @@ class SlidingSyncRoomLists:
             # We want descending order
             reverse=True,
         )
+
+    async def get_is_encrypted_for_room_at_token(
+        self, room_id: str, to_token: RoomStreamToken
+    ) -> bool:
+        """Get if the room is encrypted at the time."""
+
+        # Fetch the current encryption state
+        state_ids = await self.store.get_partial_filtered_current_state_ids(
+            room_id, StateFilter.from_types([(EventTypes.RoomEncryption, "")])
+        )
+        encryption_event_id = state_ids.get((EventTypes.RoomEncryption, ""))
+
+        # Now roll back the state by looking at the state deltas between
+        # to_token and now.
+        deltas = await self.store.get_current_state_deltas_for_room(
+            room_id,
+            from_token=to_token,
+            to_token=self.store.get_room_max_token(),
+        )
+
+        for delta in deltas:
+            if delta.event_type != EventTypes.RoomEncryption:
+                continue
+
+            # Found the first change, we look at the previous event ID to get
+            # the state at the to token.
+
+            if delta.prev_event_id is None:
+                # There is no prev event, so no encryption state event, so room is not encrypted
+                return False
+
+            encryption_event_id = delta.prev_event_id
+            break
+
+        # We didn't find an encryption state, room isn't encrypted
+        if encryption_event_id is None:
+            return False
+
+        # We found encryption state, check if content has a non-null algorithm
+        encrypted_event = await self.store.get_event(encryption_event_id)
+        algorithm = encrypted_event.content.get(EventContentFields.ENCRYPTION_ALGORITHM)
+
+        return algorithm is not None

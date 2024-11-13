@@ -233,7 +233,7 @@ def return_html_error(
 
 
 def wrap_async_request_handler(
-    h: Callable[["_AsyncResource", "SynapseRequest"], Awaitable[None]]
+    h: Callable[["_AsyncResource", "SynapseRequest"], Awaitable[None]],
 ) -> Callable[["_AsyncResource", "SynapseRequest"], "defer.Deferred[None]"]:
     """Wraps an async request handler so that it calls request.processing.
 

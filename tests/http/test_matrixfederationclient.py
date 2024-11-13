@@ -895,21 +895,30 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
         )
 
         # Fake `remoteserv:8008` responding to requests
-        mock_agent_on_federation_sender.request.side_effect = lambda *args, **kwargs: defer.succeed(
-            FakeResponse(
-                code=200,
-                body=b'{"foo": "bar"}',
-                headers=Headers(
-                    {
-                        "Content-Type": ["application/json"],
-                        "Connection": ["close, X-Foo, X-Bar"],
-                        # Should be removed because it's defined in the `Connection` header
-                        "X-Foo": ["foo"],
-                        "X-Bar": ["bar"],
-                        # Should be removed because it's a hop-by-hop header
-                        "Proxy-Authorization": "abcdef",
-                    }
-                ),
+        mock_agent_on_federation_sender.request.side_effect = (
+            lambda *args, **kwargs: defer.succeed(
+                FakeResponse(
+                    code=200,
+                    body=b'{"foo": "bar"}',
+                    headers=Headers(
+                        {
+                            "Content-Type": ["application/json"],
+                            "X-Test": ["test"],
+                            # Define some hop-by-hop headers (try with varying casing to
+                            # make sure we still match-up the headers)
+                            "Connection": ["close, X-fOo, X-Bar, X-baz"],
+                            # Should be removed because it's defined in the `Connection` header
+                            "X-Foo": ["foo"],
+                            "X-Bar": ["bar"],
+                            # (not in canonical case)
+                            "x-baZ": ["baz"],
+                            # Should be removed because it's a hop-by-hop header
+                            "Proxy-Authorization": "abcdef",
+                            # Should be removed because it's a hop-by-hop header (not in canonical case)
+                            "transfer-EnCoDiNg": "abcdef",
+                        }
+                    ),
+                )
             )
         )
 
@@ -936,9 +945,17 @@ class FederationClientProxyTests(BaseMultiWorkerStreamTestCase):
         header_names = set(headers.keys())
 
         # Make sure the response does not include the hop-by-hop headers
-        self.assertNotIn(b"X-Foo", header_names)
-        self.assertNotIn(b"X-Bar", header_names)
-        self.assertNotIn(b"Proxy-Authorization", header_names)
+        self.assertIncludes(
+            header_names,
+            {
+                b"Content-Type",
+                b"X-Test",
+                # Default headers from Twisted
+                b"Date",
+                b"Server",
+            },
+            exact=True,
+        )
         # Make sure the response is as expected back on the main worker
         self.assertEqual(res, {"foo": "bar"})
 

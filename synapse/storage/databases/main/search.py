@@ -94,7 +94,7 @@ class SearchWorkerStore(SQLBaseStore):
             VALUES (?,?,?,to_tsvector('english', ?),?,?)
             """
 
-            args1 = (
+            args1 = [
                 (
                     entry.event_id,
                     entry.room_id,
@@ -104,7 +104,7 @@ class SearchWorkerStore(SQLBaseStore):
                     entry.origin_server_ts,
                 )
                 for entry in entries
-            )
+            ]
 
             txn.execute_batch(sql, args1)
 
@@ -177,9 +177,7 @@ class SearchBackgroundUpdateStore(SearchWorkerStore):
             AND (%s)
             ORDER BY stream_ordering DESC
             LIMIT ?
-            """ % (
-                " OR ".join("type = '%s'" % (t,) for t in TYPES),
-            )
+            """ % (" OR ".join("type = '%s'" % (t,) for t in TYPES),)
 
             txn.execute(sql, (target_min_stream_id, max_stream_id, batch_size))
 

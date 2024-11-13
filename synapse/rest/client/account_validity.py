@@ -48,9 +48,7 @@ class AccountValidityRenewServlet(RestServlet):
         self.account_renewed_template = (
             hs.config.account_validity.account_validity_account_renewed_template
         )
-        self.account_previously_renewed_template = (
-            hs.config.account_validity.account_validity_account_previously_renewed_template
-        )
+        self.account_previously_renewed_template = hs.config.account_validity.account_validity_account_previously_renewed_template
         self.invalid_token_template = (
             hs.config.account_validity.account_validity_invalid_token_template
         )

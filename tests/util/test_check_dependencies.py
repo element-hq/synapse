@@ -109,10 +109,13 @@ class TestDependencyChecker(TestCase):
 
     def test_checks_ignore_dev_dependencies(self) -> None:
         """Both generic and per-extra checks should ignore dev dependencies."""
-        with patch(
-            "synapse.util.check_dependencies.metadata.requires",
-            return_value=["dummypkg >= 1; extra == 'mypy'"],
-        ), patch("synapse.util.check_dependencies.RUNTIME_EXTRAS", {"cool-extra"}):
+        with (
+            patch(
+                "synapse.util.check_dependencies.metadata.requires",
+                return_value=["dummypkg >= 1; extra == 'mypy'"],
+            ),
+            patch("synapse.util.check_dependencies.RUNTIME_EXTRAS", {"cool-extra"}),
+        ):
             # We're testing that none of these calls raise.
             with self.mock_installed_package(None):
                 check_requirements()
@@ -141,10 +144,13 @@ class TestDependencyChecker(TestCase):
 
     def test_check_for_extra_dependencies(self) -> None:
         """Complain if a package required for an extra is missing or old."""
-        with patch(
-            "synapse.util.check_dependencies.metadata.requires",
-            return_value=["dummypkg >= 1; extra == 'cool-extra'"],
-        ), patch("synapse.util.check_dependencies.RUNTIME_EXTRAS", {"cool-extra"}):
+        with (
+            patch(
+                "synapse.util.check_dependencies.metadata.requires",
+                return_value=["dummypkg >= 1; extra == 'cool-extra'"],
+            ),
+            patch("synapse.util.check_dependencies.RUNTIME_EXTRAS", {"cool-extra"}),
+        ):
             with self.mock_installed_package(None):
                 self.assertRaises(DependencyException, check_requirements, "cool-extra")
             with self.mock_installed_package(old):

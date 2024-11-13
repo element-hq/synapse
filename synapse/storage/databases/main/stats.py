@@ -161,7 +161,7 @@ class StatsStore(StateDeltasStore):
                     LIMIT ?
                 """
             txn.execute(sql, (last_user_id, batch_size))
-            return [r for r, in txn]
+            return [r for (r,) in txn]
 
         users_to_work_on = await self.db_pool.runInteraction(
             "_populate_stats_process_users", _get_next_batch
@@ -207,7 +207,7 @@ class StatsStore(StateDeltasStore):
                     LIMIT ?
                 """
             txn.execute(sql, (last_room_id, batch_size))
-            return [r for r, in txn]
+            return [r for (r,) in txn]
 
         rooms_to_work_on = await self.db_pool.runInteraction(
             "populate_stats_rooms_get_batch", _get_next_batch
@@ -751,9 +751,7 @@ class StatsStore(StateDeltasStore):
                 LEFT JOIN profiles AS p ON lmr.user_id = p.full_user_id
                 {}
                 GROUP BY lmr.user_id, displayname
-            """.format(
-                where_clause
-            )
+            """.format(where_clause)
 
             # SQLite does not support SELECT COUNT(*) OVER()
             sql = """

@@ -18,8 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-"""A replication client for use by synapse workers.
-"""
+"""A replication client for use by synapse workers."""
+
 import logging
 from typing import TYPE_CHECKING, Dict, Iterable, Optional, Set, Tuple
 

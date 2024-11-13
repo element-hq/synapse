@@ -41,6 +41,46 @@ logger = logging.getLogger(__name__)
 
 
 class SlidingSyncStore(SQLBaseStore):
+    async def get_latest_bump_stamp_for_room(
+        self,
+        room_id: str,
+    ) -> Optional[int]:
+        """
+        Get the `bump_stamp` for the room.
+
+        The `bump_stamp` is the `stream_ordering` of the last event according to the
+        `bump_event_types`. This helps clients sort more readily without them needing to
+        pull in a bunch of the timeline to determine the last activity.
+        `bump_event_types` is a thing because for example, we don't want display name
+        changes to mark the room as unread and bump it to the top. For encrypted rooms,
+        we just have to consider any activity as a bump because we can't see the content
+        and the client has to figure it out for themselves.
+
+        This should only be called where the server is participating
+        in the room (someone local is joined).
+
+        Returns:
+            The `bump_stamp` for the room (which can be `None`).
+        """
+
+        return cast(
+            Optional[int],
+            await self.db_pool.simple_select_one_onecol(
+                table="sliding_sync_joined_rooms",
+                keyvalues={"room_id": room_id},
+                retcol="bump_stamp",
+                # FIXME: This should be `False` once we bump `SCHEMA_COMPAT_VERSION` and run the
+                # foreground update for
+                # `sliding_sync_joined_rooms`/`sliding_sync_membership_snapshots` (tracked
+                # by https://github.com/element-hq/synapse/issues/17623)
+                #
+                # The should be `allow_none=False` in the future because event though
+                # `bump_stamp` itself can be `None`, we should have a row in the
+                # `sliding_sync_joined_rooms` table for any joined room.
+                allow_none=True,
+            ),
+        )
+
     async def persist_per_connection_state(
         self,
         user_id: str,
@@ -227,6 +267,15 @@ class SlidingSyncStore(SQLBaseStore):
                 (have_sent_room.status.value, have_sent_room.last_token)
             )
 
+        for (
+            room_id,
+            have_sent_room,
+        ) in per_connection_state.account_data._statuses.items():
+            key_values.append((connection_position, "account_data", room_id))
+            value_values.append(
+                (have_sent_room.status.value, have_sent_room.last_token)
+            )
+
         self.db_pool.simple_upsert_many_txn(
             txn,
             table="sliding_sync_connection_streams",
@@ -337,8 +386,8 @@ class SlidingSyncStore(SQLBaseStore):
         required_state_map: Dict[int, Dict[str, Set[str]]] = {}
         for row in rows:
             state = required_state_map[row[0]] = {}
-            for event_type, state_keys in db_to_json(row[1]):
-                state[event_type] = set(state_keys)
+            for event_type, state_key in db_to_json(row[1]):
+                state.setdefault(event_type, set()).add(state_key)
 
         # Get all the room configs, looking up the required state from the map
         # above.
@@ -367,6 +416,7 @@ class SlidingSyncStore(SQLBaseStore):
         # Now look up the per-room stream data.
         rooms: Dict[str, HaveSentRoom[str]] = {}
         receipts: Dict[str, HaveSentRoom[str]] = {}
+        account_data: Dict[str, HaveSentRoom[str]] = {}
 
         receipt_rows = self.db_pool.simple_select_list_txn(
             txn,
@@ -387,6 +437,8 @@ class SlidingSyncStore(SQLBaseStore):
                 rooms[room_id] = have_sent_room
             elif stream == "receipts":
                 receipts[room_id] = have_sent_room
+            elif stream == "account_data":
+                account_data[room_id] = have_sent_room
             else:
                 # For forwards compatibility we ignore unknown streams, as in
                 # future we want to be able to easily add more stream types.
@@ -395,6 +447,7 @@ class SlidingSyncStore(SQLBaseStore):
         return PerConnectionStateDB(
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
+            account_data=RoomStatusMap(account_data),
             room_configs=room_configs,
         )
 
@@ -412,6 +465,7 @@ class PerConnectionStateDB:
 
     rooms: "RoomStatusMap[str]"
     receipts: "RoomStatusMap[str]"
+    account_data: "RoomStatusMap[str]"
 
     room_configs: Mapping[str, "RoomSyncConfig"]
 
@@ -444,10 +498,21 @@ class PerConnectionStateDB:
             for room_id, status in per_connection_state.receipts.get_updates().items()
         }
 
+        account_data = {
+            room_id: HaveSentRoom(
+                status=status.status,
+                last_token=(
+                    str(status.last_token) if status.last_token is not None else None
+                ),
+            )
+            for room_id, status in per_connection_state.account_data.get_updates().items()
+        }
+
         log_kv(
             {
                 "rooms": rooms,
                 "receipts": receipts,
+                "account_data": account_data,
                 "room_configs": per_connection_state.room_configs.maps[0],
             }
         )
@@ -455,6 +520,7 @@ class PerConnectionStateDB:
         return PerConnectionStateDB(
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
+            account_data=RoomStatusMap(account_data),
             room_configs=per_connection_state.room_configs.maps[0],
         )
 
@@ -484,8 +550,19 @@ class PerConnectionStateDB:
             for room_id, status in self.receipts._statuses.items()
         }
 
+        account_data = {
+            room_id: HaveSentRoom(
+                status=status.status,
+                last_token=(
+                    int(status.last_token) if status.last_token is not None else None
+                ),
+            )
+            for room_id, status in self.account_data._statuses.items()
+        }
+
         return PerConnectionState(
             rooms=RoomStatusMap(rooms),
             receipts=RoomStatusMap(receipts),
+            account_data=RoomStatusMap(account_data),
             room_configs=self.room_configs,
         )

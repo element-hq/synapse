@@ -20,6 +20,7 @@
 #
 
 """Tests REST events for /profile paths."""
+
 import urllib.parse
 from http import HTTPStatus
 from typing import Any, Dict, Optional

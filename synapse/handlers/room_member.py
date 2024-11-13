@@ -1190,6 +1190,26 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
             origin_server_ts=origin_server_ts,
         )
 
+    async def check_for_any_membership_in_room(
+        self, *, user_id: str, room_id: str
+    ) -> None:
+        """
+        Check if the user has any membership in the room and raise error if not.
+
+        Args:
+            user_id: The user to check.
+            room_id: The room to check.
+
+        Raises:
+            AuthError if the user doesn't have any membership in the room.
+        """
+        result = await self.store.get_local_current_membership_for_user_in_room(
+            user_id=user_id, room_id=room_id
+        )
+
+        if result is None or result == (None, None):
+            raise AuthError(403, f"User {user_id} has no membership in room {room_id}")
+
     async def _should_perform_remote_join(
         self,
         user_id: str,
@@ -1302,11 +1322,11 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
         # If this is going to be a local join, additional information must
         # be included in the event content in order to efficiently validate
         # the event.
-        content[EventContentFields.AUTHORISING_USER] = (
-            await self.event_auth_handler.get_user_which_could_invite(
-                room_id,
-                state_before_join,
-            )
+        content[
+            EventContentFields.AUTHORISING_USER
+        ] = await self.event_auth_handler.get_user_which_could_invite(
+            room_id,
+            state_before_join,
         )
 
         return False, []
@@ -1415,9 +1435,9 @@ class RoomMemberHandler(metaclass=abc.ABCMeta):
 
         if requester is not None:
             sender = UserID.from_string(event.sender)
-            assert (
-                sender == requester.user
-            ), "Sender (%s) must be same as requester (%s)" % (sender, requester.user)
+            assert sender == requester.user, (
+                "Sender (%s) must be same as requester (%s)" % (sender, requester.user)
+            )
             assert self.hs.is_mine(sender), "Sender must be our own: %s" % (sender,)
         else:
             requester = types.create_requester(target_user)
