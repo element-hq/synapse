@@ -221,7 +221,7 @@ PUT /_synapse/admin/scim/v2/Users/@bjensen:test
 
 ### Delete user
 
-User deletion requests [deactivate](user_admin_api.md) users, with the `erase` option.
+User deletion requests [deactivate](admin_api/user_admin_api.md) users, with the `erase` option.
 
 #### Request
 
