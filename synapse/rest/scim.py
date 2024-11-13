@@ -72,14 +72,14 @@ except ImportError:
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
-SCIM_PREFIX = "/_matrix/client/unstable/coop.yaal/scim"
+SCIM_PREFIX = "/_synapse/admin/scim/v2"
 
 logger = logging.getLogger(__name__)
 
 
 class SCIMResource(JsonResource):
     """The REST resource which gets mounted at
-    /_matrix/client/unstable/coop.yaal/scim"""
+    /_synapse/admin/scim/v2"""
 
     def __init__(self, hs: "HomeServer"):
         JsonResource.__init__(self, hs, canonical_json=False)

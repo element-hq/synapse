@@ -3,7 +3,7 @@
 Synapse implements a basic subset of the SCIM 2.0 provisioning protocol as defined in [RFC7643](https://datatracker.ietf.org/doc/html/rfc7643) and [RFC7644](https://datatracker.ietf.org/doc/html/rfc7643).
 This allows Identity Provider software to update user attributes in a standard and centralized way.
 
-The SCIM endpoint is `/_matrix/client/unstable/coop.yaal/scim`.
+The SCIM endpoint is `/_synapse/admin/scim/v2`.
 
 <div class="warning">
 
@@ -33,7 +33,7 @@ Tools like [scim2-cli](https://scim2-cli.readthedocs.io) can be used to manually
 #### Request
 
 ```
-POST /_matrix/client/unstable/coop.yaal/scim/Users
+POST /_synapse/admin/scim/v2/Users
 ```
 
 ```json
@@ -64,7 +64,7 @@ POST /_matrix/client/unstable/coop.yaal/scim/Users
         "resourceType": "User",
         "created": "2024-07-22T16:59:16.326188+00:00",
         "lastModified": "2024-07-22T16:59:16.326188+00:00",
-        "location": "https://synapse.example/_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test",
+        "location": "https://synapse.example/_synapse/admin/scim/v2/Users/@bjensen:test",
     },
     "id": "@bjensen:test",
     "externalId": "@bjensen:test",
@@ -88,7 +88,7 @@ POST /_matrix/client/unstable/coop.yaal/scim/Users
 #### Request
 
 ```
-GET /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
+GET /_synapse/admin/scim/v2/Users/@bjensen:test
 ```
 
 #### Response
@@ -100,7 +100,7 @@ GET /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
         "resourceType": "User",
         "created": "2024-07-22T16:59:16.326188+00:00",
         "lastModified": "2024-07-22T16:59:16.326188+00:00",
-        "location": "https://synapse.example/_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test",
+        "location": "https://synapse.example/_synapse/admin/scim/v2/Users/@bjensen:test",
     },
     "id": "@bjensen:test",
     "externalId": "@bjensen:test",
@@ -126,7 +126,7 @@ GET /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
 Note that requests can be paginated using the `startIndex` and the `count` query string parameters:
 
 ```
-GET /_matrix/client/unstable/coop.yaal/scim/Users?startIndex=10&count=1
+GET /_synapse/admin/scim/v2/Users?startIndex=10&count=1
 ```
 
 #### Response
@@ -142,7 +142,7 @@ GET /_matrix/client/unstable/coop.yaal/scim/Users?startIndex=10&count=1
                 "resourceType": "User",
                 "created": "2024-07-22T16:59:16.326188+00:00",
                 "lastModified": "2024-07-22T16:59:16.326188+00:00",
-                "location": "https://synapse.example/_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test",
+                "location": "https://synapse.example/_synapse/admin/scim/v2/Users/@bjensen:test",
             },
             "id": "@bjensen:test",
             "externalId": "@bjensen:test",
@@ -168,7 +168,7 @@ GET /_matrix/client/unstable/coop.yaal/scim/Users?startIndex=10&count=1
 #### Request
 
 ```
-PUT /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
+PUT /_synapse/admin/scim/v2/Users/@bjensen:test
 ```
 
 ```json
@@ -200,7 +200,7 @@ PUT /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
         "resourceType": "User",
         "created": "2024-07-22T16:59:16.326188+00:00",
         "lastModified": "2024-07-22T17:34:12.834684+00:00",
-        "location": "https://synapse.example/_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test",
+        "location": "https://synapse.example/_synapse/admin/scim/v2/Users/@bjensen:test",
     },
     "id": "@bjensen:test",
     "externalId": "@bjensen:test",
@@ -221,12 +221,12 @@ PUT /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
 
 ### Delete user
 
-User deletion requests [deactivate](user_admin_api.md#deactivate-account) users, with the `erase` option.
+User deletion requests [deactivate](user_admin_api.md) users, with the `erase` option.
 
 #### Request
 
 ```
-DELETE /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
+DELETE /_synapse/admin/scim/v2/Users/@bjensen:test
 ```
 
 ## Implementation details

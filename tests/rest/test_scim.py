@@ -23,7 +23,7 @@ class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
         synapse.rest.scim.register_servlets,
         login.register_servlets,
     ]
-    url = "/_matrix/client/unstable/coop.yaal/scim"
+    url = "/_synapse/admin/scim/v2"
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.store = hs.get_datastores().main
@@ -74,7 +74,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
         synapse.rest.scim.register_servlets,
         login.register_servlets,
     ]
-    url = "/_matrix/client/unstable/coop.yaal/scim"
+    url = "/_synapse/admin/scim/v2"
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
@@ -130,7 +130,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     "resourceType": "User",
                     "created": mock.ANY,
                     "lastModified": mock.ANY,
-                    "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@user:test",
+                    "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
                 },
                 "id": "@user:test",
                 "userName": "user",
@@ -188,7 +188,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     "resourceType": "User",
                     "created": mock.ANY,
                     "lastModified": mock.ANY,
-                    "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@user:test",
+                    "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
                 },
                 "id": "@user:test",
                 "externalId": "@user:test",
@@ -230,7 +230,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     "resourceType": "User",
                     "created": mock.ANY,
                     "lastModified": mock.ANY,
-                    "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@user:test",
+                    "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
                 },
                 "id": "@user:test",
                 "userName": "user",
@@ -358,7 +358,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 "resourceType": "User",
                 "created": mock.ANY,
                 "lastModified": mock.ANY,
-                "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test",
+                "location": "https://test/_synapse/admin/scim/v2/Users/@bjensen:test",
             },
             "id": "@bjensen:test",
             "externalId": "@bjensen:test",
@@ -431,7 +431,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     "resourceType": "User",
                     "created": mock.ANY,
                     "lastModified": mock.ANY,
-                    "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@user:test",
+                    "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
                 },
                 "id": "@user:test",
                 "userName": "user",
@@ -479,7 +479,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 "resourceType": "User",
                 "created": mock.ANY,
                 "lastModified": mock.ANY,
-                "location": "https://test/_matrix/client/unstable/coop.yaal/scim/Users/@user:test",
+                "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
             },
             "id": "@user:test",
             "externalId": "@user:test",
@@ -545,7 +545,7 @@ class SCIMMetadataTestCase(HomeserverTestCase):
         synapse.rest.scim.register_servlets,
         login.register_servlets,
     ]
-    url = "/_matrix/client/unstable/coop.yaal/scim"
+    url = "/_synapse/admin/scim/v2"
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
