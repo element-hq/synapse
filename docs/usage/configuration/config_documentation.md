@@ -364,7 +364,7 @@ enable_search: false
 ---
 ### `ip_range_blacklist`
 
-*(array|null)* This option prevents outgoing requests from being sent to the specified blacklisted IP address CIDR ranges. If this option is not specified then it defaults to private IP address ranges (see the example below).
+*(array)* This option prevents outgoing requests from being sent to the specified blacklisted IP address CIDR ranges. If this option is not specified then it defaults to private IP address ranges (see the example below).
 
 The blacklist applies to the outbound requests for federation, identity servers, push servers, and for checking key validity for third-party invite events.
 
@@ -374,9 +374,7 @@ This option replaces `federation_ip_range_blacklist` in Synapse v1.25.0.
 
 Note: The value is ignored when an HTTP proxy is in use.
 
-Defaults to `null`.
-
-Example configuration:
+Default configuration:
 ```yaml
 ip_range_blacklist:
 - 127.0.0.0/8
@@ -822,7 +820,7 @@ server_context: context
 ---
 ### `limit_remote_rooms`
 
-*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained.
+*(object)* When this option is enabled, the room "complexity" will be checked before a user joins a new remote room. If it is above the complexity limit, the server will disallow joining, or will instantly leave. This is useful for homeservers that are resource-constrained. Room complexity is an arbitrary measure based on factors such as the number of users in the room.
 
 This setting has the following sub-options:
 
