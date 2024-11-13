@@ -1,15 +1,32 @@
 # SCIM API
 
-Synapse implement a basic subset of the SCIM 2.0 provisioning protocol as defined in [RFC7643](https://datatracker.ietf.org/doc/html/rfc7643) and [RFC7644](https://datatracker.ietf.org/doc/html/rfc7643).
+Synapse implements a basic subset of the SCIM 2.0 provisioning protocol as defined in [RFC7643](https://datatracker.ietf.org/doc/html/rfc7643) and [RFC7644](https://datatracker.ietf.org/doc/html/rfc7643).
 This allows Identity Provider software to update user attributes in a standard and centralized way.
 
 The SCIM endpoint is `/_matrix/client/unstable/coop.yaal/scim`.
 
+<div class="warning">
+
+The synapse SCIM API is an experimental feature, and it is disabled by default.
+It might be removed someday in favor of an implementation in the [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service).
+
+</div>
+
 ## Installation
 
-SCIM support for Synapse requires python 3.9+. The `matrix-synapse` package should be installed with the `scim` extra.
+SCIM support for Synapse requires python 3.9+. The `matrix-synapse` package should be installed with the `scim` extra. e.g. with `pip install matrix-synapse[scim]`.
+
+Then it must be explicitly enabled by configuration:
+
+```yaml
+experimental_features:
+    msc4098: true
+```
 
 ## Examples
+
+This sections presents examples of SCIM requests and responses that are supported by the synapse implementation.
+Tools like [scim2-cli](https://scim2-cli.readthedocs.io) can be used to manually build payloads and send requests to the SCIM endpoint.
 
 ### Create user
 
@@ -203,6 +220,8 @@ PUT /_matrix/client/unstable/coop.yaal/scim/Users/@bjensen:test
 ```
 
 ### Delete user
+
+User deletion requests [deactivate](user_admin_api.md#deactivate-account) users, with the `erase` option.
 
 #### Request
 
