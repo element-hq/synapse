@@ -11,28 +11,28 @@ a Synapse installation.
 
 Keep a copy of your configuration file (`homeserver.yaml`), as well as any
 auxiliary config files it refers to such as the
-[`log_config`](../configuration/config_documentation.html#log_config) file,
-[`app_service_config_files`](../configuration/config_documentation.html#app_service_config_files).
+[`log_config`](../configuration/config_documentation.md#log_config) file,
+[`app_service_config_files`](../configuration/config_documentation.md#app_service_config_files).
 Often, all such config files will be kept in a single directory such as
 `/etc/synapse`, which will make this easier.
 
 ## Server signing key
 
 Your server has a [signing
-key](../configuration/config_documentation.html#signing_key_path) which it uses
+key](../configuration/config_documentation.md#signing_key_path) which it uses
 to sign events and outgoing federation requests. It is easiest to back it up
 with your configuration files, but an alternative is to have Synapse create a
 new signing key if you have to restore.
 
 If you do decide to replace the signing key, you should add the old *public*
 key to
-[`old_signing_keys`](../configuration/config_documentation.html#old_signing_keys).
+[`old_signing_keys`](../configuration/config_documentation.md#old_signing_keys).
 
 ## Database
 
 Synapse's support for SQLite is only suitable for testing purposes, so for the
 purposes of this document, we'll assume you are using
-[PostgreSQL](https://element-hq.github.io/synapse/latest/postgres.html).
+[PostgreSQL](../../postgres.md).
 
 A full discussion of backup strategies for PostgreSQL is out of scope for this
 document; see the [PostgreSQL
@@ -69,8 +69,8 @@ sudo -u postgres pg_dump -Fc --exclude-table-data e2e_one_time_keys_json synapse
 There is no need to stop Postgres or Synapse while `pg_dump` is running: it
 will take a consistent snapshot of the databse.
 
-To restore, you will need to recreate the database as describe in [Using
-Postgres](https://element-hq.github.io/synapse/latest/postgres.html),
+To restore, you will need to recreate the database as described in [Using
+Postgres](../../postgres.md#set-up-database),
 then load the dump into it with `pg_restore`:
 
 ```shell
@@ -91,7 +91,7 @@ recommend studying the PostgreSQL documentation on backup options.
 
 Synapse keeps a copy of media uploaded by users, including avatars and message
 attachments, in its [Media
-store](../configuration/config_documentation.html#media-store).
+store](../configuration/config_documentation.md#media-store).
 
 It is a directory on the local disk, containing the following directories:
 
@@ -101,7 +101,7 @@ It is a directory on the local disk, containing the following directories:
    see errors when viewing user or room avatars, and messages with attachments.
 
  * `local_thumbnails`: "thumbnails" of images uploaded by your users. If
-   [`dynamic_thumbnails`](../configuration/config_documentation.html#dynamic_thumbnails)
+   [`dynamic_thumbnails`](../configuration/config_documentation.md#dynamic_thumbnails)
    is enabled, these will be regenerated if they are removed from the disk, and
    there is therefore no need to back them up.
 
@@ -121,5 +121,5 @@ It is a directory on the local disk, containing the following directories:
     up.
 
  * `url_cache`, `url_cache_thumbnails`: temporary caches of files downloaded
-   by the [URL previews](../../setup/installation.html#url-previews) feature.
+   by the [URL previews](../../setup/installation.md#url-previews) feature.
    These do not need to be backed up.
