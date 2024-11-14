@@ -3128,6 +3128,15 @@ it was last used.
 It is possible to build an entry from an old `signing.key` file using the
 `export_signing_key` script which is provided with synapse.
 
+If you have lost the private key file, you can ask another server you trust to
+tell you the public keys it has seen from your server. To fetch the keys from
+`matrix.org`, try something like:
+
+```
+curl https://matrix-federation.matrix.org/_matrix/key/v2/query/myserver.example.com |
+  jq '.server_keys | map(.verify_keys) | add'
+```
+
 Example configuration:
 ```yaml
 old_signing_keys:
@@ -4391,9 +4400,9 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them. 
+balanced across them.
 
-The way that the load balancing works is any outbound federation request will be assigned 
+The way that the load balancing works is any outbound federation request will be assigned
 to a federation sender worker based on the hash of the destination server name. This
 means that all requests being sent to the same destination will be processed by the same
 worker instance. Multiple `federation_sender_instances` are useful if there is a federation
@@ -4750,7 +4759,7 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match 
+* `worker_to_run_on`: Which worker to run this module on. This must match
   the "worker_name". If not set or `null`, invites will be accepted on the
   main process.
 

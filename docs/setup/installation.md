@@ -656,6 +656,10 @@ This also requires the optional `lxml` python dependency to be  installed. This
 in turn requires the `libxml2` library to be available - on  Debian/Ubuntu this
 means `apt-get install libxml2-dev`, or equivalent for your OS.
 
+### Backups
+
+Don't forget to take [backups](../usage/adminstration/backups.md) of your new server!
+
 ### Troubleshooting Installation
 
 `pip` seems to leak *lots* of memory during installation. For instance, a Linux
