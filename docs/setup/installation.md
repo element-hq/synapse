@@ -658,7 +658,7 @@ means `apt-get install libxml2-dev`, or equivalent for your OS.
 
 ### Backups
 
-Don't forget to take [backups](../usage/adminstration/backups.md) of your new server!
+Don't forget to take [backups](../usage/administration/backups.md) of your new server!
 
 ### Troubleshooting Installation
 
