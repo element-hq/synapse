@@ -1453,6 +1453,46 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
+    async def delete_old_otks_for_one_user(self, after_user_id: str) -> Tuple[Optional[str], int]:
+        """Deletes old OTKs belonging to one user.
+
+        Returns:
+            `(user, rows)`, where:
+             * `user` is the user ID of the updated user, or None if we are don
+             * `rows` is the number of deleted rows
+        """
+        def impl(txn: LoggingTransaction) -> Tuple[Optional[str], int]:
+            # Find the next user
+            txn.execute(
+                """
+                SELECT user_id FROM e2e_one_time_keys_json WHERE user_id > ? LIMIT 1
+                """,
+                (after_user_id,),
+            )
+            row = txn.fetchone()
+            if not row:
+                # We're done!
+                return None, 0
+            (user_id,) = row
+
+            # Delete any old OTKs belonging to that user.
+            #
+            # We only actually consider OTKs whose key ID is 6 characters long. These
+            # keys were likely made by libolm rather than Vodozemac; libolm only kept
+            # 100 private OTKs, so was far more vulnerable than Vodozemac to throwing
+            # away keys prematurely.
+            txn.execute(
+                """
+                DELETE FROM e2e_one_time_keys_json
+                WHERE user_id = ? AND ts_added_ms < ? AND length(key_id) = 6
+                """,
+                (user_id, self._clock.time_msec() - (7 * 24 * 3600 * 1000)),
+            )
+
+            return user_id, txn.rowcount
+
+        return await self.db_pool.runInteraction("delete_old_otks_for_one_user", impl)
+
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(

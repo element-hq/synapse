@@ -39,6 +39,8 @@ from synapse.replication.http.devices import ReplicationUploadKeysForUserRestSer
 from synapse.types import (
     JsonDict,
     JsonMapping,
+    ScheduledTask,
+    TaskStatus,
     UserID,
     get_domain_from_id,
     get_verify_key_from_cross_signing_key,
@@ -70,6 +72,7 @@ class E2eKeysHandler:
         self.is_mine = hs.is_mine
         self.clock = hs.get_clock()
         self._worker_lock_handler = hs.get_worker_locks_handler()
+        self._task_scheduler = hs.get_task_scheduler()
 
         federation_registry = hs.get_federation_registry()
 
@@ -114,6 +117,10 @@ class E2eKeysHandler:
         )
         self._query_appservices_for_keys = (
             hs.config.experimental.msc3984_appservice_key_query
+        )
+
+        self._task_scheduler.register_action(
+            self._delete_old_one_time_keys_task, "delete_old_otks"
         )
 
     @trace
@@ -1573,6 +1580,34 @@ class E2eKeysHandler:
                 if existing_key != body[req_body_key]:
                     return True
         return False
+
+    async def _delete_old_one_time_keys_task(
+        self, task: ScheduledTask
+    ) -> Tuple[TaskStatus, Optional[JsonMapping], Optional[str]]:
+        """Scheduler task to delete old one time keys.
+
+        Until Synapse 1.119, Synapse used to issue one-time-keys in a random order, leading to the possibility
+        that it could still have old OTKs that the client has dropped. This task is scheduled exactly once
+        by a database schema delta file, and it clears out old one-time-keys that look like they came from libolm.
+        """
+        user = task.result.get("from_user", "") if task.result else ""
+        while True:
+            user, rowcount = await self.store.delete_old_otks_for_one_user(user)
+            if user is None:
+                # We're done!
+                return TaskStatus.COMPLETE, None, None
+
+            logger.debug("Deleted %i old one-time-keys for user '%s'", rowcount, user)
+
+            # Store our progress
+            await self._task_scheduler.update_task(task.id, result={"from_user": user})
+
+            # Sleep a little before doing the next user.
+            #
+            # matrix.org has about 15M users in the e2e_one_time_keys_json table
+            # (comprising 20M devices). We want this to take about a week, so we need
+            # to do 25 per second.
+            await self.clock.sleep(0.04)
 
 
 def _check_cross_signing_key(
