@@ -689,12 +689,12 @@ async def filter_events_for_server(
     to_return = []
     for e in events:
         if event_visible_to_server(
-            e.sender,
-            target_server_name,
-            event_to_history_vis[e.event_id],
-            erased_senders,
-            e.event_id in partial_state_invisible_event_ids,
-            list(event_to_memberships.get(e.event_id, {}).values()),
+            sender=e.sender,
+            target_server_name=target_server_name,
+            history_visibility=event_to_history_vis[e.event_id],
+            erased_senders=erased_senders,
+            partial_state_invisible=e.event_id in partial_state_invisible_event_ids,
+            memberships=list(event_to_memberships.get(e.event_id, {}).values()),
         ):
             to_return.append(e)
         elif redact:
