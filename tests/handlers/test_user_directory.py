@@ -796,6 +796,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
+        # Kept old spam checker without `requester_id` tests for backwards compatibility.
         async def allow_all(user_profile: UserProfile) -> bool:
             # Allow all users.
             return False
@@ -809,6 +810,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
+        # Kept old spam checker without `requester_id` tests for backwards compatibility.
         # Configure a spam checker that filters all users.
         async def block_all(user_profile: UserProfile) -> bool:
             # All users are spammy.
@@ -823,6 +825,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         async def allow_all_expects_requester_id(
             user_profile: UserProfile, requester_id: str
         ) -> bool:
+            self.assertIsInstance(requester_id, str)
             # Allow all users.
             return False
 
@@ -841,6 +844,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         async def block_all_expects_requester_id(
             user_profile: UserProfile, requester_id: str
         ) -> bool:
+            self.assertIsInstance(requester_id, str)
             # All users are spammy.
             return True
 
