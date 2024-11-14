@@ -36,7 +36,7 @@ from typing import (
 )
 
 import attr
-import multipart
+import python_multipart
 import treq
 from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
