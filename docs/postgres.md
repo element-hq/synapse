@@ -102,7 +102,7 @@ database:
 
 ## Backups
 
-Don't forget to [back up](./usage/administration/backups.md#Database) your database!
+Don't forget to [back up](./usage/administration/backups.md#database) your database!
 
 ## Tuning Postgres
 
