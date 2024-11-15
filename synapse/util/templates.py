@@ -23,7 +23,7 @@
 
 import time
 import urllib.parse
-from typing import TYPE_CHECKING, Callable, Optional, Sequence, Union
+from typing import TYPE_CHECKING, Callable, Dict, Optional, Sequence, Union
 
 import jinja2
 
@@ -81,6 +81,33 @@ def build_jinja_env(
     return env
 
 
+def mxc_to_http(
+    public_baseurl: Optional[str],
+    value: str,
+    params: Optional[Dict] = None,
+) -> str:
+    if not public_baseurl:
+        raise RuntimeError(
+            "public_baseurl must be set in the homeserver config to convert MXC URLs to HTTP URLs."
+        )
+
+    if value[0:6] != "mxc://":
+        return ""
+
+    server_and_media_id = value[6:]
+    fragment = None
+    if "#" in server_and_media_id:
+        server_and_media_id, fragment = server_and_media_id.split("#", 1)
+        fragment = "#" + fragment
+
+    return "%s_matrix/media/v1/thumbnail/%s%s%s" % (
+        public_baseurl,
+        server_and_media_id,
+        "?" + urllib.parse.urlencode(params) if params else "",
+        fragment or "",
+    )
+
+
 def _create_mxc_to_http_filter(
     public_baseurl: Optional[str],
 ) -> Callable[[str, int, int, str], str]:
@@ -93,27 +120,8 @@ def _create_mxc_to_http_filter(
     def mxc_to_http_filter(
         value: str, width: int, height: int, resize_method: str = "crop"
     ) -> str:
-        if not public_baseurl:
-            raise RuntimeError(
-                "public_baseurl must be set in the homeserver config to convert MXC URLs to HTTP URLs."
-            )
-
-        if value[0:6] != "mxc://":
-            return ""
-
-        server_and_media_id = value[6:]
-        fragment = None
-        if "#" in server_and_media_id:
-            server_and_media_id, fragment = server_and_media_id.split("#", 1)
-            fragment = "#" + fragment
-
         params = {"width": width, "height": height, "method": resize_method}
-        return "%s_matrix/media/v1/thumbnail/%s?%s%s" % (
-            public_baseurl,
-            server_and_media_id,
-            urllib.parse.urlencode(params),
-            fragment or "",
-        )
+        return mxc_to_http(public_baseurl, value, params)
 
     return mxc_to_http_filter
 
