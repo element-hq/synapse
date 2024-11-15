@@ -815,13 +815,19 @@ class SlidingSyncHandler:
 
             stripped_state = []
             if invite_or_knock_event.membership == Membership.INVITE:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("invite_room_state", [])
+                invite_state = invite_or_knock_event.unsigned.get(
+                    "invite_room_state", []
                 )
+                if not isinstance(invite_state, list):
+                    invite_state = []
+
+                stripped_state.extend(invite_state)
             elif invite_or_knock_event.membership == Membership.KNOCK:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("knock_room_state", [])
-                )
+                knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
+                if not isinstance(knock_state, list):
+                    knock_state = []
+
+                stripped_state.extend(knock_state)
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
