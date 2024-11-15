@@ -1,4 +1,5 @@
 from unittest import mock
+from unittest.mock import Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -12,6 +13,7 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
+from tests.handlers.test_profile import mock_get_file
 from tests.unittest import HomeserverTestCase, skip_unless
 from tests.utils import default_config
 
@@ -75,6 +77,17 @@ class UserProvisioningTestCase(HomeserverTestCase):
         login.register_servlets,
     ]
     url = "/_synapse/admin/scim/v2"
+    maxDiff = None
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.http_client = Mock(spec=["get_file"])
+        self.http_client.get_file.side_effect = mock_get_file
+        self.http_client.user_agent = b"Synapse Test"
+
+        hs = self.setup_test_homeserver(
+            proxied_blocklisted_http_client=self.http_client,
+        )
+        return hs
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
@@ -108,7 +121,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
         self.get_success(
             self.store.set_profile_avatar_url(
                 UserID.from_string(self.user_user_id),
-                "https://mydomain.tld/photo.webp",
+                "mxc://servername/mediaid",
             )
         )
 
@@ -143,7 +156,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     {
                         "type": "photo",
                         "primary": True,
-                        "value": "https://mydomain.tld/photo.webp",
+                        "value": "https://test/_matrix/media/v1/thumbnail/servername/mediaid",
                     }
                 ],
             },
@@ -200,7 +213,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     {
                         "type": "photo",
                         "primary": True,
-                        "value": "https://mydomain.tld/photo.webp",
+                        "value": "https://test/_matrix/media/v1/thumbnail/servername/mediaid",
                     }
                 ],
             },
@@ -243,7 +256,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     {
                         "type": "photo",
                         "primary": True,
-                        "value": "https://mydomain.tld/photo.webp",
+                        "value": "https://test/_matrix/media/v1/thumbnail/servername/mediaid",
                     }
                 ],
             }
@@ -337,7 +350,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 {
                     "type": "photo",
                     "primary": True,
-                    "value": "https://mydomain.tld/photo.webp",
+                    "value": "http://my.server/me.png",
                 }
             ],
             "active": True,
@@ -370,12 +383,16 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 {
                     "type": "photo",
                     "primary": True,
-                    "value": "https://mydomain.tld/photo.webp",
+                    "value": mock.ANY,
                 }
             ],
             "displayName": "bjensen display name",
         }
         self.assertEqual(expected, channel.json_body)
+        self.assertSubstring(
+            "https://test/_matrix/media/v1/thumbnail/test/",
+            channel.json_body["photos"][0]["value"],
+        )
 
         channel = self.make_request(
             "GET",
@@ -443,7 +460,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     {
                         "type": "photo",
                         "primary": True,
-                        "value": "https://mydomain.tld/photo.webp",
+                        "value": "https://test/_matrix/media/v1/thumbnail/servername/mediaid",
                     }
                 ],
                 "active": True,
@@ -462,7 +479,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 {
                     "type": "photo",
                     "primary": True,
-                    "value": "https://mydomain.tld/photo.webp",
+                    "value": "http://my.server/me.png",
                 }
             ],
         }
@@ -494,11 +511,15 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 {
                     "type": "photo",
                     "primary": True,
-                    "value": "https://mydomain.tld/photo.webp",
+                    "value": mock.ANY,
                 }
             ],
         }
         self.assertEqual(expected, channel.json_body)
+        self.assertSubstring(
+            "https://test/_matrix/media/v1/thumbnail/test/",
+            channel.json_body["photos"][0]["value"],
+        )
 
         channel = self.make_request(
             "GET",
@@ -523,7 +544,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 {
                     "type": "photo",
                     "primary": True,
-                    "value": "https://mydomain.tld/photo.webp",
+                    "value": "http://my.server/me.png",
                 }
             ],
         }

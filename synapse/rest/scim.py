@@ -41,6 +41,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin._base import assert_requester_is_admin, assert_user_is_admin
 from synapse.types import JsonDict, UserID
+from synapse.util.templates import mxc_to_http
 
 try:
     # As of version 0.2, scim2-models requires Pydantic 2.7+ but synapse only require Pydantic 1.7
@@ -193,11 +194,14 @@ class SCIMServlet(RestServlet):
         )
 
         if profile.avatar_url:
+            http_url = mxc_to_http(
+                self.hs.config.server.public_baseurl, profile.avatar_url
+            )
             scim_user.photos = [
                 Photo(
                     type=Photo.Type.photo,
                     primary=True,
-                    value=profile.avatar_url,
+                    value=http_url,
                 )
             ]
 
@@ -278,8 +282,19 @@ class UserServlet(SCIMServlet):
             )
 
             if user.photos and user.photos[0].value:
-                await self.profile_handler.set_avatar_url(
-                    user_id_obj, requester, str(user.photos[0].value), True
+                media_repo = (
+                    self.hs.get_media_repository()
+                    if self.hs.config.media.can_load_media_repo
+                    else None
+                )
+                http_client = self.hs.get_proxied_blocklisted_http_client()
+
+                await self.profile_handler.set_avatar_from_http_url(
+                    user_id,
+                    str(user.photos[0].value),
+                    media_repo,
+                    http_client,
+                    "scim_",
                 )
 
             if threepids is not None:
@@ -381,48 +396,62 @@ class UserListServlet(SCIMServlet):
             await assert_user_is_admin(self.auth, requester)
 
             body = parse_json_object_from_request(request)
-            user = User.model_validate(body, scim_ctx=Context.RESOURCE_CREATION_REQUEST)
+            request_user = User.model_validate(
+                body, scim_ctx=Context.RESOURCE_CREATION_REQUEST
+            )
 
             from synapse.rest.client.register import RegisterRestServlet
 
             register = RegisterRestServlet(self.hs)
 
             password_hash = (
-                await self.auth_handler.hash(user.password) if user.password else None
+                await self.auth_handler.hash(request_user.password)
+                if request_user.password
+                else None
             )
             user_id = await register.registration_handler.register_user(
                 by_admin=True,
                 approved=True,
-                localpart=user.user_name,
+                localpart=request_user.user_name,
                 password_hash=password_hash,
-                default_display_name=user.display_name,
+                default_display_name=request_user.display_name,
             )
 
             now_ts = self.hs.get_clock().time_msec()
-            if user.emails:
-                for email in user.emails:
+            if request_user.emails:
+                for email in request_user.emails:
                     if email.value:
                         await self.store.user_add_threepid(
                             user_id, "email", email.value, now_ts, now_ts
                         )
 
-            if user.phone_numbers:
-                for phone_number in user.phone_numbers:
+            if request_user.phone_numbers:
+                for phone_number in request_user.phone_numbers:
                     if phone_number.value:
                         await self.store.user_add_threepid(
                             user_id, "msisdn", phone_number.value, now_ts, now_ts
                         )
 
-            if user.photos and user.photos[0].value:
-                await self.profile_handler.set_avatar_url(
-                    UserID.from_string(user_id),
-                    requester,
-                    str(user.photos[0].value),
-                    True,
+            if request_user.photos and request_user.photos[0].value:
+                media_repo = (
+                    self.hs.get_media_repository()
+                    if self.hs.config.media.can_load_media_repo
+                    else None
+                )
+                http_client = self.hs.get_proxied_blocklisted_http_client()
+
+                await self.profile_handler.set_avatar_from_http_url(
+                    user_id,
+                    str(request_user.photos[0].value),
+                    media_repo,
+                    http_client,
+                    "scim_",
                 )
 
-            user = await self.get_scim_user(user_id)
-            payload = user.model_dump(scim_ctx=Context.RESOURCE_CREATION_RESPONSE)
+            response_user = await self.get_scim_user(user_id)
+            payload = response_user.model_dump(
+                scim_ctx=Context.RESOURCE_CREATION_RESPONSE
+            )
             return HTTPStatus.CREATED, payload
 
         except SynapseError as exc:
