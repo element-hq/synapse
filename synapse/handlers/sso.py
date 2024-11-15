@@ -19,8 +19,6 @@
 #
 #
 import abc
-import hashlib
-import io
 import logging
 from typing import (
     TYPE_CHECKING,
@@ -528,7 +526,13 @@ class SsoHandler:
                             user_id_obj, requester, attributes.display_name, True
                         )
                 if attributes.picture:
-                    await self.set_avatar(user_id, attributes.picture)
+                    await self._profile_handler.set_avatar_from_http_url(
+                        user_id,
+                        attributes.picture,
+                        self._media_repo,
+                        self._http_client,
+                        "sso_avatar_",
+                    )
 
         await self._auth_handler.complete_sso_login(
             user_id,
@@ -743,106 +747,15 @@ class SsoHandler:
 
         # Set avatar, if available
         if attributes.picture:
-            await self.set_avatar(registered_user_id, attributes.picture)
+            await self._profile_handler.set_avatar_from_http_url(
+                registered_user_id,
+                attributes.picture,
+                self._media_repo,
+                self._http_client,
+                "sso_avatar_",
+            )
 
         return registered_user_id
-
-    async def set_avatar(self, user_id: str, picture_https_url: str) -> bool:
-        """Set avatar of the user.
-
-        This downloads the image file from the URL provided, stores that in
-        the media repository and then sets the avatar on the user's profile.
-
-        It can detect if the same image is being saved again and bails early by storing
-        the hash of the file in the `upload_name` of the avatar image.
-
-        Currently, it only supports server configurations which run the media repository
-        within the same process.
-
-        It silently fails and logs a warning by raising an exception and catching it
-        internally if:
-         * it is unable to fetch the image itself (non 200 status code) or
-         * the image supplied is bigger than max allowed size or
-         * the image type is not one of the allowed image types.
-
-        Args:
-            user_id: matrix user ID in the form @localpart:domain as a string.
-
-            picture_https_url: HTTPS url for the picture image file.
-
-        Returns: `True` if the user's avatar has been successfully set to the image at
-            `picture_https_url`.
-        """
-        if self._media_repo is None:
-            logger.info(
-                "failed to set user avatar because out-of-process media repositories "
-                "are not supported yet "
-            )
-            return False
-
-        try:
-            uid = UserID.from_string(user_id)
-
-            def is_allowed_mime_type(content_type: str) -> bool:
-                if (
-                    self._profile_handler.allowed_avatar_mimetypes
-                    and content_type
-                    not in self._profile_handler.allowed_avatar_mimetypes
-                ):
-                    return False
-                return True
-
-            # download picture, enforcing size limit & mime type check
-            picture = io.BytesIO()
-
-            content_length, headers, uri, code = await self._http_client.get_file(
-                url=picture_https_url,
-                output_stream=picture,
-                max_size=self._profile_handler.max_avatar_size,
-                is_allowed_content_type=is_allowed_mime_type,
-            )
-
-            if code != 200:
-                raise Exception(
-                    f"GET request to download sso avatar image returned {code}"
-                )
-
-            # upload name includes hash of the image file's content so that we can
-            # easily check if it requires an update or not, the next time user logs in
-            upload_name = "sso_avatar_" + hashlib.sha256(picture.read()).hexdigest()
-
-            # bail if user already has the same avatar
-            profile = await self._profile_handler.get_profile(user_id)
-            if profile["avatar_url"] is not None:
-                server_name = profile["avatar_url"].split("/")[-2]
-                media_id = profile["avatar_url"].split("/")[-1]
-                if self._is_mine_server_name(server_name):
-                    media = await self._media_repo.store.get_local_media(media_id)  # type: ignore[has-type]
-                    if media is not None and upload_name == media.upload_name:
-                        logger.info("skipping saving the user avatar")
-                        return True
-
-            # store it in media repository
-            avatar_mxc_url = await self._media_repo.create_content(
-                media_type=headers[b"Content-Type"][0].decode("utf-8"),
-                upload_name=upload_name,
-                content=picture,
-                content_length=content_length,
-                auth_user=uid,
-            )
-
-            # save it as user avatar
-            await self._profile_handler.set_avatar_url(
-                uid,
-                create_requester(uid),
-                str(avatar_mxc_url),
-            )
-
-            logger.info("successfully saved the user avatar")
-            return True
-        except Exception:
-            logger.warning("failed to save the user avatar")
-            return False
 
     async def complete_sso_ui_auth_request(
         self,

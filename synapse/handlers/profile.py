@@ -18,6 +18,8 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
+import io
 import logging
 import random
 from typing import TYPE_CHECKING, List, Optional, Union
@@ -30,6 +32,8 @@ from synapse.api.errors import (
     StoreError,
     SynapseError,
 )
+from synapse.http.client import SimpleHttpClient
+from synapse.media.media_repository import MediaRepository
 from synapse.storage.databases.main.media_repository import LocalMedia, RemoteMedia
 from synapse.types import JsonDict, Requester, UserID, create_requester
 from synapse.util.caches.descriptors import cached
@@ -398,6 +402,112 @@ class ProfileHandler:
                 return False
 
         return True
+
+    async def set_avatar_from_http_url(
+        self,
+        user_id: str,
+        picture_https_url: str,
+        media_repo: Optional[MediaRepository],
+        http_client: SimpleHttpClient,
+        upload_name_prefix: str = "",
+    ) -> bool:
+        """Set avatar of the user.
+
+        This downloads the image file from the URL provided, stores that in
+        the media repository and then sets the avatar on the user's profile.
+
+        It can detect if the same image is being saved again and bails early by storing
+        the hash of the file in the `upload_name` of the avatar image.
+
+        Currently, it only supports server configurations which run the media repository
+        within the same process.
+
+        It silently fails and logs a warning by raising an exception and catching it
+        internally if:
+         * it is unable to fetch the image itself (non 200 status code) or
+         * the image supplied is bigger than max allowed size or
+         * the image type is not one of the allowed image types.
+
+        Args:
+            user_id: matrix user ID in the form @localpart:domain as a string.
+
+            picture_https_url: HTTPS url for the picture image file.
+            media_repo: The media repository in which to store the downloaded picture.
+            http_client: The client used to download the picture.
+            upload_name_prefix: A prefix to the name of the uploaded file.
+
+        Returns: `True` if the user's avatar has been successfully set to the image at
+            `picture_https_url`.
+        """
+        if media_repo is None:
+            logger.info(
+                "failed to set user avatar because out-of-process media repositories "
+                "are not supported yet "
+            )
+            return False
+
+        try:
+            uid = UserID.from_string(user_id)
+
+            def is_allowed_mime_type(content_type: str) -> bool:
+                if (
+                    self.allowed_avatar_mimetypes
+                    and content_type not in self.allowed_avatar_mimetypes
+                ):
+                    return False
+                return True
+
+            # download picture, enforcing size limit & mime type check
+            picture = io.BytesIO()
+
+            content_length, headers, uri, code = await http_client.get_file(
+                url=picture_https_url,
+                output_stream=picture,
+                max_size=self.max_avatar_size,
+                is_allowed_content_type=is_allowed_mime_type,
+            )
+
+            if code != 200:
+                raise Exception(f"GET request to download avatar image returned {code}")
+
+            # upload name includes hash of the image file's content so that we can
+            # easily check if it requires an update or not, the next time user logs in
+            upload_name = (
+                upload_name_prefix + hashlib.sha256(picture.read()).hexdigest()
+            )
+
+            # bail if user already has the same avatar
+            profile = await self.get_profile(user_id)
+            if profile["avatar_url"] is not None:
+                server_name = profile["avatar_url"].split("/")[-2]
+                media_id = profile["avatar_url"].split("/")[-1]
+                if self._is_mine_server_name(server_name):
+                    media = await media_repo.store.get_local_media(media_id)
+                    if media is not None and upload_name == media.upload_name:
+                        logger.info("skipping saving the user avatar")
+                        return True
+
+            # store it in media repository
+            avatar_mxc_url = await media_repo.create_content(
+                media_type=headers[b"Content-Type"][0].decode("utf-8"),
+                upload_name=upload_name,
+                content=picture,
+                content_length=content_length,
+                auth_user=uid,
+            )
+
+            # save it as user avatar
+            await self.set_avatar_url(
+                uid,
+                create_requester(uid),
+                str(avatar_mxc_url),
+            )
+
+            logger.info("successfully saved the user avatar")
+            return True
+        except Exception:
+            logger.warning("failed to save the user avatar")
+            return False
 
     async def on_profile_query(self, args: JsonDict) -> JsonDict:
         """Handles federation profile query requests."""
