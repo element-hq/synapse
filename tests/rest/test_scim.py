@@ -8,7 +8,7 @@ import synapse.rest.scim
 from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 from synapse.rest.client import login
-from synapse.rest.scim import HAS_SCIM2
+from synapse.rest.scim import HAS_SCIM2, SCIM_IDP_ID
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
@@ -77,7 +77,6 @@ class UserProvisioningTestCase(HomeserverTestCase):
         login.register_servlets,
     ]
     url = "/_synapse/admin/scim/v2"
-    maxDiff = None
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.http_client = Mock(spec=["get_file"])
@@ -124,6 +123,12 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 "mxc://servername/mediaid",
             )
         )
+        self.get_success(
+            self.store.record_user_external_id(
+                    SCIM_IDP_ID, "IDP-user", self.user_user_id
+                )
+
+                )
 
     def test_get_user(self) -> None:
         """
@@ -147,7 +152,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 },
                 "id": "@user:test",
                 "userName": "user",
-                "externalId": "@user:test",
+                "externalId": "IDP-user",
                 "phoneNumbers": [{"value": "+1-12345678"}],
                 "emails": [{"value": "user@mydomain.tld"}],
                 "active": True,
@@ -204,7 +209,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                     "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
                 },
                 "id": "@user:test",
-                "externalId": "@user:test",
+                "externalId": "IDP-user",
                 "phoneNumbers": [{"value": "+1-12345678"}],
                 "emails": [{"value": "user@mydomain.tld"}],
                 "active": True,
@@ -247,7 +252,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 },
                 "id": "@user:test",
                 "userName": "user",
-                "externalId": "@user:test",
+                "externalId": "IDP-user",
                 "phoneNumbers": [{"value": "+1-12345678"}],
                 "emails": [{"value": "user@mydomain.tld"}],
                 "active": True,
@@ -343,7 +348,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
         request_data: JsonDict = {
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
             "userName": "bjensen",
-            "externalId": "bjensen@test",
+            "externalId": "IDP-bjensen",
             "phoneNumbers": [{"value": "+1-12345678"}],
             "emails": [{"value": "bjensen@mydomain.tld"}],
             "photos": [
@@ -374,7 +379,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 "location": "https://test/_synapse/admin/scim/v2/Users/@bjensen:test",
             },
             "id": "@bjensen:test",
-            "externalId": "@bjensen:test",
+            "externalId": "IDP-bjensen",
             "phoneNumbers": [{"value": "+1-12345678"}],
             "userName": "bjensen",
             "emails": [{"value": "bjensen@mydomain.tld"}],
@@ -453,7 +458,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 },
                 "id": "@user:test",
                 "userName": "user",
-                "externalId": "@user:test",
+                "externalId": "IDP-user",
                 "phoneNumbers": [{"value": "+1-12345678"}],
                 "emails": [{"value": "user@mydomain.tld"}],
                 "photos": [
@@ -471,6 +476,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
 
         request_data: JsonDict = {
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "externalId": "IDP-user",
             "phoneNumbers": [{"value": "+1-11112222"}],
             "emails": [{"value": "newmail@mydomain.tld"}],
             "userName": "user",
@@ -501,7 +507,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
                 "location": "https://test/_synapse/admin/scim/v2/Users/@user:test",
             },
             "id": "@user:test",
-            "externalId": "@user:test",
+            "externalId": "IDP-user",
             "phoneNumbers": [{"value": "+1-11112222"}],
             "userName": "user",
             "emails": [{"value": "newmail@mydomain.tld"}],

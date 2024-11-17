@@ -27,7 +27,7 @@ import datetime
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from synapse._pydantic_compat import PYDANTIC_VERSION
 from synapse.api.errors import SynapseError
@@ -40,6 +40,7 @@ from synapse.http.servlet import (
 )
 from synapse.http.site import SynapseRequest
 from synapse.rest.admin._base import assert_requester_is_admin, assert_user_is_admin
+from synapse.rest.client.register import RegisterRestServlet
 from synapse.types import JsonDict, UserID
 from synapse.util.templates import mxc_to_http
 
@@ -83,6 +84,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 SCIM_PREFIX = "/_synapse/admin/scim/v2"
+SCIM_IDP_ID = "__scim__"
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +153,16 @@ class SCIMServlet(RestServlet):
             count=count,
         )
 
+    async def get_scim_external_id(self, user_id: str) -> Optional[str]:
+        """Read the external id stored in the special SCIM IDP."""
+
+        external_ids = await self.store.get_external_ids_by_user(user_id)
+        for idp_id, external_id in external_ids:
+            if idp_id == SCIM_IDP_ID:
+                return external_id
+
+        return None
+
     async def get_scim_user(self, user_id: str) -> "User":
         """Create a SCIM User object from a synapse user_id.
 
@@ -174,6 +186,7 @@ class SCIMServlet(RestServlet):
             )
 
         creation_datetime = datetime.datetime.fromtimestamp(user.creation_ts)
+        external_id = await self.get_scim_external_id(user_id)
         scim_user = User(
             meta=Meta(
                 resource_type="User",
@@ -182,7 +195,7 @@ class SCIMServlet(RestServlet):
                 location=f"{self.config.server.public_baseurl}{SCIM_PREFIX[1:]}/Users/{user_id}",
             ),
             id=user_id,
-            external_id=user_id,
+            external_id=external_id,
             user_name=user_id_obj.localpart,
             display_name=profile.display_name,
             active=not user.is_deactivated,
@@ -275,7 +288,9 @@ class UserServlet(SCIMServlet):
         await assert_user_is_admin(self.auth, requester)
 
         body = parse_json_object_from_request(request)
-        user = User.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
+        request_user = User.model_validate(
+            body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
+        )
 
         try:
             user_id_obj = UserID.from_string(user_id)
@@ -283,10 +298,21 @@ class UserServlet(SCIMServlet):
             threepids = await self.store.user_get_threepids(user_id)
 
             await self.profile_handler.set_displayname(
-                user_id_obj, requester, user.display_name or "", True
+                user_id_obj, requester, request_user.display_name or "", True
             )
 
-            if user.photos and user.photos[0].value:
+            external_id = await self.get_scim_external_id(user_id)
+            if request_user.external_id != external_id:
+                if external_id:
+                    await self.store.remove_user_external_id(
+                        SCIM_IDP_ID, external_id, user_id
+                    )
+                if request_user.external_id:
+                    await self.store.record_user_external_id(
+                        SCIM_IDP_ID, request_user.external_id, user_id
+                    )
+
+            if request_user.photos and request_user.photos[0].value:
                 media_repo = (
                     self.hs.get_media_repository()
                     if self.hs.config.media.can_load_media_repo
@@ -296,7 +322,7 @@ class UserServlet(SCIMServlet):
 
                 await self.profile_handler.set_avatar_from_http_url(
                     user_id,
-                    str(user.photos[0].value),
+                    str(request_user.photos[0].value),
                     media_repo,
                     http_client,
                     "scim_",
@@ -304,11 +330,13 @@ class UserServlet(SCIMServlet):
 
             if threepids is not None:
                 new_email_threepids = {
-                    ("email", email.value) for email in user.emails or [] if email.value
+                    ("email", email.value)
+                    for email in request_user.emails or []
+                    if email.value
                 }
                 new_phone_number_threepids = {
                     ("msisdn", phone_number.value)
-                    for phone_number in user.phone_numbers or []
+                    for phone_number in request_user.phone_numbers or []
                     if phone_number.value
                 }
                 new_threepids = new_email_threepids | new_phone_number_threepids
@@ -344,8 +372,10 @@ class UserServlet(SCIMServlet):
                         user_id, medium, address, current_time
                     )
 
-            user = await self.get_scim_user(user_id)
-            payload = user.model_dump(scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE)
+            response_user = await self.get_scim_user(user_id)
+            payload = response_user.model_dump(
+                scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE
+            )
             return HTTPStatus.OK, payload
 
         except SynapseError as exc:
@@ -405,8 +435,6 @@ class UserListServlet(SCIMServlet):
                 body, scim_ctx=Context.RESOURCE_CREATION_REQUEST
             )
 
-            from synapse.rest.client.register import RegisterRestServlet
-
             register = RegisterRestServlet(self.hs)
 
             password_hash = (
@@ -421,6 +449,11 @@ class UserListServlet(SCIMServlet):
                 password_hash=password_hash,
                 default_display_name=request_user.display_name,
             )
+
+            if request_user.external_id:
+                await self.store.record_user_external_id(
+                    SCIM_IDP_ID, request_user.external_id, user_id
+                )
 
             now_ts = self.hs.get_clock().time_msec()
             if request_user.emails:
