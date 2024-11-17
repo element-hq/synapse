@@ -121,6 +121,7 @@ class SCIMServlet(RestServlet):
         self.profile_handler = hs.get_profile_handler()
 
         self.default_nb_items_per_page = 100
+        self.max_nb_items_per_page = 1000
 
     def make_error_response(
         self, status: Union[int, HTTPStatus], message: str
@@ -137,13 +138,17 @@ class SCIMServlet(RestServlet):
     def parse_search_request(self, request: SynapseRequest) -> "SearchRequest":
         """Build a SCIM SearchRequest object from the HTTP request arguments."""
         args: Dict[bytes, List[bytes]] = request.args  # type: ignore
+        count = min(
+            parse_integer(
+                request, "count", default=self.default_nb_items_per_page, negative=False
+            ),
+            self.max_nb_items_per_page,
+        )
         return SearchRequest(
             attributes=parse_strings_from_args(args, "attributes"),
             excluded_attributes=parse_strings_from_args(args, "excludedAttributes"),
             start_index=parse_integer(request, "startIndex", default=1, negative=False),
-            count=parse_integer(
-                request, "count", default=self.default_nb_items_per_page, negative=False
-            ),
+            count=count,
         )
 
     async def get_scim_user(self, user_id: str) -> "User":

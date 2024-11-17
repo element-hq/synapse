@@ -129,6 +129,12 @@ Note that requests can be paginated using the `startIndex` and the `count` query
 GET /_synapse/admin/scim/v2/Users?startIndex=10&count=1
 ```
 
+<div class="warning">
+
+For performances reason, the page count will be maxed to 1000.
+
+</div>
+
 #### Response
 
 ```json
