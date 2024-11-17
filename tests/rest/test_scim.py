@@ -125,10 +125,9 @@ class UserProvisioningTestCase(HomeserverTestCase):
         )
         self.get_success(
             self.store.record_user_external_id(
-                    SCIM_IDP_ID, "IDP-user", self.user_user_id
-                )
-
-                )
+                SCIM_IDP_ID, "IDP-user", self.user_user_id
+            )
+        )
 
     def test_get_user(self) -> None:
         """
