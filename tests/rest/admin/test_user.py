@@ -45,6 +45,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
+    media,
     profile,
     register,
     room,
@@ -3517,6 +3518,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        media.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -4023,7 +4025,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         # Try to access a media and to create `last_access_ts`
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=user_token,
         )
