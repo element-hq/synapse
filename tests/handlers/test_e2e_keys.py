@@ -19,6 +19,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import time
 from typing import Dict, Iterable
 from unittest import mock
 
@@ -1826,3 +1827,72 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         )
         self.assertIs(exists, True)
         self.assertIs(replaceable_without_uia, False)
+
+    def test_delete_old_one_time_keys(self):
+        """Test the db migration that clears out old OTKs"""
+
+        # We upload two sets of keys, one just over a week ago, and one just less than
+        # a week ago. Each batch contains some keys that match the deletion pattern
+        # (key IDs of 6 chars), and some that do not.
+        #
+        # Finally, set the scheduled task going, and check what gets deleted.
+
+        user_id = "@user000:" + self.hs.hostname
+        device_id = "xyz"
+
+        # The scheduled task should be for "now" in real, wallclock time, so
+        # set the test reactor to just over a week ago.
+        self.reactor.advance(time.time() - 7.5 * 24 * 3600)
+
+        # Upload some keys
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                user_id,
+                device_id,
+                {
+                    "one_time_keys": {
+                        # some keys to delete
+                        "alg1:AAAAAA": "key1",
+                        "alg2:AAAAAB": {"key": "key2", "signatures": {"k1": "sig1"}},
+                        # A key to *not* delete
+                        "alg2:AAAAAAAAAA": {"key": "key3"},
+                    }
+                },
+            )
+        )
+
+        # A day passes
+        self.reactor.advance(24 * 3600)
+
+        # Upload some more keys
+        self.get_success(
+            self.handler.upload_keys_for_user(
+                user_id,
+                device_id,
+                {
+                    "one_time_keys": {
+                        # some keys which match the pattern
+                        "alg1:BAAAAA": "key1",
+                        "alg2:BAAAAB": {"key": "key2", "signatures": {"k1": "sig1"}},
+                        # A key to *not* delete
+                        "alg2:BAAAAAAAAA": {"key": "key3"},
+                    }
+                },
+            )
+        )
+
+        # The rest of the week passes, which should set the scheduled task going.
+        self.reactor.advance(6.5 * 24 * 3600)
+
+        # Check what we're left with in the database
+        remaining_key_ids = {
+            row[0]
+            for row in self.get_success(
+                self.handler.store.db_pool.simple_select_list(
+                    "e2e_one_time_keys_json", None, ["key_id"]
+                )
+            )
+        }
+        self.assertEqual(
+            remaining_key_ids, {"AAAAAAAAAA", "BAAAAA", "BAAAAB", "BAAAAAAAAA"}
+        )
