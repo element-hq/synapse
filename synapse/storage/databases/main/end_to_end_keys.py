@@ -1485,7 +1485,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             # keys were likely made by libolm rather than Vodozemac; libolm only kept
             # 100 private OTKs, so was far more vulnerable than Vodozemac to throwing
             # away keys prematurely.
-            clause, args = make_in_list_sql_clause(txn.database_engine, 'user_id', users)
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", users
+            )
             sql = f"""
                 DELETE FROM e2e_one_time_keys_json
                 WHERE {clause} AND ts_added_ms < ? AND length(key_id) = 6
@@ -1495,7 +1497,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
 
             return users, txn.rowcount
 
-        return await self.db_pool.runInteraction("delete_old_otks_for_next_user_batch", impl)
+        return await self.db_pool.runInteraction(
+            "delete_old_otks_for_next_user_batch", impl
+        )
 
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
