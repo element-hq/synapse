@@ -6,6 +6,8 @@ pub mod acl;
 pub mod errors;
 pub mod events;
 pub mod http;
+pub mod identifier;
+pub mod matrix_const;
 pub mod push;
 pub mod rendezvous;
 

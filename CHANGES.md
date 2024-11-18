@@ -1,12 +1,18 @@
-# Synapse 1.119.0rc2 (2024-11-11)
+# Synapse 1.119.0 (2024-11-13)
 
-Note that due to packaging issues there was no v1.119.0rc1.
+No significant changes since 1.119.0rc2.
 
 ### Python 3.8 support dropped
 
 Python 3.8 is [end-of-life](https://devguide.python.org/versions/) and is no longer supported by Synapse. The minimum supported Python version is now 3.9.
 
 If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or greater) before upgrading Synapse.
+
+
+# Synapse 1.119.0rc2 (2024-11-11)
+
+Note that due to packaging issues there was no v1.119.0rc1.
+
 
 ### Features
 
