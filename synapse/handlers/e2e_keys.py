@@ -1590,24 +1590,35 @@ class E2eKeysHandler:
         that it could still have old OTKs that the client has dropped. This task is scheduled exactly once
         by a database schema delta file, and it clears out old one-time-keys that look like they came from libolm.
         """
-        user = task.result.get("from_user", "") if task.result else ""
+        last_user = task.result.get("from_user", "") if task.result else ""
         while True:
-            user, rowcount = await self.store.delete_old_otks_for_one_user(user)
-            if user is None:
+            # We process users in batches of 100
+            users, rowcount = await self.store.delete_old_otks_for_next_user_batch(
+                last_user, 100
+            )
+            if len(users) == 0:
                 # We're done!
                 return TaskStatus.COMPLETE, None, None
 
-            logger.debug("Deleted %i old one-time-keys for user '%s'", rowcount, user)
+            logger.debug(
+                "Deleted %i old one-time-keys for users '%s'..'%s'",
+                rowcount,
+                users[0],
+                users[-1],
+            )
+            last_user = users[-1]
 
             # Store our progress
-            await self._task_scheduler.update_task(task.id, result={"from_user": user})
+            await self._task_scheduler.update_task(
+                task.id, result={"from_user": last_user}
+            )
 
             # Sleep a little before doing the next user.
             #
             # matrix.org has about 15M users in the e2e_one_time_keys_json table
             # (comprising 20M devices). We want this to take about a week, so we need
-            # to do 25 per second.
-            await self.clock.sleep(0.04)
+            # to do about one batch of 100 users every 4 seconds.
+            await self.clock.sleep(4)
 
 
 def _check_cross_signing_key(
