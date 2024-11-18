@@ -1828,7 +1828,7 @@ class E2eKeysHandlerTestCase(unittest.HomeserverTestCase):
         self.assertIs(exists, True)
         self.assertIs(replaceable_without_uia, False)
 
-    def test_delete_old_one_time_keys(self):
+    def test_delete_old_one_time_keys(self) -> None:
         """Test the db migration that clears out old OTKs"""
 
         # We upload two sets of keys, one just over a week ago, and one just less than
