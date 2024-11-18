@@ -11,6 +11,7 @@
 !Cargo.lock
 !Cargo.toml
 !build_rust.py
+!extra_config.cfg
 
 rust/target
 synapse/*.so
