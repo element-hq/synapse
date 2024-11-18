@@ -340,7 +340,7 @@ so we have to disable discovery and configure the URIs manually.
 
 Forgejo is a fork of Gitea that can act as an OAuth2 provider.
 
-The implementation of OAuth2 is improved compared to Gitea, as it provides a correctly defined sub claim.
+The implementation of OAuth2 is improved compared to Gitea, as it provides a correctly defined `subject_claim` and `scopes`.
 
 Synapse config:
 
