@@ -1,1 +1,0 @@
-Update the portdb CI to use Python 3.13 and Postgres 17 as latest dependencies.

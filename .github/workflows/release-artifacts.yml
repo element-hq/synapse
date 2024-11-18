@@ -91,10 +91,19 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+      - name: Artifact name
+        id: artifact-name
+        # We can't have colons in the upload name of the artifact, so we convert
+        # e.g. `debian:sid` to `sid`.
+        env:
+          DISTRO: ${{ matrix.distro }}
+        run: |
+          echo "ARTIFACT_NAME=${DISTRO#*:}" >> "$GITHUB_OUTPUT"
+
       - name: Upload debs as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: debs
+          name: debs-${{ steps.artifact-name.outputs.ARTIFACT_NAME }}
           path: debs/*
 
   build-wheels:
@@ -102,7 +111,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-12]
+        os: [ubuntu-22.04, macos-13]
         arch: [x86_64, aarch64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
@@ -112,9 +121,9 @@ jobs:
         exclude:
           # Don't build macos wheels on PR CI.
           - is_pr: true
-            os: "macos-12"
+            os: "macos-13"
           # Don't build aarch64 wheels on mac.
-          - os: "macos-12"
+          - os: "macos-13"
             arch: aarch64
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
@@ -196,17 +205,18 @@ jobs:
       - name: Download all workflow run artifacts
         uses: actions/download-artifact@v4
       - name: Build a tarball for the debs
-        run: tar -cvJf debs.tar.xz debs
+        # We need to merge all the debs uploads into one folder, then compress
+        # that.
+        run: |
+          mkdir debs
+          mv debs*/* debs/
+          tar -cvJf debs.tar.xz debs
       - name: Attach to release
-        uses: softprops/action-gh-release@a929a66f232c1b11af63782948aa2210f981808a  # PR#109
+        uses: softprops/action-gh-release@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: |
             Sdist/*
-            Wheel/*
+            Wheel*/*
             debs.tar.xz
-          # if it's not already published, keep the release as a draft.
-          draft: true
-          # mark it as a prerelease if the tag contains 'rc'.
-          prerelease: ${{ contains(github.ref, 'rc') }}
