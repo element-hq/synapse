@@ -264,6 +264,8 @@ The profile is represented as a dictionary with the following keys:
 The module is given a copy of the original dictionary, so modifying it from within the
 module cannot modify a user's profile when included in user directory search results.
 
+The requester_id parameter is the ID of the user that called the user directory API.
+
 If multiple modules implement this callback, they will be considered in order. If a
 callback returns `False`, Synapse falls through to the next one. The value of the first
 callback that does not return `False` will be used. If this happens, Synapse will not call

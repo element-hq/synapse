@@ -825,7 +825,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         async def allow_all_expects_requester_id(
             user_profile: UserProfile, requester_id: str
         ) -> bool:
-            self.assertIsInstance(requester_id, str)
+            self.assertEqual(requester_id, u1)
             # Allow all users.
             return False
 
@@ -844,7 +844,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         async def block_all_expects_requester_id(
             user_profile: UserProfile, requester_id: str
         ) -> bool:
-            self.assertIsInstance(requester_id, str)
+            self.assertEqual(requester_id, u1)
             # All users are spammy.
             return True
 
