@@ -392,7 +392,7 @@ skip = "cp36* cp37* cp38* pp37* pp38* *-musllinux_i686 pp*aarch64 *-musllinux_aa
 
 # We need a rust compiler
 before-all = "curl https://sh.rustup.rs -sSf | sh -s -- --default-toolchain stable -y --profile minimal"
-environment = { PATH = "$PATH:$HOME/.cargo/bin", DIST_EXTRA_CONFIG = "/project/extra_config.cfg" }
+environment = { PATH = "$PATH:$HOME/.cargo/bin", DIST_EXTRA_CONFIG = "$(pwd)/extra_config.cfg" }
 
 # For some reason if we don't manually clean the build directory we
 # can end up polluting the next build with a .so that is for the wrong
