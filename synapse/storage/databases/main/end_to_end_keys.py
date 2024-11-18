@@ -1453,7 +1453,9 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
-    async def delete_old_otks_for_one_user(self, after_user_id: str) -> Tuple[Optional[str], int]:
+    async def delete_old_otks_for_one_user(
+        self, after_user_id: str
+    ) -> Tuple[Optional[str], int]:
         """Deletes old OTKs belonging to one user.
 
         Returns:
@@ -1461,6 +1463,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
              * `user` is the user ID of the updated user, or None if we are don
              * `rows` is the number of deleted rows
         """
+
         def impl(txn: LoggingTransaction) -> Tuple[Optional[str], int]:
             # Find the next user
             txn.execute(
