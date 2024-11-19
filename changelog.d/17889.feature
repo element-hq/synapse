@@ -1,1 +1,1 @@
-Set `enable_authenticated_media` to `true` by default. In a future release of Synapse, this option will be removed and become always-on.
+Enforce authenticated media by default. Administrators can revert this by configuring `enable_authenticated_media` to `false`. In a future release of Synapse, this option will be removed and become always-on.
