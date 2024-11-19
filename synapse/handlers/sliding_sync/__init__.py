@@ -955,6 +955,17 @@ class SlidingSyncHandler:
                             and state_key == StateValues.LAZY
                         ):
                             lazy_load_room_members = True
+
+                            # For incremental syncs that aren't limited, when
+                            # lazy-loading room members, also include any membership
+                            # that has changed. This allows clients to cache the
+                            # membership list for as long as it doesn't get a gappy
+                            # sync, but still ensures for large gaps the server doesn't
+                            # need to send down all membership changes.
+                            # if not initial and not limited:
+                            #     # `None` is a wildcard in the `StateFilter`
+                            #     required_state_types.append((EventTypes.Member, None))
+
                             # Everyone in the timeline is relevant
                             #
                             # FIXME: We probably also care about invite, ban, kick, targets, etc

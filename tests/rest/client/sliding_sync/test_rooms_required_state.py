@@ -18,7 +18,7 @@ from parameterized import parameterized, parameterized_class
 from twisted.test.proto_helpers import MemoryReactor
 
 import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventTypes, Membership, EventContentFields
 from synapse.handlers.sliding_sync import StateValues
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
@@ -491,6 +491,92 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
             response_body["rooms"][room_id1]["required_state"],
             {
                 state_map[(EventTypes.Member, user4_id)],
+            },
+            exact=True,
+        )
+        self.assertIsNone(response_body["rooms"][room_id1].get("invite_state"))
+
+    def test_rooms_required_state_changed_membership_in_timeline_lazy_loading_room_members_incremental_sync(
+        self,
+    ) -> None:
+        """
+        On incremental sync, test `rooms.required_state` returns people relevant to the
+        timeline when lazy-loading room members, `["m.room.member","$LAZY"]` **including
+        changes to membership**.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+        user3_id = self.register_user("user3", "pass")
+        user3_tok = self.login(user3_id, "pass")
+        user4_id = self.register_user("user4", "pass")
+        user4_tok = self.login(user4_id, "pass")
+        user5_id = self.register_user("user5", "pass")
+        user5_tok = self.login(user5_id, "pass")
+
+        room_id1 = self.helper.create_room_as(user2_id, tok=user2_tok)
+        self.helper.join(room_id1, user1_id, tok=user1_tok)
+        self.helper.join(room_id1, user3_id, tok=user3_tok)
+        self.helper.join(room_id1, user4_id, tok=user4_tok)
+        self.helper.join(room_id1, user5_id, tok=user5_tok)
+
+        self.helper.send(room_id1, "1", tok=user2_tok)
+        self.helper.send(room_id1, "2", tok=user2_tok)
+        self.helper.send(room_id1, "3", tok=user2_tok)
+
+        # Make the Sliding Sync request with lazy loading for the room members
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [
+                        [EventTypes.Create, ""],
+                        [EventTypes.Member, StateValues.LAZY],
+                    ],
+                    "timeline_limit": 3,
+                }
+            }
+        }
+        response_body, from_token = self.do_sync(sync_body, tok=user1_tok)
+
+        # Send more timeline events into the room
+        self.helper.send(room_id1, "4", tok=user2_tok)
+        self.helper.send(room_id1, "5", tok=user4_tok)
+        # self.helper.send(room_id1, "6", tok=user4_tok)
+        # Update the display name of user5 (causing a membership change)
+        self.helper.send_state(
+            room_id1,
+            event_type=EventTypes.Member,
+            state_key=user5_id,
+            body={
+                EventContentFields.MEMBERSHIP: "join",
+                EventContentFields.MEMBERSHIP_DISPLAYNAME: "quick changer",
+            },
+            tok=user5_tok,
+        )
+
+        # Make an incremental Sliding Sync request
+        response_body, _ = self.do_sync(sync_body, since=from_token, tok=user1_tok)
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id1)
+        )
+
+        # Only user2, user4, and user5 sent events in the last 3 events we see in the
+        # `timeline`.
+        self._assertRequiredStateIncludes(
+            response_body["rooms"][room_id1]["required_state"],
+            {
+                # This appears because *some* membership in the room changed and the
+                # heroes are recalculated and is thrown in because we have it. But this
+                # is technically optional and not needed because we've already seen user2
+                # in the last sync (and their membership hasn't changed).
+                state_map[(EventTypes.Member, user2_id)],
+                # Appears because there is a message in the timeline from this user
+                state_map[(EventTypes.Member, user4_id)],
+                # Appears because there is a membership event in the timeline from this user
+                state_map[(EventTypes.Member, user5_id)],
             },
             exact=True,
         )
@@ -1243,7 +1329,7 @@ class SlidingSyncRoomsRequiredStateTestCase(SlidingSyncBase):
 
         # Update the room name
         self.helper.send_state(
-            room_id1, "m.room.name", {"name": "Bar"}, state_key="", tok=user1_tok
+            room_id1, EventTypes.Name, {"name": "Bar"}, state_key="", tok=user1_tok
         )
 
         # Update the sliding sync requests to exclude the room name again
