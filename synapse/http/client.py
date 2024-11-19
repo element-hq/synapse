@@ -105,9 +105,6 @@ try:
 except ImportError:
     from multipart import MultipartParser
 
-    if TYPE_CHECKING:
-        from multipart import multipart
-
 
 logger = logging.getLogger(__name__)
 
