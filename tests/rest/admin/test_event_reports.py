@@ -745,3 +745,139 @@ class DeleteEventReportTestCase(unittest.HomeserverTestCase):
         self.assertEqual(404, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.NOT_FOUND, channel.json_body["errcode"])
         self.assertEqual("Event report not found", channel.json_body["error"])
+
+
+class EventReportsAgainstUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin_user = self.register_user("admin", "pass", admin=True)
+        self.admin_user_tok = self.login("admin", "pass")
+
+        self.bad_user_1 = self.register_user("user", "pass")
+        self.bad_user_1_tok = self.login("user", "pass")
+
+        self.bad_user_2 = self.register_user("user2", "pass")
+        self.bad_user_2_tok = self.login("user2", "pass")
+
+        self.room_id1 = self.helper.create_room_as(
+            self.bad_user_1, tok=self.bad_user_1_tok, is_public=True
+        )
+        self.helper.join(self.room_id1, user=self.admin_user, tok=self.admin_user_tok)
+        self.helper.join(self.room_id1, user=self.bad_user_2, tok=self.bad_user_2_tok)
+
+        self.room_id2 = self.helper.create_room_as(
+            self.bad_user_1, tok=self.bad_user_1_tok, is_public=True
+        )
+        self.helper.join(self.room_id2, user=self.admin_user, tok=self.admin_user_tok)
+        self.helper.join(self.room_id2, user=self.bad_user_2, tok=self.bad_user_2_tok)
+
+        for _ in range(5):
+            self._create_event_and_report(
+                room_id=self.room_id1,
+                sender_tok=self.bad_user_1_tok,
+                reporter_tok=self.admin_user_tok,
+            )
+        for _ in range(5):
+            self._create_event_and_report(
+                room_id=self.room_id2,
+                sender_tok=self.bad_user_2_tok,
+                reporter_tok=self.admin_user_tok,
+            )
+
+        self.url = "/_synapse/admin/v1/event_reports"
+
+    def _create_event_and_report(
+        self, room_id: str, sender_tok: str, reporter_tok: str
+    ) -> None:
+        """Create and report events"""
+        resp = self.helper.send(room_id, tok=sender_tok)
+        event_id = resp["event_id"]
+
+        channel = self.make_request(
+            "POST",
+            "rooms/%s/report/%s" % (room_id, event_id),
+            {"score": -100, "reason": "this makes me sad"},
+            access_token=reporter_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+
+    def test_get_reports_against_user_no_params(self) -> None:
+        # first grab all the reports
+        channel = self.make_request(
+            "GET",
+            self.url,
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(len(channel.json_body["event_reports"]), 10)
+
+        # filter out set of report ids of events sent by bad user
+        filtered_report_ids = []
+        for event_report in channel.json_body["event_reports"]:
+            if event_report["sender"] == self.bad_user_1:
+                filtered_report_ids.append(event_report["id"])
+
+        # grab the report ids by sender and compare to filtered report ids
+        channel = self.make_request(
+            "GET",
+            f"{self.url}/user/{self.bad_user_1}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        report_ids_by_user = channel.json_body["report_ids"]
+        self.assertEqual(True, set(filtered_report_ids) == set(report_ids_by_user))
+
+    def test_get_reports_against_user_params(self) -> None:
+        # first grab all the reports
+        channel = self.make_request(
+            "GET",
+            self.url,
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(len(channel.json_body["event_reports"]), 10)
+
+        # filter out set of report ids of events sent by bad user
+        filtered_report_ids = []
+        for event_report in channel.json_body["event_reports"]:
+            if event_report["sender"] == self.bad_user_2:
+                filtered_report_ids.append(event_report["id"])
+
+        channel = self.make_request(
+            "GET",
+            f"{self.url}/user/{self.bad_user_2}?start=2&limit=2",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        report_ids_by_user = channel.json_body["report_ids"]
+
+        # check that limit is respected
+        self.assertEqual(len(report_ids_by_user), 2)
+
+        # check that offset is respected
+        self.assertEqual([9, 8], report_ids_by_user)
+
+        # check that response is for correct user
+        self.assertEqual(
+            True, set(report_ids_by_user).issubset(set(filtered_report_ids))
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"{self.url}/user/{self.bad_user_2}?dir=f",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        oldest_report_ids_by_user = channel.json_body["report_ids"]
+
+        # check reversal param
+        self.assertEqual([7, 8, 9, 10, 11], oldest_report_ids_by_user)
+        self.assertEqual(
+            True, set(oldest_report_ids_by_user).issubset(set(filtered_report_ids))
+        )
