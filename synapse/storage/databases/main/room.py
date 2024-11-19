@@ -1518,6 +1518,69 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             get_un_partial_stated_rooms_from_stream_txn,
         )
 
+    async def get_event_report_IDs_by_sender(
+        self,
+        sender_id: str,
+        start: int,
+        limit: int,
+        direction: Direction = Direction.BACKWARDS,
+    ) -> Optional[List[str]]:
+        """
+        Get all the event reports IDs where the sender is the provided user id
+
+        Args:
+            sender_id: The user_id of the sender of the reported event
+            start: event offset to begin the query from
+            limit: number of rows to retrieve
+            direction: Whether to fetch the most recent first (backwards) or the
+                oldest first (forwards)
+        """
+
+        def _get_event_report_IDs_txn(
+            txn: LoggingTransaction,
+            sender_id: str,
+            start: int,
+            limit: int,
+            direction: Direction,
+        ) -> Optional[List[str]]:
+            if direction == Direction.BACKWARDS:
+                order = "DESC"
+            else:
+                order = "ASC"
+
+            sql = f"""
+                SELECT
+                    er.id
+                FROM event_reports AS er
+                LEFT JOIN events
+                    ON events.event_id = er.event_id
+                WHERE events.sender = ?
+                ORDER BY er.received_ts {order}
+                LIMIT ?
+                OFFSET ?
+            """
+
+            txn.execute(sql, (sender_id, limit, start))
+            rows = txn.fetchall()
+
+            if not rows:
+                return None
+
+            report_ids = []
+            for r in rows:
+                report_ids.append(r[0])
+
+            return report_ids
+
+        return await self.db_pool.runInteraction(
+            "get_event_report_IDs_by_sender",
+            _get_event_report_IDs_txn,
+            sender_id,
+            start,
+            limit,
+            direction,
+        )
+
     async def get_event_report(self, report_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve an event report
 
