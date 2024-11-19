@@ -1909,6 +1909,8 @@ will perpetually be available over the legacy, unauthenticated endpoint, even af
 This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
 those older clients or homeservers will not be cut off from media they can already see.
 
+_Changed in Synapse 1.120:_ This option now defaults to `True` when not set, whereas before this version it defaulted to `False`.
+
 Example configuration:
 ```yaml
 enable_authenticated_media: false
