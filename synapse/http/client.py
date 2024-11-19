@@ -103,7 +103,7 @@ try:
     if TYPE_CHECKING:
         from python_multipart import multipart
 except ImportError:
-    from multipart import MultipartParser
+    from multipart import MultipartParser  # type: ignore[no-redef]
 
 
 logger = logging.getLogger(__name__)
