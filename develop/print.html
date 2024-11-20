@@ -1902,6 +1902,20 @@ has been closed (and will not enter the Matrix spec). As such, we are
 removing the experimental support for it in this release.</p>
 <p>The <code>experimental_features.msc3886_endpoint</code> configuration option has
 been removed.</p>
+<h2 id="authenticated-media-is-now-enforced-by-default"><a class="header" href="#authenticated-media-is-now-enforced-by-default">Authenticated media is now enforced by default</a></h2>
+<p>The <a href="usage/configuration/config_documentation.html#enable_authenticated_media"><code>enable_authenticated_media</code></a> configuration option now defaults to true.</p>
+<p>This means that clients and remote (federated) homeservers now need to use
+the authenticated media endpoints in order to download media from your
+homeserver.</p>
+<p>As an exception, existing media that was stored on the server prior to
+this option changing to <code>true</code> will still be accessible over the
+unauthenticated endpoints.</p>
+<p>The matrix.org homeserver has already been running with this option enabled
+since September 2024, so most common clients and homeservers should already
+be compatible.</p>
+<p>With that said, administrators who wish to disable this feature for broader
+compatibility can still do so by manually configuring
+<code>enable_authenticated_media: False</code>.</p>
 <h1 id="upgrading-to-v11190"><a class="header" href="#upgrading-to-v11190">Upgrading to v1.119.0</a></h1>
 <h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.8 to v3.9.
@@ -5454,8 +5468,7 @@ into fewer transactions. Defaults to 50.</p>
 <h3 id="enable_authenticated_media"><a class="header" href="#enable_authenticated_media"><code>enable_authenticated_media</code></a></h3>
 <p>When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
 unauthenticated media endpoints (<code>/_matrix/media/(r0|v3|v1)/download</code> and <code>/_matrix/media/(r0|v3|v1)/thumbnail</code>) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints <code>_matrix/client/v1/media/download</code> and <code>_matrix/client/v1/media/thumbnail</code>. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
-after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
-this will change to true in a future Synapse release.</p>
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to true (previously false). In a future release of Synapse, this option will be removed and become always-on.</p>
 <p>In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
 case-by-case breakdown describes whether media downloads are permitted:</p>
 <ul>
@@ -5481,8 +5494,9 @@ otherwise denied.</li>
 will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to <code>True</code>.
 This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
 those older clients or homeservers will not be cut off from media they can already see.</p>
+<p><em>Changed in Synapse 1.120:</em> This option now defaults to <code>True</code> when not set, whereas before this version it defaulted to <code>False</code>.</p>
 <p>Example configuration:</p>
-<pre><code class="language-yaml">enable_authenticated_media: true
+<pre><code class="language-yaml">enable_authenticated_media: false
 </code></pre>
 <hr />
 <h3 id="enable_media_repo"><a class="header" href="#enable_media_repo"><code>enable_media_repo</code></a></h3>

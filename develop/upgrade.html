@@ -292,6 +292,20 @@ has been closed (and will not enter the Matrix spec). As such, we are
 removing the experimental support for it in this release.</p>
 <p>The <code>experimental_features.msc3886_endpoint</code> configuration option has
 been removed.</p>
+<h2 id="authenticated-media-is-now-enforced-by-default"><a class="header" href="#authenticated-media-is-now-enforced-by-default">Authenticated media is now enforced by default</a></h2>
+<p>The <a href="usage/configuration/config_documentation.html#enable_authenticated_media"><code>enable_authenticated_media</code></a> configuration option now defaults to true.</p>
+<p>This means that clients and remote (federated) homeservers now need to use
+the authenticated media endpoints in order to download media from your
+homeserver.</p>
+<p>As an exception, existing media that was stored on the server prior to
+this option changing to <code>true</code> will still be accessible over the
+unauthenticated endpoints.</p>
+<p>The matrix.org homeserver has already been running with this option enabled
+since September 2024, so most common clients and homeservers should already
+be compatible.</p>
+<p>With that said, administrators who wish to disable this feature for broader
+compatibility can still do so by manually configuring
+<code>enable_authenticated_media: False</code>.</p>
 <h1 id="upgrading-to-v11190"><a class="header" href="#upgrading-to-v11190">Upgrading to v1.119.0</a></h1>
 <h2 id="minimum-supported-python-version"><a class="header" href="#minimum-supported-python-version">Minimum supported Python version</a></h2>
 <p>The minimum supported Python version has been increased from v3.8 to v3.9.
