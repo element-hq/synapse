@@ -82,7 +82,7 @@
                   #
                   # NOTE: We currently need to set the Rust version unnecessarily high
                   # in order to work around https://github.com/matrix-org/synapse/issues/15939
-                  (rust-bin.stable."1.71.1".default.override {
+                  (rust-bin.stable."1.82.0".default.override {
                     # Additionally install the "rust-src" extension to allow diving into the
                     # Rust source code in an IDE (rust-analyzer will also make use of it).
                     extensions = [ "rust-src" ];
@@ -205,7 +205,7 @@
                 # corresponding Nix packages on https://search.nixos.org/packages.
                 #
                 # This was done until `./install-deps.pl --dryrun` produced no output.
-                env.PERL5LIB = "${with pkgs.perl536Packages; makePerlPath [
+                env.PERL5LIB = "${with pkgs.perl538Packages; makePerlPath [
                   DBI
                   ClassMethodModifiers
                   CryptEd25519
