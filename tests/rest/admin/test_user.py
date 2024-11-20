@@ -5533,7 +5533,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5543,7 +5543,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(60 * 60 * 48 * 1000)
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5555,7 +5555,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5595,7 +5595,7 @@ class GetRoomCountForUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5605,7 +5605,7 @@ class GetRoomCountForUserTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(60 * 60 * 48 * 1000)
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5617,7 +5617,7 @@ class GetRoomCountForUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)

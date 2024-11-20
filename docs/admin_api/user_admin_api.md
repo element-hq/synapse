@@ -1451,7 +1451,7 @@ _Added in Synapse 1.116.0._
 Fetches the count of the number of invites sent by the provided user ID across all rooms in the last 24 hours.
 
 ```
-GET /_synapse/admin/v1/user/invite_count/$user_id
+GET /_synapse/admin/v1/users/invite_count/$user_id
 ```
 
 A response body like the following is returned:
@@ -1469,7 +1469,7 @@ _Added in Synapse 1.120.0_
 Fetches the number of rooms the provided user ID has joined in the last 24 hours.
 
 ```
-GET /_synapse/admin/v1/user/room_count/$user_id
+GET /_synapse/admin/v1/users/room_count/$user_id
 ```
 
 A response body like the following is returned:

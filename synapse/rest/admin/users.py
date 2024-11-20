@@ -1508,7 +1508,7 @@ class UserInvitesCount(RestServlet):
     Return the count of invites that the user has sent in the last 24 hours
     """
 
-    PATTERNS = admin_patterns("/user/invite_count/(?P<user_id>[^/]*)$")
+    PATTERNS = admin_patterns("/users/invite_count/(?P<user_id>[^/]*)$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1529,7 +1529,7 @@ class UserRoomJoinCount(RestServlet):
     Return the count of rooms that the user has joined in the last 24 hours
     """
 
-    PATTERNS = admin_patterns("/user/room_count/(?P<user_id>[^/]*)$")
+    PATTERNS = admin_patterns("/users/room_count/(?P<user_id>[^/]*)$")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
