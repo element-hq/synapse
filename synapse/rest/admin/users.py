@@ -1501,3 +1501,45 @@ class RedactUserStatus(RestServlet):
                 }
         else:
             raise NotFoundError("redact id '%s' not found" % redact_id)
+
+
+class UserInvitesCount(RestServlet):
+    """
+    Return the count of invites that the user has sent in the last 24 hours
+    """
+
+    PATTERNS = admin_patterns("/user/invite_count/(?P<user_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+
+        res = await self.store.get_invite_count_by_user(user_id)
+
+        return HTTPStatus.OK, {"invite_count": res}
+
+
+class UserRoomJoinCount(RestServlet):
+    """
+    Return the count of rooms that the user has joined in the last 24 hours
+    """
+
+    PATTERNS = admin_patterns("/user/room_count/(?P<user_id>[^/]*)$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+
+        res = await self.store.get_join_count_by_user(user_id)
+
+        return HTTPStatus.OK, {"room_count": res}

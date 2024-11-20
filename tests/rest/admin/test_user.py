@@ -5500,3 +5500,125 @@ class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
                     redaction_ids.add(event["redacts"])
 
         self.assertIncludes(redaction_ids, original_event_ids, exact=True)
+
+
+class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+        self.random_users = []
+        for i in range(4):
+            self.random_users.append(self.register_user(f"user{i}", f"pass{i}"))
+
+        self.rm1 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.rm2 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.rm3 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+
+    def test_get_user_invite_count_test_case(self) -> None:
+        # bad user send some invites
+        for rm in [self.rm1, self.rm2]:
+            for user in self.random_users:
+                self.helper.invite(rm, self.bad_user, user, tok=self.bad_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 8)
+
+        # advance clock 48 hours and check again, should return 0
+        self.reactor.advance(60 * 60 * 48 * 1000)
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 0)
+
+        # send some more invites, they should show up
+        for user in self.random_users:
+            self.helper.invite(self.rm3, self.bad_user, user, tok=self.bad_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/invite_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 4)
+
+
+class GetRoomCountForUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+        self.rooms1 = []
+        self.rooms2 = []
+        for i in range(10):
+            rm = self.helper.create_room_as(
+                self.admin, is_public=True, tok=self.admin_tok
+            )
+            if i % 2 == 0:
+                self.rooms1.append(rm)
+            else:
+                self.rooms2.append(rm)
+
+    def test_room_count_for_user(self) -> None:
+        # bad user go on a join spree
+        for rm in self.rooms1:
+            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["room_count"], 5)
+
+        # advance clock 48 hours and check again, should return 0
+        self.reactor.advance(60 * 60 * 48 * 1000)
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["room_count"], 0)
+
+        # join some more
+        for rm in self.rooms2:
+            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/room_count/{self.bad_user}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["room_count"], 5)
