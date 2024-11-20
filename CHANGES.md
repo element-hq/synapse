@@ -1,10 +1,65 @@
-# Synapse 1.119.0rc1 (2024-11-11)
+# Synapse 1.120.0rc1 (2024-11-20)
+
+This release enables the enforcement of authenticated media by default, with exemptions for media that is already present in the
+homeserver's media store.
+
+Most homeservers operating in the public federation will not be impacted by this change, given that
+the large homeserver `matrix.org` enabled this in September 2024 and therefore most clients and servers
+will already have updated as a result.
+
+Some server administrators may still wish to disable this enforcement for the time being, in the interest of compatibility with older clients
+and older federated homeservers.
+See the [upgrade notes](https://element-hq.github.io/synapse/v1.120/upgrade.html#authenticated-media-is-now-enforced-by-default) for more information.
+
+### Features
+
+- Enforce authenticated media by default. Administrators can revert this by configuring `enable_authenticated_media` to `false`. In a future release of Synapse, this option will be removed and become always-on. ([\#17889](https://github.com/element-hq/synapse/issues/17889))
+- Add a one-off task to delete old One-Time Keys, to guard against us having old OTKs in the database that the client has long forgotten about. ([\#17934](https://github.com/element-hq/synapse/issues/17934))
+
+### Improved Documentation
+
+- Clarify the semantics of the `enable_authenticated_media` configuration option. ([\#17913](https://github.com/element-hq/synapse/issues/17913))
+- Add documentation about backing up Synapse. ([\#17931](https://github.com/element-hq/synapse/issues/17931))
+
+### Deprecations and Removals
+
+- Remove support for [MSC3886: Simple client rendezvous capability](https://github.com/matrix-org/matrix-spec-proposals/pull/3886), which has been superseded by [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108) and therefore closed. ([\#17638](https://github.com/element-hq/synapse/issues/17638))
+
+### Internal Changes
+
+- Addressed some typos in docs and returned error message for unknown MXC ID. ([\#17865](https://github.com/element-hq/synapse/issues/17865))
+- Unpin the upload release GHA action. ([\#17923](https://github.com/element-hq/synapse/issues/17923))
+- Bump macos version used to build wheels during release, as current version used is end-of-life. ([\#17924](https://github.com/element-hq/synapse/issues/17924))
+- Move server event filtering logic to rust. ([\#17928](https://github.com/element-hq/synapse/issues/17928))
+- Support new package name of PyPI package `python-multipart` 0.0.13 so that distro packagers do not need to work around name conflict with PyPI package `multipart`. ([\#17932](https://github.com/element-hq/synapse/issues/17932))
+- Speed up slow initial sliding syncs on large servers. ([\#17946](https://github.com/element-hq/synapse/issues/17946))
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.92 to 1.0.93. ([\#17920](https://github.com/element-hq/synapse/issues/17920))
+* Bump bleach from 6.1.0 to 6.2.0. ([\#17918](https://github.com/element-hq/synapse/issues/17918))
+* Bump immutabledict from 4.2.0 to 4.2.1. ([\#17941](https://github.com/element-hq/synapse/issues/17941))
+* Bump packaging from 24.1 to 24.2. ([\#17940](https://github.com/element-hq/synapse/issues/17940))
+* Bump phonenumbers from 8.13.49 to 8.13.50. ([\#17942](https://github.com/element-hq/synapse/issues/17942))
+* Bump pygithub from 2.4.0 to 2.5.0. ([\#17917](https://github.com/element-hq/synapse/issues/17917))
+* Bump ruff from 0.7.2 to 0.7.3. ([\#17919](https://github.com/element-hq/synapse/issues/17919))
+* Bump serde from 1.0.214 to 1.0.215. ([\#17938](https://github.com/element-hq/synapse/issues/17938))
+
+# Synapse 1.119.0 (2024-11-13)
+
+No significant changes since 1.119.0rc2.
 
 ### Python 3.8 support dropped
 
-Python 3.8 is no longer supported by Synapse. The minimum supported Python version is now 3.9.
+Python 3.8 is [end-of-life](https://devguide.python.org/versions/) and is no longer supported by Synapse. The minimum supported Python version is now 3.9.
 
 If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or greater) before upgrading Synapse.
+
+
+# Synapse 1.119.0rc2 (2024-11-11)
+
+Note that due to packaging issues there was no v1.119.0rc1.
+
 
 ### Features
 
@@ -37,6 +92,7 @@ If you are running Synapse with Python 3.8, please upgrade to Python 3.9 (or gre
 - Update version constraint to allow the latest poetry-core 1.9.1. ([\#17902](https://github.com/element-hq/synapse/pull/17902))
 - Update the portdb CI to use Python 3.13 and Postgres 17 as latest dependencies. ([\#17909](https://github.com/element-hq/synapse/pull/17909))
 - Add an index to `current_state_delta_stream` table. ([\#17912](https://github.com/element-hq/synapse/issues/17912))
+- Fix building and attaching release artifacts during the release process. ([\#17921](https://github.com/element-hq/synapse/issues/17921))
 
 ### Updates to locked dependencies
 
