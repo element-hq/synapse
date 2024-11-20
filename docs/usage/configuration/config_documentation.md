@@ -3299,7 +3299,8 @@ This setting has the following sub-options:
 * `attribute_requirements`: It is possible to configure Synapse to only allow logins if SAML attributes
     match particular values. The requirements can be listed under
    `attribute_requirements` as shown in the example. All of the listed attributes must
-    match for the login to be permitted.
+    match for the login to be permitted. Values can be comma-seperated to allow
+    multiple values for one attribute.
 * `idp_entityid`: If the metadata XML contains multiple IdP entities then the `idp_entityid`
    option must be set to the entity to redirect users to.
    Most deployments only have a single IdP entity and so should omit this option.
@@ -3380,7 +3381,7 @@ saml2_config:
     - attribute: userGroup
       value: "staff"
     - attribute: department
-      value: "sales"
+      value: "sales,admins"
 
   idp_entityid: 'https://our_idp/entityid'
 ```

@@ -1,0 +1,1 @@
+Add functionality to be able to use multiple values in SSO featute `attribute_requirements` via comma seperated list.

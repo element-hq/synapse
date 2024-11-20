@@ -1280,8 +1280,9 @@ def _check_attribute_requirement(
         return True
 
     values = attributes[req.attribute]
-    if req.value in values:
-        return True
+    for req_value in req.value.split(","):
+        if req_value in values:
+            return True
 
     logger.info(
         "SSO attribute %s did not match required value '%s' (was '%s')",
