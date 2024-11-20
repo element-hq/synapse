@@ -8749,6 +8749,30 @@ and &quot;App Secret&quot; for use below.</li>
 but it has a <code>response_types_supported</code> which excludes &quot;code&quot; (which we rely on, and
 is even mentioned in their <a href="https://developers.facebook.com/docs/facebook-login/manually-build-a-login-flow#login">documentation</a>),
 so we have to disable discovery and configure the URIs manually.</p>
+<h3 id="forgejo"><a class="header" href="#forgejo">Forgejo</a></h3>
+<p>Forgejo is a fork of Gitea that can act as an OAuth2 provider.</p>
+<p>The implementation of OAuth2 is improved compared to Gitea, as it provides a correctly defined <code>subject_claim</code> and <code>scopes</code>.</p>
+<p>Synapse config:</p>
+<pre><code class="language-yaml">oidc_providers:
+  - idp_id: forgejo
+    idp_name: Forgejo
+    discover: false
+    issuer: &quot;https://your-forgejo.com/&quot;
+    client_id: &quot;your-client-id&quot; # TO BE FILLED
+    client_secret: &quot;your-client-secret&quot; # TO BE FILLED
+    client_auth_method: client_secret_post
+    scopes: [&quot;openid&quot;, &quot;profile&quot;, &quot;email&quot;, &quot;groups&quot;]
+    authorization_endpoint: &quot;https://your-forgejo.com/login/oauth/authorize&quot;
+    token_endpoint: &quot;https://your-forgejo.com/login/oauth/access_token&quot;
+    userinfo_endpoint: &quot;https://your-forgejo.com/api/v1/user&quot;
+    user_mapping_provider:
+      config:
+        subject_claim: &quot;sub&quot;
+        picture_claim: &quot;picture&quot;
+        localpart_template: &quot;{{ user.preferred_username }}&quot;
+        display_name_template: &quot;{{ user.name }}&quot;
+        email_template: &quot;{{ user.email }}&quot;
+</code></pre>
 <h3 id="github"><a class="header" href="#github">GitHub</a></h3>
 <p><a href="https://developer.github.com/apps/building-oauth-apps/authorizing-oauth-apps">GitHub</a> is a bit special as it is not an OpenID Connect compliant provider, but
 just a regular OAuth2 provider.</p>
