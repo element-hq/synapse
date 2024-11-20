@@ -1444,3 +1444,40 @@ The following fields are returned in the JSON response body:
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._
+
+
+## Get the number of invites sent by the user in the last 24 hours
+
+Fetches the count of the number of invites sent by the provided user ID across all rooms in the last 24 hours.
+
+```
+GET /_synapse/admin/v1/user/invite_count/$user_id
+```
+
+A response body like the following is returned:
+
+```
+{
+  "invite_count": 30
+}
+```
+
+_Added in Synapse 1.120.0_
+
+## Get the number of rooms the user has joined in the last 24 hours
+
+Fetches the number of rooms the provided user ID has joined in the last 24 hours.
+
+```
+GET /_synapse/admin/v1/user/room_count/$user_id
+```
+
+A response body like the following is returned:
+
+```
+{
+  "room_count": 50
+}
+```
+
+_Added in Synapse 1.120.0_
