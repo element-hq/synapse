@@ -99,6 +99,13 @@ class EndToEndKeyBackgroundStore(SQLBaseStore):
             unique=True,
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="add_otk_ts_added_index",
+            index_name="e2e_one_time_keys_json_user_id_device_id_algorithm_ts_added_idx",
+            table="e2e_one_time_keys_json",
+            columns=("user_id", "device_id", "algorithm", "ts_added_ms"),
+        )
+
 
 class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorkerStore):
     def __init__(
@@ -1122,7 +1129,7 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         """Take a list of one time keys out of the database.
 
         Args:
-            query_list: An iterable of tuples of (user ID, device ID, algorithm).
+            query_list: An iterable of tuples of (user ID, device ID, algorithm, number of keys).
 
         Returns:
             A tuple (results, missing) of:
@@ -1310,9 +1317,14 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             OTK was found.
         """
 
+        # Return the oldest keys from this device (based on `ts_added_ms`).
+        # Doing so means that keys are issued in the same order they were uploaded,
+        # which reduces the chances of a client expiring its copy of a (private)
+        # key while the public key is still on the server, waiting to be issued.
         sql = """
             SELECT key_id, key_json FROM e2e_one_time_keys_json
             WHERE user_id = ? AND device_id = ? AND algorithm = ?
+            ORDER BY ts_added_ms
             LIMIT ?
         """
 
@@ -1354,13 +1366,22 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             A list of tuples (user_id, device_id, algorithm, key_id, key_json)
             for each OTK claimed.
         """
+        # Find, delete, and return the oldest keys from each device (based on
+        # `ts_added_ms`).
+        #
+        # Doing so means that keys are issued in the same order they were uploaded,
+        # which reduces the chances of a client expiring its copy of a (private)
+        # key while the public key is still on the server, waiting to be issued.
         sql = """
             WITH claims(user_id, device_id, algorithm, claim_count) AS (
                 VALUES ?
             ), ranked_keys AS (
                 SELECT
                     user_id, device_id, algorithm, key_id, claim_count,
-                    ROW_NUMBER() OVER (PARTITION BY (user_id, device_id, algorithm)) AS r
+                    ROW_NUMBER() OVER (
+                        PARTITION BY (user_id, device_id, algorithm)
+                        ORDER BY ts_added_ms
+                    ) AS r
                 FROM e2e_one_time_keys_json
                     JOIN claims USING (user_id, device_id, algorithm)
             )
@@ -1430,6 +1451,54 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         return await self.db_pool.runInteraction(
             "e2e_cross_signing_keys",
             impl,
+        )
+
+    async def delete_old_otks_for_next_user_batch(
+        self, after_user_id: str, number_of_users: int
+    ) -> Tuple[List[str], int]:
+        """Deletes old OTKs belonging to the next batch of users
+
+        Returns:
+            `(users, rows)`, where:
+             * `users` is the user IDs of the updated users. An empty list if we are done.
+             * `rows` is the number of deleted rows
+        """
+
+        def impl(txn: LoggingTransaction) -> Tuple[List[str], int]:
+            # Find a batch of users
+            txn.execute(
+                """
+                SELECT DISTINCT(user_id) FROM e2e_one_time_keys_json
+                    WHERE user_id > ?
+                    ORDER BY user_id
+                    LIMIT ?
+                """,
+                (after_user_id, number_of_users),
+            )
+            users = [row[0] for row in txn.fetchall()]
+            if len(users) == 0:
+                return users, 0
+
+            # Delete any old OTKs belonging to those users.
+            #
+            # We only actually consider OTKs whose key ID is 6 characters long. These
+            # keys were likely made by libolm rather than Vodozemac; libolm only kept
+            # 100 private OTKs, so was far more vulnerable than Vodozemac to throwing
+            # away keys prematurely.
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", users
+            )
+            sql = f"""
+                DELETE FROM e2e_one_time_keys_json
+                WHERE {clause} AND ts_added_ms < ? AND length(key_id) = 6
+                """
+            args.append(self._clock.time_msec() - (7 * 24 * 3600 * 1000))
+            txn.execute(sql, args)
+
+            return users, txn.rowcount
+
+        return await self.db_pool.runInteraction(
+            "delete_old_otks_for_next_user_batch", impl
         )
 
 
