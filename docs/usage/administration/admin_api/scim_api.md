@@ -20,7 +20,9 @@ Then it must be explicitly enabled by configuration:
 
 ```yaml
 experimental_features:
-    msc4098: true
+    msc4098:
+      enabled: true
+      idp_id: <my-provider>
 ```
 
 ## Examples
