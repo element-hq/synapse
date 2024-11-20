@@ -36,6 +36,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.test_utils import SMALL_PNG
+from tests.unittest import override_config
 
 VALID_TIMESTAMP = 1609459200000  # 2021-01-01 in milliseconds
 INVALID_TIMESTAMP_IN_S = 1893456000  # 2030-01-01 in seconds
@@ -126,6 +127,7 @@ class DeleteMediaByIDTestCase(_AdminMediaTests):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual("Can only delete local media", channel.json_body["error"])
 
+    @override_config({"enable_authenticated_media": False})
     def test_delete_media(self) -> None:
         """
         Tests that delete a media is successfully
@@ -371,6 +373,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_date(self) -> None:
         """
         Tests that media is not deleted if it is newer than `before_ts`
@@ -408,6 +411,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_size(self) -> None:
         """
         Tests that media is not deleted if its size is smaller than or equal
@@ -443,6 +447,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_user_avatar(self) -> None:
         """
         Tests that we do not delete media if is used as a user avatar
@@ -487,6 +492,7 @@ class DeleteMediaByDateSizeTestCase(_AdminMediaTests):
 
         self._access_media(server_and_media_id, False)
 
+    @override_config({"enable_authenticated_media": False})
     def test_keep_media_by_room_avatar(self) -> None:
         """
         Tests that we do not delete media if it is used as a room avatar
