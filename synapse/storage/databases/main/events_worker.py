@@ -2591,7 +2591,7 @@ class EventsWorkerStore(SQLBaseStore):
             txn: LoggingTransaction, user_id: str, timestamp: int
         ) -> int:
             sql = """
-                        SELECT COUNT(event_id) FROM events WHERE sender = ? AND type = "m.room.member" AND received_ts > ? AND state_key != ?
+                        SELECT COUNT(event_id) FROM events WHERE sender = ? AND type = 'm.room.member' AND received_ts > ? AND state_key != ?
                   """
 
             txn.execute(sql, (user_id, timestamp, user_id))
