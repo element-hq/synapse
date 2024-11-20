@@ -8,7 +8,7 @@ import synapse.rest.scim
 from synapse.config import ConfigError
 from synapse.config.homeserver import HomeServerConfig
 from synapse.rest.client import login
-from synapse.rest.scim import HAS_SCIM2, SCIM_IDP_ID
+from synapse.rest.scim import HAS_SCIM2, SCIM_DEFAULT_IDP_ID
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
@@ -58,7 +58,9 @@ class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
 
         config_dict = {
             "experimental_features": {
-                "msc4098": True,
+                "msc4098": {
+                    "enabled": True,
+                },
                 "msc3861": {"enabled": True},
             },
             **default_config("test"),
@@ -90,7 +92,10 @@ class UserProvisioningTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
-        conf.setdefault("experimental_features", {}).setdefault("msc4098", True)
+        msc4098_conf = conf.setdefault("experimental_features", {}).setdefault(
+            "msc4098", {}
+        )
+        msc4098_conf.setdefault("enabled", True)
         return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -125,7 +130,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
         )
         self.get_success(
             self.store.record_user_external_id(
-                SCIM_IDP_ID, "IDP-user", self.user_user_id
+                SCIM_DEFAULT_IDP_ID, "IDP-user", self.user_user_id
             )
         )
 
@@ -578,7 +583,10 @@ class SCIMMetadataTestCase(HomeserverTestCase):
 
     def default_config(self) -> JsonDict:
         conf = super().default_config()
-        conf.setdefault("experimental_features", {}).setdefault("msc4098", True)
+        msc4098_conf = conf.setdefault("experimental_features", {}).setdefault(
+            "msc4098", {}
+        )
+        msc4098_conf.setdefault("enabled", True)
         return conf
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:

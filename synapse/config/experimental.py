@@ -256,6 +256,19 @@ class MSC3866Config:
     require_approval_for_new_accounts: bool = False
 
 
+@attr.s(auto_attribs=True, frozen=True, slots=True)
+class MSC4098Config:
+    """Configuration for MSC4098 (SCIM provisioning)"""
+
+    # Whether the SCIM provisioning API is enabled.
+    enabled: bool = False
+
+    # The ID of the IDP that will be associated with the SCIM 'externalId' parameter.
+    # This should be one of the values used in the SSO config.
+    # If unset, a default '__scim__' id will be used.
+    idp_id: Optional[str] = None
+
+
 class ExperimentalConfig(Config):
     """Config section for enabling experimental features"""
 
@@ -416,13 +429,18 @@ class ExperimentalConfig(Config):
         )
 
         # MSC4098: SCIM provisioning API
-        self.msc4098_enabled = experimental.get("msc4098", False)
-        if self.msc4098_enabled and self.msc3861.enabled:
+        try:
+            self.msc4098 = MSC4098Config(**experimental.get("msc4098", {}))
+            if self.msc4098.enabled and self.msc3861.enabled:
+                raise ConfigError(
+                    "MSC3861 and MSC4098 are mutually exclusive. Please disable one or the"
+                    "other.",
+                    ("experimental", "msc4098"),
+                )
+        except ValueError as exc:
             raise ConfigError(
-                "MSC3861 and MSC4098 are mutually exclusive. Please disable one or the"
-                "other.",
-                ("experimental", "msc4098"),
-            )
+                "Invalid MSC4098 configuration", ("experimental", "msc4098")
+            ) from exc
 
         # MSC4108: Mechanism to allow OIDC sign in and E2EE set up via QR code
         self.msc4108_enabled = experimental.get("msc4108_enabled", False)

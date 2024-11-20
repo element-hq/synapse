@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 SCIM_PREFIX = "/_synapse/admin/scim/v2"
-SCIM_IDP_ID = "__scim__"
+SCIM_DEFAULT_IDP_ID = "__scim__"
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class SCIMResource(JsonResource):
 
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    if not hs.config.experimental.msc4098_enabled:
+    if not hs.config.experimental.msc4098.enabled:
         return
 
     SchemaListServlet(hs).register(http_server)
@@ -156,9 +156,10 @@ class SCIMServlet(RestServlet):
     async def get_scim_external_id(self, user_id: str) -> Optional[str]:
         """Read the external id stored in the special SCIM IDP."""
 
+        scim_idp_id = self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
         external_ids = await self.store.get_external_ids_by_user(user_id)
         for idp_id, external_id in external_ids:
-            if idp_id == SCIM_IDP_ID:
+            if idp_id == scim_idp_id:
                 return external_id
 
         return None
@@ -303,13 +304,16 @@ class UserServlet(SCIMServlet):
 
             external_id = await self.get_scim_external_id(user_id)
             if request_user.external_id != external_id:
+                scim_idp_id = (
+                    self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
+                )
                 if external_id:
                     await self.store.remove_user_external_id(
-                        SCIM_IDP_ID, external_id, user_id
+                        scim_idp_id, external_id, user_id
                     )
                 if request_user.external_id:
                     await self.store.record_user_external_id(
-                        SCIM_IDP_ID, request_user.external_id, user_id
+                        scim_idp_id, request_user.external_id, user_id
                     )
 
             if request_user.photos and request_user.photos[0].value:
@@ -451,8 +455,11 @@ class UserListServlet(SCIMServlet):
             )
 
             if request_user.external_id:
+                scim_idp_id = (
+                    self.hs.config.experimental.msc4098.idp_id or SCIM_DEFAULT_IDP_ID
+                )
                 await self.store.record_user_external_id(
-                    SCIM_IDP_ID, request_user.external_id, user_id
+                    scim_idp_id, request_user.external_id, user_id
                 )
 
             now_ts = self.hs.get_clock().time_msec()
