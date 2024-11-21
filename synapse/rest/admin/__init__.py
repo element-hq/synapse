@@ -112,7 +112,6 @@ from synapse.rest.admin.users import (
     UserRegisterServlet,
     UserReplaceMasterCrossSigningKeyRestServlet,
     UserRestServletV2,
-    UserRoomJoinCount,
     UsersRestServletV2,
     UsersRestServletV3,
     UserTokenRestServlet,
@@ -326,7 +325,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     RedactUser(hs).register(http_server)
     RedactUserStatus(hs).register(http_server)
     UserInvitesCount(hs).register(http_server)
-    UserRoomJoinCount(hs).register(http_server)
 
     DeviceRestServlet(hs).register(http_server)
     DevicesRestServlet(hs).register(http_server)

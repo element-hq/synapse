@@ -478,7 +478,8 @@ with a body of:
 
 ## List room memberships of a user
 
-Gets a list of all `room_id` that a specific `user_id` is member.
+Gets a list of all `room_id` that a specific `user_id` is member. Optionally, get the list of all the rooms
+the user has joined after a given time, via the `from_ts` param. 
 
 The API is:
 
@@ -507,6 +508,7 @@ member are returned.
 The following parameters should be set in the URL:
 
 - `user_id` - fully qualified: for example, `@user:server.com`.
+- `from_ts` - int. Optional. A timestamp in ms from the unix epoch - only rooms joined after the provided timestamp will be returned. Note: https://currentmillis.com/ is a useful tool for converting dates into timestamps and vice versa.
 
 **Response**
 
@@ -1451,7 +1453,7 @@ _Added in Synapse 1.116.0._
 Fetches the number of invites sent by the provided user ID across all rooms in the last 24 hours.
 
 ```
-GET /_synapse/admin/v1/users/invite_count/$user_id
+GET /_synapse/admin/v1/users/$user_id/invite_count
 ```
 
 A response body like the following is returned:
@@ -1464,20 +1466,3 @@ A response body like the following is returned:
 
 _Added in Synapse 1.120.0_
 
-## Get the number of rooms the user has joined in the last 24 hours
-
-Fetches the number of rooms the provided user ID has joined in the last 24 hours.
-
-```
-GET /_synapse/admin/v1/users/room_count/$user_id
-```
-
-A response body like the following is returned:
-
-```
-{
-  "room_count": 50
-}
-```
-
-_Added in Synapse 1.120.0_

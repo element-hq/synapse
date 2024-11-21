@@ -331,6 +331,13 @@ class EventsWorkerStore(SQLBaseStore):
             writers=["master"],
         )
 
+        self.db_pool.updates.register_background_index_update(
+            update_name="events_received_ts_index",
+            index_name="received_ts_idx",
+            table="events",
+            columns=("received_ts",),
+        )
+
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
             self._un_partial_stated_events_stream_id_gen.get_current_token_for_writer(
@@ -2591,7 +2598,7 @@ class EventsWorkerStore(SQLBaseStore):
             txn: LoggingTransaction, user_id: str, timestamp: int
         ) -> int:
             sql = """
-                        SELECT COUNT(event_id) FROM events WHERE sender = ? AND type = 'm.room.member' AND received_ts > ? AND state_key != ?
+                  SELECT COUNT(event_id) FROM events WHERE sender = ? AND type = 'm.room.member' AND received_ts > ? AND state_key != ?
                   """
 
             txn.execute(sql, (user_id, timestamp, user_id))

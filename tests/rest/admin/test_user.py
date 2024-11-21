@@ -5555,19 +5555,19 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         for i in range(4):
             self.random_users.append(self.register_user(f"user{i}", f"pass{i}"))
 
-        self.rm1 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
-        self.rm2 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
-        self.rm3 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.room1 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.room2 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
+        self.room3 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
 
     def test_get_user_invite_count_test_case(self) -> None:
         # bad user send some invites
-        for rm in [self.rm1, self.rm2]:
+        for rm in [self.room1, self.room2]:
             for user in self.random_users:
                 self.helper.invite(rm, self.bad_user, user, tok=self.bad_user_tok)
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/invite_count",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5577,7 +5577,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.reactor.advance(60 * 60 * 48 * 1000)
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/invite_count",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5585,11 +5585,11 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         # send some more invites, they should show up
         for user in self.random_users:
-            self.helper.invite(self.rm3, self.bad_user, user, tok=self.bad_user_tok)
+            self.helper.invite(self.room3, self.bad_user, user, tok=self.bad_user_tok)
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/invite_count/{self.bad_user}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/invite_count",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)

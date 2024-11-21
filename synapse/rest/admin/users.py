@@ -1514,7 +1514,7 @@ class UserInvitesCount(RestServlet):
     Return the count of invites that the user has sent in the last 24 hours
     """
 
-    PATTERNS = admin_patterns("/users/invite_count/(?P<user_id>[^/]*)$")
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/invite_count")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
