@@ -983,7 +983,8 @@ class UserAdminServlet(RestServlet):
 
 class UserMembershipRestServlet(RestServlet):
     """
-    Get room list of an user.
+    Get room list of a user. Optionally get a list of rooms joined after a given timestamp, via
+    the optional `from_ts` query param.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")
@@ -997,10 +998,15 @@ class UserMembershipRestServlet(RestServlet):
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
+        from_ts = parse_integer(request, "from_ts")
 
-        room_ids = await self.store.get_rooms_for_user(user_id)
-        ret = {"joined_rooms": list(room_ids), "total": len(room_ids)}
-        return HTTPStatus.OK, ret
+        if from_ts:
+            room_ids = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
+        else:
+            room_ids = await self.store.get_rooms_for_user(user_id)
+        rooms_list = {"joined_rooms": list(room_ids), "total": len(room_ids)}
+
+        return HTTPStatus.OK, rooms_list
 
 
 class PushersRestServlet(RestServlet):
@@ -1522,24 +1528,3 @@ class UserInvitesCount(RestServlet):
         res = await self.store.get_invite_count_by_user(user_id)
 
         return HTTPStatus.OK, {"invite_count": res}
-
-
-class UserRoomJoinCount(RestServlet):
-    """
-    Return the count of rooms that the user has joined in the last 24 hours
-    """
-
-    PATTERNS = admin_patterns("/users/room_count/(?P<user_id>[^/]*)$")
-
-    def __init__(self, hs: "HomeServer"):
-        self._auth = hs.get_auth()
-        self.store = hs.get_datastores().main
-
-    async def on_GET(
-        self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
-        await assert_requester_is_admin(self._auth, request)
-
-        res = await self.store.get_join_count_by_user(user_id)
-
-        return HTTPStatus.OK, {"room_count": res}

@@ -1572,6 +1572,34 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             get_sliding_sync_room_for_user_batch_txn,
         )
 
+    async def get_rooms_for_user_by_date(self, user_id: str, from_ts: int) -> frozenset:
+        """
+        Fetch a list of rooms that the user has joined since the given timestamp.
+
+        Args:
+            user_id: user ID of the user to search for
+            from_ts: a timestamp in ms from the unix epoch at which to begin the search at
+        """
+
+        def _get_rooms_for_user_by_join_date_txn(
+            txn: LoggingTransaction, user_id: str, timestamp: int
+        ) -> frozenset:
+            sql = """
+                    SELECT c.room_id
+                    FROM current_state_events c
+                    JOIN events e ON c.event_id = e.event_id
+                    WHERE c.state_key = ? AND c.membership = 'join' AND e.received_ts > ?
+            """
+            txn.execute(sql, (user_id, from_ts))
+            return frozenset([r[0] for r in txn])
+
+        return await self.db_pool.runInteraction(
+            "_get_rooms_for_user_by_join_date_txn",
+            _get_rooms_for_user_by_join_date_txn,
+            user_id,
+            from_ts,
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(

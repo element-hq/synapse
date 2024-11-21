@@ -2607,32 +2607,3 @@ class EventsWorkerStore(SQLBaseStore):
             user_id,
             timestamp,
         )
-
-    async def get_join_count_by_user(self, user_id: str) -> int:
-        """
-        Get the number of rooms the user has joined in the last 24hrs
-        """
-        timestamp = self._clock.time_msec() - (24 * 60 * 60 * 1000)  # 24 hours ago
-
-        def _get_join_count_by_user_txn(
-            txn: LoggingTransaction, user_id: str, timestamp: int
-        ) -> int:
-            sql = """
-                        SELECT COUNT(c.event_id)
-                        FROM current_state_events c
-                        JOIN events e ON c.event_id = e.event_id
-                        WHERE c.membership = 'join' AND c.state_key = ? AND e.received_ts > ?
-                  """
-            txn.execute(sql, (user_id, timestamp))
-            res = txn.fetchone()
-
-            if res is None:
-                return 0
-            return int(res[0])
-
-        return await self.db_pool.runInteraction(
-            "_get_join_count_by_user_txn",
-            _get_join_count_by_user_txn,
-            user_id,
-            timestamp,
-        )

@@ -3384,6 +3384,40 @@ class UserMembershipRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, channel.json_body["total"])
         self.assertEqual([local_and_remote_room_id], channel.json_body["joined_rooms"])
 
+    def test_from_ts_param(self) -> None:
+        # Create rooms and join, grab timestamp of room creation
+        room_creation_timestamp = self.reactor.rightNow
+        other_user_tok = self.login("user", "pass")
+        number_rooms = 5
+        for _ in range(number_rooms):
+            self.helper.create_room_as(self.other_user, tok=other_user_tok)
+
+        # advance clock 48 hours
+        self.reactor.advance(60 * 60 * 48 * 1000)
+
+        # get a timestamp beginning 24 hours ago
+        current_time = self.reactor.rightNow
+        from_ts = current_time - (24 * 60 * 60 * 1000)  # 24 hours ago
+
+        # Get rooms using this timestamp, there should be none
+        channel = self.make_request(
+            "GET",
+            f"{self.url}?from_ts={int(from_ts)}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, channel.json_body["total"])
+
+        # fetch rooms with the older timestamp, this should return the rooms
+        channel = self.make_request(
+            "GET",
+            f"{self.url}?from_ts={int(room_creation_timestamp)}",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(number_rooms, channel.json_body["total"])
+        self.assertEqual(number_rooms, len(channel.json_body["joined_rooms"]))
+
 
 class PushersRestTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -5560,65 +5594,3 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 4)
-
-
-class GetRoomCountForUserTestCase(unittest.HomeserverTestCase):
-    servlets = [
-        synapse.rest.admin.register_servlets,
-        login.register_servlets,
-        admin.register_servlets,
-        room.register_servlets,
-    ]
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        self.admin = self.register_user("thomas", "pass", True)
-        self.admin_tok = self.login("thomas", "pass")
-
-        self.bad_user = self.register_user("teresa", "pass")
-        self.bad_user_tok = self.login("teresa", "pass")
-
-        self.rooms1 = []
-        self.rooms2 = []
-        for i in range(10):
-            rm = self.helper.create_room_as(
-                self.admin, is_public=True, tok=self.admin_tok
-            )
-            if i % 2 == 0:
-                self.rooms1.append(rm)
-            else:
-                self.rooms2.append(rm)
-
-    def test_room_count_for_user(self) -> None:
-        # bad user go on a join spree
-        for rm in self.rooms1:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
-
-        channel = self.make_request(
-            "GET",
-            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
-            access_token=self.admin_tok,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["room_count"], 5)
-
-        # advance clock 48 hours and check again, should return 0
-        self.reactor.advance(60 * 60 * 48 * 1000)
-        channel = self.make_request(
-            "GET",
-            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
-            access_token=self.admin_tok,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["room_count"], 0)
-
-        # join some more
-        for rm in self.rooms2:
-            self.helper.join(rm, self.bad_user, tok=self.bad_user_tok)
-
-        channel = self.make_request(
-            "GET",
-            f"/_synapse/admin/v1/users/room_count/{self.bad_user}",
-            access_token=self.admin_tok,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["room_count"], 5)
