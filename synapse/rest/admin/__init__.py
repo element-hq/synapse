@@ -54,7 +54,6 @@ from synapse.rest.admin.devices import (
     DevicesRestServlet,
 )
 from synapse.rest.admin.event_reports import (
-    EventReportAgainstUserRestServlet,
     EventReportDetailRestServlet,
     EventReportsRestServlet,
 )
@@ -301,7 +300,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UsersRestServletV3(hs).register(http_server)
     UserMediaStatisticsRestServlet(hs).register(http_server)
     LargestRoomsStatistics(hs).register(http_server)
-    EventReportAgainstUserRestServlet(hs).register(http_server)
     EventReportDetailRestServlet(hs).register(http_server)
     EventReportsRestServlet(hs).register(http_server)
     AccountDataRestServlet(hs).register(http_server)

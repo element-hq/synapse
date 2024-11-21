@@ -1518,69 +1518,6 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             get_un_partial_stated_rooms_from_stream_txn,
         )
 
-    async def get_event_report_IDs_by_sender(
-        self,
-        sender_id: str,
-        start: int,
-        limit: int,
-        direction: Direction = Direction.BACKWARDS,
-    ) -> Optional[List[str]]:
-        """
-        Get all the event reports IDs where the sender is the provided user id
-
-        Args:
-            sender_id: The user_id of the sender of the reported event
-            start: event offset to begin the query from
-            limit: number of rows to retrieve
-            direction: Whether to fetch the most recent first (backwards) or the
-                oldest first (forwards)
-        """
-
-        def _get_event_report_IDs_txn(
-            txn: LoggingTransaction,
-            sender_id: str,
-            start: int,
-            limit: int,
-            direction: Direction,
-        ) -> Optional[List[str]]:
-            if direction == Direction.BACKWARDS:
-                order = "DESC"
-            else:
-                order = "ASC"
-
-            sql = f"""
-                SELECT
-                    er.id
-                FROM event_reports AS er
-                LEFT JOIN events
-                    ON events.event_id = er.event_id
-                WHERE events.sender = ?
-                ORDER BY er.received_ts {order}
-                LIMIT ?
-                OFFSET ?
-            """
-
-            txn.execute(sql, (sender_id, limit, start))
-            rows = txn.fetchall()
-
-            if not rows:
-                return None
-
-            report_ids = []
-            for r in rows:
-                report_ids.append(r[0])
-
-            return report_ids
-
-        return await self.db_pool.runInteraction(
-            "get_event_report_IDs_by_sender",
-            _get_event_report_IDs_txn,
-            sender_id,
-            start,
-            limit,
-            direction,
-        )
-
     async def get_event_report(self, report_id: int) -> Optional[Dict[str, Any]]:
         """Retrieve an event report
 
@@ -1649,6 +1586,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         direction: Direction = Direction.BACKWARDS,
         user_id: Optional[str] = None,
         room_id: Optional[str] = None,
+        sender_user_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Retrieve a paginated list of event reports
 
@@ -1659,6 +1597,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 oldest first (forwards)
             user_id: search for user_id. Ignored if user_id is None
             room_id: search for room_id. Ignored if room_id is None
+            sender_user_id: search for the sender of the reported event. Ignored if sender_user_id is None
         Returns:
             Tuple of:
                 json list of event reports
@@ -1678,6 +1617,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 filters.append("er.room_id LIKE ?")
                 args.extend(["%" + room_id + "%"])
 
+            if sender_user_id:
+                filters.append("events.sender LIKE ?")
+                args.extend(["%" + sender_user_id + "%"])
+
             if direction == Direction.BACKWARDS:
                 order = "DESC"
             else:
@@ -1693,6 +1636,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = """
                 SELECT COUNT(*) as total_event_reports
                 FROM event_reports AS er
+                LEFT JOIN events
+                    ON events.event_id = er.event_id
                 JOIN room_stats_state ON room_stats_state.room_id = er.room_id
                 {}
                 """.format(where_clause)

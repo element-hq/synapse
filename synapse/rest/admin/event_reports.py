@@ -50,8 +50,9 @@ class EventReportsRestServlet(RestServlet):
         The parameters `from` and `limit` are required only for pagination.
         By default, a `limit` of 100 is used.
         The parameter `dir` can be used to define the order of results.
-        The parameter `user_id` can be used to filter by user id.
+        The parameter `user_id` can be used to filter the user id of the reporter of the event.
         The parameter `room_id` can be used to filter by room id.
+        The parameter `sender_user_id` can be used to filter by the user id of the sender of the reported event.
     Returns:
         A list of reported events and an integer representing the total number of
         reported events that exist given this query
@@ -71,6 +72,7 @@ class EventReportsRestServlet(RestServlet):
         direction = parse_enum(request, "dir", Direction, Direction.BACKWARDS)
         user_id = parse_string(request, "user_id")
         room_id = parse_string(request, "room_id")
+        sender_user_id = parse_string(request, "sender_user_id")
 
         if start < 0:
             raise SynapseError(
@@ -87,7 +89,7 @@ class EventReportsRestServlet(RestServlet):
             )
 
         event_reports, total = await self._store.get_event_reports_paginate(
-            start, limit, direction, user_id, room_id
+            start, limit, direction, user_id, room_id, sender_user_id
         )
         ret = {"event_reports": event_reports, "total": total}
         if (start + limit) < total:
@@ -168,35 +170,3 @@ class EventReportDetailRestServlet(RestServlet):
             return HTTPStatus.OK, {}
 
         raise NotFoundError("Event report not found")
-
-
-class EventReportAgainstUserRestServlet(RestServlet):
-    """
-    Get all the event reports where the original sender of the reported event is the provided user
-
-    GET /_synapse/admin/v1/event_reports/user/<user_id>
-
-    """
-
-    PATTERNS = admin_patterns("/event_reports/user/(?P<user_id>[^/]*)$")
-
-    def __init__(self, hs: "HomeServer"):
-        self._auth = hs.get_auth()
-        self._store = hs.get_datastores().main
-
-    async def on_GET(
-        self, request: SynapseRequest, user_id: str
-    ) -> Tuple[HTTPStatus, dict[str, list[str]]]:
-        await assert_requester_is_admin(self._auth, request)
-
-        start = parse_integer(request, "start", default=0)
-        limit = parse_integer(request, "limit", default=100)
-        direction = parse_enum(request, "dir", Direction, Direction.BACKWARDS)
-
-        res = await self._store.get_event_report_IDs_by_sender(
-            user_id, start, limit, direction
-        )
-        if not res:
-            raise NotFoundError("User ID not found")
-
-        return HTTPStatus.OK, {"report_ids": res}

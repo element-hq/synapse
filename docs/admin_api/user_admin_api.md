@@ -1448,7 +1448,7 @@ _Added in Synapse 1.116.0._
 
 ## Get the number of invites sent by the user in the last 24 hours
 
-Fetches the count of the number of invites sent by the provided user ID across all rooms in the last 24 hours.
+Fetches the number of invites sent by the provided user ID across all rooms in the last 24 hours.
 
 ```
 GET /_synapse/admin/v1/users/invite_count/$user_id

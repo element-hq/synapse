@@ -64,6 +64,8 @@ paginate through.
   contain this value. This is the user who reported the event and wrote the reason.
 * `room_id`: string - Is optional and filters to only return rooms with room IDs that
   contain this value.
+* `sender_user_id`: string - Is optional and filters to only return event reports against the provided
+  user (i.e. where the user is the reported event's sender)
 
 **Response**
 
@@ -183,33 +185,3 @@ DELETE /_synapse/admin/v1/event_reports/<report_id>
 **URL parameters:**
 
 * `report_id`: string - The ID of the event report.
-
-
-# Fetch the report IDs for a specific user
-
-Fetches the report IDs where the sender of the reported event is the provided user ID. 
-
-The api is:
-```
-GET /_synapse/admin/v1/event_reports/user/$user_id
-```
-
-**URL paramters**
-
-* `user_id`: string - Required. The ID of the user to search for
-* `limit`: integer - Is optional but is used for pagination, denoting the maximum number
-  of items to return in this call. Defaults to `100`.
-* `from`: integer - Is optional but used for pagination, denoting the offset in the
-  returned results. This should be treated as an opaque value and not explicitly set to
-  anything other than the return value of `next_token` from a previous call. Defaults to `0`.
-* `dir`: string - Direction of event report order. Whether to fetch the most recent
-  first (`b`) or the oldest first (`f`). Defaults to `b`.
-
-A response body like the following is returned:
-```
-  {
-    "report_ids": [2, 3, 4]
-  }
-```
-
-_Added in Synapse 1.120.0_
