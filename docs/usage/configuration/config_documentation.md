@@ -1887,8 +1887,7 @@ Config options related to Synapse's media store.
 
 When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
 unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
-after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
-this will change to true in a future Synapse release.
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to true (previously false). In a future release of Synapse, this option will be removed and become always-on.
 
 In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
 case-by-case breakdown describes whether media downloads are permitted:
@@ -1910,9 +1909,11 @@ will perpetually be available over the legacy, unauthenticated endpoint, even af
 This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
 those older clients or homeservers will not be cut off from media they can already see.
 
+_Changed in Synapse 1.120:_ This option now defaults to `True` when not set, whereas before this version it defaulted to `False`.
+
 Example configuration:
 ```yaml
-enable_authenticated_media: true
+enable_authenticated_media: false
 ```
 ---
 ### `enable_media_repo`
