@@ -104,6 +104,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+ONE_HOUR_MS = 60 * 60 * 1000
+ONE_DAY_MS = 24 * ONE_HOUR_MS
+
 
 class DatabaseCorruptionError(RuntimeError):
     """We found an event in the DB that has a persisted event ID that doesn't
@@ -2592,7 +2595,7 @@ class EventsWorkerStore(SQLBaseStore):
         """
         Get the number of invites sent by the given user in the past 24 hours
         """
-        timestamp = self._clock.time_msec() - (24 * 60 * 60 * 1000)  # 24 hours ago
+        timestamp = self._clock.time_msec() - ONE_DAY_MS  # 24 hours ago
 
         def _get_invite_count_by_user_txn(
             txn: LoggingTransaction, user_id: str, timestamp: int
