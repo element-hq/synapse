@@ -956,16 +956,6 @@ class SlidingSyncHandler:
                         ):
                             lazy_load_room_members = True
 
-                            # For incremental syncs that aren't limited, when
-                            # lazy-loading room members, also include any membership
-                            # that has changed. This allows clients to cache the
-                            # membership list for as long as it doesn't get a gappy
-                            # sync, but still ensures for large gaps the server doesn't
-                            # need to send down all membership changes.
-                            # if not initial and not limited:
-                            #     # `None` is a wildcard in the `StateFilter`
-                            #     required_state_types.append((EventTypes.Member, None))
-
                             # Everyone in the timeline is relevant
                             #
                             # FIXME: We probably also care about invite, ban, kick, targets, etc
@@ -973,7 +963,18 @@ class SlidingSyncHandler:
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
+                                    # Anyone who sent a message is relevant
                                     timeline_membership.add(timeline_event.sender)
+
+                                    # We also care about invite, ban, kick, targets,
+                                    # etc. This allows clients to cache the membership
+                                    # list for as long as it doesn't get a gappy sync,
+                                    # but still ensures for large gaps the server
+                                    # doesn't need to send down all membership changes.
+                                    if timeline_event.type == EventTypes.Member:
+                                        timeline_membership.add(
+                                            timeline_event.state_key
+                                        )
 
                             # Update the required state filter so we pick up the new
                             # membership
