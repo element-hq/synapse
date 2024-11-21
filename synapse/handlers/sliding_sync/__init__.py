@@ -957,9 +957,6 @@ class SlidingSyncHandler:
                             lazy_load_room_members = True
 
                             # Everyone in the timeline is relevant
-                            #
-                            # FIXME: We probably also care about invite, ban, kick, targets, etc
-                            # but the spec only mentions "senders".
                             timeline_membership: Set[str] = set()
                             if timeline_events is not None:
                                 for timeline_event in timeline_events:
