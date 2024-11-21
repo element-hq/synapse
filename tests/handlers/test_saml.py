@@ -367,12 +367,12 @@ class SamlHandlerTestCase(HomeserverTestCase):
         {
             "saml2_config": {
                 "attribute_requirements": [
-                    {"attribute": "userGroup", "value": "staff,admin"},
+                    {"attribute": "userGroup", "one_of": ["staff", "admin"]},
                 ],
             },
         }
     )
-    def test_attribute_requirements_multiple_values(self) -> None:
+    def test_attribute_requirements_one_of(self) -> None:
         """The required attributes can be comma-separated."""
 
         # stub out the auth handler

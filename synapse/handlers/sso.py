@@ -1276,13 +1276,16 @@ def _check_attribute_requirement(
         return False
 
     # If the requirement is None, the attribute existing is enough.
-    if req.value is None:
+    if req.value is None and req.one_of is None:
         return True
 
     values = attributes[req.attribute]
-    for req_value in req.value.split(","):
-        if req_value in values:
-            return True
+    if req.value in values:
+        return True
+    if req.one_of:
+        for value in req.one_of:
+            if value in values:
+                return True
 
     logger.info(
         "SSO attribute %s did not match required value '%s' (was '%s')",

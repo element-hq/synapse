@@ -1271,11 +1271,13 @@ class OidcHandlerTestCase(HomeserverTestCase):
         {
             "oidc_config": {
                 **DEFAULT_CONFIG,
-                "attribute_requirements": [{"attribute": "test", "value": "foo,bar"}],
+                "attribute_requirements": [
+                    {"attribute": "test", "one_of": ["foo", "bar"]}
+                ],
             }
         }
     )
-    def test_attribute_requirements_multiple_values(self) -> None:
+    def test_attribute_requirements_one_of(self) -> None:
         """Test that auth succeeds if userinfo attribute has multiple values and CONTAINS required value"""
         # userinfo with "test": ["bar"] attribute should succeed.
         userinfo = {
