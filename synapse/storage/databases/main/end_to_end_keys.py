@@ -220,12 +220,15 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
         self,
         query_list: Collection[Tuple[str, Optional[str]]],
         include_displaynames: bool = True,
+        include_uploaded_unsigned_data: bool = False,
     ) -> Dict[str, Dict[str, JsonDict]]:
         """Fetch a list of device keys, formatted suitably for the C/S API.
         Args:
             query_list: List of pairs of user_ids and device_ids.
             include_displaynames: Whether to include the displayname of returned devices
                 (if one exists).
+            include_uploaded_unsigned_data: Whether to include uploaded `unsigned` data
+                in the response
         Returns:
             Dict mapping from user-id to dict mapping from device_id to
             key data.  The key data will be a dict in the same format as the
@@ -247,7 +250,13 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
                 if r is None:
                     continue
 
-                r["unsigned"] = {}
+                # If there was already an `unsigned` dict in the uploaded key, keep it.
+                # Otherwise, create a new one.
+                if not include_uploaded_unsigned_data or not isinstance(
+                    r.get("unsigned"), dict
+                ):
+                    r["unsigned"] = {}
+
                 if include_displaynames:
                     # Include the device's display name in the "unsigned" dictionary
                     display_name = device_info.display_name
