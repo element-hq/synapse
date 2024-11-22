@@ -195,12 +195,14 @@ class SCIMServlet(RestServlet):
                 Email(value=threepid.address)
                 for threepid in threepids
                 if threepid.medium == "email"
-            ],
+            ]
+            or None,
             phone_numbers=[
                 PhoneNumber(value=threepid.address)
                 for threepid in threepids
                 if threepid.medium == "msisdn"
-            ],
+            ]
+            or None,
         )
 
         if profile.avatar_url:
