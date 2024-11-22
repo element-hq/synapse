@@ -27,7 +27,7 @@ import datetime
 import logging
 import re
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, TypeVar, Union
 
 from synapse._pydantic_compat import PYDANTIC_VERSION
 from synapse.api.errors import SynapseError
@@ -103,6 +103,9 @@ def register_scim_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     UserServlet(hs).register(http_server)
 
 
+T = TypeVar("T")
+
+
 class SCIMServlet(RestServlet):
     def __init__(self, hs: "HomeServer"):
         self.hs = hs
@@ -116,11 +119,22 @@ class SCIMServlet(RestServlet):
         self.default_nb_items_per_page = 100
         self.max_nb_items_per_page = 1000
 
+    def make_response(
+        self,
+        request: SynapseRequest,
+        status: Union[int, HTTPStatus],
+        payload: T,
+    ) -> Tuple[Union[int, HTTPStatus], T]:
+        """Create a SCIM response, and adds the expected headers."""
+        request.setHeader(b"Content-Type", b"application/scim+json")
+        return status, payload
+
     def make_error_response(
-        self, status: Union[int, HTTPStatus], message: str
+        self, request: SynapseRequest, status: Union[int, HTTPStatus], message: str
     ) -> Tuple[Union[int, HTTPStatus], JsonDict]:
         """Create a SCIM Error object intended to be returned as HTTP response."""
-        return (
+        return self.make_response(
+            request,
             status,
             Error(
                 status=status.value if isinstance(status, HTTPStatus) else status,
@@ -246,9 +260,9 @@ class UserServlet(SCIMServlet):
                 attributes=req.attributes,
                 excluded_attributes=req.excluded_attributes,
             )
-            return HTTPStatus.OK, payload
+            return self.make_response(request, HTTPStatus.OK, payload)
         except SynapseError as exc:
-            return self.make_error_response(exc.code, exc.msg)
+            return self.make_error_response(request, exc.code, exc.msg)
 
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str
@@ -266,9 +280,9 @@ class UserServlet(SCIMServlet):
                 user_id, erase_data=True, requester=requester, by_admin=True
             )
         except SynapseError as exc:
-            return self.make_error_response(exc.code, exc.msg)
+            return self.make_error_response(request, exc.code, exc.msg)
 
-        return HTTPStatus.NO_CONTENT, ""
+        return self.make_response(request, HTTPStatus.NO_CONTENT, "")
 
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
@@ -373,10 +387,10 @@ class UserServlet(SCIMServlet):
             payload = response_user.model_dump(
                 scim_ctx=Context.RESOURCE_REPLACEMENT_RESPONSE
             )
-            return HTTPStatus.OK, payload
+            return self.make_response(request, HTTPStatus.OK, payload)
 
         except SynapseError as exc:
-            return self.make_error_response(exc.code, exc.msg)
+            return self.make_error_response(request, exc.code, exc.msg)
 
 
 class UserListServlet(SCIMServlet):
@@ -412,10 +426,10 @@ class UserListServlet(SCIMServlet):
             payload = list_response.model_dump(
                 scim_ctx=Context.RESOURCE_QUERY_RESPONSE,
             )
-            return HTTPStatus.OK, payload
+            return self.make_response(request, HTTPStatus.OK, payload)
 
         except SynapseError as exc:
-            return self.make_error_response(exc.code, exc.msg)
+            return self.make_error_response(request, exc.code, exc.msg)
 
     async def on_POST(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
         """Implement the RFC7644 resource creation endpoint.
@@ -490,10 +504,10 @@ class UserListServlet(SCIMServlet):
             payload = response_user.model_dump(
                 scim_ctx=Context.RESOURCE_CREATION_RESPONSE
             )
-            return HTTPStatus.CREATED, payload
+            return self.make_response(request, HTTPStatus.CREATED, payload)
 
         except SynapseError as exc:
-            return self.make_error_response(exc.code, exc.msg)
+            return self.make_error_response(request, exc.code, exc.msg)
 
 
 class ServiceProviderConfigServlet(SCIMServlet):
@@ -532,7 +546,11 @@ class ServiceProviderConfigServlet(SCIMServlet):
                 ),
             ],
         )
-        return HTTPStatus.OK, spc.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE)
+        return self.make_response(
+            request,
+            HTTPStatus.OK,
+            spc.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE),
+        )
 
 
 class BaseSchemaServlet(SCIMServlet):
@@ -578,8 +596,10 @@ class SchemaListServlet(BaseSchemaServlet):
             start_index=start_index,
             resources=resources[start_index - 1 : stop_index],
         )
-        return HTTPStatus.OK, response.model_dump(
-            scim_ctx=Context.RESOURCE_QUERY_RESPONSE
+        return self.make_response(
+            request,
+            HTTPStatus.OK,
+            response.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE),
         )
 
 
@@ -595,11 +615,17 @@ class SchemaServlet(BaseSchemaServlet):
         https://datatracker.ietf.org/doc/html/rfc7644#section-4"""
 
         try:
-            return HTTPStatus.OK, self.schemas[schema_id].model_dump(
-                scim_ctx=Context.RESOURCE_QUERY_RESPONSE
+            return self.make_response(
+                request,
+                HTTPStatus.OK,
+                self.schemas[schema_id].model_dump(
+                    scim_ctx=Context.RESOURCE_QUERY_RESPONSE
+                ),
             )
         except KeyError:
-            return self.make_error_response(HTTPStatus.NOT_FOUND, "Object not found")
+            return self.make_error_response(
+                request, HTTPStatus.NOT_FOUND, "Object not found"
+            )
 
 
 class BaseResourceTypeServlet(SCIMServlet):
@@ -645,8 +671,10 @@ class ResourceTypeListServlet(BaseResourceTypeServlet):
             start_index=start_index,
             resources=resources[start_index - 1 : stop_index],
         )
-        return HTTPStatus.OK, response.model_dump(
-            scim_ctx=Context.RESOURCE_QUERY_RESPONSE
+        return self.make_response(
+            request,
+            HTTPStatus.OK,
+            response.model_dump(scim_ctx=Context.RESOURCE_QUERY_RESPONSE),
         )
 
 
@@ -668,6 +696,10 @@ class ResourceTypeServlet(BaseResourceTypeServlet):
         }
 
         try:
-            return HTTPStatus.OK, resource_types[resource_type]
+            return self.make_response(
+                request, HTTPStatus.OK, resource_types[resource_type]
+            )
         except KeyError:
-            return self.make_error_response(HTTPStatus.NOT_FOUND, "Object not found")
+            return self.make_error_response(
+                request, HTTPStatus.NOT_FOUND, "Object not found"
+            )

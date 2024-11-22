@@ -171,6 +171,10 @@ class UserProvisioningTestCase(HomeserverTestCase):
             },
             channel.json_body,
         )
+        self.assertIn(
+            b"application/scim+json",
+            channel.headers.getRawHeaders(b"Content-Type") or [],
+        )
 
     def test_get_user_include_attribute(self) -> None:
         """
