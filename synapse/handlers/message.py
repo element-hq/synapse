@@ -196,7 +196,9 @@ class MessageHandler:
             AuthError (403) if the user doesn't have permission to view
             members of this room.
         """
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
+
         user_id = requester.user.to_string()
 
         if at_token:

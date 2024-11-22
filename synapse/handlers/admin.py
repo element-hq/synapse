@@ -73,6 +73,8 @@ class AdminHandler:
             self._redact_all_events, REDACT_ALL_EVENTS_ACTION_NAME
         )
 
+        self.hs = hs
+
     async def get_redact_task(self, redact_id: str) -> Optional[ScheduledTask]:
         """Get the current status of an active redaction process
 
@@ -423,8 +425,10 @@ class AdminHandler:
         user_id = task.params.get("user_id")
         assert user_id is not None
 
+        # puppet the user if they're ours, otherwise use admin to redact
         requester = create_requester(
-            user_id, authenticated_entity=admin.user.to_string()
+            user_id if self.hs.is_mine_id(user_id) else admin.user.to_string(),
+            authenticated_entity=admin.user.to_string(),
         )
 
         reason = task.params.get("reason")
@@ -443,8 +447,8 @@ class AdminHandler:
                 ["m.room.member", "m.room.message"],
             )
             if not event_ids:
-                # there's nothing to redact
-                return TaskStatus.COMPLETE, result, None
+                # nothing to redact in this room
+                continue
 
             events = await self._store.get_events_as_list(event_ids)
             for event in events:

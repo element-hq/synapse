@@ -172,20 +172,25 @@ class TestJoinsLimitedByPerRoomRateLimiter(FederatingHomeserverTestCase):
             )
         )
 
-        with patch.object(
-            self.handler.federation_handler.federation_client,
-            "make_membership_event",
-            mock_make_membership_event,
-        ), patch.object(
-            self.handler.federation_handler.federation_client,
-            "send_join",
-            mock_send_join,
-        ), patch(
-            "synapse.event_auth._is_membership_change_allowed",
-            return_value=None,
-        ), patch(
-            "synapse.handlers.federation_event.check_state_dependent_auth_rules",
-            return_value=None,
+        with (
+            patch.object(
+                self.handler.federation_handler.federation_client,
+                "make_membership_event",
+                mock_make_membership_event,
+            ),
+            patch.object(
+                self.handler.federation_handler.federation_client,
+                "send_join",
+                mock_send_join,
+            ),
+            patch(
+                "synapse.event_auth._is_membership_change_allowed",
+                return_value=None,
+            ),
+            patch(
+                "synapse.handlers.federation_event.check_state_dependent_auth_rules",
+                return_value=None,
+            ),
         ):
             self.get_success(
                 self.handler.update_membership(
@@ -380,7 +385,7 @@ class RoomMemberMasterHandlerTestCase(HomeserverTestCase):
         )
 
     def test_forget_when_not_left(self) -> None:
-        """Tests that a user cannot not forgets a room that has not left."""
+        """Tests that a user cannot forget a room that they are still in."""
         self.get_failure(self.handler.forget(self.alice_ID, self.room_id), SynapseError)
 
     def test_nonlocal_room_user_action(self) -> None:
