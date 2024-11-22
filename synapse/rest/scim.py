@@ -29,7 +29,6 @@ import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, TypeVar, Union
 
-from synapse._pydantic_compat import PYDANTIC_VERSION
 from synapse.api.errors import SynapseError
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
@@ -45,37 +44,29 @@ from synapse.types import JsonDict, UserID
 from synapse.util.templates import mxc_to_http
 
 try:
-    # As of version 0.2, scim2-models requires Pydantic 2.7+ but synapse only require Pydantic 1.7
-    # https://github.com/python-scim/scim2-models/blob/9a816731e0659622f0b6395e48d85ffa779487df/pyproject.toml#L30
-    # The SCIM API will be disabled if the installed Pydantic version is too old.
+    from scim2_models import (
+        AuthenticationScheme,
+        Bulk,
+        ChangePassword,
+        Context,
+        Email,
+        Error,
+        ETag,
+        Filter,
+        ListResponse,
+        Meta,
+        Patch,
+        PhoneNumber,
+        Photo,
+        ResourceType,
+        Schema,
+        SearchRequest,
+        ServiceProviderConfig,
+        Sort,
+        User,
+    )
 
-    if (PYDANTIC_VERSION.major, PYDANTIC_VERSION.minor) < (2, 7):
-        HAS_SCIM2 = False
-
-    else:
-        from scim2_models import (
-            AuthenticationScheme,
-            Bulk,
-            ChangePassword,
-            Context,
-            Email,
-            Error,
-            ETag,
-            Filter,
-            ListResponse,
-            Meta,
-            Patch,
-            PhoneNumber,
-            Photo,
-            ResourceType,
-            Schema,
-            SearchRequest,
-            ServiceProviderConfig,
-            Sort,
-            User,
-        )
-
-        HAS_SCIM2 = True
+    HAS_SCIM2 = True
 
 except ImportError:
     HAS_SCIM2 = False
