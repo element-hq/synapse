@@ -125,7 +125,7 @@ CLIENT_SERVLET_FUNCTIONS: Tuple[RegisterServletsFunc, ...] = (
 )
 
 if scim.HAS_SCIM2:
-    CLIENT_SERVLET_FUNCTIONS += (scim.register_servlets,)
+    CLIENT_SERVLET_FUNCTIONS += (scim.register_scim_servlets,)
 
 
 SERVLET_GROUPS: Dict[str, Iterable[RegisterServletsFunc]] = {

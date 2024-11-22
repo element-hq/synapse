@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 from synapse._pydantic_compat import PYDANTIC_VERSION
 from synapse.api.errors import SynapseError
-from synapse.http.server import HttpServer, JsonResource
+from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
     parse_integer,
@@ -89,16 +89,7 @@ SCIM_DEFAULT_IDP_ID = "__scim__"
 logger = logging.getLogger(__name__)
 
 
-class SCIMResource(JsonResource):
-    """The REST resource which gets mounted at
-    /_synapse/admin/scim/v2"""
-
-    def __init__(self, hs: "HomeServer"):
-        JsonResource.__init__(self, hs, canonical_json=False)
-        register_servlets(hs, self)
-
-
-def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
+def register_scim_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     if not hs.config.experimental.msc4098.enabled:
         return
 

@@ -22,7 +22,7 @@ from tests.utils import default_config
 class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
-        synapse.rest.scim.register_servlets,
+        synapse.rest.scim.register_scim_servlets,
         login.register_servlets,
     ]
     url = "/_synapse/admin/scim/v2"
@@ -75,7 +75,7 @@ class SCIMExperimentalFeatureTestCase(HomeserverTestCase):
 class UserProvisioningTestCase(HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
-        synapse.rest.scim.register_servlets,
+        synapse.rest.scim.register_scim_servlets,
         login.register_servlets,
     ]
     url = "/_synapse/admin/scim/v2"
@@ -576,7 +576,7 @@ class UserProvisioningTestCase(HomeserverTestCase):
 class SCIMMetadataTestCase(HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
-        synapse.rest.scim.register_servlets,
+        synapse.rest.scim.register_scim_servlets,
         login.register_servlets,
     ]
     url = "/_synapse/admin/scim/v2"
