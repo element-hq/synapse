@@ -54,6 +54,7 @@
       - [Using `synctl` with Workers](synctl_workers.md)
       - [Systemd](systemd-with-workers/README.md)
   - [Administration](usage/administration/README.md)
+    - [Backups](usage/administration/backups.md)
     - [Admin API](usage/administration/admin_api/README.md)
       - [Account Validity](admin_api/account_validity.md)
       - [Background Updates](usage/administration/admin_api/background_updates.md)
