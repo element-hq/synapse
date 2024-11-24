@@ -1,6 +1,7 @@
 from typing import Dict
 from unittest.mock import AsyncMock, Mock
 
+from twisted.internet.defer import ensureDeferred
 from twisted.test.proto_helpers import MemoryReactor
 from twisted.trial import unittest
 from twisted.web.client import PartialDownloadError
@@ -44,7 +45,8 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
         authdict = {"response": "captcha_solution", "session": "fake_session_id"}
         clientip = "127.0.0.1"
 
-        d = self.recaptcha_checker.check_auth(authdict, clientip)
+        d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
+
         result = self.successResultOf(d)
         self.assertTrue(result)
 
@@ -67,7 +69,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
         authdict = {"response": "invalid_response", "session": "fake_session_id"}
         clientip = "127.0.0.1"
 
-        d = self.recaptcha_checker.check_auth(authdict, clientip)
+        d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
         f = self.failureResultOf(d, LoginError)
         self.assertEqual(f.value.errcode, Codes.UNAUTHORIZED)
 
@@ -77,7 +79,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
         authdict = {"response": "invalid_response"}
         clientip = "127.0.0.1"
 
-        d = self.recaptcha_checker.check_auth(authdict, clientip)
+        d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
         f = self.failureResultOf(d, LoginError)
         self.assertEqual(f.value.errcode, Codes.MISSING_PARAM)
 
@@ -86,7 +88,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
         authdict: Dict[str, str] = {}
         clientip = "127.0.0.1"
 
-        d = self.recaptcha_checker.check_auth(authdict, clientip)
+        d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
         f = self.failureResultOf(d, LoginError)
         self.assertEqual(f.value.errcode, Codes.CAPTCHA_NEEDED)
 
@@ -102,7 +104,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
         authdict = {"response": "captcha_solution", "session": "fake_session_id"}
         clientip = "127.0.0.1"
 
-        d = self.recaptcha_checker.check_auth(authdict, clientip)
+        d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
         result = self.successResultOf(d)
         self.assertTrue(result)
 
@@ -117,7 +119,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
                 return_value=_expected_response
             )
 
-            d = self.recaptcha_checker.check_auth(authdict, clientip)
+            d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
             self.successResultOf(d)
 
         logs = "\n".join(cm.output)
