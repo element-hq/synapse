@@ -23,14 +23,9 @@
         [
           {
             "module": "my_super_module.MySuperClass",
-            "config": {
-              "do_thing": true
-            }
+            "config": {"do_thing": true}
           },
-          {
-            "module": "my_other_super_module.SomeClass",
-            "config": {}
-          }
+          {"module": "my_other_super_module.SomeClass", "config": {}}
         ]
       ]
     },
@@ -66,12 +61,7 @@
     "extra_well_known_client_content": {
       "type": "object",
       "description": "This option allows server runners to add arbitrary key-value pairs to the [client-facing `.well-known` response](https://spec.matrix.org/latest/client-server-api/#well-known-uri). Note that the `public_baseurl` config option must be provided for Synapse to serve a response to `/.well-known/matrix/client` at all.\n\nIf this option is provided, it parses the given yaml to json and serves it on `/.well-known/matrix/client` endpoint alongside the standard properties.\n\n*Added in Synapse 1.62.0.*",
-      "examples": [
-        {
-          "option1": "value1",
-          "option2": "value2"
-        }
-      ]
+      "examples": [{"option1": "value1", "option2": "value2"}]
     },
     "soft_file_limit": {
       "type": "integer",
@@ -86,13 +76,7 @@
         "enabled": {
           "type": ["boolean", "string"],
           "description": "Set to false to disable presence tracking on this homeserver.\n\nCan also be set to a special value of \"untracked\" which ignores updates received via clients and federation, while still accepting updates from the [module API](../../modules/index.md).\n\n*The \"untracked\" option was added in Synapse 1.96.0.*",
-          "oneOf": [
-            { "type": "boolean" },
-            {
-              "type": "string",
-              "const": "untracked"
-            }
-          ],
+          "oneOf": [{"type": "boolean"}, {"type": "string", "const": "untracked"}],
           "default": true
         },
         "include_offline_users_on_sync": {
@@ -101,12 +85,7 @@
           "default": false
         }
       },
-      "examples": [
-        {
-          "enabled": false,
-          "include_offline_users_on_sync": false
-        }
-      ]
+      "examples": [{"enabled": false, "include_offline_users_on_sync": false}]
     },
     "require_auth_for_profile_requests": {
       "type": "boolean",
@@ -177,7 +156,7 @@
     "ip_range_blacklist": {
       "type": "array",
       "description": "This option prevents outgoing requests from being sent to the specified blacklisted IP address CIDR ranges. If this option is not specified then it defaults to private IP address ranges (see the example below).\n\nThe blacklist applies to the outbound requests for federation, identity servers, push servers, and for checking key validity for third-party invite events.\n\n(0.0.0.0 and :: are always blacklisted, whether or not they are explicitly listed here, since they correspond to unroutable addresses.)\n\nThis option replaces `federation_ip_range_blacklist` in Synapse v1.25.0.\n\nNote: The value is ignored when an HTTP proxy is in use.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [
         "127.0.0.0/8",
         "10.0.0.0/8",
@@ -203,7 +182,7 @@
     "ip_range_whitelist": {
       "type": "array",
       "description": "List of IP address CIDR ranges that should be allowed for federation, identity servers, push servers, and for checking key validity for third-party invite events. This is useful for specifying exceptions to wide-ranging blacklisted target IP ranges – e.g. for communication with a push server only visible in your network.\n\nThis whitelist overrides `ip_range_blacklist`.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["192.168.1.1"]]
     },
@@ -213,10 +192,7 @@
       "items": {
         "type": "object",
         "properties": {
-          "port": {
-            "type": "integer",
-            "description": "The TCP port to bind to."
-          },
+          "port": {"type": "integer", "description": "The TCP port to bind to."},
           "tag": {
             "type": ["string", "null"],
             "description": "An alias for the port in the logger name. If set the tag is logged instead of the port. Default to `None`, is optional and only valid for listener with `type: http`. See the docs [request log format](../administration/request_log.md)."
@@ -224,7 +200,7 @@
           "bind_addresses": {
             "type": ["array", "null"],
             "description": "A list of local addresses to listen on. The default is \"all local interfaces\".",
-            "items": { "type": "string" }
+            "items": {"type": "string"}
           },
           "type": {
             "type": "string",
@@ -281,8 +257,8 @@
             "additionalProperties": {
               "type": "object",
               "properties": {
-                "module": { "type": "string" },
-                "config": { "type": "object" }
+                "module": {"type": "string"},
+                "config": {"type": "object"}
               }
             }
           },
@@ -303,11 +279,7 @@
             "port": 8448,
             "type": "http",
             "tls": true,
-            "resources": [
-              {
-                "names": ["client", "federation"]
-              }
-            ]
+            "resources": [{"names": ["client", "federation"]}]
           }
         ],
         [
@@ -317,14 +289,12 @@
             "type": "http",
             "x_forwarded": true,
             "bind_addresses": ["::1", "127.0.0.1"],
-
             "resources": [
               {
                 "names": ["client", "federation"],
                 "compress": false
               }
             ],
-
             "additional_resources": {
               "/_matrix/my/custom/endpoint": {
                 "module": "my_module.CustomRequestHandler",
@@ -332,7 +302,6 @@
               }
             }
           },
-
           {
             "port": 9000,
             "bind_addresses": ["::1", "127.0.0.1"],
@@ -343,7 +312,7 @@
           {
             "path": "/run/synapse/main_public.sock",
             "type": "http",
-            "resources": [{ "names": ["client", "federation"] }]
+            "resources": [{"names": ["client", "federation"]}]
           }
         ]
       ]
@@ -385,7 +354,7 @@
       "examples": [5]
     },
     "delete_stale_devices_after": {
-      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
       "description": "An optional duration. If set, Synapse will run a daily background task to log out and delete any device that hasn't been accessed for more than the specified amount of time.\n\nA value of null means devices are never pruned.\n\n**Note:** This task will always run on the main process, regardless of the value of `run_background_tasks_on`. This is due to workers currently not having the ability to delete devices.",
       "default": null,
       "examples": ["1y"]
@@ -542,7 +511,6 @@
           "client_base_url": "http://localhost/riot",
           "validation_token_lifetime": "15m",
           "invite_client_location": "https://app.element.io",
-
           "subjects": {
             "message_from_person_in_room": "[%(app)s] You have a message on %(app)s from %(person)s in the %(room)s room...",
             "message_from_person": "[%(app)s] You have a message on %(app)s from %(person)s...",
@@ -559,7 +527,7 @@
       ]
     },
     "max_event_delay_duration": {
-      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
       "description": "The maximum allowed duration by which sent events can be delayed, as per [MSC4140](https://github.com/matrix-org/matrix-spec-proposals/pull/4140). Must be a positive value if set.\n\nIf null or unset, sending of delayed events is disallowed.",
       "default": null,
       "examples": ["24h"]
@@ -603,14 +571,9 @@
     "mau_appservice_trial_days": {
       "type": "object",
       "description": "The option `mau_appservice_trial_days` is similar to `mau_trial_days`, but applies a different trial number if the user was registered by an appservice. A value of 0 means no trial days are applied. Appservices not listed in this dictionary use the value of `mau_trial_days` instead.",
-      "additionalProperties": { "type": "integer" },
+      "additionalProperties": {"type": "integer"},
       "default": {},
-      "examples": [
-        {
-          "my_appservice_id": 3,
-          "another_appservice_id": 6
-        }
-      ]
+      "examples": [{"my_appservice_id": 3, "another_appservice_id": 6}]
     },
     "mau_limit_alerting": {
       "type": "boolean",
@@ -641,14 +604,7 @@
         }
       },
       "default": [],
-      "examples": [
-        [
-          {
-            "medium": "email",
-            "address": "reserved_user@example.com"
-          }
-        ]
-      ]
+      "examples": [[{"medium": "email", "address": "reserved_user@example.com"}]]
     },
     "server_context": {
       "type": ["string", "null"],
@@ -703,7 +659,7 @@
       "examples": [false]
     },
     "max_avatar_size": {
-      "oneOf": [{ "$ref": "#/$defs/bytes" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/bytes"}, {"type": "null"}],
       "description": "The largest permissible file size in bytes for a user avatar. Defaults to no restriction. Use M for MB and K for KB.\n\nNote that user avatar changes will not work if this is set without using Synapse's media repository.",
       "default": null,
       "examples": ["10M"]
@@ -711,24 +667,24 @@
     "allowed_avatar_mimetypes": {
       "type": ["array", "null"],
       "description": "The MIME types allowed for user avatars. Defaults to no restriction.\n\nNote that user avatar changes will not work if this is set without using Synapse's media repository.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": null,
       "examples": [["image/png", "image/jpeg", "image/gif"]]
     },
     "redaction_retention_period": {
-      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
       "description": "How long to keep redacted events in unredacted form in the database. After this period redacted events get replaced with their redacted form in the DB.\n\nSynapse will check whether the rentention period has concluded for redacted events every 5 minutes. Thus, even if this option is set to `0`, Synapse may still take up to 5 minutes to purge redacted events from the database. Set to `null` to disable.",
       "default": "7d",
       "examples": ["28d"]
     },
     "forgotten_room_retention_period": {
-      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
       "description": "How long to keep locally forgotten rooms before purging them from the DB. A value of `null` means it's disabled.",
       "default": null,
       "examples": ["28d"]
     },
     "user_ips_max_age": {
-      "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+      "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
       "description": "How long to track users' last seen time and IPs in the database. Set to `null` to disable clearing out of old rows.",
       "default": "28d",
       "examples": ["14d"]
@@ -755,9 +711,7 @@
           "default": null
         }
       },
-      "examples": [
-        { "custom_template_directory": "/path/to/custom/templates/" }
-      ]
+      "examples": [{"custom_template_directory": "/path/to/custom/templates/"}]
     },
     "retention": {
       "type": "object",
@@ -773,24 +727,24 @@
           "description": "Default message retention policy. If set, Synapse will apply it to rooms that lack the `m.room.retention` state event.",
           "properties": {
             "min_lifetime": {
-              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
               "description": "Minimum message retention time of the default message retention policy. Synapse doesn't take this option into account yet.",
               "default": null
             },
             "max_lifetime": {
-              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
               "description": "Maximum message retention time of the default message retention policy.",
               "default": null
             }
           }
         },
         "allowed_lifetime_min": {
-          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
           "description": "Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `min_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs.",
           "default": null
         },
         "allowed_lifetime_max": {
-          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
           "description": "Retention policy limit. If set, and the state of a room contains a `m.room.retention` event in its state which contains a `max_lifetime` that's beyond this bound, Synapse will cap the room's policy to these limits when running purge jobs.",
           "default": null
         },
@@ -801,11 +755,11 @@
             "type": "object",
             "properties": {
               "shortest_max_lifetime": {
-                "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+                "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
                 "description": "Apply job to rooms that have a `max_lifetime` higher than `shortest_max_lifetime`. A value of `null` never excludes any room."
               },
               "longest_max_lifetime": {
-                "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+                "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
                 "description": "Apply job to rooms that have a `max_lifetime` lower than or equal to `shortest_max_lifetime`. A value of `null` never excludes any room."
               },
               "interval": {
@@ -820,21 +774,12 @@
       "examples": [
         {
           "enabled": true,
-          "default_policy": {
-            "min_lifetime": "1d",
-            "max_lifetime": "1y"
-          },
+          "default_policy": {"min_lifetime": "1d", "max_lifetime": "1y"},
           "allowed_lifetime_min": "1d",
           "allowed_lifetime_max": "1y",
           "purge_jobs": [
-            {
-              "longest_max_lifetime": "3d",
-              "interval": "12h"
-            },
-            {
-              "shortest_max_lifetime": "3d",
-              "interval": "1d"
-            }
+            {"longest_max_lifetime": "3d", "interval": "12h"},
+            {"shortest_max_lifetime": "3d", "interval": "1d"}
           ]
         }
       ]
@@ -866,21 +811,21 @@
     "federation_certificate_verification_whitelist": {
       "type": "array",
       "description": "Skip federation certificate verification on a given whitelist of domains.\n\nThis setting should only be used in very specific cases, such as federation over Tor hidden services and similar. For private networks of homeservers, you likely want to use a private CA instead.\n\nOnly effective if `federation_verify_certificates` is `true`.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["lon.example.com", "*.domain.com", "*.onion"]]
     },
     "federation_custom_ca_list": {
       "type": "array",
       "description": "List of custom certificate authorities for federation traffic.\n\nThis setting should only normally be used within a private network of homeservers.\n\nNote that this list will replace those that are provided by your operating environment. Certificates must be in PEM format.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["myCA1.pem", "myCA2.pem", "myCA3.pem"]]
     },
     "federation_domain_whitelist": {
       "type": "array",
       "description": "Restrict federation to the given whitelist of domains. N.B. we recommend also firewalling your federation listener to limit inbound federation traffic as early as possible, rather than relying purely on this application-layer restriction. If not specified, the default is to whitelist everything.\n\nNote: this does not stop a server from joining rooms that servers not on the whitelist are in. As such, this option is really only useful to establish a \"private federation\", where a group of servers all whitelist each other and have the same whitelist.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["lon.example.com", "nyc.example.com", "syd.example.com"]]
     },
@@ -893,7 +838,7 @@
     "federation_metrics_domains": {
       "type": "array",
       "description": "Report prometheus metrics on the age of PDUs being sent to and received from the given domains. This can be used to give an idea of \"delay\" on inbound and outbound federation, though be aware that any delay can be due to problems at either end or with the intermediate network.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["matrix.org", "example.com"]]
     },
@@ -986,7 +931,7 @@
         "per_cache_factors": {
           "type": "object",
           "description": "A dictionary of cache name to cache factor for that individual cache. Overrides the global cache factor for a given cache.\n\nThese can also be set through environment variables comprised of `SYNAPSE_CACHE_FACTOR_` + the name of the cache in capital letters and underscores. Setting by environment variable takes priority over setting through the config file. Ex. `SYNAPSE_CACHE_FACTOR_GET_USERS_WHO_SHARE_ROOM_WITH_USER=2.0`\n\nSome caches have ‘*' and other characters that are not alphanumeric or underscores. These caches can be named with or without the special characters stripped. For example, to specify the cache factor for `*stateGroupCache*` via an environment variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.",
-          "additionalProperties": { "type": "number" },
+          "additionalProperties": {"type": "number"},
           "default": {}
         },
         "expire_caches": {
@@ -1009,17 +954,17 @@
           "description": "`cache_autotuning` and its sub-options `max_cache_memory_usage`, `target_cache_memory_usage`, and `min_cache_ttl` work in conjunction with each other to maintain a balance between cache memory usage and cache entry availability. You must be using [jemalloc](../administration/admin_faq.md#help-synapse-is-slow-and-eats-all-my-ramcpu) to utilize this option, and all three of the options must be specified for this feature to work. This option defaults to off, enable it by providing values for the sub-options listed below. Please note that the feature will not work and may cause unstable behavior (such as excessive emptying of caches or exceptions) if all of the values are not provided. Please see the [Config Conventions](#config-conventions) for information on how to specify memory size and cache expiry durations.",
           "properties": {
             "max_cache_memory_usage": {
-              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
               "description": "Sets a ceiling on how much memory the cache can use before caches begin to be continuously evicted. They will continue to be evicted until the memory usage drops below the `target_cache_memory_usage`, set in the setting below, or until the `min_cache_ttl` is hit.",
               "default": null
             },
             "target_cache_memory_usage": {
-              "oneOf": [{ "$ref": "#/$defs/bytes" }, { "type": "null" }],
+              "oneOf": [{"$ref": "#/$defs/bytes"}, {"type": "null"}],
               "description": "Sets a rough target for the desired memory usage of the caches.",
               "default": null
             },
             "min_cache_ttl": {
-              "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+              "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
               "description": "Sets a limit under which newer cache entries are not evicted and is only applied when caches are actively being evicted/`max_cache_memory_usage` has been exceeded. This is to protect hot caches from being emptied while Synapse is evicting due to memory.",
               "default": null
             }
@@ -1029,9 +974,7 @@
       "examples": [
         {
           "global_factor": 1.0,
-          "per_cache_factors": {
-            "get_users_who_share_room_with_user": 2.0
-          },
+          "per_cache_factors": {"get_users_who_share_room_with_user": 2.0},
           "sync_response_cache_duration": "2m",
           "cache_autotuning": {
             "max_cache_memory_usage": "1024M",
@@ -1046,7 +989,7 @@
       "examples": [
         {
           "name": "sqlite3",
-          "args": { "database": "/path/to/homeserver.db" }
+          "args": {"database": "/path/to/homeserver.db"}
         },
         {
           "name": "psycopg2",
@@ -1121,44 +1064,20 @@
     "rc_message": {
       "$ref": "#/$defs/rc",
       "description": "Ratelimiting settings for client messaging.\n\nThis is a ratelimiting option for messages that ratelimits sending based on the account the client is using.",
-      "default": {
-        "per_second": 0.2,
-        "burst_count": 10
-      },
-      "examples": [
-        {
-          "per_second": 0.5,
-          "burst_count": 15
-        }
-      ]
+      "default": {"per_second": 0.2, "burst_count": 10},
+      "examples": [{"per_second": 0.5, "burst_count": 15}]
     },
     "rc_registration": {
       "$ref": "#/$defs/rc",
       "description": "This option ratelimits registration requests based on the client's IP address.",
-      "default": {
-        "per_second": 0.17,
-        "burst_count": 3
-      },
-      "examples": [
-        {
-          "per_second": 0.15,
-          "burst_count": 2
-        }
-      ]
+      "default": {"per_second": 0.17, "burst_count": 3},
+      "examples": [{"per_second": 0.15, "burst_count": 2}]
     },
     "rc_registration_token_validity": {
       "$ref": "#/$defs/rc",
       "description": "This option checks the validity of registration tokens that ratelimits requests based on the client's IP address.",
-      "default": {
-        "per_second": 0.1,
-        "burst_count": 5
-      },
-      "examples": [
-        {
-          "per_second": 0.3,
-          "burst_count": 6
-        }
-      ]
+      "default": {"per_second": 0.1, "burst_count": 5},
+      "examples": [{"per_second": 0.3, "burst_count": 6}]
     },
     "rc_login": {
       "type": "object",
@@ -1167,54 +1086,31 @@
         "address": {
           "$ref": "#/$defs/rc",
           "description": "Ratelimits login requests based on the client's IP address.",
-          "default": {
-            "per_second": 0.003,
-            "burst_count": 5
-          }
+          "default": {"per_second": 0.003, "burst_count": 5}
         },
         "account": {
           "$ref": "#/$defs/rc",
           "description": "Ratelimits login requests based on the account the client is attempting to log into.",
-          "default": {
-            "per_second": 0.003,
-            "burst_count": 5
-          }
+          "default": {"per_second": 0.003, "burst_count": 5}
         },
         "failed_attempts": {
           "$ref": "#/$defs/rc",
           "description": "Ratelimits login requests based on the account the client is attempting to log into, based on the amount of failed login attempts for this account.",
-          "default": {
-            "per_second": 0.17,
-            "burst_count": 3
-          }
+          "default": {"per_second": 0.17, "burst_count": 3}
         }
       },
       "examples": [
         {
-          "address": {
-            "per_second": 0.15,
-            "burst_count": 5
-          },
-          "account": {
-            "per_second": 0.18,
-            "burst_count": 4
-          },
-          "failed_attempts": {
-            "per_second": 0.19,
-            "burst_count": 7
-          }
+          "address": {"per_second": 0.15, "burst_count": 5},
+          "account": {"per_second": 0.18, "burst_count": 4},
+          "failed_attempts": {"per_second": 0.19, "burst_count": 7}
         }
       ]
     },
     "rc_admin_redaction": {
       "$ref": "#/$defs/rc",
       "description": "This option sets ratelimiting redactions by room admins. If this is not explicitly set then it uses the same ratelimiting as per `rc_message`. This is useful to allow room admins to deal with abuse quickly.",
-      "examples": [
-        {
-          "per_second": 1,
-          "burst_count": 50
-        }
-      ]
+      "examples": [{"per_second": 1.0, "burst_count": 50}]
     },
     "rc_joins": {
       "type": "object",
@@ -1223,60 +1119,32 @@
         "local": {
           "$ref": "#/$defs/rc",
           "description": "Ratelimits when users are joining rooms the server is already in.",
-          "default": {
-            "per_second": 0.1,
-            "burst_count": 10
-          }
+          "default": {"per_second": 0.1, "burst_count": 10}
         },
         "remote": {
           "$ref": "#/$defs/rc",
           "description": "Ratelimits when users are trying to join rooms not on the server (which can be more computationally expensive than restricting locally).",
-          "default": {
-            "per_second": 0.01,
-            "burst_count": 10
-          }
+          "default": {"per_second": 0.01, "burst_count": 10}
         }
       },
       "examples": [
         {
-          "local": {
-            "per_second": 0.2,
-            "burst_count": 15
-          },
-          "remote": {
-            "per_second": 0.03,
-            "burst_count": 12
-          }
+          "local": {"per_second": 0.2, "burst_count": 15},
+          "remote": {"per_second": 0.03, "burst_count": 12}
         }
       ]
     },
     "rc_joins_per_room": {
       "$ref": "#/$defs/rc",
       "description": "This option allows admins to ratelimit joins to a room based on the number of recent joins (local or remote) to that room. It is intended to mitigate mass-join spam waves which target multiple homeservers.\n\n_Added in Synapse 1.64.0._",
-      "default": {
-        "per_second": 1.0,
-        "burst_count": 10
-      },
-      "examples": [
-        {
-          "per_second": 1.0,
-          "burst_count": 10
-        }
-      ]
+      "default": {"per_second": 1.0, "burst_count": 10},
+      "examples": [{"per_second": 1.0, "burst_count": 10}]
     },
     "rc_3pid_validation": {
       "$ref": "#/$defs/rc",
       "description": "This option ratelimits how often a user or IP can attempt to validate a 3PID.",
-      "default": {
-        "per_second": 0.003,
-        "burst_count": 5
-      },
-      "examples": [
-        {
-          "per_second": 0.003,
-          "burst_count": 5
-        }
-      ]
+      "default": {"per_second": 0.003, "burst_count": 5},
+      "examples": [{"per_second": 0.003, "burst_count": 5}]
     },
     "rc_invites": {
       "type": "object",
@@ -1285,60 +1153,36 @@
         "per_room": {
           "$ref": "#/$defs/rc",
           "description": "Applies to the room of the invitation.",
-          "default": {
-            "per_second": 0.3,
-            "burst_count": 10
-          }
+          "default": {"per_second": 0.3, "burst_count": 10}
         },
         "per_user": {
           "$ref": "#/$defs/rc",
           "description": "Applies to the *receiver* of the invite, rather than the sender, meaning that a `rc_invite.per_user.burst_count` of 5 mandates that a single user cannot *receive* more than a burst of 5 invites at a time.",
-          "default": {
-            "per_second": 0.003,
-            "burst_count": 5
-          }
+          "default": {"per_second": 0.003, "burst_count": 5}
         },
         "per_issuer": {
           "$ref": "#/$defs/rc",
           "description": "Applies to the *issuer* of the invite, meaning that a `rc_invite.per_issuer.burst_count` of 5 mandates that single user cannot *send* more than a burst of 5 invites at a time.",
-          "default": {
-            "per_second": 0.3,
-            "burst_count": 10
-          }
+          "default": {"per_second": 0.3, "burst_count": 10}
         }
       },
       "examples": [
         {
-          "per_room": {
-            "per_second": 0.5,
-            "burst_count": 5
-          },
-          "per_user": {
-            "per_second": 0.004,
-            "burst_count": 3
-          },
-          "per_issuer": {
-            "per_second": 0.5,
-            "burst_count": 5
-          }
+          "per_room": {"per_second": 0.5, "burst_count": 5},
+          "per_user": {"per_second": 0.004, "burst_count": 3},
+          "per_issuer": {"per_second": 0.5, "burst_count": 5}
         }
       ]
     },
     "rc_third_party_invite": {
       "$ref": "#/$defs/rc",
       "description": "This option ratelimits 3PID invites (i.e. invites sent to a third-party ID such as an email address or a phone number) based on the account that's sending the invite.",
-      "default": {
-        "per_second": 0.2,
-        "burst_count": 10
-      }
+      "default": {"per_second": 0.2, "burst_count": 10}
     },
     "rc_media_create": {
       "$ref": "#/$defs/rc",
       "description": "This option ratelimits creation of MXC URIs via the `/_matrix/media/v1/create` endpoint based on the account that's creating the media.",
-      "default": {
-        "per_second": 10,
-        "burst_count": 50
-      }
+      "default": {"per_second": 10.0, "burst_count": 50}
     },
     "rc_federation": {
       "type": "object",
@@ -1442,10 +1286,7 @@
             "type": "object",
             "description": "Sets a path to the resource through the `directory` option.",
             "properties": {
-              "directory": {
-                "type": "string",
-                "description": "Path to the resource."
-              }
+              "directory": {"type": "string", "description": "Path to the resource."}
             }
           }
         }
@@ -1458,9 +1299,7 @@
             "store_local": false,
             "store_remote": false,
             "store_synchronous": false,
-            "config": {
-              "directory": "/mnt/some/other/directory"
-            }
+            "config": {"directory": "/mnt/some/other/directory"}
           }
         ]
       ]
@@ -1492,7 +1331,7 @@
     "prevent_media_downloads_from": {
       "type": "array",
       "description": "A list of domains to never download media from. Media from these domains that is already downloaded will not be deleted, but will be inaccessible to users. This option does not affect admin APIs trying to download/operate on media.\n\nThis will not prevent the listed domains from accessing media themselves. It simply prevents users on this server from downloading media originating from the listed servers.\n\nThis will have no effect on media originating from the local server. This only affects media downloaded from other Matrix servers, to control URL previews see [`url_preview_ip_range_blacklist`](#url_preview_ip_range_blacklist) or [`url_preview_url_blacklist`](#url_preview_url_blacklist).",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["evil.example.org", "evil2.example.org"]]
     },
@@ -1524,11 +1363,11 @@
         }
       },
       "default": [
-        { "width": 32, "height": 32, "method": "crop" },
-        { "width": 96, "height": 96, "method": "crop" },
-        { "width": 320, "height": 240, "method": "scale" },
-        { "width": 640, "height": 480, "method": "scale" },
-        { "width": 800, "height": 600, "method": "scale" }
+        {"width": 32, "height": 32, "method": "crop"},
+        {"width": 96, "height": 96, "method": "crop"},
+        {"width": 320, "height": 240, "method": "scale"},
+        {"width": 640, "height": 480, "method": "scale"},
+        {"width": 800, "height": 600, "method": "scale"}
       ]
     },
     "media_retention": {
@@ -1536,20 +1375,15 @@
       "description": "Controls whether local media and entries in the remote media cache (media that is downloaded from other homeservers) should be removed under certain conditions, typically for the purpose of saving space.\n\nPurging media files will be the carried out by the media worker (that is, the worker that has the `enable_media_repo` homeserver config option set to `true`). This may be the main process.\n\nThe `media_retention.local_media_lifetime` and `media_retention.remote_media_lifetime` config options control whether media will be purged if it has not been accessed in a given amount of time. Note that media is \"accessed\" when loaded in a room in a client, or otherwise downloaded by a local or remote user. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If either of these options are unset, then media of that type will not be purged.\n\nLocal or cached remote media that has been [quarantined](../../admin_api/media_admin_api.md#quarantining-media-in-a-room) will not be deleted. Similarly, local media that has been marked as [protected from quarantine](../../admin_api/media_admin_api.md#protecting-media-from-being-quarantined) will not be deleted.",
       "properties": {
         "local_media_lifetime": {
-          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
           "default": null
         },
         "remote_media_lifetime": {
-          "oneOf": [{ "$ref": "#/$defs/duration" }, { "type": "null" }],
+          "oneOf": [{"$ref": "#/$defs/duration"}, {"type": "null"}],
           "default": null
         }
       },
-      "examples": [
-        {
-          "local_media_lifetime": "90d",
-          "remote_media_lifetime": "14d"
-        }
-      ]
+      "examples": [{"local_media_lifetime": "90d", "remote_media_lifetime": "14d"}]
     },
     "url_preview_enabled": {
       "type": "boolean",
@@ -1560,7 +1394,7 @@
     "url_preview_ip_range_blacklist": {
       "type": ["array", "null"],
       "description": "List of IP address CIDR ranges that the URL preview spider is denied from accessing. There are no defaults: you must explicitly specify a list for URL previewing to work. You should specify any internal services in your network that you do not want synapse to try to connect to, otherwise anyone in any Matrix room could cause your synapse to issue arbitrary GET requests to your internal services, causing serious security issues.\n\n(0.0.0.0 and :: are always blacklisted, whether or not they are explicitly listed here, since they correspond to unroutable addresses.)\n\nThis must be specified if `url_preview_enabled` is set. It is recommended that you use the following example list as a starting point.\n\nNote: The value is ignored when an HTTP proxy is in use.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": null,
       "examples": [
         [
@@ -1589,26 +1423,23 @@
     "url_preview_ip_range_whitelist": {
       "type": "array",
       "description": "This option sets a list of IP address CIDR ranges that the URL preview spider is allowed to access even if they are specified in `url_preview_ip_range_blacklist`. This is useful for specifying exceptions to wide-ranging blacklisted target IP ranges – e.g. for enabling URL previews for a specific private website only visible in your network.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["192.168.1.1"]]
     },
     "url_preview_url_blacklist": {
       "type": "array",
       "description": "Optional list of URL matches that the URL preview spider is denied from accessing. This is a usability feature, not a security one. You should use `url_preview_ip_range_blacklist` in preference to this, otherwise someone could define a public DNS entry that points to a private IP address and circumvent the blacklist. Applications that perform redirects or serve different content when detecting that Synapse is accessing them can also bypass the blacklist. This is more useful if you know there is an entire shape of URL that you know that you do not want Synapse to preview.\n\nEach list entry is a dictionary of url component attributes as returned by urlparse.urlsplit as applied to the absolute form of the URL. See [here](https://docs.python.org/2/library/urlparse.html#urlparse.urlsplit) for more information. Some examples are:\n\n* `username`\n* `netloc`\n* `scheme`\n* `path`\n\nThe values of the dictionary are treated as a filename match pattern applied to that component of URLs, unless they start with a ^ in which case they are treated as a regular expression match. If all the specified component matches for a given list item succeed, the URL is blacklisted.",
-      "items": { "type": "object" },
+      "items": {"type": "object"},
       "default": [],
       "examples": [
         [
-          { "username": "*" },
-          { "netloc": "google.com" },
-          { "netloc": "*.google.com" },
-          { "scheme": "http" },
-          {
-            "netloc": "www.acme.com",
-            "path": "/foo"
-          },
-          { "netloc": "^[0-9]+.[0-9]+.[0-9]+.[0-9]+$" }
+          {"username": "*"},
+          {"netloc": "google.com"},
+          {"netloc": "*.google.com"},
+          {"scheme": "http"},
+          {"netloc": "www.acme.com", "path": "/foo"},
+          {"netloc": "^[0-9]+.[0-9]+.[0-9]+.[0-9]+$"}
         ]
       ]
     },
@@ -1621,7 +1452,7 @@
     "url_preview_accept_language": {
       "type": "array",
       "description": "A list of values for the Accept-Language HTTP header used when downloading webpages during URL preview generation. This allows Synapse to specify the preferred languages that URL previews should be in when communicating with remote servers.\n\nEach value is a IETF language tag; a 2-3 letter identifier for a language, optionally followed by subtags separated by `-`, specifying a country or region variant.\n\nMultiple values can be provided, and a weight can be added to each by using quality value syntax (;q=). `*` translates to any language.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": ["en"],
       "examples": [["en-UK", "en-US;q=0.9", "fr;q=0.8", "*;q=0.7"]]
     },
@@ -1637,7 +1468,7 @@
         "additional_providers": {
           "type": "array",
           "description": "Additional files with oEmbed configuration (each should be in the form of providers.json).",
-          "items": { "type": "string" },
+          "items": {"type": "string"},
           "default": []
         }
       },
@@ -1675,7 +1506,7 @@
     "turn_uris": {
       "type": "array",
       "description": "The public URIs of the TURN server to give to clients.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["turn:example.org"]]
     },
@@ -1730,7 +1561,7 @@
     "registrations_require_3pid": {
       "type": "array",
       "description": "If this is set, users must provide all of the specified types of [3PID](https://spec.matrix.org/latest/appendices/#3pid-types) when registering an account.\n\nNote that [`enable_registration`](#enable_registration) must also be set to allow account registration.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["email", "msisdn"]]
     },
@@ -1746,25 +1577,16 @@
       "items": {
         "type": "object",
         "properties": {
-          "medium": { "$ref": "#/$defs/3pidmedium" },
-          "pattern": { "type": "string" }
+          "medium": {"$ref": "#/$defs/3pidmedium"},
+          "pattern": {"type": "string"}
         }
       },
       "default": null,
       "examples": [
         [
-          {
-            "medium": "email",
-            "pattern": "^[^@]+@matrix\\.org$"
-          },
-          {
-            "medium": "email",
-            "pattern": "^[^@]+@vector\\.im$"
-          },
-          {
-            "medium": "msisdn",
-            "pattern": "^44\\d{10}$"
-          }
+          {"medium": "email", "pattern": "^[^@]+@matrix\\.org$"},
+          {"medium": "email", "pattern": "^[^@]+@vector\\.im$"},
+          {"medium": "msisdn", "pattern": "^44\\d{10}$"}
         ]
       ]
     },
@@ -1820,7 +1642,7 @@
       },
       "description": "Delegate verification of phone numbers to an identity server.\n\nWhen a user wishes to add a phone number to their account, we need to verify that they actually own that phone number, which requires sending them a text message (SMS). Currently Synapse does not support sending those texts itself and instead delegates the task to an identity server. The base URI for the identity server to be used is specified by the `account_threepid_delegates.msisdn` option.\n\nIf this is left unspecified, Synapse will not allow users to add phone numbers to their account.\n\n(Servers handling the these requests must answer the `/requestToken` endpoints defined by the Matrix Identity Service API [specification](https://matrix.org/docs/spec/identity_service/latest).)\n\n*Deprecated in Synapse 1.64.0*: The `email` option is deprecated.\n\n*Removed in Synapse 1.66.0*: The `email` option has been removed. If present, Synapse will report a configuration error on startup.",
       "default": {},
-      "examples": [{ "msisdn": "http://localhost:8090" }]
+      "examples": [{"msisdn": "http://localhost:8090"}]
     },
     "enable_set_displayname": {
       "type": "boolean",
@@ -1843,11 +1665,9 @@
     "auto_join_rooms": {
       "type": "array",
       "description": "Users who register on this homeserver will automatically be joined to the rooms listed under this option.\n\nBy default, any room aliases included in this list will be created as a publicly joinable room when the first user registers for the homeserver. If the room already exists, make certain it is a publicly joinable room, i.e. the join rule of the room must be set to `public`. You can find more options relating to auto-joining rooms below.\n\nAs Spaces are just rooms under the hood, Space aliases may also be used.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
-      "examples": [
-        ["#exampleroom:example.com", "#anotherexampleroom:example.com"]
-      ]
+      "examples": [["#exampleroom:example.com", "#anotherexampleroom:example.com"]]
     },
     "autocreate_auto_join_rooms": {
       "type": "boolean",
@@ -1912,27 +1732,21 @@
     },
     "ui_auth": {
       "oneOf": [
-        {
-          "$ref": "#/$defs/duration"
-        },
+        {"$ref": "#/$defs/duration"},
         {
           "type": "object",
-          "properties": { "session_timeout": { "$ref": "#/$defs/duration" } }
+          "properties": {"session_timeout": {"$ref": "#/$defs/duration"}}
         }
       ],
       "description": "The amount of time to allow a user-interactive authentication session to be active.\n\nThis defaults to 0, meaning the user is queried for their credentials before every action, but this can be overridden to allow a single validation to be re-used. This weakens the protections afforded by the user-interactive authentication process, by allowing for multiple (and potentially different) operations to use the same validation session.\n\nThis is ignored for potentially \"dangerous\" operations (including deactivating an account, modifying an account password, adding a 3PID, and minting additional login tokens).\n\nUse the `session_timeout` sub-option here to change the time allowed for credential validation.",
       "default": 0,
-      "examples": [{ "session_timeout": "15s" }]
+      "examples": [{"session_timeout": "15s"}]
     },
     "login_via_existing_session": {
       "type": "object",
       "description": "Matrix supports the ability of an existing session to mint a login token for another client.\n\nSynapse disables this by default as it has security ramifications – a malicious client could use the mechanism to spawn more than one session.",
       "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "",
-          "default": false
-        },
+        "enabled": {"type": "boolean", "description": "", "default": false},
         "require_ui_auth": {
           "type": "boolean",
           "description": "Require user-interactive authentication.",
@@ -1944,13 +1758,7 @@
           "default": "5m"
         }
       },
-      "examples": [
-        {
-          "enabled": true,
-          "require_ui_auth": false,
-          "token_timeout": "5m"
-        }
-      ]
+      "examples": [{"enabled": true, "require_ui_auth": false, "token_timeout": "5m"}]
     },
     "enable_metrics": {
       "type": "boolean",
@@ -1971,12 +1779,7 @@
           "default": null
         }
       },
-      "examples": [
-        {
-          "environment": "production",
-          "dsn": "..."
-        }
-      ]
+      "examples": [{"environment": "production", "dsn": "..."}]
     },
     "metrics_flags": {
       "type": "object",
@@ -1988,7 +1791,7 @@
           "default": false
         }
       },
-      "examples": [{ "known_servers": true }]
+      "examples": [{"known_servers": true}]
     },
     "report_stats": {
       "type": "boolean",
@@ -2016,7 +1819,7 @@
           "description": "A list of additional state events to include in the events to be shared. By default, this list is empty (so only the default event types are shared).\n\nEach entry in this list should be either a single string or a list of two strings.\n* A standalone string `t` represents all events with type `t` (i.e. with no restrictions on state keys).\n* A pair of strings `[t, s]` represents a single event with type `t` and state key `s`. The same type can appear in two entries with different state keys: in this situation, both state keys are included in prejoin state.",
           "items": {
             "type": ["string", "array"],
-            "items": { "type": "string" }
+            "items": {"type": "string"}
           },
           "default": []
         }
@@ -2042,7 +1845,7 @@
     "app_service_config_files": {
       "type": "array",
       "description": "A list of application service config files to use.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["app_service_1.yaml", "app_service_2.yaml"]]
     },
@@ -2082,10 +1885,7 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
-          "key": {
-            "type": "string",
-            "description": "The base64-encoded public key."
-          },
+          "key": {"type": "string", "description": "The base64-encoded public key."},
           "expired_ts": {
             "type": "integer",
             "description": "Time, in milliseconds since the unix epoch, that the key was last used."
@@ -2093,14 +1893,7 @@
         }
       },
       "default": {},
-      "examples": [
-        {
-          "ed25519:id": {
-            "key": "base64string",
-            "expired_ts": 123456789123
-          }
-        }
-      ]
+      "examples": [{"ed25519:id": {"key": "base64string", "expired_ts": 123456789123}}]
     },
     "key_refresh_interval": {
       "$ref": "#/$defs/duration",
@@ -2119,14 +1912,14 @@
         "verify_keys": {
           "type": ["object", "null"],
           "description": "An optional map from key id to base64-encoded public key. If specified, we will check that the response is signed by at least one of the given keys.",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {"type": "string"}
         },
         "accept_keys_insecurely": {
           "type": "boolean",
           "description": "Normally, if `verify_keys` is unset, and `federation_verify_certificates` is not `true`, synapse will refuse to start, because this would allow anyone who can spoof DNS responses to masquerade as the trusted key server. If you know what you are doing and are sure that your network environment provides a secure connection to the key server, you can set this to `true` to override this behaviour."
         }
       },
-      "default": [{ "server_name": "matrix.org" }],
+      "default": [{"server_name": "matrix.org"}],
       "examples": [
         [
           {
@@ -2135,9 +1928,9 @@
               "ed25519:auto": "abcdefghijklmnopqrstuvwxyzabcdefghijklmopqr"
             }
           },
-          { "server_name": "my_other_trusted_server.example.com" }
+          {"server_name": "my_other_trusted_server.example.com"}
         ],
-        [{ "server_name": "matrix.org" }]
+        [{"server_name": "matrix.org"}]
       ]
     },
     "suppress_key_server_warning": {
@@ -2186,10 +1979,7 @@
           "type": "object",
           "description": "Using this option, an external module can be provided as a custom solution to mapping attributes returned from a saml provider onto a matrix user.",
           "properties": {
-            "module": {
-              "type": "string",
-              "description": "The custom module's class."
-            },
+            "module": {"type": "string", "description": "The custom module's class."},
             "config": {
               "type": "object",
               "description": "Custom configuration values for the module. Use the values provided in the example if you are using the built-in user_mapping_provider, or provide your own config values for a custom class if you are using one. This section will be passed as a Python dictionary to the module's `parse_config` method. The built-in provider takes the following two options:\n* `mxid_source_attribute`: The SAML attribute (after mapping via the attribute maps) to use to derive the Matrix ID from. It is \"uid\" by default. Note: This used to be configured by the `saml2_config.mxid_source_attribute option`. If that is still defined, its value will be used instead.\n* `mxid_mapping`: The mapping system to use for mapping the saml attribute onto a matrix ID. Options include: `hexencode` (which maps unpermitted characters to `=xx`) and `dotreplace` (which replaces unpermitted characters with `.`). The default is `hexencode`. Note: This used to be configured by the `saml2_config.mxid_mapping option`. If that is still defined, its value will be used instead."
@@ -2207,8 +1997,8 @@
           "items": {
             "type": "object",
             "properties": {
-              "attribute": { "type": "string" },
-              "value": { "type": "string" }
+              "attribute": {"type": "string"},
+              "value": {"type": "string"}
             }
           }
         },
@@ -2223,10 +2013,10 @@
           "sp_config": {
             "metadata": {
               "local": ["saml2/idp.xml"],
-              "remote": [{ "url": "https://our_idp/metadata.xml" }]
+              "remote": [{"url": "https://our_idp/metadata.xml"}]
             },
             "accepted_time_diff": 3,
-            "service": { "sp": { "allow_unsolicited": true } },
+            "service": {"sp": {"allow_unsolicited": true}},
             "description": ["My awesome SP", "en"],
             "name": ["Test SP", "en"],
             "ui_info": {
@@ -2243,16 +2033,10 @@
                 }
               ],
               "information_url": [
-                {
-                  "lang": "en",
-                  "text": "https://example.com/terms-of-service"
-                }
+                {"lang": "en", "text": "https://example.com/terms-of-service"}
               ],
               "privacy_statement_url": [
-                {
-                  "lang": "en",
-                  "text": "https://example.com/privacy-policy"
-                }
+                {"lang": "en", "text": "https://example.com/privacy-policy"}
               ],
               "keywords": [
                 {
@@ -2292,14 +2076,8 @@
           },
           "grandfathered_mxid_source_attribute": "upn",
           "attribute_requirements": [
-            {
-              "attribute": "userGroup",
-              "value": "staff"
-            },
-            {
-              "attribute": "department",
-              "value": "sales"
-            }
+            {"attribute": "userGroup", "value": "staff"},
+            {"attribute": "department", "value": "sales"}
           ],
           "idp_entityid": "https://our_idp/entityid"
         }
@@ -2362,7 +2140,7 @@
               "jwt_header": {
                 "type": "object",
                 "description": "Dictionary giving properties to include in the JWT header. Must include the key `alg`, giving the algorithm used to sign the JWT, such as ES256, using the JWA identifiers in RFC7518.",
-                "properties": { "alg": { "type": "string" } }
+                "properties": {"alg": {"type": "string"}}
               },
               "jwt_payload": {
                 "type": "object",
@@ -2383,7 +2161,7 @@
           "scopes": {
             "type": ["array", "null"],
             "description": "List of scopes to request. This should normally include the \"openid\" scope. Defaults to `[\"openid\"]`.",
-            "items": { "type": "string" }
+            "items": {"type": "string"}
           },
           "authorization_endpoint": {
             "type": "string",
@@ -2413,7 +2191,7 @@
           "additional_authorization_parameters": {
             "type": "object",
             "description": "String to string dictionary that will be passed as additional parameters to the authorization grant URL.",
-            "additionalProperties": { "type": "string" }
+            "additionalProperties": {"type": "string"}
           },
           "allow_existing_users": {
             "type": "boolean",
@@ -2464,9 +2242,7 @@
             "token_endpoint": "https://accounts.example.com/oauth2/token",
             "userinfo_endpoint": "https://accounts.example.com/userinfo",
             "jwks_uri": "https://accounts.example.com/.well-known/jwks.json",
-            "additional_authorization_parameters": {
-              "acr_values": "2fa"
-            },
+            "additional_authorization_parameters": {"acr_values": "2fa"},
             "skip_verification": true,
             "enable_registration": true,
             "user_mapping_provider": {
@@ -2478,10 +2254,7 @@
               }
             },
             "attribute_requirements": [
-              {
-                "attribute": "userGroup",
-                "value": "synapseUsers"
-              }
+              {"attribute": "userGroup", "value": "synapseUsers"}
             ]
           }
         ]
@@ -2527,7 +2300,7 @@
         "required_attributes": {
           "type": "object",
           "description": "It is possible to configure Synapse to only allow logins if CAS attributes match particular values. All of the keys given below must exist and the values must match the given value. Alternately if the given value is `None` then any value is allowed (the attribute just must exist). All of the listed attributes must match for the login to be permitted.",
-          "additionalProperties": { "type": ["string", "null"] },
+          "additionalProperties": {"type": ["string", "null"]},
           "default": {}
         },
         "enable_registration": {
@@ -2552,10 +2325,7 @@
           "server_url": "https://cas-server.com",
           "protocol_version": 3,
           "displayname_attribute": "name",
-          "required_attributes": {
-            "userGroup": "staff",
-            "department": "None"
-          },
+          "required_attributes": {"userGroup": "staff", "department": "None"},
           "enable_registration": true,
           "allow_numeric_ids": true,
           "numeric_ids_prefix": "numericuser"
@@ -2569,7 +2339,7 @@
         "client_whitelist": {
           "type": ["array", "null"],
           "description": "A list of client URLs which are whitelisted so that the user does not have to confirm giving access to their account to the URL. Any client whose URL starts with an entry in the following list will not be subject to an additional confirmation step after the SSO login is completed.\n\nWARNING: An entry such as \"https://my.client\" is insecure, because it will also match \"https://my.client.evil.site\", exposing your users to phishing attacks from evil.site. To avoid this, include a slash after the hostname: \"https://my.client/\".\n\nThe login fallback page (used by clients that don't natively support the required login flows) is whitelisted in addition to any URLs in this list. By default, this list contains only the login fallback page.",
-          "items": { "type": "string" },
+          "items": {"type": "string"},
           "default": null
         },
         "update_profile_information": {
@@ -2580,10 +2350,7 @@
       },
       "examples": [
         {
-          "client_whitelist": [
-            "https://riot.im/develop",
-            "https://my.custom.client/"
-          ],
+          "client_whitelist": ["https://riot.im/develop", "https://my.custom.client/"],
           "update_profile_information": true
         }
       ]
@@ -2623,7 +2390,7 @@
         "audiences": {
           "type": ["array", "null"],
           "description": "A list of audiences to validate the \"aud\" claim against. If provided the \"aud\" claim will be required and validated for all JSON web tokens. Note that if the \"aud\" claim is included in a JSON web token then validation will fail without configuring audiences.",
-          "items": { "type": "string" },
+          "items": {"type": "string"},
           "default": null
         }
       },
@@ -2803,8 +2570,8 @@
           "type": "object",
           "description": "If enabled, will send a user a \"Server Notice\" asking them to consent to the privacy policy. The [`server_notices` section](#server_notices) must also be configured for this to work. Notices will *not* be sent to guest users unless `send_server_notice_to_guests` is set to true.",
           "properties": {
-            "msgtype": { "type": "string" },
-            "body": { "type": "string" }
+            "msgtype": {"type": "string"},
+            "body": {"type": "string"}
           }
         },
         "send_server_notice_to_guests": {
@@ -2852,7 +2619,7 @@
           "default": true
         }
       },
-      "examples": [{ "enabled": false }]
+      "examples": [{"enabled": false}]
     },
     "server_notices": {
       "type": "object",
@@ -2935,22 +2702,13 @@
       "default": null,
       "examples": [
         null,
-        [{ "action": "allow" }],
+        [{"action": "allow"}],
         [],
-        [{ "action": "deny" }],
+        [{"action": "deny"}],
+        [{"user_id": "@bad_user:example.com", "action": "deny"}, {"action": "allow"}],
         [
-          {
-            "user_id": "@bad_user:example.com",
-            "action": "deny"
-          },
-          { "action": "allow" }
-        ],
-        [
-          {
-            "room_id": "!forbiddenRoom:example.com",
-            "action": "deny"
-          },
-          { "action": "allow" }
+          {"room_id": "!forbiddenRoom:example.com", "action": "deny"},
+          {"action": "allow"}
         ]
       ]
     },
@@ -2982,30 +2740,15 @@
       "default": null,
       "examples": [
         null,
-        [{ "action": "allow" }],
+        [{"action": "allow"}],
         [],
-        [{ "action": "deny" }],
+        [{"action": "deny"}],
+        [{"user_id": "@bad_user:example.com", "action": "deny"}, {"action": "allow"}],
         [
-          {
-            "user_id": "@bad_user:example.com",
-            "action": "deny"
-          },
-          { "action": "allow" }
+          {"room_id": "!forbiddenRoom:example.com", "action": "deny"},
+          {"action": "allow"}
         ],
-        [
-          {
-            "room_id": "!forbiddenRoom:example.com",
-            "action": "deny"
-          },
-          { "action": "allow" }
-        ],
-        [
-          {
-            "alias": "#*potato*:example.com",
-            "action": "deny"
-          },
-          { "action": "allow" }
-        ]
+        [{"alias": "#*potato*:example.com", "action": "deny"}, {"action": "allow"}]
       ]
     },
     "default_power_level_content_override": {
@@ -3014,11 +2757,7 @@
       "default": {},
       "examples": [
         {
-          "private_chat": {
-            "events": {
-              "com.example.foo": 0
-            }
-          },
+          "private_chat": {"events": {"com.example.foo": 0}},
           "trusted_private_chat": null,
           "public_chat": null
         },
@@ -3050,7 +2789,7 @@
     "exclude_rooms_from_sync": {
       "type": "array",
       "description": "A list of rooms to exclude from sync responses. This is useful for server administrators wishing to group users into a room without these users being able to see it from their client.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["!foo:example.com"]]
     },
@@ -3066,13 +2805,13 @@
         "homeserver_whitelist": {
           "type": "array",
           "description": "The list of homeservers we wish to send and receive span contexts and span baggage. See [here](../../opentracing.md) for more. This is a list of regexes which are matched against the `server_name` of the homeserver. If the list is empty, no servers are matched.",
-          "items": { "type": "string" },
+          "items": {"type": "string"},
           "default": []
         },
         "force_tracing_for_users": {
           "type": "array",
           "description": "A list of the matrix IDs of users whose requests will always be traced, even if the tracing system would otherwise drop the traces due to probabilistic sampling.",
-          "items": { "type": "string" },
+          "items": {"type": "string"},
           "default": []
         },
         "jaeger_config": {
@@ -3085,15 +2824,9 @@
         {
           "enabled": true,
           "homeserver_whitelist": [".*"],
-          "force_tracing_for_users": [
-            "@user1:server_name",
-            "@user2:server_name"
-          ],
+          "force_tracing_for_users": ["@user1:server_name", "@user2:server_name"],
           "jaeger_config": {
-            "sampler": {
-              "type": "const",
-              "param": 1
-            },
+            "sampler": {"type": "const", "param": 1},
             "logging": false
           }
         }
@@ -3114,7 +2847,7 @@
     "pusher_instances": {
       "type": "array",
       "description": "It is possible to scale the processes that handle sending push notifications to [sygnal](https://github.com/matrix-org/sygnal) and email by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to a `pusher_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them. Ensure the main process and all pusher workers are restarted after changing this option.",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["pusher_worker1"], ["pusher_worker1", "pusher_worker2"]]
     },
@@ -3127,7 +2860,7 @@
     "federation_sender_instances": {
       "type": "array",
       "description": "It is possible to scale the processes that handle sending outbound federation requests by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to a `federation_sender_instances` map. Doing so will remove handling of this function from the main process. Multiple workers can be added to this map, in which case the work is balanced across them.\n\nThe way that the load balancing works is any outbound federation request will be assigned to a federation sender worker based on the hash of the destination server name. This means that all requests being sent to the same destination will be processed by the same worker instance. Multiple `federation_sender_instances` are useful if there is a federation with multiple servers.\n\nThis configuration setting must be shared between all workers handling federation sending, and if changed all federation sender workers must be stopped at the same time and then started, to ensure that all instances are running with the same config (otherwise events may be dropped).",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [
         ["federation_sender1"],
@@ -3137,22 +2870,16 @@
     "instance_map": {
       "type": "object",
       "description": "When using workers this should be a map from [`worker_name`](#worker_name) to the HTTP replication listener of the worker, if configured, and to the main process. Each worker declared under [`stream_writers`](../../workers.md#stream-writers) and [`outbound_federation_restricted_to`](#outbound_federation_restricted_to) needs a HTTP replication listener, and that listener should be included in the `instance_map`. The main process also needs an entry on the `instance_map`, and it should be listed under `main` **if even one other worker exists**. Ensure the port matches with what is declared inside the `listener` block for a `replication` listener.",
-      "additionalProperties": { "type": "object" },
+      "additionalProperties": {"type": "object"},
       "default": {},
       "examples": [
         {
-          "main": {
-            "host": "localhost",
-            "port": 8030
-          },
-          "worker1": {
-            "host": "localhost",
-            "port": 8034
-          }
+          "main": {"host": "localhost", "port": 8030},
+          "worker1": {"host": "localhost", "port": 8034}
         },
         {
-          "main": { "path": "/run/synapse/main_replication.sock" },
-          "worker1": { "path": "/run/synapse/worker1_replication.sock" }
+          "main": {"path": "/run/synapse/main_replication.sock"},
+          "worker1": {"path": "/run/synapse/worker1_replication.sock"}
         }
       ]
     },
@@ -3160,26 +2887,21 @@
       "type": "object",
       "description": "Experimental: When using workers you can define which workers should handle writing to streams such as event persistence and typing notifications. Any worker specified here must also be in the [`instance_map`](#instance_map).\n\nSee the list of available streams in the [worker documentation](../../workers.md#stream-writers).",
       "properties": {
-        "events": { "type": "string" },
-        "typing": { "type": "string" },
-        "to_device": { "type": "string" },
-        "account_data": { "type": "string" },
-        "receipts": { "type": "string" },
-        "presence": { "type": "string" },
-        "push_rules": { "type": "string" }
+        "events": {"type": "string"},
+        "typing": {"type": "string"},
+        "to_device": {"type": "string"},
+        "account_data": {"type": "string"},
+        "receipts": {"type": "string"},
+        "presence": {"type": "string"},
+        "push_rules": {"type": "string"}
       },
       "default": {},
-      "examples": [
-        {
-          "events": "worker1",
-          "typing": "worker1"
-        }
-      ]
+      "examples": [{"events": "worker1", "typing": "worker1"}]
     },
     "outbound_federation_restricted_to": {
       "type": "array",
       "description": "When using workers, you can restrict outbound federation traffic to only go through a specific subset of workers. Any worker specified here must also be in the [`instance_map`](#instance_map). [`worker_replication_secret`](#worker_replication_secret) must also be configured to authorize inter-worker communication.\n\nAlso see the [worker documentation](../../workers.md#restrict-outbound-federation-traffic-to-a-specific-set-of-workers) for more info.\n\n_Added in Synapse 1.89.0._",
-      "items": { "type": "string" },
+      "items": {"type": "string"},
       "default": [],
       "examples": [["federation_sender1", "federation_sender2"]]
     },
@@ -3301,19 +3023,19 @@
           {
             "type": "http",
             "port": 8083,
-            "resources": [{ "names": ["client", "federation"] }]
+            "resources": [{"names": ["client", "federation"]}]
           }
         ],
         [
           {
             "type": "http",
             "path": "/run/synapse/worker_replication.sock",
-            "resources": [{ "names": ["replication"] }]
+            "resources": [{"names": ["replication"]}]
           },
           {
             "type": "http",
             "path": "/run/synapse/worker_public.sock",
-            "resources": [{ "names": ["client", "federation"] }]
+            "resources": [{"names": ["client", "federation"]}]
           }
         ]
       ]
@@ -3418,10 +3140,19 @@
     }
   },
   "$defs": {
-    "bytes": { "type": ["string", "integer"], "io.element.type_name": "byte size" },
-    "duration": { "type": "string", "io.element.type_name": "duration" },
-    "size": { "type": ["string", "integer"], "io.element.type_name": "size" },
-    "3pidmedium": { "type": "string", "enum": ["email", "msisdn"] },
+    "bytes": {
+      "type": ["string", "integer"],
+      "io.element.type_name": "byte size"
+    },
+    "duration": {"type": "string", "io.element.type_name": "duration"},
+    "size": {
+      "type": ["string", "integer"],
+      "io.element.type_name": "size"
+    },
+    "3pidmedium": {
+      "type": "string",
+      "enum": ["email", "msisdn"]
+    },
     "rc": {
       "type": "object",
       "properties": {

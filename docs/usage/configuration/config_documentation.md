@@ -1599,7 +1599,7 @@ This setting has the following sub-options:
 Example configuration:
 ```yaml
 rc_admin_redaction:
-  per_second: 1
+  per_second: 1.0
   burst_count: 50
 ```
 ---
@@ -1766,7 +1766,7 @@ This setting has the following sub-options:
 Default configuration:
 ```yaml
 rc_media_create:
-  per_second: 10
+  per_second: 10.0
   burst_count: 50
 ```
 ---
