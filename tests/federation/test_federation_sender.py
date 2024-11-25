@@ -247,7 +247,7 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
 
         # expect a call to send_transaction for each host
         self.assertEqual(mock_send_transaction.call_count, 20)
-        self._assert_edu_in_call(mock_send_transaction.call_args[0][1])
+        self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
 
         mock_send_transaction.reset_mock()
 
@@ -285,14 +285,14 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
         # First, expect a call to send_transaction for the sending host
         mock_send_transaction.assert_called()
 
-        transaction = mock_send_transaction.call_args_list[0][0][0]
+        transaction = mock_send_transaction.call_args_list[0].args[0]
         self.assertEqual(transaction.destination, "host1")
-        self._assert_edu_in_call(mock_send_transaction.call_args_list[0][0][1])
+        self._assert_edu_in_call(mock_send_transaction.call_args_list[0].args[1])
 
         # We also expect a call to one of the other hosts, as the first
         # destination to wake up.
         self.assertEqual(mock_send_transaction.call_count, 2)
-        self._assert_edu_in_call(mock_send_transaction.call_args[0][1])
+        self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
 
         mock_send_transaction.reset_mock()
 
@@ -305,7 +305,7 @@ class FederationSenderReceiptsTestCases(HomeserverTestCase):
             )
 
             mock_send_transaction.assert_called_once()
-            self._assert_edu_in_call(mock_send_transaction.call_args[0][1])
+            self._assert_edu_in_call(mock_send_transaction.call_args.args[1])
             mock_send_transaction.reset_mock()
 
     def _assert_edu_in_call(self, json_cb: Callable[[], JsonDict]) -> None:
