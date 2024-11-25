@@ -322,6 +322,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache(
             "get_unread_event_push_actions_by_room_for_user", (room_id,)
         )
+        self._attempt_to_invalidate_cache("get_metadata_for_event", (room_id, event_id))
 
         self._attempt_to_invalidate_cache("_get_max_event_pos", (room_id,))
 
@@ -446,6 +447,7 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
         self._attempt_to_invalidate_cache("_get_state_group_for_event", None)
 
         self._attempt_to_invalidate_cache("get_event_ordering", None)
+        self._attempt_to_invalidate_cache("get_metadata_for_event", (room_id,))
         self._attempt_to_invalidate_cache("is_partial_state_event", None)
         self._attempt_to_invalidate_cache("_get_joined_profile_from_event_id", None)
 
