@@ -65,7 +65,7 @@ use anyhow::{Context, Error};
 use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyList, PyLong, PyString};
+use pyo3::types::{PyBool, PyInt, PyList, PyString};
 use pythonize::{depythonize, pythonize, PythonizeError};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
@@ -280,7 +280,7 @@ impl<'source> FromPyObject<'source> for SimpleJsonValue {
         // A bool *is* an int, ensure we try bool first.
         } else if let Ok(b) = ob.downcast::<PyBool>() {
             Ok(SimpleJsonValue::Bool(b.extract()?))
-        } else if let Ok(i) = ob.downcast::<PyLong>() {
+        } else if let Ok(i) = ob.downcast::<PyInt>() {
             Ok(SimpleJsonValue::Int(i.extract()?))
         } else if ob.is_none() {
             Ok(SimpleJsonValue::Null)
