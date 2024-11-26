@@ -1996,9 +1996,9 @@ Local or cached remote media that has been [quarantined](../../admin_api/media_a
 
 This setting has the following sub-options:
 
-* `local_media_lifetime`: MISSING DESCRIPTION
+* `local_media_lifetime`: Duration without access to a local media resource after which it will be purged. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If unset or null, local media will not be purged. Defaults to `null`.
 
-* `remote_media_lifetime`: MISSING DESCRIPTION
+* `remote_media_lifetime`: Duration without access to a remote media resource after which it will be purged. If the media has never been accessed, the media's creation time is used instead. Both thumbnails and the original media will be removed. If unset or null, remote media will not be purged. Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -2328,9 +2328,9 @@ Defaults to `null`.
 
 Options for each entry include:
 
-* `medium` (string): MISSING DESCRIPTION
+* `medium` (string): The medium for which to allow 3PID association.
 
-* `pattern` (string): MISSING DESCRIPTION
+* `pattern` (string): A [Perl-like regular expression](https://docs.python.org/3/library/re.html#module-re) allowing association of a 3PID to a local account if it matches the given format.
 
 Example configuration:
 ```yaml
@@ -2684,7 +2684,7 @@ Synapse disables this by default as it has security ramifications – a maliciou
 
 This setting has the following sub-options:
 
-* `enabled` (boolean): MISSING DESCRIPTION
+* `enabled` (boolean): Enable login via existing session. Defaults to `false`.
 
 * `require_ui_auth` (boolean): Require user-interactive authentication. Defaults to `true`.
 
@@ -2722,9 +2722,9 @@ NOTE: While attempts are made to ensure that the logs don't contain any sensitiv
 
 This setting has the following sub-options:
 
-* `dsn` (string|null): MISSING DESCRIPTION
+* `dsn` (string|null): The DSN assigned by sentry. If unset or null, sentry integration is disabled. Defaults to `null`.
 
-* `environment` (string|null): MISSING DESCRIPTION
+* `environment` (string|null): Sentry environment. Defaults to `null`.
 
 Example configuration:
 ```yaml
@@ -3036,9 +3036,9 @@ This setting has the following sub-options:
 
   Options for each entry include:
 
-  * `attribute` (string): MISSING DESCRIPTION
+  * `attribute` (string): SAML attribute for which to allow logins.
 
-  * `value` (string): MISSING DESCRIPTION
+  * `value` (string): Value the SAML attribute must match.
 
 * `idp_entityid` (string|null): If the metadata XML contains multiple IdP entities then the `idp_entityid` option must be set to the entity to redirect users to. Most deployments only have a single IdP entity and so should omit this option. Defaults to `null`.
 
@@ -3161,11 +3161,11 @@ Options for each entry include:
 
   * `key_file` (string|null): Path to the file containing a pem-encoded signing key. Required unless `key` is given.
 
-  * `jwt_header` (object): Dictionary giving properties to include in the JWT header. Must include the key `alg`, giving the algorithm used to sign the JWT, such as ES256, using the JWA identifiers in RFC7518.
+  * `jwt_header` (object): Dictionary giving properties to include in the JWT header. Must include the key `alg`.
 
     This setting has the following sub-options:
 
-    * `alg` (string): MISSING DESCRIPTION
+    * `alg` (string): Algorithm used to sign the JWT, such as ES256, using the JWA identifiers in RFC7518.
 
   * `jwt_payload` (object): Optional dictionary giving properties to include in the JWT payload. Normally this should include an `iss` key.
 
@@ -3533,9 +3533,9 @@ This setting has the following sub-options:
 
   This setting has the following sub-options:
 
-  * `msgtype` (string): MISSING DESCRIPTION
+  * `msgtype` (string): Message type of the notice event.
 
-  * `body` (string): MISSING DESCRIPTION
+  * `body` (string): Message template for the server notice event body.
 
 * `send_server_notice_to_guests` (boolean): Send server notices to guest users, too. Defaults to `false`.
 
@@ -3543,7 +3543,7 @@ This setting has the following sub-options:
 
 * `require_at_registration` (boolean): If enabled, will add a step to the registration process, similar to how captcha works. Users will be required to accept the policy before their account is created.
 
-* `policy_name` (string): MISSING DESCRIPTION
+* `policy_name` (string): Human-readable name of the privacy policy. Defaults to `"Privacy Policy"`.
 
 Example configuration:
 ```yaml
@@ -3984,19 +3984,19 @@ Defaults to `{}`.
 
 This setting has the following sub-options:
 
-* `events` (string): MISSING DESCRIPTION
+* `events` (string): Name of a worker assigned to the `events` stream.
 
-* `typing` (string): MISSING DESCRIPTION
+* `typing` (string): Name of a worker assigned to the `typing` stream.
 
-* `to_device` (string): MISSING DESCRIPTION
+* `to_device` (string): Name of a worker assigned to the `to_device` stream.
 
-* `account_data` (string): MISSING DESCRIPTION
+* `account_data` (string): Name of a worker assigned to the `account_data` stream.
 
-* `receipts` (string): MISSING DESCRIPTION
+* `receipts` (string): Name of a worker assigned to the `receipts` stream.
 
-* `presence` (string): MISSING DESCRIPTION
+* `presence` (string): Name of a worker assigned to the `presence` stream.
 
-* `push_rules` (string): MISSING DESCRIPTION
+* `push_rules` (string): Name of a worker assigned to the `push_rules` stream.
 
 Example configuration:
 ```yaml

@@ -2306,11 +2306,21 @@ properties:
       will not be deleted.
     properties:
       local_media_lifetime:
+        description: >-
+          Duration without access to a local media resource after which it will
+          be purged. If the media has never been accessed, the media's creation
+          time is used instead. Both thumbnails and the original media will be
+          removed. If unset or null, local media will not be purged.
         oneOf:
           - $ref: "#/$defs/duration"
           - type: "null"
         default: null
       remote_media_lifetime:
+        description: >-
+          Duration without access to a remote media resource after which it will
+          be purged. If the media has never been accessed, the media's creation
+          time is used instead. Both thumbnails and the original media will be
+          removed. If unset or null, remote media will not be purged.
         oneOf:
           - $ref: "#/$defs/duration"
           - type: "null"
@@ -2647,11 +2657,18 @@ properties:
       spec](https://spec.matrix.org/latest/appendices/#3pid-types).
     items:
       type: object
+      description: Item allowing a given pattern for the specified 3PID medium.
       properties:
         medium:
           $ref: "#/$defs/3pidmedium"
+          description: The medium for which to allow 3PID association.
         pattern:
           type: string
+          description: >-
+            A [Perl-like regular
+            expression](https://docs.python.org/3/library/re.html#module-re)
+            allowing association of a 3PID to a local account if it matches the
+            given format.
     default: null
     examples:
       - - medium: email
@@ -3056,7 +3073,7 @@ properties:
     properties:
       enabled:
         type: boolean
-        description: ""
+        description: "Enable login via existing session."
         default: false
       require_ui_auth:
         type: boolean
@@ -3096,9 +3113,13 @@ properties:
     properties:
       dsn:
         type: ["string", "null"]
+        description: >-
+          The DSN assigned by sentry. If unset or null, sentry integration is
+          disabled.
         default: null
       environment:
         type: ["string", "null"]
+        description: Sentry environment.
         default: null
     examples:
       - environment: production
@@ -3526,11 +3547,14 @@ properties:
           listed attributes must match for the login to be permitted.
         items:
           type: object
+          description: Item allowing a specific SAML attribute.
           properties:
             attribute:
               type: string
+              description: SAML attribute for which to allow logins.
             value:
               type: string
+              description: Value the SAML attribute must match.
       idp_entityid:
         type: ["string", "null"]
         description: >-
@@ -3723,11 +3747,13 @@ properties:
               type: object
               description: >-
                 Dictionary giving properties to include in the JWT header. Must
-                include the key `alg`, giving the algorithm used to sign the
-                JWT, such as ES256, using the JWA identifiers in RFC7518.
+                include the key `alg`.
               properties:
                 alg:
                   type: string
+                  description: >-
+                    Algorithm used to sign the JWT, such as ES256, using the JWA
+                    identifiers in RFC7518.
             jwt_payload:
               type: object
               description: >-
@@ -4405,8 +4431,10 @@ properties:
         properties:
           msgtype:
             type: string
+            description: Message type of the notice event.
           body:
             type: string
+            description: Message template for the server notice event body.
       send_server_notice_to_guests:
         type: boolean
         description: Send server notices to guest users, too.
@@ -4426,7 +4454,7 @@ properties:
           their account is created.
       policy_name:
         type: string
-        description: ""
+        description: Human-readable name of the privacy policy.
         default: Privacy Policy
     examples:
       - template_dir: res/templates/privacy
@@ -4933,18 +4961,25 @@ properties:
     properties:
       events:
         type: string
+        description: Name of a worker assigned to the `events` stream.
       typing:
         type: string
+        description: Name of a worker assigned to the `typing` stream.
       to_device:
         type: string
+        description: Name of a worker assigned to the `to_device` stream.
       account_data:
         type: string
+        description: Name of a worker assigned to the `account_data` stream.
       receipts:
         type: string
+        description: Name of a worker assigned to the `receipts` stream.
       presence:
         type: string
+        description: Name of a worker assigned to the `presence` stream.
       push_rules:
         type: string
+        description: Name of a worker assigned to the `push_rules` stream.
     default: {}
     examples:
       - events: worker1
