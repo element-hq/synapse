@@ -129,7 +129,7 @@ Define your homeserver name and other base options.
 
 *(string)* This sets the public-facing domain of the server.
 
-The `server_name` name will appear at the end of usernames and room addresses created on your server. For example if the `server_name` was example.com, usernames on your server would be in the format `@user:example.com`
+The `server_name` name will appear at the end of usernames and room addresses created on your server. For example if the `server_name` was example.com, usernames on your server would be in the format `@user:example.com`.
 
 In most cases you should avoid using a matrix specific subdomain such as matrix.example.com or synapse.example.com as the `server_name` for the same reasons you wouldn't use user@email.example.com as your email address. See [here](../../delegate.md) for information on how to host Synapse on a subdomain while preserving a clean `server_name`.
 
@@ -540,7 +540,7 @@ This setting has the following sub-options:
 
 * `ssh_priv_key_path` (string|null): The private SSH key used to encrypt the manhole traffic. If left unset, then hardcoded and non-secret keys are used, which could allow traffic to be intercepted if sent over a public network.
 
-* `ssh_pub_key_path` (string|null): The public SSH key corresponsing to `ssh_priv_key_path`. If left unset, a hardcoded key is used,
+* `ssh_pub_key_path` (string|null): The public SSH key corresponsing to `ssh_priv_key_path`. If left unset, a hardcoded key is used.
 
 Example configuration:
 ```yaml
@@ -609,7 +609,7 @@ This setting has the following sub-options:
 
 * `enable_tls` (boolean): By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `smtp_host`. If this option is set to false, TLS will not be used. Defaults to `true`.
 
-* `notif_from` (string|null): Defines the "From" address to use when sending emails. It must be set if email sending is enabled. The placeholder `%(app)s` will be replaced by the application name, which is normally set in `app_name`, but may be overridden by the Matrix client application. Note that the placeholder must be written `%(app)s`, including the trailing ‘s'. Defaults to `null`.
+* `notif_from` (string|null): Defines the "From" address to use when sending emails. It must be set if email sending is enabled. The placeholder `%(app)s` will be replaced by the application name, which is normally set in `app_name`, but may be overridden by the Matrix client application. Note that the placeholder must be written `%(app)s`, including the trailing 's'. Defaults to `null`.
 
 * `app_name` (string): Defines the default value for `%(app)s` in `notif_from` and email subjects. Defaults to `"Matrix"`.
 
@@ -623,7 +623,7 @@ This setting has the following sub-options:
 
   Defaults to `"10m"`.
 
-* `client_base_url` (string): Custom URL for client links within the email notifications.  (This setting used to be called `riot_base_url`; the old name is still supported for backwards-compatibility but is now deprecated.) Defaults to `"https://matrix.to"`.
+* `client_base_url` (string): Custom URL for client links within the email notifications. (This setting used to be called `riot_base_url`; the old name is still supported for backwards-compatibility but is now deprecated.) Defaults to `"https://matrix.to"`.
 
 * `validation_token_lifetime` (duration): Configures the time that a validation email will expire after sending. Defaults to `"1h"`.
 
@@ -1267,7 +1267,7 @@ This setting has the following sub-options:
 
   These can also be set through environment variables comprised of `SYNAPSE_CACHE_FACTOR_` + the name of the cache in capital letters and underscores. Setting by environment variable takes priority over setting through the config file. Ex. `SYNAPSE_CACHE_FACTOR_GET_USERS_WHO_SHARE_ROOM_WITH_USER=2.0`
 
-  Some caches have ‘*' and other characters that are not alphanumeric or underscores. These caches can be named with or without the special characters stripped. For example, to specify the cache factor for `*stateGroupCache*` via an environment variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
+  Some caches have '*' and other characters that are not alphanumeric or underscores. These caches can be named with or without the special characters stripped. For example, to specify the cache factor for `*stateGroupCache*` via an environment variable would be `SYNAPSE_CACHE_FACTOR_STATEGROUPCACHE=2.0`.
 
   Defaults to `{}`.
 
@@ -1306,19 +1306,15 @@ caches:
 
 ### Reloading cache factors
 
-The cache factors (i.e. `caches.global_factor` and `caches.per_cache_factors`)  may be reloaded at any time by sending a
-[`SIGHUP`](https://en.wikipedia.org/wiki/SIGHUP) signal to Synapse using e.g.
+The cache factors (i.e. `caches.global_factor` and `caches.per_cache_factors`)  may be reloaded at any time by sending a [`SIGHUP`](https://en.wikipedia.org/wiki/SIGHUP) signal to Synapse using e.g.
 
 ```commandline
 kill -HUP [PID_OF_SYNAPSE_PROCESS]
 ```
 
-If you are running multiple workers, you must individually update the worker
-config file and send this signal to each worker process.
+If you are running multiple workers, you must individually update the worker config file and send this signal to each worker process.
 
-If you're using the [example systemd service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service)
-file in Synapse's `contrib` directory, you can send a `SIGHUP` signal by using
-`systemctl reload matrix-synapse`.
+If you're using the [example systemd service](https://github.com/element-hq/synapse/blob/develop/contrib/systemd/matrix-synapse.service) file in Synapse's `contrib` directory, you can send a `SIGHUP` signal by using `systemctl reload matrix-synapse`.
 
 ---
 ## Database
