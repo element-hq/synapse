@@ -288,6 +288,13 @@ impl RendezvousHandler {
         let mut response = Response::new(Bytes::new());
         *response.status_mut() = StatusCode::ACCEPTED;
         prepare_headers(response.headers_mut(), session);
+
+        // Even though this isn't mandated by the MSC, we set a Content-Type on the response. It
+        // doesn't do any harm as the body is empty, but this helps escape a bug in some reverse
+        // proxy/cache setup which strips the ETag header if there is no Content-Type set.
+        // Specifically, we noticed this behaviour when placing Synapse behind Cloudflare.
+        response.headers_mut().typed_insert(ContentType::text());
+
         http_response_to_twisted(twisted_request, response)?;
 
         Ok(())
