@@ -66,7 +66,7 @@ use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyList, PyLong, PyString};
-use pythonize::{depythonize_bound, pythonize};
+use pythonize::{depythonize, pythonize};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -187,7 +187,7 @@ impl IntoPy<PyObject> for Action {
         // When we pass the `Action` struct to Python we want it to be converted
         // to a dict. We use `pythonize`, which converts the struct using the
         // `serde` serialization.
-        pythonize(py, &self).expect("valid action")
+        pythonize(py, &self).expect("valid action").unbind()
     }
 }
 
@@ -365,13 +365,13 @@ pub enum KnownCondition {
 
 impl IntoPy<PyObject> for Condition {
     fn into_py(self, py: Python<'_>) -> PyObject {
-        pythonize(py, &self).expect("valid condition")
+        pythonize(py, &self).expect("valid condition").unbind()
     }
 }
 
 impl<'source> FromPyObject<'source> for Condition {
     fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
-        Ok(depythonize_bound(ob.clone())?)
+        Ok(depythonize(ob)?)
     }
 }
 
