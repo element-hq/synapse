@@ -3257,7 +3257,9 @@ This setting has the following sub-options:
    and then copy the "url" from the source of the event.)
 * `idp_brand`: An optional brand for this identity provider, allowing clients
    to style the login flow according to the identity provider in question.
-   See the [spec](https://spec.matrix.org/latest/) for possible options here.
+   See the [spec](https://spec.matrix.org/v1.12/client-server-api/#definition-mloginsso-flow-schema_idp) and
+  [the brand registry](https://github.com/matrix-org/matrix-spec/blob/main/informal/idp-brands.md)
+  for possible options here.
 * `sp_config`: the configuration for the pysaml2 Service Provider. See pysaml2 docs for format of config.
    Default values will be used for the `entityid` and `service` settings,
    so it is not normally necessary to specify them unless you need to
