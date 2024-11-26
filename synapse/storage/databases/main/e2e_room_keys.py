@@ -28,10 +28,9 @@ from typing import (
     Mapping,
     Optional,
     Tuple,
+    TypedDict,
     cast,
 )
-
-from typing_extensions import TypedDict
 
 from synapse.api.errors import StoreError
 from synapse.logging.opentracing import log_kv, trace
