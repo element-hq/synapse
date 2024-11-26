@@ -277,7 +277,7 @@ impl EventInternalMetadata {
     ///
     /// Note that `outlier` and `stream_ordering` are stored in separate columns so are not returned here.
     fn get_dict(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let dict = PyDict::new_bound(py);
+        let dict = PyDict::new(py);
 
         for entry in &self.data {
             let (key, value) = entry.to_python_pair(py);

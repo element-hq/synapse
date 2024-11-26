@@ -79,7 +79,7 @@ pub mod utils;
 
 /// Called when registering modules with python.
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child_module = PyModule::new_bound(py, "push")?;
+    let child_module = PyModule::new(py, "push")?;
     child_module.add_class::<PushRule>()?;
     child_module.add_class::<PushRules>()?;
     child_module.add_class::<FilteredPushRules>()?;
@@ -90,7 +90,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import push` work.
-    py.import_bound("sys")?
+    py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.push", child_module)?;
 
