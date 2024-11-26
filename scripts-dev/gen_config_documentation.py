@@ -461,19 +461,22 @@ def section(prop: str, values: dict) -> str:
 
 
 def main() -> None:
-    try:
-        script_name = "???.py"
-        script_name = sys.argv[0]
-        schemafile = sys.argv[1]
-    except IndexError:
-        print("No schema file provided.", file=sys.stderr)
+    def usage(err_msg: str) -> int:
+        script_name = (sys.argv[:1] or ["__main__.py"])[0]
+        print(err_msg, file=sys.stderr)
         print(f"Usage: {script_name} <JSON Schema file>", file=sys.stderr)
         print(f"\n{__doc__}", file=sys.stderr)
         exit(1)
 
-    with open(schemafile) as f:
-        schema = json.load(f)
+    def read_json_file_arg() -> Any:
+        if len(sys.argv) > 2:
+            exit(usage("Too many arguments."))
+        if not (filepath := (sys.argv[1:] or [""])[0]):
+            exit(usage("No schema file provided."))
+        with open(filepath) as f:
+            return json.load(f)
 
+    schema = read_json_file_arg()
     schema = resolve_local_refs(schema)
 
     sections = (section(k, v) for k, v in schema["properties"].items())
