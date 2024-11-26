@@ -19,9 +19,19 @@
 #
 #
 
-from typing import TYPE_CHECKING, Dict, Iterable, List, Mapping, Optional, Tuple, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    Iterable,
+    List,
+    Literal,
+    Mapping,
+    Optional,
+    Tuple,
+    cast,
+)
 
-from typing_extensions import Literal, TypedDict
+from typing_extensions import TypedDict
 
 from synapse.api.errors import StoreError
 from synapse.logging.opentracing import log_kv, trace

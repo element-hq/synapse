@@ -29,6 +29,7 @@ from typing import (
     Generator,
     Iterable,
     List,
+    Literal,
     Optional,
     Sequence,
     Set,
@@ -36,7 +37,7 @@ from typing import (
     overload,
 )
 
-from typing_extensions import Literal, Protocol
+from typing_extensions import Protocol
 
 from synapse import event_auth
 from synapse.api.constants import EventTypes
