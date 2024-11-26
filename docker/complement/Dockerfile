@@ -6,11 +6,17 @@
 # Instructions for building this image from those it depends on is detailed in this guide:
 # https://github.com/element-hq/synapse/blob/develop/docker/README-testing.md#testing-with-postgresql-and-single-or-multi-process-synapse
 
-ARG SYNAPSE_VERSION=latest
 # This is an intermediate image, to be built locally (not pulled from a registry).
-ARG FROM=matrixdotorg/synapse-workers:$SYNAPSE_VERSION
+ARG SYNAPSE_WORKERS_IMAGE=synapse-workers
 
-FROM $FROM
+ARG POSTGRES_VERSION=13
+ARG POSTGRES_IMAGE=docker.io/library/postgres:$POSTGRES_VERSION-bookworm
+
+# Save the Postgres image for later
+FROM $POSTGRES_IMAGE AS postgres
+
+FROM $SYNAPSE_WORKERS_IMAGE
+
 # First of all, we copy postgres server from the official postgres image,
 # since for repeated rebuilds, this is much faster than apt installing
 # postgres each time.
@@ -20,8 +26,8 @@ FROM $FROM
 # the same debian version as Synapse's docker image (so the versions of the
 # shared libraries match).
 RUN adduser --system --uid 999 postgres --home /var/lib/postgresql
-COPY --from=docker.io/library/postgres:13-bookworm /usr/lib/postgresql /usr/lib/postgresql
-COPY --from=docker.io/library/postgres:13-bookworm /usr/share/postgresql /usr/share/postgresql
+COPY --from=postgres /usr/lib/postgresql /usr/lib/postgresql
+COPY --from=postgres /usr/share/postgresql /usr/share/postgresql
 RUN mkdir /var/run/postgresql && chown postgres /var/run/postgresql
 ENV PATH="${PATH}:/usr/lib/postgresql/13/bin"
 ENV PGDATA=/var/lib/postgresql/data
@@ -29,9 +35,10 @@ ENV PGDATA=/var/lib/postgresql/data
 # We also initialize the database at build time, rather than runtime, so that it's faster to spin up the image.
 RUN gosu postgres initdb --locale=C --encoding=UTF-8 --auth-host password
 
-# Configure a password and create a database for Synapse
+# Configure a password and create a database for Synapse and MAS
 RUN echo "ALTER USER postgres PASSWORD 'somesecret'" | gosu postgres postgres --single
 RUN echo "CREATE DATABASE synapse" | gosu postgres postgres --single
+RUN echo "CREATE DATABASE mas" | gosu postgres postgres --single
 
 # Extend the shared homeserver config to disable rate-limiting,
 # set Complement's static shared secret, enable registration, amongst other
