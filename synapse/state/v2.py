@@ -31,13 +31,12 @@ from typing import (
     List,
     Literal,
     Optional,
+    Protocol,
     Sequence,
     Set,
     Tuple,
     overload,
 )
-
-from typing_extensions import Protocol
 
 from synapse import event_auth
 from synapse.api.constants import EventTypes
