@@ -66,7 +66,7 @@ use log::warn;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyList, PyLong, PyString};
-use pythonize::{depythonize, pythonize};
+use pythonize::{depythonize, pythonize, PythonizeError};
 use serde::de::Error as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -182,12 +182,16 @@ pub enum Action {
     Unknown(Value),
 }
 
-impl IntoPy<PyObject> for Action {
-    fn into_py(self, py: Python<'_>) -> PyObject {
+impl<'py> IntoPyObject<'py> for Action {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
         // When we pass the `Action` struct to Python we want it to be converted
         // to a dict. We use `pythonize`, which converts the struct using the
         // `serde` serialization.
-        pythonize(py, &self).expect("valid action").unbind()
+        pythonize(py, &self)
     }
 }
 
@@ -367,9 +371,13 @@ pub enum KnownCondition {
     },
 }
 
-impl IntoPy<PyObject> for Condition {
-    fn into_py(self, py: Python<'_>) -> PyObject {
-        pythonize(py, &self).expect("valid condition").unbind()
+impl<'source> IntoPyObject<'source> for Condition {
+    type Target = PyAny;
+    type Output = Bound<'source, Self::Target>;
+    type Error = PythonizeError;
+
+    fn into_pyobject(self, py: Python<'source>) -> Result<Self::Output, Self::Error> {
+        pythonize(py, &self)
     }
 }
 
