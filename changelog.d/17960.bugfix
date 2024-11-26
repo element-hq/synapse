@@ -1,0 +1,1 @@
+Fix a bug introduced in Synapse v1.120rc1 which would cause the newly-introduced `delete_old_otks` job to fail in worker-mode deployments.

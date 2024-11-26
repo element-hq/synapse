@@ -29,8 +29,8 @@ See the [upgrade notes](https://element-hq.github.io/synapse/v1.120/upgrade.html
 
 - Addressed some typos in docs and returned error message for unknown MXC ID. ([\#17865](https://github.com/element-hq/synapse/issues/17865))
 - Unpin the upload release GHA action. ([\#17923](https://github.com/element-hq/synapse/issues/17923))
-- Bump macos version used to build wheels during release, as current version used is end-of-life. ([\#17924](https://github.com/element-hq/synapse/issues/17924))
-- Move server event filtering logic to rust. ([\#17928](https://github.com/element-hq/synapse/issues/17928))
+- Bump macOS version used to build wheels during release, as current version used is end-of-life. ([\#17924](https://github.com/element-hq/synapse/issues/17924))
+- Move server event filtering logic to Rust. ([\#17928](https://github.com/element-hq/synapse/issues/17928))
 - Support new package name of PyPI package `python-multipart` 0.0.13 so that distro packagers do not need to work around name conflict with PyPI package `multipart`. ([\#17932](https://github.com/element-hq/synapse/issues/17932))
 - Speed up slow initial sliding syncs on large servers. ([\#17946](https://github.com/element-hq/synapse/issues/17946))
 
