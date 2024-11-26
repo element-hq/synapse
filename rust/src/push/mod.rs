@@ -270,7 +270,7 @@ pub enum SimpleJsonValue {
 }
 
 impl<'source> FromPyObject<'source> for SimpleJsonValue {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
         if let Ok(s) = ob.downcast::<PyString>() {
             Ok(SimpleJsonValue::Str(Cow::Owned(s.to_string())))
         // A bool *is* an int, ensure we try bool first.
@@ -298,15 +298,19 @@ pub enum JsonValue {
 }
 
 impl<'source> FromPyObject<'source> for JsonValue {
-    fn extract(ob: &'source PyAny) -> PyResult<Self> {
+    fn extract_bound(ob: &Bound<'source, PyAny>) -> PyResult<Self> {
         if let Ok(l) = ob.downcast::<PyList>() {
-            match l.iter().map(SimpleJsonValue::extract).collect() {
+            match l
+                .iter()
+                .map(|it| SimpleJsonValue::extract_bound(&it))
+                .collect()
+            {
                 Ok(a) => Ok(JsonValue::Array(a)),
                 Err(e) => Err(PyTypeError::new_err(format!(
                     "Can't convert to JsonValue::Array: {e}"
                 ))),
             }
-        } else if let Ok(v) = SimpleJsonValue::extract(ob) {
+        } else if let Ok(v) = SimpleJsonValue::extract_bound(ob) {
             Ok(JsonValue::Value(v))
         } else {
             Err(PyTypeError::new_err(format!(
