@@ -39,7 +39,7 @@ from twisted.internet.endpoints import (
 )
 from twisted.internet.interfaces import (
     IPushProducer,
-    IReactorTCP,
+    IReactorTime,
     IStreamClientEndpoint,
 )
 from twisted.internet.protocol import Factory, Protocol
@@ -113,7 +113,7 @@ class RemoteHandler(logging.Handler):
         port: int,
         maximum_buffer: int = 1000,
         level: int = logging.NOTSET,
-        _reactor: Optional[IReactorTCP] = None,
+        _reactor: Optional[IReactorTime] = None,
     ):
         super().__init__(level=level)
         self.host = host

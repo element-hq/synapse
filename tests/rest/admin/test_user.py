@@ -45,6 +45,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
+    media,
     profile,
     register,
     room,
@@ -719,7 +720,7 @@ class UsersListTestCase(unittest.HomeserverTestCase):
         self.assertEqual(400, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.INVALID_PARAM, channel.json_body["errcode"])
 
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             "GET",
             self.url + "?order_by=bar",
@@ -3221,6 +3222,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertIn("consent_ts", content)
         self.assertIn("external_ids", content)
         self.assertIn("last_seen_ts", content)
+        self.assertIn("suspended", content)
 
         # This key was removed intentionally. Ensure it is not accidentally re-included.
         self.assertNotIn("password_hash", content)
@@ -3517,6 +3519,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        media.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -3696,7 +3699,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     @parameterized.expand(["GET", "DELETE"])
     def test_invalid_parameter(self, method: str) -> None:
         """If parameters are invalid, an error is returned."""
-        # unkown order_by
+        # unknown order_by
         channel = self.make_request(
             method,
             self.url + "?order_by=bar",
@@ -4023,7 +4026,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         # Try to access a media and to create `last_access_ts`
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=user_token,
         )

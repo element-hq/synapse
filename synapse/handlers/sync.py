@@ -143,6 +143,7 @@ class SyncConfig:
     filter_collection: FilterCollection
     is_guest: bool
     device_id: Optional[str]
+    use_state_after: bool
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -1141,6 +1142,7 @@ class SyncHandler:
         since_token: Optional[StreamToken],
         end_token: StreamToken,
         full_state: bool,
+        joined: bool,
     ) -> MutableStateMap[EventBase]:
         """Works out the difference in state between the end of the previous sync and
         the start of the timeline.
@@ -1155,6 +1157,7 @@ class SyncHandler:
                 the point just after their leave event.
             full_state: Whether to force returning the full state.
                 `lazy_load_members` still applies when `full_state` is `True`.
+            joined: whether the user is currently joined to the room
 
         Returns:
             The state to return in the sync response for the room.
@@ -1230,11 +1233,12 @@ class SyncHandler:
             if full_state:
                 state_ids = await self._compute_state_delta_for_full_sync(
                     room_id,
-                    sync_config.user,
+                    sync_config,
                     batch,
                     end_token,
                     members_to_fetch,
                     timeline_state,
+                    joined,
                 )
             else:
                 # If this is an initial sync then full_state should be set, and
@@ -1244,6 +1248,7 @@ class SyncHandler:
 
                 state_ids = await self._compute_state_delta_for_incremental_sync(
                     room_id,
+                    sync_config,
                     batch,
                     since_token,
                     end_token,
@@ -1316,20 +1321,24 @@ class SyncHandler:
     async def _compute_state_delta_for_full_sync(
         self,
         room_id: str,
-        syncing_user: UserID,
+        sync_config: SyncConfig,
         batch: TimelineBatch,
         end_token: StreamToken,
         members_to_fetch: Optional[Set[str]],
         timeline_state: StateMap[str],
+        joined: bool,
     ) -> StateMap[str]:
         """Calculate the state events to be included in a full sync response.
 
         As with `_compute_state_delta_for_incremental_sync`, the result will include
         the membership events for the senders of each event in `members_to_fetch`.
 
+        Note that whether this returns the state at the start or the end of the
+        batch depends on `sync_config.use_state_after` (c.f. MSC4222).
+
         Args:
             room_id: The room we are calculating for.
-            syncing_user: The user that is calling `/sync`.
+            sync_confg: The user that is calling `/sync`.
             batch: The timeline batch for the room that will be sent to the user.
             end_token: Token of the end of the current batch. Normally this will be
                 the same as the global "now_token", but if the user has left the room,
@@ -1338,10 +1347,11 @@ class SyncHandler:
                 events in the timeline.
             timeline_state: The contribution to the room state from state events in
                 `batch`. Only contains the last event for any given state key.
+            joined: whether the user is currently joined to the room
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
-            should be included in the `state` part of the sync response.
+            should be included in the `state` or `state_after` part of the sync response.
         """
         if members_to_fetch is not None:
             # Lazy-loading of membership events is enabled.
@@ -1359,7 +1369,7 @@ class SyncHandler:
             # is no guarantee that our membership will be in the auth events of
             # timeline events when the room is partial stated.
             state_filter = StateFilter.from_lazy_load_member_list(
-                members_to_fetch.union((syncing_user.to_string(),))
+                members_to_fetch.union((sync_config.user.to_string(),))
             )
 
             # We are happy to use partial state to compute the `/sync` response.
@@ -1372,6 +1382,61 @@ class SyncHandler:
             state_filter = StateFilter.all()
             await_full_state = True
             lazy_load_members = False
+
+        # Check if we are wanting to return the state at the start or end of the
+        # timeline. If at the end we can just use the current state.
+        if sync_config.use_state_after:
+            # If we're getting the state at the end of the timeline, we can just
+            # use the current state of the room (and roll back any changes
+            # between when we fetched the current state and `end_token`).
+            #
+            # For rooms we're not joined to, there might be a very large number
+            # of deltas between `end_token` and "now", and so instead we fetch
+            # the state at the end of the timeline.
+            if joined:
+                state_ids = await self._state_storage_controller.get_current_state_ids(
+                    room_id,
+                    state_filter=state_filter,
+                    await_full_state=await_full_state,
+                )
+
+                # Now roll back the state by looking at the state deltas between
+                # end_token and now.
+                deltas = await self.store.get_current_state_deltas_for_room(
+                    room_id,
+                    from_token=end_token.room_key,
+                    to_token=self.store.get_room_max_token(),
+                )
+                if deltas:
+                    mutable_state_ids = dict(state_ids)
+
+                    # We iterate over the deltas backwards so that if there are
+                    # multiple changes of the same type/state_key we'll
+                    # correctly pick the earliest delta.
+                    for delta in reversed(deltas):
+                        if delta.prev_event_id:
+                            mutable_state_ids[(delta.event_type, delta.state_key)] = (
+                                delta.prev_event_id
+                            )
+                        elif (delta.event_type, delta.state_key) in mutable_state_ids:
+                            mutable_state_ids.pop((delta.event_type, delta.state_key))
+
+                    state_ids = mutable_state_ids
+
+                return state_ids
+
+            else:
+                # Just use state groups to get the state at the end of the
+                # timeline, i.e. the state at the leave/etc event.
+                state_at_timeline_end = (
+                    await self._state_storage_controller.get_state_ids_at(
+                        room_id,
+                        stream_position=end_token,
+                        state_filter=state_filter,
+                        await_full_state=await_full_state,
+                    )
+                )
+                return state_at_timeline_end
 
         state_at_timeline_end = await self._state_storage_controller.get_state_ids_at(
             room_id,
@@ -1405,6 +1470,7 @@ class SyncHandler:
     async def _compute_state_delta_for_incremental_sync(
         self,
         room_id: str,
+        sync_config: SyncConfig,
         batch: TimelineBatch,
         since_token: StreamToken,
         end_token: StreamToken,
@@ -1419,8 +1485,12 @@ class SyncHandler:
         (`compute_state_delta`) is responsible for keeping track of which membership
         events we have already sent to the client, and hence ripping them out.
 
+        Note that whether this returns the state at the start or the end of the
+        batch depends on `sync_config.use_state_after` (c.f. MSC4222).
+
         Args:
             room_id: The room we are calculating for.
+            sync_config
             batch: The timeline batch for the room that will be sent to the user.
             since_token: Token of the end of the previous batch.
             end_token: Token of the end of the current batch. Normally this will be
@@ -1433,7 +1503,7 @@ class SyncHandler:
 
         Returns:
             A map from (type, state_key) to event_id, for each event that we believe
-            should be included in the `state` part of the sync response.
+            should be included in the `state` or `state_after` part of the sync response.
         """
         if members_to_fetch is not None:
             # Lazy-loading is enabled. Only return the state that is needed.
@@ -1444,6 +1514,51 @@ class SyncHandler:
             state_filter = StateFilter.all()
             await_full_state = True
             lazy_load_members = False
+
+        # Check if we are wanting to return the state at the start or end of the
+        # timeline. If at the end we can just use the current state delta stream.
+        if sync_config.use_state_after:
+            delta_state_ids: MutableStateMap[str] = {}
+
+            if members_to_fetch:
+                # We're lazy-loading, so the client might need some more member
+                # events to understand the events in this timeline. So we always
+                # fish out all the member events corresponding to the timeline
+                # here. The caller will then dedupe any redundant ones.
+                member_ids = await self._state_storage_controller.get_current_state_ids(
+                    room_id=room_id,
+                    state_filter=StateFilter.from_types(
+                        (EventTypes.Member, member) for member in members_to_fetch
+                    ),
+                    await_full_state=await_full_state,
+                )
+                delta_state_ids.update(member_ids)
+
+            # We don't do LL filtering for incremental syncs - see
+            # https://github.com/vector-im/riot-web/issues/7211#issuecomment-419976346
+            # N.B. this slows down incr syncs as we are now processing way more
+            # state in the server than if we were LLing.
+            #
+            # i.e. we return all state deltas, including membership changes that
+            # we'd normally exclude due to LL.
+            deltas = await self.store.get_current_state_deltas_for_room(
+                room_id=room_id,
+                from_token=since_token.room_key,
+                to_token=end_token.room_key,
+            )
+            for delta in deltas:
+                if delta.event_id is None:
+                    # There was a state reset and this state entry is no longer
+                    # present, but we have no way of informing the client about
+                    # this, so we just skip it for now.
+                    continue
+
+                # Note that deltas are in stream ordering, so if there are
+                # multiple deltas for a given type/state_key we'll always pick
+                # the latest one.
+                delta_state_ids[(delta.event_type, delta.state_key)] = delta.event_id
+
+            return delta_state_ids
 
         # For a non-gappy sync if the events in the timeline are simply a linear
         # chain (i.e. no merging/branching of the graph), then we know the state
@@ -2867,6 +2982,7 @@ class SyncHandler:
                     since_token,
                     room_builder.end_token,
                     full_state=full_state,
+                    joined=room_builder.rtype == "joined",
                 )
             else:
                 # An out of band room won't have any state changes.
