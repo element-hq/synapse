@@ -436,10 +436,6 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        self.msc3823_account_suspension = experimental.get(
-            "msc3823_account_suspension", False
-        )
-
         # MSC4151: Report room API (Client-Server API)
         self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
 

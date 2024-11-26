@@ -1338,7 +1338,7 @@ class RoomJoinTestCase(RoomBase):
         )
         self.assertEqual(channel.code, 403)
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
         channel = self.make_request(
@@ -1346,7 +1346,7 @@ class RoomJoinTestCase(RoomBase):
         )
         self.assertEqual(channel.code, 403)
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
     def test_suspended_user_cannot_knock_on_room(self) -> None:
@@ -1362,7 +1362,7 @@ class RoomJoinTestCase(RoomBase):
         )
         self.assertEqual(channel.code, 403)
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
     def test_suspended_user_cannot_invite_to_room(self) -> None:
@@ -1377,7 +1377,7 @@ class RoomJoinTestCase(RoomBase):
             content={"user_id": self.user2},
         )
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
 
@@ -4012,7 +4012,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"body": "hello", "msgtype": "m.text"},
         )
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
     def test_suspended_user_cannot_change_profile_data(self) -> None:
@@ -4027,7 +4027,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
         channel2 = self.make_request(
@@ -4038,7 +4038,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(
-            channel2.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel2.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
     def test_suspended_user_cannot_redact_messages_other_than_their_own(self) -> None:
@@ -4074,7 +4074,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+            channel.json_body["errcode"], "M_USER_SUSPENDED"
         )
 
         # but can redact their own
