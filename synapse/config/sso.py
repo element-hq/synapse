@@ -43,7 +43,8 @@ class SsoAttributeRequirement:
     """Object describing a single requirement for SSO attributes."""
 
     attribute: str
-    # If a value is not given, than the attribute must simply exist.
+    # If neither value nor one_of is given, the attribute must simply exist. This is
+    # only true for CAS configs which use a different JSON schema than the one below.
     value: Optional[str] = None
     one_of: Optional[List[str]] = None
 
