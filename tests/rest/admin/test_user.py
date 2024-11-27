@@ -3222,6 +3222,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertIn("consent_ts", content)
         self.assertIn("external_ids", content)
         self.assertIn("last_seen_ts", content)
+        self.assertIn("suspended", content)
 
         # This key was removed intentionally. Ensure it is not accidentally re-included.
         self.assertNotIn("password_hash", content)

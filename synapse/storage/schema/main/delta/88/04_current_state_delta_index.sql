@@ -12,7 +12,7 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 
--- Add an index on (user_id, device_id, algorithm, ts_added_ms) on e2e_one_time_keys_json, so that OTKs can
--- efficiently be issued in the same order they were uploaded.
+-- Add an index on `current_state_delta_stream(room_id, stream_id)` to allow
+-- efficient per-room lookups.
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
     (8804, 'current_state_delta_stream_room_index', '{}');
