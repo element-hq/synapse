@@ -212,7 +212,7 @@ jobs:
           mv debs*/* debs/
           tar -cvJf debs.tar.xz debs
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
