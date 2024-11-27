@@ -11,8 +11,9 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
-
--- Add an index on `current_state_delta_stream(room_id, stream_id)` to allow
--- efficient per-room lookups.
-INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (8804, 'current_state_delta_stream_room_index', '{}');
+-- Until Synapse 1.119, Synapse used to issue one-time-keys in a random order, leading to the possibility
+-- that it could still have old OTKs that the client has dropped.
+--
+-- We create a scheduled task which will drop old OTKs, to flush them out.
+INSERT INTO scheduled_tasks(id, action, status, timestamp)
+    VALUES ('delete_old_otks_task', 'delete_old_otks', 'scheduled', strftime('%s', 'now') * 1000);
