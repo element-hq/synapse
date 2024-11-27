@@ -788,6 +788,13 @@ class ServerConfig(Config):
         else:
             self.max_event_delay_ms = None
 
+        self.url_preview_user_agent: str = (
+            config.get("url_preview_user_agent")
+            or "Synapse (bot; +https://github.com/matrix-org/synapse)"
+        )
+        if len(self.url_preview_user_agent.strip()) == 0:
+            raise ConfigError("The 'url_preview_user_agent' must be a valid User-Agent")
+
     def has_tls_listener(self) -> bool:
         return any(listener.is_tls() for listener in self.listeners)
 

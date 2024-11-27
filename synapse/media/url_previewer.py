@@ -168,6 +168,7 @@ class UrlPreviewer:
     ):
         self.clock = hs.get_clock()
         self.filepaths = media_repo.filepaths
+        self.hs = hs
         self.max_spider_size = hs.config.media.max_spider_size
         self.server_name = hs.hostname
         self.store = hs.get_datastores().main
@@ -464,9 +465,7 @@ class UrlPreviewer:
                     # Use a custom user agent for the preview because some sites will only return
                     # Open Graph metadata to crawler user agents. Omit the Synapse version
                     # string to avoid leaking information.
-                    b"User-Agent": [
-                        "Synapse (bot; +https://github.com/matrix-org/synapse)"
-                    ],
+                    b"User-Agent": [self.hs.config.server.url_preview_user_agent],
                 },
                 is_allowed_content_type=_is_previewable,
             )
