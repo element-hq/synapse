@@ -29,7 +29,7 @@ use pyo3::{
     exceptions::PyValueError,
     pyclass, pymethods,
     types::{PyAnyMethods, PyModule, PyModuleMethods},
-    Bound, Py, PyAny, PyObject, PyResult, Python, ToPyObject,
+    Bound, IntoPyObject, Py, PyAny, PyObject, PyResult, Python,
 };
 use ulid::Ulid;
 
@@ -37,6 +37,7 @@ use self::session::Session;
 use crate::{
     errors::{NotFoundError, SynapseError},
     http::{http_request_from_twisted, http_response_to_twisted, HeaderMapPyExt},
+    UnwrapInfallible,
 };
 
 mod session;
@@ -125,7 +126,11 @@ impl RendezvousHandler {
         let base = Uri::try_from(format!("{base}_synapse/client/rendezvous"))
             .map_err(|_| PyValueError::new_err("Invalid base URI"))?;
 
-        let clock = homeserver.call_method0("get_clock")?.to_object(py);
+        let clock = homeserver
+            .call_method0("get_clock")?
+            .into_pyobject(py)
+            .unwrap_infallible()
+            .unbind();
 
         // Construct a Python object so that we can get a reference to the
         // evict method and schedule it to run.
@@ -318,7 +323,7 @@ impl RendezvousHandler {
 }
 
 pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let child_module = PyModule::new_bound(py, "rendezvous")?;
+    let child_module = PyModule::new(py, "rendezvous")?;
 
     child_module.add_class::<RendezvousHandler>()?;
 
@@ -326,7 +331,7 @@ pub fn register_module(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> 
 
     // We need to manually add the module to sys.modules to make `from
     // synapse.synapse_rust import rendezvous` work.
-    py.import_bound("sys")?
+    py.import("sys")?
         .getattr("modules")?
         .set_item("synapse.synapse_rust.rendezvous", child_module)?;
 

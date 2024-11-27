@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use lazy_static::lazy_static;
 use pyo3::prelude::*;
 use pyo3_log::ResetHandle;
@@ -51,4 +53,17 @@ fn synapse_rust(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     rendezvous::register_module(py, m)?;
 
     Ok(())
+}
+
+pub trait UnwrapInfallible<T> {
+    fn unwrap_infallible(self) -> T;
+}
+
+impl<T> UnwrapInfallible<T> for Result<T, Infallible> {
+    fn unwrap_infallible(self) -> T {
+        match self {
+            Ok(val) => val,
+            Err(never) => match never {},
+        }
+    }
 }
