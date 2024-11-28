@@ -76,14 +76,17 @@ class LoginSSORedirectURIBuilder:
     def build_login_sso_redirect_uri(
         self, *, idp_id: Optional[str], client_redirect_url: str
     ) -> str:
-        """Build a `/login/sso/redirect` URI for the given identity provider
+        """Build a `/login/sso/redirect` URI for the given identity provider.
+
+        Builds `/_matrix/client/v3/login/sso/redirect/{idpId}?redirectUrl=xxx` when `idp_id` is specified.
+        Otherwise, builds `/_matrix/client/v3/login/sso/redirect?redirectUrl=xxx` when `idp_id` is `None`.
 
         Args:
             idp_id: ID of the identity provider
             client_redirect_url: URL to redirect the user to after login
 
         Returns
-            The URI where the user can do consent
+            The URI to follow when choosing a specific identity provider.
         """
         base_url = urljoin(
             self._public_baseurl,
