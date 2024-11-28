@@ -36,8 +36,9 @@ logger = logging.getLogger(__name__)
 
 class AppserviceEventVisibilityrestServlet(RestServlet):
     PATTERNS = client_patterns(
-        "/appservice/(?P<appservice_id>[^/]*)/can_user_see_event/(?P<room_id>[^/]*)/(?P<user_id>[^/]*)/(?P<event_id>[^/]*)$",
-        releases=("v1",),
+        "/net.tadzik/appservice/(?P<appservice_id>[^/]*)/can_user_see_event/(?P<room_id>[^/]*)/(?P<user_id>[^/]*)/(?P<event_id>[^/]*)$",
+        unstable=True,
+        releases=(),
     )
 
     def __init__(self, hs: "HomeServer"):
@@ -71,4 +72,5 @@ class AppserviceEventVisibilityrestServlet(RestServlet):
         return HTTPStatus.OK, bool(filtered)
 
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
-    AppserviceEventVisibilityrestServlet(hs).register(http_server)
+    if hs.config.experimental.msc4185_enabled:
+        AppserviceEventVisibilityrestServlet(hs).register(http_server)
