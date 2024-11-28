@@ -308,9 +308,8 @@ class TaskScheduler:
         # Just run the scheduler
         self._launch_scheduled_tasks()
 
-    @wrap_as_background_process("launch_scheduled_tasks")
-    async def _launch_scheduled_tasks(self) -> None:
-        """Retrieve and launch scheduled tasks that should be running."""
+    def _launch_scheduled_tasks(self) -> None:
+        """Retrieve and launch scheduled tasks that should be running at this time."""
         # Don't bother trying to launch new tasks if we're already at capacity.
         if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
             return
@@ -320,22 +319,26 @@ class TaskScheduler:
 
         self._launching_new_tasks = True
 
-        try:
-            for task in await self.get_tasks(
-                statuses=[TaskStatus.ACTIVE], limit=self.MAX_CONCURRENT_RUNNING_TASKS
-            ):
-                # _launch_task will ignore tasks that we're already running, and
-                # will also do nothing if we're already at the maximum capacity.
-                await self._launch_task(task)
-            for task in await self.get_tasks(
-                statuses=[TaskStatus.SCHEDULED],
-                max_timestamp=self._clock.time_msec(),
-                limit=self.MAX_CONCURRENT_RUNNING_TASKS,
-            ):
-                await self._launch_task(task)
+        async def inner() -> None:
+            try:
+                for task in await self.get_tasks(
+                    statuses=[TaskStatus.ACTIVE],
+                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                ):
+                    # _launch_task will ignore tasks that we're already running, and
+                    # will also do nothing if we're already at the maximum capacity.
+                    await self._launch_task(task)
+                for task in await self.get_tasks(
+                    statuses=[TaskStatus.SCHEDULED],
+                    max_timestamp=self._clock.time_msec(),
+                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                ):
+                    await self._launch_task(task)
 
-        finally:
-            self._launching_new_tasks = False
+            finally:
+                self._launching_new_tasks = False
+
+        run_as_background_process("launch_scheduled_tasks", inner)
 
     @wrap_as_background_process("clean_scheduled_tasks")
     async def _clean_scheduled_tasks(self) -> None:
