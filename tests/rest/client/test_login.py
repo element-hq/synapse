@@ -76,12 +76,7 @@ logger = logging.getLogger(__name__)
 
 
 # synapse server name: used to populate public_baseurl in some tests
-#
-# Because we can only specify the URI path when doing a `make_request(...)`, this needs
-# to match the hostname/port that's used in the `make_request(...)` calls; because the
-# `SsoRedirectServlet` expects us to use the "canonical URL" for the homeserver in order
-# for the cookies to be visible.
-SYNAPSE_SERVER_PUBLIC_HOSTNAME = "127.0.0.1:8888"
+SYNAPSE_SERVER_PUBLIC_HOSTNAME = "synapse"
 
 # public_baseurl for some tests. It uses an http:// scheme because
 # FakeChannel.isSecure() returns False, so synapse will see the requested uri as
@@ -759,14 +754,16 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         )
 
         # follow the redirect
-        #
-        # We have to make this relative to be compatible with `make_request(...)`
-        relative_sso_login_redirect_uri = get_relative_uri_from_absolute_uri(
-            sso_login_redirect_uri
-        )
         channel = self.make_request(
             "GET",
-            relative_sso_login_redirect_uri,
+            # We have to make this relative to be compatible with `make_request(...)`
+            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
+            # We have to set the Host header to match the `public_baseurl` to avoid
+            # the extra redirect in the `SsoRedirectServlet` in order for the
+            # cookies to be visible.
+            custom_headers=[
+                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
+            ],
         )
 
         self.assertEqual(channel.code, 302, channel.result)
@@ -808,14 +805,16 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         )
 
         # follow the redirect
-        #
-        # We have to make this relative to be compatible with `make_request(...)`
-        relative_sso_login_redirect_uri = get_relative_uri_from_absolute_uri(
-            sso_login_redirect_uri
-        )
         channel = self.make_request(
             "GET",
-            relative_sso_login_redirect_uri,
+            # We have to make this relative to be compatible with `make_request(...)`
+            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
+            # We have to set the Host header to match the `public_baseurl` to avoid
+            # the extra redirect in the `SsoRedirectServlet` in order for the
+            # cookies to be visible.
+            custom_headers=[
+                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
+            ],
         )
 
         self.assertEqual(channel.code, 302, channel.result)
@@ -858,14 +857,16 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
 
         with fake_oidc_server.patch_homeserver(hs=self.hs):
             # follow the redirect
-            #
-            # We have to make this relative to be compatible with `make_request(...)`
-            relative_sso_login_redirect_uri = get_relative_uri_from_absolute_uri(
-                sso_login_redirect_uri
-            )
             channel = self.make_request(
                 "GET",
-                relative_sso_login_redirect_uri,
+                # We have to make this relative to be compatible with `make_request(...)`
+                get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
+                # We have to set the Host header to match the `public_baseurl` to avoid
+                # the extra redirect in the `SsoRedirectServlet` in order for the
+                # cookies to be visible.
+                custom_headers=[
+                    ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
+                ],
             )
 
         self.assertEqual(channel.code, 302, channel.result)
@@ -948,14 +949,16 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
         )
 
         # follow the redirect
-        #
-        # We have to make this relative to be compatible with `make_request(...)`
-        relative_sso_login_redirect_uri = get_relative_uri_from_absolute_uri(
-            sso_login_redirect_uri
-        )
         channel = self.make_request(
             "GET",
-            relative_sso_login_redirect_uri,
+            # We have to make this relative to be compatible with `make_request(...)`
+            get_relative_uri_from_absolute_uri(sso_login_redirect_uri),
+            # We have to set the Host header to match the `public_baseurl` to avoid
+            # the extra redirect in the `SsoRedirectServlet` in order for the
+            # cookies to be visible.
+            custom_headers=[
+                ("Host", SYNAPSE_SERVER_PUBLIC_HOSTNAME),
+            ],
         )
 
         self.assertEqual(channel.code, 404, channel.result)
