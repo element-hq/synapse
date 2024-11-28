@@ -23,7 +23,6 @@ from synapse.api.errors import (
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet
 from synapse.http.site import SynapseRequest
-from synapse.types import JsonDict
 from synapse.visibility import filter_events_for_client
 
 from ._base import client_patterns
