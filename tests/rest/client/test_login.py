@@ -115,9 +115,19 @@ ADDITIONAL_LOGIN_FLOWS = [
 
 
 def get_relative_uri_from_absolute_uri(absolute_uri: str) -> str:
+    """
+    Peels off the path and query string from an absolute URI. Useful when interacting
+    with `make_request(...)` util function which expects a relative path instead of a
+    full URI.
+    """
     parsed_uri = urllib.parse.urlparse(absolute_uri)
+    # Sanity check that we're working with an absolute URI
     assert parsed_uri.scheme == "http" or parsed_uri.scheme == "https"
-    relative_uri = "?".join(filter(None, [parsed_uri.path, parsed_uri.query]))
+
+    relative_uri = parsed_uri.path
+    if parsed_uri.query:
+        relative_uri += "?" + parsed_uri.query
+
     return relative_uri
 
 
