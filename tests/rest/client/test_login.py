@@ -43,6 +43,7 @@ from twisted.web.resource import Resource
 import synapse.rest.admin
 from synapse.api.constants import ApprovalNoticeMedium, LoginType
 from synapse.api.errors import Codes
+from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.appservice import ApplicationService
 from synapse.http.client import RawHeaders
 from synapse.module_api import ModuleApi
@@ -69,15 +70,24 @@ try:
 except ImportError:
     HAS_JWT = False
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # synapse server name: used to populate public_baseurl in some tests
-SYNAPSE_SERVER_PUBLIC_HOSTNAME = "synapse"
+#
+# Because we can only specify the URI path when doing a `make_request(...)`, this needs
+# to match the hostname/port that's used in the `make_request(...)` calls; because the
+# `SsoRedirectServlet` expects us to use the "canonical URL" for the homeserver in order
+# for the cookies to be visible.
+SYNAPSE_SERVER_PUBLIC_HOSTNAME = "127.0.0.1:8888"
 
 # public_baseurl for some tests. It uses an http:// scheme because
 # FakeChannel.isSecure() returns False, so synapse will see the requested uri as
 # http://..., so using http in the public_baseurl stops Synapse trying to redirect to
 # https://....
-BASE_URL = "http://%s/" % (SYNAPSE_SERVER_PUBLIC_HOSTNAME,)
+PUBLIC_BASEURL = "http://%s/" % (SYNAPSE_SERVER_PUBLIC_HOSTNAME,)
 
 # CAS server used in some tests
 CAS_SERVER = "https://fake.test"
@@ -107,6 +117,13 @@ EXPECTED_CLIENT_REDIRECT_URL_PARAMS = [("<ab c>", ""), ('q" =+"', '"fö&=o"')]
 ADDITIONAL_LOGIN_FLOWS = [
     {"type": "m.login.application_service"},
 ]
+
+
+def get_relative_uri_from_absolute_uri(absolute_uri: str) -> str:
+    parsed_uri = urllib.parse.urlparse(absolute_uri)
+    assert parsed_uri.scheme == "http" or parsed_uri.scheme == "https"
+    relative_uri = "?".join(filter(None, [parsed_uri.path, parsed_uri.query]))
+    return relative_uri
 
 
 class TestSpamChecker:
@@ -614,7 +631,7 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
     def default_config(self) -> Dict[str, Any]:
         config = super().default_config()
 
-        config["public_baseurl"] = BASE_URL
+        config["public_baseurl"] = PUBLIC_BASEURL
 
         config["cas_config"] = {
             "enabled": True,
@@ -652,6 +669,9 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
             }
         ]
         return config
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
 
     def create_resource_dict(self) -> Dict[str, Resource]:
         d = super().create_resource_dict()
@@ -773,10 +793,33 @@ class MultiSSOTestCase(unittest.HomeserverTestCase):
             # pick the default OIDC provider
             channel = self.make_request(
                 "GET",
-                "/_synapse/client/pick_idp?redirectUrl="
-                + urllib.parse.quote_plus(TEST_CLIENT_REDIRECT_URL)
-                + "&idp=oidc",
+                f"/_synapse/client/pick_idp?redirectUrl={urllib.parse.quote_plus(TEST_CLIENT_REDIRECT_URL)}&idp=oidc",
             )
+        self.assertEqual(channel.code, 302, channel.result)
+        location_headers = channel.headers.getRawHeaders("Location")
+        assert location_headers
+        sso_login_redirect_uri = location_headers[0]
+
+        # it should redirect us to the standard login SSO redirect flow
+        self.assertEqual(
+            sso_login_redirect_uri,
+            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+                idp_id="oidc", client_redirect_url=TEST_CLIENT_REDIRECT_URL
+            ),
+        )
+
+        with fake_oidc_server.patch_homeserver(hs=self.hs):
+            # follow the redirect
+            #
+            # We have to make this relative to be compatible with `make_request(...)`
+            relative_sso_login_redirect_uri = get_relative_uri_from_absolute_uri(
+                sso_login_redirect_uri
+            )
+            channel = self.make_request(
+                "GET",
+                relative_sso_login_redirect_uri,
+            )
+
         self.assertEqual(channel.code, 302, channel.result)
         location_headers = channel.headers.getRawHeaders("Location")
         assert location_headers
@@ -1473,7 +1516,7 @@ class UsernamePickerTestCase(HomeserverTestCase):
 
     def default_config(self) -> Dict[str, Any]:
         config = super().default_config()
-        config["public_baseurl"] = BASE_URL
+        config["public_baseurl"] = PUBLIC_BASEURL
 
         config["oidc_config"] = {}
         config["oidc_config"].update(TEST_OIDC_CONFIG)

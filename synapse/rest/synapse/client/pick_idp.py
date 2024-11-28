@@ -20,9 +20,8 @@
 #
 import logging
 from typing import TYPE_CHECKING
-from urllib.parse import urljoin
 
-from synapse.api.urls import CLIENT_API_PREFIX
+from synapse.api.urls import LoginSSORedirectURIBuilder
 from synapse.http.server import (
     DirectServeHtmlResource,
     finish_request,
@@ -52,6 +51,7 @@ class PickIdpResource(DirectServeHtmlResource):
         )
         self._server_name = hs.hostname
         self._public_baseurl = hs.config.server.public_baseurl
+        self.login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
         client_redirect_url = parse_string(
@@ -69,9 +69,10 @@ class PickIdpResource(DirectServeHtmlResource):
         # We could go directly to the IdP's redirect URI, but this way we ensure that
         # the user goes through the same logic as normal flow. Additionally, if a proxy
         # needs to intercept the request, it only needs to intercept the one endpoint.
-        sso_login_redirect_url = urljoin(
-            self._public_baseurl,
-            f"{CLIENT_API_PREFIX}/v3/login/sso/redirect/{idp}?redirectUrl={client_redirect_url}",
+        sso_login_redirect_url = (
+            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+                idp_id=idp, client_redirect_url=client_redirect_url
+            )
         )
         logger.info("Redirecting to %s", sso_login_redirect_url)
         request.redirect(sso_login_redirect_url)
