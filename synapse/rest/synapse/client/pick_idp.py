@@ -51,7 +51,7 @@ class PickIdpResource(DirectServeHtmlResource):
         )
         self._server_name = hs.hostname
         self._public_baseurl = hs.config.server.public_baseurl
-        self.login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
+        self._login_sso_redirect_url_builder = LoginSSORedirectURIBuilder(hs.config)
 
     async def _async_render_GET(self, request: SynapseRequest) -> None:
         client_redirect_url = parse_string(
@@ -70,7 +70,7 @@ class PickIdpResource(DirectServeHtmlResource):
         # the user goes through the same logic as normal flow. Additionally, if a proxy
         # needs to intercept the request, it only needs to intercept the one endpoint.
         sso_login_redirect_url = (
-            self.login_sso_redirect_url_builder.build_login_sso_redirect_uri(
+            self._login_sso_redirect_url_builder.build_login_sso_redirect_uri(
                 idp_id=idp, client_redirect_url=client_redirect_url
             )
         )
