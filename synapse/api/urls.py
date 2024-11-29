@@ -82,7 +82,7 @@ class LoginSSORedirectURIBuilder:
         Otherwise, builds `/_matrix/client/v3/login/sso/redirect?redirectUrl=xxx` when `idp_id` is `None`.
 
         Args:
-            idp_id: ID of the identity provider
+            idp_id: Optional ID of the identity provider
             client_redirect_url: URL to redirect the user to after login
 
         Returns
