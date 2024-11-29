@@ -560,21 +560,18 @@ class RoomStateTestCase(RoomBase):
             "/rooms/%s/state" % room_id,
         )
 
-        etag = channel.headers.getRawHeaders(b"ETag")[0]
+        etagheader = channel.headers.getRawHeaders(b"ETag")
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
-        self.assertIsNotNone(
-            etag,
-            "has a ETag header",
-        )
+        assert etagheader
         channel2 = self.make_request(
             "GET",
             "/rooms/%s/state" % room_id,
-            custom_headers=(
+            custom_headers=[
                 (
                     b"If-None-Match",
-                    etag,
+                    etagheader[0],
                 ),
-            ),
+            ],
         )
         self.assertEqual(
             HTTPStatus.NOT_MODIFIED,
@@ -582,8 +579,8 @@ class RoomStateTestCase(RoomBase):
             "Responds with not modified when provided with the correct ETag",
         )
         self.assertEqual(
-            etag,
-            channel2.headers.getRawHeaders(b"ETag")[0],
+            etagheader,
+            channel2.headers.getRawHeaders(b"ETag"),
             "returns the same etag",
         )
 

@@ -835,7 +835,7 @@ class RoomStateRestServlet(RestServlet):
     @cancellable
     async def on_GET(
         self, request: SynapseRequest, room_id: str
-    ) -> Tuple[int, List[JsonDict]]:
+    ) -> Tuple[int, Optional[List[JsonDict]]]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         existing_hash = request.getHeader(b"If-None-Match")
 
@@ -848,7 +848,7 @@ class RoomStateRestServlet(RestServlet):
         )
         request.setHeader(b"ETag", f'"{hash}"'.encode("ascii"))
 
-        if events is None:
+        if len(events) == 0:
             return 304, None
 
         return 200, events

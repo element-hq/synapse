@@ -175,7 +175,7 @@ class MessageHandler:
         state_filter: Optional[StateFilter] = None,
         at_token: Optional[StreamToken] = None,
         last_hash: Optional[str] = None,
-    ) -> Tuple[List[dict], str]:
+    ) -> Tuple[List[dict], Optional[str]]:
         """Retrieve all state events for a given room. If the user is
         joined to the room then return the current state. If the user has
         left the room return the state events from when they left. If an explicit
@@ -192,7 +192,8 @@ class MessageHandler:
                 state based on the current_state_events table.
         Returns:
             A list of dicts representing state events. [{}, {}, {}]
-            A hash of the state IDs representing the state events.
+            A hash of the state IDs representing the state events. This is only calculated if
+            no at_token is given and the user is joined to the room.
         Raises:
             NotFoundError (404) if the at token does not yield an event
 
@@ -250,7 +251,7 @@ class MessageHandler:
                 # If the requester's hash matches ours, their cache is up to date and we can skip
                 # fetching events.
                 if last_hash == hash:
-                    return None, hash
+                    return [], hash
                 room_state = await self.store.get_events(state_ids.values())
             elif membership == Membership.LEAVE:
                 # If the membership is not JOIN, then the event ID should exist.
