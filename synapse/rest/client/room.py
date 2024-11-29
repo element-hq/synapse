@@ -715,7 +715,7 @@ class RoomMemberListRestServlet(RestServlet):
         membership = parse_string(request, "membership")
         not_membership = parse_string(request, "not_membership")
 
-        events = await handler.get_state_events(
+        events, _ = await handler.get_state_events(
             room_id=room_id,
             requester=requester,
             at_token=at_token,
@@ -837,11 +837,20 @@ class RoomStateRestServlet(RestServlet):
         self, request: SynapseRequest, room_id: str
     ) -> Tuple[int, List[JsonDict]]:
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
+        existing_hash = request.getHeader(b"If-None-Match")
+
         # Get all the current state for this room
-        events = await self.message_handler.get_state_events(
+        events, hash = await self.message_handler.get_state_events(
             room_id=room_id,
             requester=requester,
+            # Trim quotes from hash.
+            last_hash=existing_hash.decode('ascii')[1:-1] if existing_hash else None
         )
+        request.setHeader(b"ETag", f"\"{hash}\"".encode("ascii"))
+
+        if events is None:
+            return 304, None
+
         return 200, events
 
 
