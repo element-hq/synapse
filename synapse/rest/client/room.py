@@ -844,9 +844,9 @@ class RoomStateRestServlet(RestServlet):
             room_id=room_id,
             requester=requester,
             # Trim quotes from hash.
-            last_hash=existing_hash.decode('ascii')[1:-1] if existing_hash else None
+            last_hash=existing_hash.decode("ascii")[1:-1] if existing_hash else None,
         )
-        request.setHeader(b"ETag", f"\"{hash}\"".encode("ascii"))
+        request.setHeader(b"ETag", f'"{hash}"'.encode("ascii"))
 
         if events is None:
             return 304, None

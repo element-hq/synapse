@@ -19,9 +19,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import hashlib
 import logging
 import random
-import hashlib
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
@@ -244,7 +244,9 @@ class MessageHandler:
                     room_id, state_filter=state_filter
                 )
 
-                hash = hashlib.sha1(','.join(state_ids.values()).encode("utf-8")).hexdigest()
+                hash = hashlib.sha1(
+                    ",".join(state_ids.values()).encode("utf-8")
+                ).hexdigest()
                 # If the requester's hash matches ours, their cache is up to date and we can skip
                 # fetching events.
                 if last_hash == hash:
