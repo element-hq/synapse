@@ -56,7 +56,6 @@ try:
 except ImportError:
     HAS_AUTHLIB = False
 
-
 # set this to True to run the tests against postgres instead of sqlite.
 #
 # When running under postgres, we first create a base database with the name
