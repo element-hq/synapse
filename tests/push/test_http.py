@@ -1140,7 +1140,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(
             self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
         )
-        
+
         # Verify that the notification doesn't contain a counts field
         self.assertNotIn("counts", self.push_attempts[0][2]["notification"])
 
@@ -1199,7 +1199,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(
             self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
         )
-        
+
         # Verify that the notification doesn't contain a counts field
         self.assertNotIn("counts", self.push_attempts[0][2]["notification"])
 
@@ -1256,7 +1256,7 @@ class HTTPPusherTests(HomeserverTestCase):
         self.assertEqual(
             self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
         )
-        
+
         # Verify that the notification contains a counts field
         self.assertIn("counts", self.push_attempts[0][2]["notification"])
         self.assertEqual(
