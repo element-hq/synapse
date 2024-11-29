@@ -332,8 +332,14 @@ class ServerConfig(Config):
             logger.info("Using default public_baseurl %s", public_baseurl)
         else:
             self.serve_client_wellknown = True
+            # Ensure that public_baseurl ends with a trailing slash
             if public_baseurl[-1] != "/":
                 public_baseurl += "/"
+
+        # Scrutinize user-provided config
+        if not isinstance(public_baseurl, str):
+            raise ConfigError("Must be a string", ("public_baseurl",))
+
         self.public_baseurl = public_baseurl
 
         # check that public_baseurl is valid
