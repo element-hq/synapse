@@ -378,7 +378,7 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(channel.json_body["event_reports"]), 1)
         self.assertNotIn("next_token", channel.json_body)
 
-    def test_filter_against_user(self) -> None:
+    def test_filter_against_event_sender(self) -> None:
         # first grab all the reports
         channel = self.make_request(
             "GET",
@@ -396,18 +396,18 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         # grab the report ids by sender and compare to filtered report ids
         channel = self.make_request(
             "GET",
-            f"{self.url}?sender_user_id={self.other_user}",
+            f"{self.url}?event_sender_user_id={self.other_user}",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code)
         self.assertEqual(channel.json_body["total"], len(filtered_report_ids))
 
         event_reports = channel.json_body["event_reports"]
-        returned_report_ids = []
+        returned_report_ids = set()
         for event_report in event_reports:
             if event_report["sender"] == self.other_user:
-                returned_report_ids.append(event_report["id"])
-        self.assertEqual(True, set(filtered_report_ids) == set(returned_report_ids))
+                returned_report_ids.add(event_report["id"])
+        self.assertEqual(True, set(filtered_report_ids) == returned_report_ids)
 
     def _create_event_and_report(self, room_id: str, user_tok: str) -> None:
         """Create and report events"""
