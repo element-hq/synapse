@@ -196,6 +196,14 @@ class _EventRow:
     outlier: bool
 
 
+@attr.s(slots=True, frozen=True, auto_attribs=True)
+class EventMetadata:
+    """Event metadata returned by `get_metadata_for_event(..)`"""
+
+    sender: str
+    received_ts: int
+
+
 class EventRedactBehaviour(Enum):
     """
     What to do when retrieving a redacted event from the database.
@@ -2621,4 +2629,23 @@ class EventsWorkerStore(SQLBaseStore):
             _get_invite_count_by_user_txn,
             user_id,
             from_ts,
+        )
+
+    @cached(tree=True)
+    async def get_metadata_for_event(
+        self, room_id: str, event_id: str
+    ) -> Optional[EventMetadata]:
+        row = await self.db_pool.simple_select_one(
+            table="events",
+            keyvalues={"room_id": room_id, "event_id": event_id},
+            retcols=("sender", "received_ts"),
+            allow_none=True,
+            desc="get_metadata_for_event",
+        )
+        if row is None:
+            return None
+
+        return EventMetadata(
+            sender=row[0],
+            received_ts=row[1],
         )

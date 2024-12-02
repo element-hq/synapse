@@ -88,6 +88,7 @@ from synapse.storage.databases.main.relations import RelationsWorkerStore
 from synapse.storage.databases.main.room import RoomBackgroundUpdateStore
 from synapse.storage.databases.main.roommember import RoomMemberBackgroundUpdateStore
 from synapse.storage.databases.main.search import SearchBackgroundUpdateStore
+from synapse.storage.databases.main.sliding_sync import SlidingSyncStore
 from synapse.storage.databases.main.state import MainStateBackgroundUpdateStore
 from synapse.storage.databases.main.stats import StatsStore
 from synapse.storage.databases.main.user_directory import (
@@ -255,6 +256,7 @@ class Store(
     ReceiptsBackgroundUpdateStore,
     RelationsWorkerStore,
     EventFederationWorkerStore,
+    SlidingSyncStore,
 ):
     def execute(self, f: Callable[..., R], *args: Any, **kwargs: Any) -> Awaitable[R]:
         return self.db_pool.runInteraction(f.__name__, f, *args, **kwargs)

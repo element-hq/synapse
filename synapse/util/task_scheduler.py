@@ -174,9 +174,10 @@ class TaskScheduler:
             The id of the scheduled task
         """
         status = TaskStatus.SCHEDULED
+        start_now = False
         if timestamp is None or timestamp < self._clock.time_msec():
             timestamp = self._clock.time_msec()
-            status = TaskStatus.ACTIVE
+            start_now = True
 
         task = ScheduledTask(
             random_string(16),
@@ -190,9 +191,11 @@ class TaskScheduler:
         )
         await self._store.insert_scheduled_task(task)
 
-        if status == TaskStatus.ACTIVE:
+        # If the task is ready to run immediately, run the scheduling algorithm now
+        # rather than waiting
+        if start_now:
             if self._run_background_tasks:
-                await self._launch_task(task)
+                self._launch_scheduled_tasks()
             else:
                 self._hs.get_replication_command_handler().send_new_active_task(task.id)
 
@@ -300,23 +303,13 @@ class TaskScheduler:
             raise Exception(f"Task {id} is currently ACTIVE and can't be deleted")
         await self._store.delete_scheduled_task(id)
 
-    def launch_task_by_id(self, id: str) -> None:
-        """Try launching the task with the given ID."""
-        # Don't bother trying to launch new tasks if we're already at capacity.
-        if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
-            return
+    def on_new_task(self, task_id: str) -> None:
+        """Handle a notification that a new ready-to-run task has been added to the queue"""
+        # Just run the scheduler
+        self._launch_scheduled_tasks()
 
-        run_as_background_process("launch_task_by_id", self._launch_task_by_id, id)
-
-    async def _launch_task_by_id(self, id: str) -> None:
-        """Helper async function for `launch_task_by_id`."""
-        task = await self.get_task(id)
-        if task:
-            await self._launch_task(task)
-
-    @wrap_as_background_process("launch_scheduled_tasks")
-    async def _launch_scheduled_tasks(self) -> None:
-        """Retrieve and launch scheduled tasks that should be running at that time."""
+    def _launch_scheduled_tasks(self) -> None:
+        """Retrieve and launch scheduled tasks that should be running at this time."""
         # Don't bother trying to launch new tasks if we're already at capacity.
         if len(self._running_tasks) >= TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS:
             return
@@ -326,20 +319,26 @@ class TaskScheduler:
 
         self._launching_new_tasks = True
 
-        try:
-            for task in await self.get_tasks(
-                statuses=[TaskStatus.ACTIVE], limit=self.MAX_CONCURRENT_RUNNING_TASKS
-            ):
-                await self._launch_task(task)
-            for task in await self.get_tasks(
-                statuses=[TaskStatus.SCHEDULED],
-                max_timestamp=self._clock.time_msec(),
-                limit=self.MAX_CONCURRENT_RUNNING_TASKS,
-            ):
-                await self._launch_task(task)
+        async def inner() -> None:
+            try:
+                for task in await self.get_tasks(
+                    statuses=[TaskStatus.ACTIVE],
+                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                ):
+                    # _launch_task will ignore tasks that we're already running, and
+                    # will also do nothing if we're already at the maximum capacity.
+                    await self._launch_task(task)
+                for task in await self.get_tasks(
+                    statuses=[TaskStatus.SCHEDULED],
+                    max_timestamp=self._clock.time_msec(),
+                    limit=self.MAX_CONCURRENT_RUNNING_TASKS,
+                ):
+                    await self._launch_task(task)
 
-        finally:
-            self._launching_new_tasks = False
+            finally:
+                self._launching_new_tasks = False
+
+        run_as_background_process("launch_scheduled_tasks", inner)
 
     @wrap_as_background_process("clean_scheduled_tasks")
     async def _clean_scheduled_tasks(self) -> None:
