@@ -146,16 +146,16 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         [
             (
                 "turn_shared_secret_path: {}",
-                lambda c: c.voip.turn_shared_secret,
+                lambda c: c.voip.turn_shared_secret.encode("utf-8"),
             ),
             (
                 "registration_shared_secret_path: {}",
-                lambda c: c.registration.registration_shared_secret,
+                lambda c: c.registration.registration_shared_secret.encode("utf-8"),
             ),
             *[
                 (
                     "redis:\n  enabled: true\n  password_path: {}",
-                    lambda c: c.redis.redis_password,
+                    lambda c: c.redis.redis_password.encode("utf-8"),
                 )
             ]
             * (hiredis is not None),
@@ -171,4 +171,4 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             self.add_lines_to_config(["", config_line.format(secret_file.name)])
             config = HomeServerConfig.load_config("", ["-c", self.config_file])
 
-            self.assertEqual(get_secret(config), "53C237")
+            self.assertEqual(get_secret(config), b"53C237")
