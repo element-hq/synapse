@@ -317,6 +317,7 @@ class SsoHandler:
         Returns:
              the URI to redirect to
         """
+
         if not self._identity_providers:
             raise SynapseError(
                 400, "Homeserver not configured for SSO.", errcode=Codes.UNRECOGNIZED

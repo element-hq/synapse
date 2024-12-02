@@ -653,11 +653,6 @@ class SsoRedirectServlet(RestServlet):
         # get our cookies back.
         requested_uri = get_request_uri(request)
         baseurl_bytes = self._public_baseurl.encode("utf-8")
-        logger.info(
-            "asdf _public_baseurl=%s requested_uri=%s",
-            self._public_baseurl,
-            requested_uri.decode("utf-8"),
-        )
         if not requested_uri.startswith(baseurl_bytes):
             # swap out the incorrect base URL for the right one.
             #
