@@ -27,6 +27,10 @@ from twisted.web.iweb import IRequest
 
 from synapse.api.errors import SynapseError
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class RequestTimedOutError(SynapseError):
     """Exception representing timeout of an outbound request"""
@@ -72,12 +76,15 @@ def get_request_uri(request: IRequest) -> bytes:
 def _get_requested_host(request: IRequest) -> bytes:
     hostname = request.getHeader(b"host")
     if hostname:
+        logger.info("asdf _get_requested_host hostname from Host header %s", hostname)
         return hostname
 
     # no Host header, use the address/port that the request arrived on
     host: Union[address.IPv4Address, address.IPv6Address] = request.getHost()
 
     hostname = host.host.encode("ascii")
+
+    logger.info("asdf _get_requested_host %s %s", hostname, host.port)
 
     if request.isSecure() and host.port == 443:
         # default port for https
