@@ -124,6 +124,7 @@ class AdminHandler:
             "consent_ts": user_info.consent_ts,
             "user_type": user_info.user_type,
             "is_guest": user_info.is_guest,
+            "suspended": user_info.suspended,
         }
 
         if self._msc3866_enabled:

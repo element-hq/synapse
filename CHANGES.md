@@ -1,3 +1,12 @@
+# Synapse 1.120.0 (2024-11-26)
+
+### Bugfixes
+
+- Fix a bug introduced in Synapse v1.120rc1 which would cause the newly-introduced `delete_old_otks` job to fail in worker-mode deployments. ([\#17960](https://github.com/element-hq/synapse/issues/17960))
+
+
+
+
 # Synapse 1.120.0rc1 (2024-11-20)
 
 This release enables the enforcement of authenticated media by default, with exemptions for media that is already present in the
