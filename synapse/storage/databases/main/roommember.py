@@ -1588,7 +1588,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     SELECT c.room_id
                     FROM current_state_events c
                     JOIN events e ON c.event_id = e.event_id
-                    WHERE c.state_key = ? AND c.membership = 'join' AND e.received_ts > ?
+                    WHERE c.state_key = ? AND c.membership = 'join' AND e.received_ts > ? AND c.type = 'm.room.member'
             """
             txn.execute(sql, (user_id, from_ts))
             return frozenset([r[0] for r in txn])

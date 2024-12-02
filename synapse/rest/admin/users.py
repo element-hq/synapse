@@ -1511,10 +1511,10 @@ class RedactUserStatus(RestServlet):
 
 class UserInvitesCount(RestServlet):
     """
-    Return the count of invites that the user has sent in the last 24 hours
+    Return the count of invites that the user has sent after the given timestamp
     """
 
-    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/invite_count")
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/sent_invite_count")
 
     def __init__(self, hs: "HomeServer"):
         self._auth = hs.get_auth()
@@ -1524,7 +1524,8 @@ class UserInvitesCount(RestServlet):
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self._auth, request)
+        from_ts = parse_integer(request, "from_ts", required=True)
 
-        res = await self.store.get_invite_count_by_user(user_id)
+        res = await self.store.get_invite_count_by_user(user_id, from_ts)
 
         return HTTPStatus.OK, {"invite_count": res}

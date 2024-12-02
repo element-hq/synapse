@@ -339,6 +339,7 @@ class EventsWorkerStore(SQLBaseStore):
             index_name="received_ts_idx",
             table="events",
             columns=("received_ts",),
+            where_clause="type = 'm.room.member'",
         )
 
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
@@ -2591,20 +2592,24 @@ class EventsWorkerStore(SQLBaseStore):
             )
         )
 
-    async def get_invite_count_by_user(self, user_id: str) -> int:
+    async def get_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """
-        Get the number of invites sent by the given user in the past 24 hours
+        Get the number of invites sent by the given user after the provided timestamp.
+
+        Args:
+            user_id: user ID to search against
+            from_ts: a timestamp in milliseconds from the unix epoch
+
         """
-        timestamp = self._clock.time_msec() - ONE_DAY_MS  # 24 hours ago
 
         def _get_invite_count_by_user_txn(
-            txn: LoggingTransaction, user_id: str, timestamp: int
+            txn: LoggingTransaction, user_id: str, from_ts: int
         ) -> int:
             sql = """
-                  SELECT COUNT(event_id) FROM events WHERE sender = ? AND type = 'm.room.member' AND received_ts > ? AND state_key != ?
-                  """
+                  SELECT COUNT(e.event_id) FROM events e JOIN room_memberships rm ON e.event_id = rm.event_id WHERE e.sender = ? AND e.received_ts > ? AND e.state_key != ? AND rm.membership = 'invite'
+            """
 
-            txn.execute(sql, (user_id, timestamp, user_id))
+            txn.execute(sql, (user_id, from_ts, user_id))
             res = txn.fetchone()
 
             if res is None:
@@ -2615,5 +2620,5 @@ class EventsWorkerStore(SQLBaseStore):
             "_get_invite_count_by_user_txn",
             _get_invite_count_by_user_txn,
             user_id,
-            timestamp,
+            from_ts,
         )

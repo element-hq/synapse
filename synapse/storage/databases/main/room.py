@@ -1586,7 +1586,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         direction: Direction = Direction.BACKWARDS,
         user_id: Optional[str] = None,
         room_id: Optional[str] = None,
-        sender_user_id: Optional[str] = None,
+        event_sender_user_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Retrieve a paginated list of event reports
 
@@ -1597,7 +1597,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 oldest first (forwards)
             user_id: search for user_id. Ignored if user_id is None
             room_id: search for room_id. Ignored if room_id is None
-            sender_user_id: search for the sender of the reported event. Ignored if sender_user_id is None
+            event_sender_user_id: search for the sender of the reported event. Ignored if sender_user_id is None
         Returns:
             Tuple of:
                 json list of event reports
@@ -1617,9 +1617,9 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 filters.append("er.room_id LIKE ?")
                 args.extend(["%" + room_id + "%"])
 
-            if sender_user_id:
-                filters.append("events.sender LIKE ?")
-                args.extend(["%" + sender_user_id + "%"])
+            if event_sender_user_id:
+                filters.append("events.sender = ?")
+                args.extend([event_sender_user_id])
 
             if direction == Direction.BACKWARDS:
                 order = "DESC"
