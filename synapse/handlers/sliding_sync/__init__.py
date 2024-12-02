@@ -964,10 +964,7 @@ class SlidingSyncHandler:
                                     timeline_membership.add(timeline_event.sender)
 
                                     # We also care about invite, ban, kick, targets,
-                                    # etc. This allows clients to cache the membership
-                                    # list for as long as it doesn't get a gappy sync,
-                                    # but still ensures for large gaps the server
-                                    # doesn't need to send down all membership changes.
+                                    # etc.
                                     if timeline_event.type == EventTypes.Member:
                                         timeline_membership.add(
                                             timeline_event.state_key
