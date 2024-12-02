@@ -39,7 +39,7 @@ except ImportError:
 
 class ConfigLoadingFileTestCase(ConfigFileTestCase):
     def test_load_fails_if_server_name_missing(self) -> None:
-        self.generate_config_and_remove_lines_containing("server_name")
+        self.generate_config_and_remove_lines_containing(["server_name"])
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
         with self.assertRaises(ConfigError):
@@ -76,7 +76,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             )
 
     def test_load_succeeds_if_macaroon_secret_key_missing(self) -> None:
-        self.generate_config_and_remove_lines_containing("macaroon")
+        self.generate_config_and_remove_lines_containing(["macaroon"])
         config1 = HomeServerConfig.load_config("", ["-c", self.config_file])
         config2 = HomeServerConfig.load_config("", ["-c", self.config_file])
         config3 = HomeServerConfig.load_or_generate_config("", ["-c", self.config_file])
@@ -111,7 +111,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self.assertTrue(config3.registration.enable_registration)
 
     def test_stats_enabled(self) -> None:
-        self.generate_config_and_remove_lines_containing("enable_metrics")
+        self.generate_config_and_remove_lines_containing(["enable_metrics"])
         self.add_lines_to_config(["enable_metrics: true"])
 
         # The default Metrics Flags are off by default.
@@ -164,7 +164,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
     def test_secret_files_existing(
         self, config_line: str, get_secret: Callable[[RootConfig], str]
     ) -> None:
-        self.generate_config_and_remove_lines_containing("registration_shared_secret")
+        self.generate_config_and_remove_lines_containing(["registration_shared_secret"])
         with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
             secret_file.write(b"53C237")
 
