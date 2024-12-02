@@ -64,7 +64,7 @@ paginate through.
   contain this value. This is the user who reported the event and wrote the reason.
 * `room_id`: string - Is optional and filters to only return rooms with room IDs that
   contain this value.
-* `sender_user_id`: string - Is optional and filters to only return event reports against the provided
+* `event_sender_user_id`: string - Is optional and filters to only return event reports against the provided
   user (i.e. where the user is the reported event's sender)
 
 **Response**

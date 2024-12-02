@@ -508,7 +508,10 @@ member are returned.
 The following parameters should be set in the URL:
 
 - `user_id` - fully qualified: for example, `@user:server.com`.
-- `from_ts` - int. Optional. A timestamp in ms from the unix epoch - only rooms joined after the provided timestamp will be returned. Note: https://currentmillis.com/ is a useful tool for converting dates into timestamps and vice versa.
+- `from_ts` - int. Optional. A timestamp in ms from the unix 
+   epoch - only rooms joined after the provided timestamp will be returned.
+   Note: https://currentmillis.com/ is a useful tool for converting dates
+   into timestamps and vice versa.
 
 **Response**
 
@@ -516,6 +519,35 @@ The following fields are returned in the JSON response body:
 
 - `joined_rooms` - An array of `room_id`.
 - `total` - Number of rooms.
+
+## Get the number of invites sent by the user
+
+Fetches the number of invites sent by the provided user ID across all rooms
+after the given timestamp.
+
+```
+GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+```
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+* `from_ts`: int. A timestamp in ms from the unix epoch - only
+   invites sent after the provided timestamp will be returned.
+   Note: https://currentmillis.com/ is a useful tool for converting dates
+   into timestamps and vice versa.
+
+
+A response body like the following is returned:
+
+```
+{
+  "invite_count": 30
+}
+```
+
+_Added in Synapse 1.121.0_
 
 ## Account Data
 Gets information about account data for a specific `user_id`.
@@ -1447,22 +1479,4 @@ The following fields are returned in the JSON response body:
 
 _Added in Synapse 1.116.0._
 
-
-## Get the number of invites sent by the user in the last 24 hours
-
-Fetches the number of invites sent by the provided user ID across all rooms in the last 24 hours.
-
-```
-GET /_synapse/admin/v1/users/$user_id/invite_count
-```
-
-A response body like the following is returned:
-
-```
-{
-  "invite_count": 30
-}
-```
-
-_Added in Synapse 1.120.0_
 
