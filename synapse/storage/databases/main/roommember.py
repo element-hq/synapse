@@ -1584,6 +1584,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def _get_rooms_for_user_by_join_date_txn(
             txn: LoggingTransaction, user_id: str, timestamp: int
         ) -> frozenset:
+            # Note that matching on c.type = 'm.room.member' allows us to benefit from
+            # this index: "current_state_events_member_index" btree (state_key) WHERE type = 'm.room.member'::text
+            # on the current_state_events_table
             sql = """
                     SELECT c.room_id
                     FROM current_state_events c

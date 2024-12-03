@@ -509,7 +509,7 @@ The following parameters should be set in the URL:
 
 - `user_id` - fully qualified: for example, `@user:server.com`.
 
-The following parameters should be set as query parameters in the URL:
+The following should be set as query parameters in the URL:
 
 - `from_ts` - int. Optional. A timestamp in ms from the unix 
    epoch - only rooms joined after the provided timestamp will be returned.
@@ -538,9 +538,9 @@ The following parameters should be set in the URL:
 
 * `user_id`: fully qualified: for example, `@user:server.com`
 
-The following parameters should be set as query parameters in the URL:
+The following should be set as query parameters in the URL:
 
-* `from_ts`: int. A timestamp in ms from the unix epoch. Only
+* `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
    invites sent after the provided timestamp will be returned.
    Note: https://currentmillis.com/ is a useful tool for converting dates
    into timestamps and vice versa.
