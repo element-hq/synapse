@@ -1,0 +1,1 @@
+Add experimental option to pass through unsigned data in `/keys/query` responses.

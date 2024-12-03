@@ -448,3 +448,6 @@ class ExperimentalConfig(Config):
 
         # MSC4222: Adding `state_after` to sync v2
         self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+
+        # MSC4229: Pass through `unsigned` data from `/keys/upload` to `/keys/query`
+        self.msc4229_enabled: bool = experimental.get("msc4229_enabled", False)

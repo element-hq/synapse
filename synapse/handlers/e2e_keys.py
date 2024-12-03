@@ -542,7 +542,9 @@ class E2eKeysHandler:
             result_dict[user_id] = {}
 
         results = await self.store.get_e2e_device_keys_for_cs_api(
-            local_query, include_displaynames
+            local_query,
+            include_displaynames,
+            include_uploaded_unsigned_data=self.config.experimental.msc4229_enabled,
         )
 
         # Check if the application services have any additional results.

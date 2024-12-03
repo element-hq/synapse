@@ -19,6 +19,7 @@
 #
 #
 import urllib.parse
+from copy import deepcopy
 from http import HTTPStatus
 from unittest.mock import patch
 
@@ -203,6 +204,141 @@ class KeyQueryTestCase(unittest.HomeserverTestCase):
             alice_token,
         )
         self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+
+class UnsignedKeyDataTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        keys.register_servlets,
+        admin.register_servlets_for_client_rest_resource,
+        login.register_servlets,
+    ]
+
+    def default_config(self) -> JsonDict:
+        config = super().default_config()
+        config["experimental_features"] = {"msc4229_enabled": True}
+        return config
+
+    def make_key_data(self, user_id: str, device_id: str) -> JsonDict:
+        return {
+            "algorithms": ["m.olm.v1.curve25519-aes-sha2", "m.megolm.v1.aes-sha2"],
+            "device_id": device_id,
+            "keys": {
+                f"curve25519:{device_id}": "keykeykey",
+                f"ed25519:{device_id}": "keykeykey",
+            },
+            "signatures": {user_id: {f"ed25519:{device_id}": "sigsigsig"}},
+            "user_id": user_id,
+        }
+
+    def test_unsigned_uploaded_data_returned_in_keys_query(self) -> None:
+        password = "wonderland"
+        device_id = "ABCDEFGHI"
+        alice_id = self.register_user("alice", password)
+        alice_token = self.login(
+            "alice",
+            password,
+            device_id=device_id,
+            additional_request_fields={"initial_device_display_name": "mydevice"},
+        )
+
+        # Alice uploads some keys, with a bit of unsigned data
+        keys1 = self.make_key_data(alice_id, device_id)
+        keys1["unsigned"] = {"a": "b"}
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {"device_keys": keys1},
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # /keys/query should return the unsigned data, with the device display name merged in.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/query",
+            {"device_keys": {alice_id: []}},
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        device_response = channel.json_body["device_keys"][alice_id][device_id]
+        expected_device_response = deepcopy(keys1)
+        expected_device_response["unsigned"]["device_display_name"] = "mydevice"
+        self.assertEqual(device_response, expected_device_response)
+
+        # /_matrix/federation/v1/user/devices/{userId} should return the unsigned data too
+        fed_response = self.get_success(
+            self.hs.get_device_handler().on_federation_query_user_devices(alice_id)
+        )
+        self.assertEqual(
+            fed_response["devices"][0],
+            {"device_id": device_id, "keys": keys1},
+        )
+
+        # so should /_matrix/federation/v1/user/keys/query
+        fed_response = self.get_success(
+            self.hs.get_e2e_keys_handler().on_federation_query_client_keys(
+                {"device_keys": {alice_id: []}}
+            )
+        )
+        fed_device_response = fed_response["device_keys"][alice_id][device_id]
+        self.assertEqual(fed_device_response, keys1)
+
+    def test_non_dict_unsigned_is_ignored(self) -> None:
+        password = "wonderland"
+        device_id = "ABCDEFGHI"
+        alice_id = self.register_user("alice", password)
+        alice_token = self.login(
+            "alice",
+            password,
+            device_id=device_id,
+            additional_request_fields={"initial_device_display_name": "mydevice"},
+        )
+
+        # Alice uploads some keys, with a malformed unsigned data
+        keys1 = self.make_key_data(alice_id, device_id)
+        keys1["unsigned"] = ["a", "b"]  # a list!
+
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/upload",
+            {"device_keys": keys1},
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+
+        # /keys/query should return the unsigned data, with the device display name merged in.
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/v3/keys/query",
+            {"device_keys": {alice_id: []}},
+            alice_token,
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
+        device_response = channel.json_body["device_keys"][alice_id][device_id]
+        expected_device_response = deepcopy(keys1)
+        expected_device_response["unsigned"] = {"device_display_name": "mydevice"}
+        self.assertEqual(device_response, expected_device_response)
+
+        # /_matrix/federation/v1/user/devices/{userId} should return the unsigned data too
+        fed_response = self.get_success(
+            self.hs.get_device_handler().on_federation_query_user_devices(alice_id)
+        )
+        self.assertEqual(
+            fed_response["devices"][0],
+            {"device_id": device_id, "keys": keys1},
+        )
+
+        # so should /_matrix/federation/v1/user/keys/query
+        fed_response = self.get_success(
+            self.hs.get_e2e_keys_handler().on_federation_query_client_keys(
+                {"device_keys": {alice_id: []}}
+            )
+        )
+        fed_device_response = fed_response["device_keys"][alice_id][device_id]
+        expected_device_response = deepcopy(keys1)
+        expected_device_response["unsigned"] = {}
+        self.assertEqual(fed_device_response, expected_device_response)
 
 
 class SigningKeyUploadServletTestCase(unittest.HomeserverTestCase):
