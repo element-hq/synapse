@@ -1657,7 +1657,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     room_stats_state.name
                 FROM event_reports AS er
                 LEFT JOIN events USING(event_id)
-                JOIN room_stats_state 
+                JOIN room_stats_state
                     ON room_stats_state.room_id = er.room_id
                 {where_clause}
                 ORDER BY er.received_ts {order}
