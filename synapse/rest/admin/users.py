@@ -999,7 +999,7 @@ class UserMembershipRestServlet(RestServlet):
         await assert_requester_is_admin(self.auth, request)
         from_ts = parse_integer(request, "from_ts")
 
-        if from_ts:
+        if from_ts is not None:
             room_ids = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
         else:
             room_ids = await self.store.get_rooms_for_user(user_id)
