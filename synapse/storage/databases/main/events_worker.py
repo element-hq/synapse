@@ -342,6 +342,8 @@ class EventsWorkerStore(SQLBaseStore):
             writers=["master"],
         )
 
+        # Added to accommodate some queries for the admin API in order to fetch/filter
+        # membership events by when it was received
         self.db_pool.updates.register_background_index_update(
             update_name="events_received_ts_index",
             index_name="received_ts_idx",
@@ -2606,7 +2608,8 @@ class EventsWorkerStore(SQLBaseStore):
 
         Args:
             user_id: user ID to search against
-            from_ts: a timestamp in milliseconds from the unix epoch
+            from_ts: a timestamp in milliseconds from the unix epoch. Filters against
+            `events.received_ts`
 
         """
 

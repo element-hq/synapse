@@ -1656,10 +1656,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     room_stats_state.canonical_alias,
                     room_stats_state.name
                 FROM event_reports AS er
-                LEFT JOIN events
-                    ON events.event_id = er.event_id
-                JOIN room_stats_state
-                    ON room_stats_state.room_id = er.room_id
+                LEFT JOIN events USING(event_id)
+                JOIN room_stats_state USING(room_id)
                 {where_clause}
                 ORDER BY er.received_ts {order}
                 LIMIT ?
