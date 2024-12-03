@@ -409,7 +409,9 @@ class EventReportsTestCase(unittest.HomeserverTestCase):
         server_filtered_report_ids = set()
         for event_report in event_reports:
             server_filtered_report_ids.add(event_report["id"])
-        self.assertEqual(True, locally_filtered_report_ids == server_filtered_report_ids)
+        self.assertEqual(
+            True, locally_filtered_report_ids == server_filtered_report_ids
+        )
 
     def _create_event_and_report(self, room_id: str, user_tok: str) -> None:
         """Create and report events"""

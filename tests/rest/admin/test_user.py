@@ -5601,7 +5601,9 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         # send some more invites, they should show up in addition to original 8 using same timestamp
         for user in self.random_users:
-            self.helper.invite(self.room3, src=self.bad_user, targ=user, tok=self.bad_user_tok)
+            self.helper.invite(
+                self.room3, src=self.bad_user, targ=user, tok=self.bad_user_tok
+            )
 
         channel = self.make_request(
             "GET",
@@ -5610,7 +5612,6 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 12)
-
 
     def test_get_user_invite_count_invites_before_ts_test_case(self) -> None:
         """
@@ -5663,8 +5664,9 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         # send a kick and some bans and make sure these aren't counted against invite total
         for user in self.random_users:
-            self.helper.ban(self.room1, src=self.bad_user, targ=user,
-                            tok=self.bad_user_tok)
+            self.helper.ban(
+                self.room1, src=self.bad_user, targ=user, tok=self.bad_user_tok
+            )
 
         channel = self.make_request(
             "POST",
