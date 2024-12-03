@@ -49,29 +49,29 @@ class TaskScheduler:
     This is a simple task scheduler designed for resumable tasks. Normally,
     you'd use `run_in_background` to start a background task or Twisted's
     `deferLater` if you want to run it later.
-    
+
     The issue is that these tasks stop completely and won't resume if Synapse is
     shut down for any reason.
-    
+
     Here's how it works:
-    
+
     - Register an Action: First, you need to register a function to a named
       action using `register_action`. This function will be called to resume tasks
       after a Synapse shutdown. Make sure to register it when Synapse initializes,
       not right before scheduling the task.
-    
+
     - Schedule a Task: You can launch a task linked to the named action
       using `schedule_task`. You can pass a `params` dictionary, which will be
       passed to the registered function when it's executed. Tasks can be scheduled
       to run either immediately or later by specifying a `timestamp`.
-    
+
     - Update Task: The function handling the task can call `update_task` at
       any point to update the task's `result`. This lets you resume the task from
       a specific point or pass results back to the code that scheduled it. When
       the function completes, you can also return a `result` or an `error`.
-    
+
     Things to keep in mind:
-    
+
     - The reconciliation loop runs every minute, so this is not a high-precision
       scheduler.
 
@@ -233,10 +233,10 @@ class TaskScheduler:
             status: the new `TaskStatus` of the task
             result: the new result of the task
             error: the new error of the task
-        
+
         Returns:
             True if the update was successful, False otherwise.
-        
+
         Raises:
             Exception: If a status other than `ACTIVE` or `SCHEDULED` was passed.
         """
