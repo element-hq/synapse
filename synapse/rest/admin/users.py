@@ -983,8 +983,7 @@ class UserAdminServlet(RestServlet):
 
 class UserMembershipRestServlet(RestServlet):
     """
-    Get room list of a user. Optionally get a list of rooms joined after a given timestamp, via
-    the optional `from_ts` query param.
+    Get list of joined room ID's for a user.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")

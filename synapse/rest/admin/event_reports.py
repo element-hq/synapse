@@ -50,9 +50,10 @@ class EventReportsRestServlet(RestServlet):
         The parameters `from` and `limit` are required only for pagination.
         By default, a `limit` of 100 is used.
         The parameter `dir` can be used to define the order of results.
-        The parameter `user_id` can be used to filter the user id of the reporter of the event.
-        The parameter `room_id` can be used to filter by room id.
-        The parameter `event_sender_user_id` can be used to filter by the user id of the sender of the reported event.
+        The `user_id` query parameter filters by the user ID of the reporter of the event.
+        The `room_id` query parameter filters by room id.
+        The `event_sender_user_id` query parameter can be used to filter by the user id
+        of the sender of the reported event.
     Returns:
         A list of reported events and an integer representing the total number of
         reported events that exist given this query
