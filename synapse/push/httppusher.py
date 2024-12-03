@@ -488,7 +488,6 @@ class HttpPusher(Pusher):
             if not self.disable_badge_count:
                 content["counts"] = {
                     "unread": badge,
-                    # 'missed_calls': 2
                 }
             if event.type == "m.room.member" and event.is_state():
                 content["membership"] = event.content["membership"]
