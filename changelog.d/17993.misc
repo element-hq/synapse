@@ -1,0 +1,1 @@
+Fix building wheels for MacOS which was temporarily disabled in Synapse 1.120.2.
