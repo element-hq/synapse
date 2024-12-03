@@ -1088,15 +1088,19 @@ class HTTPPusherTests(HomeserverTestCase):
 
         self.assertEqual(len(self.push_attempts), 11)
 
-    @parameterized.expand([
-        # Badge count disabled
-        (True, True),
-        (True, False),
-        # Badge count enabled
-        (False, True),
-        (False, False),
-    ])
-    def test_msc4076_badge_count(self, disable_badge_count: bool, event_id_only: bool) -> None:
+    @parameterized.expand(
+        [
+            # Badge count disabled
+            (True, True),
+            (True, False),
+            # Badge count enabled
+            (False, True),
+            (False, False),
+        ]
+    )
+    def test_msc4076_badge_count(
+        self, disable_badge_count: bool, event_id_only: bool
+    ) -> None:
         # Register the user who gets notified
         user_id = self.register_user("user", "pass")
         access_token = self.login("user", "pass")
