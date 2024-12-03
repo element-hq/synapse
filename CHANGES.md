@@ -1,3 +1,11 @@
+# Synapse 1.120.2 (2024-12-03)
+
+This version has building of wheels for macOS disabled.
+It is functionally identical to 1.120.1, which contains multiple security fixes.
+If you are already using 1.120.1, there is no need to upgrade to this version.
+
+
+
 # Synapse 1.120.1 (2024-12-03)
 
 This patch release fixes multiple security vulnerabilities, some affecting all prior versions of Synapse. Server administrators are encouraged to update Synapse as soon as possible. We are not aware of these vulnerabilities being exploited in the wild.
