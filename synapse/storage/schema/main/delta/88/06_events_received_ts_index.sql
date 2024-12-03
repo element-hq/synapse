@@ -11,6 +11,7 @@
 -- See the GNU Affero General Public License for more details:
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
--- Add an index on events.received_ts to allow for efficient lookup of events by timestamp
+-- Add an index on `events.received_ts` for `m.room.member` events to allow for
+-- efficient lookup of events by timestamp in some Admin API's
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (8805, 'events_received_ts_index', '{}');
+    (8806, 'events_received_ts_index', '{}');
