@@ -128,7 +128,7 @@ class HttpPusher(Pusher):
             raise PusherConfigException("'data' key can not be null for HTTP pusher")
 
         # Check if badge counts should be disabled for this push gateway
-        self.disable_badge_count = bool(
+        self.disable_badge_count = self.hs.config.experimental.msc4076_enabled and bool(
             self.data.get("org.matrix.msc4076.disable_badge_count", False)
         )
 

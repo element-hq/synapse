@@ -1098,6 +1098,7 @@ class HTTPPusherTests(HomeserverTestCase):
             (False, False),
         ]
     )
+    @override_config({"experimental_features": {"msc4076_enabled": True}})
     def test_msc4076_badge_count(
         self, disable_badge_count: bool, event_id_only: bool
     ) -> None:
