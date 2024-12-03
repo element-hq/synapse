@@ -5,7 +5,7 @@ name: Build release artifacts
 on:
   # we build on PRs and develop to (hopefully) get early warning
   # of things breaking (but only build one set of debs). PRs skip
-  # building wheels on macOS & ARM.
+  # building wheels on ARM.
   pull_request:
   push:
     branches: ["develop", "release-*"]
@@ -111,7 +111,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-22.04, macos-13]
+        os: [ubuntu-22.04]
         arch: [x86_64, aarch64]
         # is_pr is a flag used to exclude certain jobs from the matrix on PRs.
         # It is not read by the rest of the workflow.
@@ -119,12 +119,6 @@ jobs:
           - ${{ startsWith(github.ref, 'refs/pull/') }}
 
         exclude:
-          # Don't build macos wheels on PR CI.
-          - is_pr: true
-            os: "macos-13"
-          # Don't build aarch64 wheels on mac.
-          - os: "macos-13"
-            arch: aarch64
           # Don't build aarch64 wheels on PR CI.
           - is_pr: true
             arch: aarch64
