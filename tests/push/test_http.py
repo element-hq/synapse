@@ -20,6 +20,8 @@
 from typing import Any, List, Tuple
 from unittest.mock import Mock
 
+from parameterized import parameterized
+
 from twisted.internet.defer import Deferred
 from twisted.test.proto_helpers import MemoryReactor
 
@@ -1086,179 +1088,77 @@ class HTTPPusherTests(HomeserverTestCase):
 
         self.assertEqual(len(self.push_attempts), 11)
 
-    def test_badge_count_disabled(self) -> None:
-        """
-        Test that when disable_badge_count is set to True, the counts field is omitted
-        from the notification.
-        """
-        # Register the user who gets notified
-        user_id = self.register_user("user", "pass")
-        access_token = self.login("user", "pass")
+    @parameterized.expand([
+        # Badge count disabled
+        (True, True),
+        (True, False),
+        # Badge count enabled
+        (False, True),
+        (False, False),
+    ])
+    def test_msc4076_badge_count(self, disable_badge_count: bool, event_id_only: bool) -> None:
+            # Register the user who gets notified
+            user_id = self.register_user("user", "pass")
+            access_token = self.login("user", "pass")
 
-        # Register the user who sends the message
-        other_user_id = self.register_user("otheruser", "pass")
-        other_access_token = self.login("otheruser", "pass")
+            # Register the user who sends the message
+            other_user_id = self.register_user("otheruser", "pass")
+            other_access_token = self.login("otheruser", "pass")
 
-        # Register the pusher with disable_badge_count set to True
-        user_tuple = self.get_success(
-            self.hs.get_datastores().main.get_user_by_access_token(access_token)
-        )
-        assert user_tuple is not None
-        device_id = user_tuple.device_id
-
-        self.get_success(
-            self.hs.get_pusherpool().add_or_update_pusher(
-                user_id=user_id,
-                device_id=device_id,
-                kind="http",
-                app_id="m.http",
-                app_display_name="HTTP Push Notifications",
-                device_display_name="pushy push",
-                pushkey="a@example.com",
-                lang=None,
-                data={
-                    "url": "http://example.com/_matrix/push/v1/notify",
-                    "org.matrix.msc4076.disable_badge_count": True,
-                },
+            # Register the pusher with disable_badge_count set to True
+            user_tuple = self.get_success(
+                self.hs.get_datastores().main.get_user_by_access_token(access_token)
             )
-        )
+            assert user_tuple is not None
+            device_id = user_tuple.device_id
 
-        # Create a room
-        room = self.helper.create_room_as(user_id, tok=access_token)
+            # Set the push data dict based on test input parameters
+            push_data = {
+                "url": "http://example.com/_matrix/push/v1/notify",
+            }
+            if disable_badge_count:
+                push_data["org.matrix.msc4076.disable_badge_count"] = True
+            if event_id_only:
+                push_data["format"] = "event_id_only"
 
-        # The other user joins
-        self.helper.join(room=room, user=other_user_id, tok=other_access_token)
-
-        # The other user sends a message
-        self.helper.send(room, body="Hi!", tok=other_access_token)
-
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
-        # One push was attempted to be sent
-        self.assertEqual(len(self.push_attempts), 1)
-        self.assertEqual(
-            self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
-        )
-
-        # Verify that the notification doesn't contain a counts field
-        self.assertNotIn("counts", self.push_attempts[0][2]["notification"])
-
-    def test_badge_count_disabled_event_id_only(self) -> None:
-        """
-        Test that when disable_badge_count is set to True and format is event_id_only,
-        the counts field is omitted from the notification.
-        """
-        # Register the user who gets notified
-        user_id = self.register_user("user", "pass")
-        access_token = self.login("user", "pass")
-
-        # Register the user who sends the message
-        other_user_id = self.register_user("otheruser", "pass")
-        other_access_token = self.login("otheruser", "pass")
-
-        # Register the pusher with disable_badge_count set to True and format set to event_id_only
-        user_tuple = self.get_success(
-            self.hs.get_datastores().main.get_user_by_access_token(access_token)
-        )
-        assert user_tuple is not None
-        device_id = user_tuple.device_id
-
-        self.get_success(
-            self.hs.get_pusherpool().add_or_update_pusher(
-                user_id=user_id,
-                device_id=device_id,
-                kind="http",
-                app_id="m.http",
-                app_display_name="HTTP Push Notifications",
-                device_display_name="pushy push",
-                pushkey="a@example.com",
-                lang=None,
-                data={
-                    "url": "http://example.com/_matrix/push/v1/notify",
-                    "format": "event_id_only",
-                    "org.matrix.msc4076.disable_badge_count": True,
-                },
+            self.get_success(
+                self.hs.get_pusherpool().add_or_update_pusher(
+                    user_id=user_id,
+                    device_id=device_id,
+                    kind="http",
+                    app_id="m.http",
+                    app_display_name="HTTP Push Notifications",
+                    device_display_name="pushy push",
+                    pushkey="a@example.com",
+                    lang=None,
+                    data=push_data,
+                )
             )
-        )
 
-        # Create a room
-        room = self.helper.create_room_as(user_id, tok=access_token)
+            # Create a room
+            room = self.helper.create_room_as(user_id, tok=access_token)
 
-        # The other user joins
-        self.helper.join(room=room, user=other_user_id, tok=other_access_token)
+            # The other user joins
+            self.helper.join(room=room, user=other_user_id, tok=other_access_token)
 
-        # The other user sends a message
-        self.helper.send(room, body="Hi!", tok=other_access_token)
+            # The other user sends a message
+            self.helper.send(room, body="Hi!", tok=other_access_token)
 
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
+            # Advance time a bit, so the pusher will register something has happened
+            self.pump()
 
-        # One push was attempted to be sent
-        self.assertEqual(len(self.push_attempts), 1)
-        self.assertEqual(
-            self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
-        )
-
-        # Verify that the notification doesn't contain a counts field
-        self.assertNotIn("counts", self.push_attempts[0][2]["notification"])
-
-    def test_badge_count_enabled(self) -> None:
-        """
-        Test that when disable_badge_count is set to False, the counts field is included
-        in the notification.
-        """
-        # Register the user who gets notified
-        user_id = self.register_user("user", "pass")
-        access_token = self.login("user", "pass")
-
-        # Register the user who sends the message
-        other_user_id = self.register_user("otheruser", "pass")
-        other_access_token = self.login("otheruser", "pass")
-
-        # Register the pusher with disable_badge_count set to False
-        user_tuple = self.get_success(
-            self.hs.get_datastores().main.get_user_by_access_token(access_token)
-        )
-        assert user_tuple is not None
-        device_id = user_tuple.device_id
-
-        self.get_success(
-            self.hs.get_pusherpool().add_or_update_pusher(
-                user_id=user_id,
-                device_id=device_id,
-                kind="http",
-                app_id="m.http",
-                app_display_name="HTTP Push Notifications",
-                device_display_name="pushy push",
-                pushkey="a@example.com",
-                lang=None,
-                data={
-                    "url": "http://example.com/_matrix/push/v1/notify",
-                },
+            # One push was attempted to be sent
+            self.assertEqual(len(self.push_attempts), 1)
+            self.assertEqual(
+                self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
             )
-        )
 
-        # Create a room
-        room = self.helper.create_room_as(user_id, tok=access_token)
-
-        # The other user joins
-        self.helper.join(room=room, user=other_user_id, tok=other_access_token)
-
-        # The other user sends a message
-        self.helper.send(room, body="Hi!", tok=other_access_token)
-
-        # Advance time a bit, so the pusher will register something has happened
-        self.pump()
-
-        # One push was attempted to be sent
-        self.assertEqual(len(self.push_attempts), 1)
-        self.assertEqual(
-            self.push_attempts[0][1], "http://example.com/_matrix/push/v1/notify"
-        )
-
-        # Verify that the notification contains a counts field
-        self.assertIn("counts", self.push_attempts[0][2]["notification"])
-        self.assertEqual(
-            self.push_attempts[0][2]["notification"]["counts"]["unread"], 1
-        )
+            if disable_badge_count:
+                # Verify that the notification DOESN'T contain a counts field
+                self.assertNotIn("counts", self.push_attempts[0][2]["notification"])
+            else:
+                # Ensure that the notification DOES contain a counts field
+                self.assertIn("counts", self.push_attempts[0][2]["notification"])
+                self.assertEqual(
+                    self.push_attempts[0][2]["notification"]["counts"]["unread"], 1
+                )
