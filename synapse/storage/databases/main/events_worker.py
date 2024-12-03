@@ -2606,10 +2606,14 @@ class EventsWorkerStore(SQLBaseStore):
             txn: LoggingTransaction, user_id: str, from_ts: int
         ) -> int:
             sql = """
-                  SELECT COUNT(e.event_id) FROM events e JOIN room_memberships rm ON e.event_id = rm.event_id WHERE e.sender = ? AND e.received_ts > ? AND e.state_key != ? AND rm.membership = 'invite'
+                  SELECT COUNT(e.event_id)
+                  FROM events e
+                  INNER JOIN room_memberships rm USING(event_id)
+                  WHERE e.sender = ? AND rm.membership = 'invite'
+                  AND e.type = 'm.room.member' AND e.received_ts > ?
             """
 
-            txn.execute(sql, (user_id, from_ts, user_id))
+            txn.execute(sql, (user_id, from_ts))
             res = txn.fetchone()
 
             if res is None:
