@@ -3390,8 +3390,11 @@ class UserMembershipRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual([local_and_remote_room_id], channel.json_body["joined_rooms"])
 
     def test_from_ts_param(self) -> None:
+        """
+        Tests filtering joined room results by timestamp
+        """
         # Create rooms and join, grab timestamp of room creation
-        room_creation_timestamp = self.hs.get_clock().time_msec()
+        before_room_creation_timestamp = self.hs.get_clock().time_msec()
         other_user_tok = self.login("user", "pass")
         number_rooms = 5
         for _ in range(number_rooms):
@@ -3418,7 +3421,7 @@ class UserMembershipRestTestCase(unittest.HomeserverTestCase):
         # return the rooms
         channel = self.make_request(
             "GET",
-            f"{self.url}?from_ts={int(room_creation_timestamp)}",
+            f"{self.url}?from_ts={int(before_room_creation_timestamp)}",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
@@ -5572,10 +5575,47 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         self.helper.join(self.room1, self.to_kick, tok=self.to_kick_tok)
 
-    def test_get_user_invite_count_test_case(self) -> None:
+    def test_get_user_invite_count_new_invites_test_case(self) -> None:
+        """
+        Test that new invites that arrive after a provided timestamp are counted
+        """
         # grab a current timestamp
         invites_sent_ts = self.hs.get_clock().time_msec()
 
+        # bad user sends some invites
+        for room_id in [self.room1, self.room2]:
+            for user in self.random_users:
+                self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
+
+        # advance clock 48 hours
+        self.reactor.advance(ONE_DAY_MS * 2)
+
+        # fetch using timestamp, all should be returned
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 8)
+
+        # send some more invites, they should show up in addition to original 8 using same timestamp
+        for user in self.random_users:
+            self.helper.invite(self.room3, src=self.bad_user, targ=user, tok=self.bad_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body["invite_count"], 12)
+
+
+    def test_get_user_invite_count_invites_before_ts_test_case(self) -> None:
+        """
+        Test that invites sent before provided ts are not counted
+        """
         # bad user sends some invites
         for room_id in [self.room1, self.room2]:
             for user in self.random_users:
@@ -5597,7 +5637,22 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 0)
 
-        # fetch using original timestamp, all should be returned
+    def test_user_invite_count_kick_ban_not_counted(self) -> None:
+        """
+        Test that kicks and bans are not counted in invite count
+        """
+        # grab a current timestamp
+        invites_sent_ts = self.hs.get_clock().time_msec()
+
+        # bad user sends some invites (8)
+        for room_id in [self.room1, self.room2]:
+            for user in self.random_users:
+                self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
+
+        # advance clock 48 hours
+        self.reactor.advance(ONE_DAY_MS * 2)
+
+        # fetch using timestamp, all invites sent should be counted
         channel = self.make_request(
             "GET",
             f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
@@ -5606,21 +5661,10 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 8)
 
-        # send some more invites, they should show up in addition to original 8 using original ts
-        for user in self.random_users:
-            self.helper.invite(self.room3, self.bad_user, user, tok=self.bad_user_tok)
-
-        channel = self.make_request(
-            "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
-            access_token=self.admin_tok,
-        )
-        self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["invite_count"], 12)
-
         # send a kick and some bans and make sure these aren't counted against invite total
         for user in self.random_users:
-            self.helper.ban(self.room1, self.bad_user, user, tok=self.bad_user_tok)
+            self.helper.ban(self.room1, src=self.bad_user, targ=user,
+                            tok=self.bad_user_tok)
 
         channel = self.make_request(
             "POST",
@@ -5637,4 +5681,4 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
-        self.assertEqual(channel.json_body["invite_count"], 12)
+        self.assertEqual(channel.json_body["invite_count"], 8)
