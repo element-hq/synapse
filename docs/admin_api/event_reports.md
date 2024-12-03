@@ -63,7 +63,8 @@ paginate through.
 * `user_id`: optional string - Filter by the user ID of the reporter. This is the user who reported the event
    and wrote the reason.
 * `room_id`: optional string - Filter by room id.
-* `event_sender_user_id`: optional string - Filter by the sender of the reported event. This is the user who the report was made against.
+* `event_sender_user_id`: optional string - Filter by the sender of the reported event. This is the user who 
+   the report was made against.
 
 **Response**
 

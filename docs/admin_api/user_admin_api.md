@@ -513,6 +513,8 @@ The following should be set as query parameters in the URL:
 
 - `from_ts` - int. Optional. A timestamp in ms from the unix 
    epoch - only rooms joined after the provided timestamp will be returned.
+   This works by comparing the provided timestamp to the `received_ts`
+   column in the `events` table.
    Note: https://currentmillis.com/ is a useful tool for converting dates
    into timestamps and vice versa.
 
@@ -542,6 +544,8 @@ The following should be set as query parameters in the URL:
 
 * `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
    invites sent after the provided timestamp will be returned.
+   This works by comparing the provided timestamp to the `received_ts`
+   column in the `events` table.
    Note: https://currentmillis.com/ is a useful tool for converting dates
    into timestamps and vice versa.
 
@@ -549,7 +553,7 @@ The following should be set as query parameters in the URL:
 
 A response body like the following is returned:
 
-```
+```json
 {
   "invite_count": 30
 }
