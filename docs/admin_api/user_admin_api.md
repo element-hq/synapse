@@ -55,7 +55,8 @@ It returns a JSON body like the following:
         }
     ],
     "user_type": null,
-    "locked": false
+    "locked": false,
+    "suspended": false
 }
 ```
 

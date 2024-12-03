@@ -254,6 +254,7 @@ class HomeServer(metaclass=abc.ABCMeta):
         "auth",
         "deactivate_account",
         "delayed_events",
+        "e2e_keys",  # for the `delete_old_otks` scheduled-task handler
         "message",
         "pagination",
         "profile",
