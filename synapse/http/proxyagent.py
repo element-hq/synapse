@@ -391,7 +391,8 @@ def http_proxy_endpoint(
     if scheme == b"https":
         if tls_options_factory:
             tls_options = tls_options_factory.creatorForNetloc(host, port)
-            proxy_endpoint = wrapClientTLS(tls_options, proxy_endpoint)
+            wrapped_proxy_endpoint = wrapClientTLS(tls_options, proxy_endpoint)
+            return wrapped_proxy_endpoint, credentials
         else:
             raise RuntimeError(
                 f"No TLS options for a https connection via proxy {proxy!s}"
