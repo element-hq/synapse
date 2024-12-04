@@ -448,3 +448,6 @@ class ExperimentalConfig(Config):
 
         # MSC4222: Adding `state_after` to sync v2
         self.msc4222_enabled: bool = experimental.get("msc4222_enabled", False)
+
+        # MSC4076: Add `disable_badge_count`` to pusher configuration
+        self.msc4076_enabled: bool = experimental.get("msc4076_enabled", False)

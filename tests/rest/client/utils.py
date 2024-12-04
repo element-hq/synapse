@@ -889,7 +889,7 @@ class RestHelper:
             "GET",
             uri,
         )
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {uri}, got {channel.code}"
 
         # hit the redirect url again with the right Host header, which should now issue
         # a cookie and redirect to the SSO provider.
@@ -901,17 +901,18 @@ class RestHelper:
 
         location = get_location(channel)
         parts = urllib.parse.urlsplit(location)
+        next_uri = urllib.parse.urlunsplit(("", "") + parts[2:])
         channel = make_request(
             self.reactor,
             self.site,
             "GET",
-            urllib.parse.urlunsplit(("", "") + parts[2:]),
+            next_uri,
             custom_headers=[
                 ("Host", parts[1]),
             ],
         )
 
-        assert channel.code == 302
+        assert channel.code == 302, f"Expected 302 for {next_uri}, got {channel.code}"
         channel.extract_cookies(cookies)
         return get_location(channel)
 
