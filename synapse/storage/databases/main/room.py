@@ -1598,7 +1598,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             user_id: search for user_id. Ignored if user_id is None
             room_id: search for room_id. Ignored if room_id is None
                 event_sender_user_id: search for the sender of the reported event. Ignored if
-            event_sender_user_id is None
+                event_sender_user_id is None
         Returns:
             Tuple of:
                 json list of event reports

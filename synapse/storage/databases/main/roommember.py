@@ -1588,10 +1588,13 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # this index: "current_state_events_member_index" btree (state_key) WHERE type = 'm.room.member'::text
             # on the current_state_events_table
             sql = """
-                    SELECT c.room_id
-                    FROM current_state_events c
-                    JOIN events e ON c.event_id = e.event_id
-                    WHERE c.state_key = ? AND c.membership = 'join' AND e.received_ts > ? AND c.type = 'm.room.member'
+                    SELECT room_id
+                    FROM room_memberships AS rm
+                    INNER JOIN events AS e USING (event_id)
+                    WHERE rm.user_id = ?
+                        AND rm.membership = 'join'
+                        AND e.type = 'm.room.member'
+                        AND e.received_ts > ?
             """
             txn.execute(sql, (user_id, from_ts))
             return frozenset([r[0] for r in txn])

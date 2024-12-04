@@ -2602,26 +2602,28 @@ class EventsWorkerStore(SQLBaseStore):
             )
         )
 
-    async def get_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
+    async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """
         Get the number of invites sent by the given user after the provided timestamp.
 
         Args:
             user_id: user ID to search against
             from_ts: a timestamp in milliseconds from the unix epoch. Filters against
-            `events.received_ts`
+                `events.received_ts`
 
         """
 
-        def _get_invite_count_by_user_txn(
+        def _get_sent_invite_count_by_user_txn(
             txn: LoggingTransaction, user_id: str, from_ts: int
         ) -> int:
             sql = """
-                  SELECT COUNT(e.event_id)
-                  FROM events e
-                  INNER JOIN room_memberships rm USING(event_id)
-                  WHERE e.sender = ? AND rm.membership = 'invite'
-                  AND e.type = 'm.room.member' AND e.received_ts > ?
+                  SELECT COUNT(rm.event_id)
+                  FROM room_memberships AS rm
+                  INNER JOIN events AS e USING(event_id)
+                  WHERE rm.sender = ?
+                    AND rm.membership = 'invite'
+                    AND e.type = 'm.room.member'
+                    AND e.received_ts >= ?
             """
 
             txn.execute(sql, (user_id, from_ts))
@@ -2632,8 +2634,8 @@ class EventsWorkerStore(SQLBaseStore):
             return int(res[0])
 
         return await self.db_pool.runInteraction(
-            "_get_invite_count_by_user_txn",
-            _get_invite_count_by_user_txn,
+            "_get_sent_invite_count_by_user_txn",
+            _get_sent_invite_count_by_user_txn,
             user_id,
             from_ts,
         )
