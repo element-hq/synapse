@@ -1,0 +1,1 @@
+Add ratelimit `rc_set_presence.per_user` to prevent load from excessive presence updates sent by clients. Contributed by @rda0.

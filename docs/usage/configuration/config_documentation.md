@@ -1866,6 +1866,22 @@ rc_federation:
   concurrent: 5
 ```
 ---
+### `rc_set_presence`
+
+This option sets ratelimiting for presence.
+
+The `rc_set_presence.per_user` sets ratelimiting how often a specific users' presence
+updates are evaluated. Ratelimited presence updates are ignored.
+`per_user` defaults to `per_second: 0.1`, `burst_count: 1`.
+
+Example configuration:
+```yaml
+rc_set_presence:
+  per_user:
+    per_second: 0.1
+    burst_count: 1
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 Sets outgoing federation transaction frequency for sending read-receipts,
