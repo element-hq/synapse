@@ -85,7 +85,7 @@ impl TryFrom<String> for UserID {
             return Err(IdentifierError::MissingColon);
         }
 
-        Ok(UserID(s.to_string()))
+        Ok(UserID(s))
     }
 }
 
