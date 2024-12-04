@@ -3393,31 +3393,27 @@ class UserMembershipRestTestCase(unittest.HomeserverTestCase):
         """
         Tests filtering joined room results by timestamp
         """
-        # Create rooms and join, grab timestamp of room creation
+        # Create rooms and join, grab timestamp before room creation
         before_room_creation_timestamp = self.hs.get_clock().time_msec()
         other_user_tok = self.login("user", "pass")
         number_rooms = 5
         for _ in range(number_rooms):
             self.helper.create_room_as(self.other_user, tok=other_user_tok)
 
-        # advance clock 48 hours
-        self.reactor.advance(ONE_DAY_MS * 2)
+        # get a timestamp after room creation and join
+        after_room_creation = self.hs.get_clock().time_msec()
 
-        # get a timestamp beginning 24 hours ago
-        current_time = self.hs.get_clock().time_msec()
-        from_ts = current_time - (ONE_DAY_MS)
-
-        # Get rooms using this timestamp, there should be none since all rooms were created
-        # outside of the `from_ts` 24 hour range
+        # Get rooms using this timestamp, there should be none since all rooms were created and joined
+        # before provided timestamp
         channel = self.make_request(
             "GET",
-            f"{self.url}?from_ts={int(from_ts)}",
+            f"{self.url}?from_ts={int(after_room_creation)}",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code, msg=channel.json_body)
         self.assertEqual(0, channel.json_body["total"])
 
-        # fetch rooms with the older timestamp before they were created, this should
+        # fetch rooms with the older timestamp before they were created and joined, this should
         # return the rooms
         channel = self.make_request(
             "GET",
@@ -5622,7 +5618,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        after_invites_sent_ts = self.hs.get_clock().time_msec()
+        after_invites_sent_ts = self.hs.get_clock().time_msec() + 1 # add a ms of space between invite and ts
 
         # fetch invites with timestamp, none should be returned
         channel = self.make_request(

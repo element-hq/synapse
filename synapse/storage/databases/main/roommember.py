@@ -1588,7 +1588,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             # this index: "current_state_events_member_index" btree (state_key) WHERE type = 'm.room.member'::text
             # on the current_state_events_table
             sql = """
-                    SELECT room_id
+                    SELECT rm.room_id
                     FROM room_memberships AS rm
                     INNER JOIN events AS e USING (event_id)
                     WHERE rm.user_id = ?
