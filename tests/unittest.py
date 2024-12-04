@@ -781,7 +781,7 @@ class HomeserverTestCase(TestCase):
         self,
         username: str,
         appservice_token: str,
-    ) -> Tuple[str, str]:
+    ) -> Tuple[str, Optional[str]]:
         """Register an appservice user as an application service.
         Requires the client-facing registration API be registered.
 
@@ -805,7 +805,7 @@ class HomeserverTestCase(TestCase):
             access_token=appservice_token,
         )
         self.assertEqual(channel.code, 200, channel.json_body)
-        return channel.json_body["user_id"], channel.json_body["device_id"]
+        return channel.json_body["user_id"], channel.json_body.get("device_id")
 
     def login(
         self,
