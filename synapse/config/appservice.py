@@ -184,7 +184,7 @@ def _load_appservice(
         )
 
     # Opt-in flag for the MSC4190 behaviours.
-    # When enabled, the following C-S API endpoints change:
+    # When enabled, the following C-S API endpoints change for appservices:
     # - POST /register does not return an access token
     # - PUT /devices/{device_id} creates a new device if one does not exist
     # - DELETE /devices/{device_id} no longer requires UIA

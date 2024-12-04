@@ -1168,8 +1168,10 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         user_id, device_id = self.register_appservice_user(
             "as.sender", self._service_token
         )
-        # With MSC4190 enabled, we may not have a device out of the
-        # registration, but we don't have it enabled in this test
+        # With MSC4190 enabled, there will not be a device created
+        # during AS registration. However MSC4190 is not enabled
+        # in this test. It may become the default behaviour in the
+        # future, in which case this test will need to be updated.
         assert device_id is not None
         self._sender_user = user_id
         self._sender_device = device_id

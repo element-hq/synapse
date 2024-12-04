@@ -529,7 +529,8 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200, channel.json_body)
 
-        # On the regular service, that API sh
+        # On the regular service, that API should not allow for the
+        # creation of new devices.
         channel = self.make_request(
             "PUT",
             "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
@@ -568,7 +569,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, 200, channel.json_body)
         self.assertEqual(len(channel.json_body["devices"]), 1)
 
-        # Delete the device
+        # Delete the device. UIA should not be required.
         channel = self.make_request(
             "DELETE",
             "/_matrix/client/v3/devices/AABBCCDD?user_id=@alice:test",
@@ -616,6 +617,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
         self.assertEqual(len(channel.json_body["devices"]), 1)
 
         # Delete the device with delete_devices
+        # UIA should not be required.
         channel = self.make_request(
             "POST",
             "/_matrix/client/v3/delete_devices?user_id=@alice:test",
