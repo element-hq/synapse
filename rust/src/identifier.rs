@@ -157,7 +157,7 @@ impl TryFrom<String> for RoomID {
     type Error = IdentifierError;
 
     /// Will try creating a `RoomID` from the provided `String`.
-    /// Can fail if the event_id is incorrectly formatted.
+    /// Can fail if the room_id is incorrectly formatted.
     fn try_from(s: String) -> Result<Self, Self::Error> {
         if !s.starts_with('!') {
             return Err(IdentifierError::IncorrectSigil);
