@@ -1,3 +1,50 @@
+# Synapse 1.121.0rc1 (2024-12-04)
+
+This release candidate contains the security fixes from [v1.120.2](https://github.com/element-hq/synapse/releases/tag/v1.120.2).
+
+New changes listed below.
+
+### Features
+
+- Support for [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190): device management for Application Services. ([\#17705](https://github.com/element-hq/synapse/issues/17705))
+- Update [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync to include invite, ban, kick, targets when `$LAZY`-loading room members. ([\#17947](https://github.com/element-hq/synapse/issues/17947))
+- Use stable `M_USER_LOCKED` error code for locked accounts, as per [Matrix 1.12](https://spec.matrix.org/v1.12/client-server-api/#account-locking). ([\#17965](https://github.com/element-hq/synapse/issues/17965))
+- [MSC4076](https://github.com/matrix-org/matrix-spec-proposals/pull/4076): Add `disable_badge_count` to pusher configuration. ([\#17975](https://github.com/element-hq/synapse/issues/17975))
+
+### Bugfixes
+
+- Fix long-standing bug where read receipts could get overly delayed being sent over federation. ([\#17933](https://github.com/element-hq/synapse/issues/17933))
+
+### Improved Documentation
+
+- Add OIDC example configuration for Forgejo (fork of Gitea). ([\#17872](https://github.com/element-hq/synapse/issues/17872))
+- Link to element-docker-demo from contrib/docker*. ([\#17953](https://github.com/element-hq/synapse/issues/17953))
+
+### Internal Changes
+
+- [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108): Add a `Content-Type` header on the `PUT` response to work around a faulty behavior in some caching reverse proxies. ([\#17253](https://github.com/element-hq/synapse/issues/17253))
+- Fix incorrect comment in new schema delta. ([\#17936](https://github.com/element-hq/synapse/issues/17936))
+- Raise setuptools_rust version cap to 1.10.2. ([\#17944](https://github.com/element-hq/synapse/issues/17944))
+- Enable encrypted appservice related experimental features in the complement docker image. ([\#17945](https://github.com/element-hq/synapse/issues/17945))
+- Return whether the user is suspended when querying the user account in the Admin API. ([\#17952](https://github.com/element-hq/synapse/issues/17952))
+- Fix new scheduled tasks jumping the queue. ([\#17962](https://github.com/element-hq/synapse/issues/17962))
+- Bump pyo3 and dependencies to v0.23.2. ([\#17966](https://github.com/element-hq/synapse/issues/17966))
+- Update setuptools-rust and fix building abi3 wheels in latest version. ([\#17969](https://github.com/element-hq/synapse/issues/17969))
+- Consolidate SSO redirects through `/_matrix/client/v3/login/sso/redirect(/{idpId})`. ([\#17972](https://github.com/element-hq/synapse/issues/17972))
+- Fix Docker and Complement config to be able to use `public_baseurl`. ([\#17986](https://github.com/element-hq/synapse/issues/17986))
+- Fix building wheels for MacOS which was temporarily disabled in Synapse 1.120.2. ([\#17993](https://github.com/element-hq/synapse/issues/17993))
+- Fix release process to not create duplicate releases. ([\#17970](https://github.com/element-hq/synapse/issues/17970), [\#17995](https://github.com/element-hq/synapse/issues/17995))
+
+
+### Updates to locked dependencies
+
+* Bump bytes from 1.8.0 to 1.9.0. ([\#17982](https://github.com/element-hq/synapse/issues/17982))
+* Bump pysaml2 from 7.3.1 to 7.5.0. ([\#17978](https://github.com/element-hq/synapse/issues/17978))
+* Bump serde_json from 1.0.132 to 1.0.133. ([\#17939](https://github.com/element-hq/synapse/issues/17939))
+* Bump tomli from 2.0.2 to 2.1.0. ([\#17959](https://github.com/element-hq/synapse/issues/17959))
+* Bump tomli from 2.1.0 to 2.2.1. ([\#17979](https://github.com/element-hq/synapse/issues/17979))
+* Bump tornado from 6.4.1 to 6.4.2. ([\#17955](https://github.com/element-hq/synapse/issues/17955))
+
 # Synapse 1.120.2 (2024-12-03)
 
 This version has building of wheels for macOS disabled.
