@@ -467,6 +467,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.hs = self.setup_test_homeserver()
 
+        # This application service uses the new MSC4190 behaviours
         self.msc4190_service = ApplicationService(
             id="msc4190",
             token="some_token",
@@ -477,7 +478,8 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             },
             msc4190_device_management=True,
         )
-        self.regular_service = ApplicationService(
+        # This application service doesn't use the new MSC4190 behaviours
+        self.pre_msc_service = ApplicationService(
             id="regular",
             token="other_token",
             hs_token="other_token",
@@ -488,12 +490,12 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             msc4190_device_management=False,
         )
         self.hs.get_datastores().main.services_cache.append(self.msc4190_service)
-        self.hs.get_datastores().main.services_cache.append(self.regular_service)
+        self.hs.get_datastores().main.services_cache.append(self.pre_msc_service)
         return self.hs
 
     def test_PUT_device(self) -> None:
         self.register_appservice_user("alice", self.msc4190_service.token)
-        self.register_appservice_user("bob", self.regular_service.token)
+        self.register_appservice_user("bob", self.pre_msc_service.token)
 
         channel = self.make_request(
             "GET",
@@ -535,7 +537,7 @@ class MSC4190AppserviceDevicesTestCase(unittest.HomeserverTestCase):
             "PUT",
             "/_matrix/client/v3/devices/AABBCCDD?user_id=@bob:test",
             content={"display_name": "Bob's device"},
-            access_token=self.regular_service.token,
+            access_token=self.pre_msc_service.token,
         )
         self.assertEqual(channel.code, 404, channel.json_body)
 
