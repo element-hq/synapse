@@ -5580,24 +5580,24 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         Test that new invites that arrive after a provided timestamp are counted
         """
         # grab a current timestamp
-        invites_sent_ts = self.hs.get_clock().time_msec()
+        before_invites_sent_ts = self.hs.get_clock().time_msec()
 
         # bad user sends some invites
         for room_id in [self.room1, self.room2]:
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        # advance clock 48 hours
-        self.reactor.advance(ONE_DAY_MS * 2)
-
         # fetch using timestamp, all should be returned
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 8)
+
+        # advance clock slightly to avoid ratelimiting when sending new invites
+        self.reactor.advance(60)
 
         # send some more invites, they should show up in addition to original 8 using same timestamp
         for user in self.random_users:
@@ -5607,7 +5607,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5622,17 +5622,12 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        # advance clock 48 hours
-        self.reactor.advance(ONE_DAY_MS * 2)
-
-        # get a timestamp beginning 24 hours ago
-        current_time = self.hs.get_clock().time_msec()
-        from_ts = current_time - (ONE_DAY_MS)
+        after_invites_sent_ts = self.hs.get_clock().time_msec()
 
         # fetch invites with timestamp, none should be returned
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={from_ts}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={after_invites_sent_ts}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5643,20 +5638,17 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         Test that kicks and bans are not counted in invite count
         """
         # grab a current timestamp
-        invites_sent_ts = self.hs.get_clock().time_msec()
+        before_invites_sent_ts = self.hs.get_clock().time_msec()
 
         # bad user sends some invites (8)
         for room_id in [self.room1, self.room2]:
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        # advance clock 48 hours
-        self.reactor.advance(ONE_DAY_MS * 2)
-
         # fetch using timestamp, all invites sent should be counted
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
@@ -5679,7 +5671,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={invites_sent_ts}",
+            f"/_synapse/admin/v1/users/{self.bad_user}/sent_invite_count?from_ts={before_invites_sent_ts}",
             access_token=self.admin_tok,
         )
         self.assertEqual(channel.code, 200)
