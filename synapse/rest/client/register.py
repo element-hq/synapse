@@ -908,6 +908,14 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
         await self.ratelimiter.ratelimit(None, client_addr, update=False)
 
+        # Allow only ASes to use this API.
+        if body.get("type") != APP_SERVICE_REGISTRATION_TYPE:
+            raise SynapseError(
+                403,
+                "Registration has been disabled. Only m.login.application_service registrations are allowed.",
+                errcode=Codes.FORBIDDEN,
+            )
+
         kind = parse_string(request, "kind", default="user")
 
         if kind == "guest":
@@ -922,10 +930,6 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
         desired_username = body.get("username")
         if not isinstance(desired_username, str) or len(desired_username) > 512:
             raise SynapseError(400, "Invalid username")
-
-        # Allow only ASes to use this API.
-        if body.get("type") != APP_SERVICE_REGISTRATION_TYPE:
-            raise SynapseError(403, "Non-application service registration type")
 
         if not self.auth.has_access_token(request):
             raise SynapseError(
