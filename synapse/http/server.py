@@ -789,7 +789,12 @@ def respond_with_json(
     else:
         encoder = _encode_json_bytes
 
-    request.setHeader(b"Content-Type", b"application/json")
+    content_types = dict(request.responseHeaders.getAllRawHeaders()).get(
+        b"Content-Type"
+    )
+    content_type = content_types[0] if content_types else b"application/json"
+    request.setHeader(b"Content-Type", content_type)
+
     request.setHeader(b"Cache-Control", b"no-cache, no-store, must-revalidate")
 
     if send_cors:
