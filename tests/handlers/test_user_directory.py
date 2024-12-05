@@ -796,6 +796,7 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
+        # Kept old spam checker without `requester_id` tests for backwards compatibility.
         async def allow_all(user_profile: UserProfile) -> bool:
             # Allow all users.
             return False
@@ -809,12 +810,47 @@ class UserDirectoryTestCase(unittest.HomeserverTestCase):
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
         self.assertEqual(len(s["results"]), 1)
 
+        # Kept old spam checker without `requester_id` tests for backwards compatibility.
         # Configure a spam checker that filters all users.
         async def block_all(user_profile: UserProfile) -> bool:
             # All users are spammy.
             return True
 
         spam_checker._check_username_for_spam_callbacks = [block_all]
+
+        # User1 now gets no search results for any of the other users.
+        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        self.assertEqual(len(s["results"]), 0)
+
+        async def allow_all_expects_requester_id(
+            user_profile: UserProfile, requester_id: str
+        ) -> bool:
+            self.assertEqual(requester_id, u1)
+            # Allow all users.
+            return False
+
+        # Configure a spam checker that does not filter any users.
+        spam_checker = self.hs.get_module_api_callbacks().spam_checker
+        spam_checker._check_username_for_spam_callbacks = [
+            allow_all_expects_requester_id
+        ]
+
+        # The results do not change:
+        # We get one search result when searching for user2 by user1.
+        s = self.get_success(self.handler.search_users(u1, "user2", 10))
+        self.assertEqual(len(s["results"]), 1)
+
+        # Configure a spam checker that filters all users.
+        async def block_all_expects_requester_id(
+            user_profile: UserProfile, requester_id: str
+        ) -> bool:
+            self.assertEqual(requester_id, u1)
+            # All users are spammy.
+            return True
+
+        spam_checker._check_username_for_spam_callbacks = [
+            block_all_expects_requester_id
+        ]
 
         # User1 now gets no search results for any of the other users.
         s = self.get_success(self.handler.search_users(u1, "user2", 10))
