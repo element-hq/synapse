@@ -115,10 +115,14 @@ class RecaptchaAuthChecker(UserInteractiveAuthChecker):
             raise LoginError(
                 400, "Captcha response is required", errcode=Codes.CAPTCHA_NEEDED
             )
+        try:
+            _ = authdict["session"]
+        except KeyError:
+            # Client tried to provide captcha but didn't give the session ID:
+            # bad request.
+            raise LoginError(400, "Missing UIA session", Codes.MISSING_PARAM)
 
-        logger.info(
-            "Submitting recaptcha response %s with remoteip %s", user_response, clientip
-        )
+        logger.debug("Submitting recaptcha response %s", user_response)
 
         # TODO: get this from the homeserver rather than creating a new one for
         # each request
