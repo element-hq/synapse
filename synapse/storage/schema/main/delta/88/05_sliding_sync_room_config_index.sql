@@ -12,7 +12,9 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 
--- Add an index on `current_state_delta_stream(room_id, stream_id)` to allow
--- efficient per-room lookups.
+-- Add an index on sliding_sync_connection_room_configs(required_state_id), so
+-- that when we delete entries in `sliding_sync_connection_required_state` it's
+-- efficient for Postgres to check they've been deleted from
+-- `sliding_sync_connection_room_configs` too
 INSERT INTO background_updates (ordering, update_name, progress_json) VALUES
-    (8804, 'current_state_delta_stream_room_index', '{}');
+    (8805, 'sliding_sync_connection_room_configs_required_state_id_idx', '{}');

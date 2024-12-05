@@ -128,6 +128,29 @@ removing the experimental support for it in this release.
 The `experimental_features.msc3886_endpoint` configuration option has
 been removed.
 
+## Authenticated media is now enforced by default
+
+The [`enable_authenticated_media`] configuration option now defaults to true.
+
+This means that clients and remote (federated) homeservers now need to use
+the authenticated media endpoints in order to download media from your
+homeserver.
+
+As an exception, existing media that was stored on the server prior to
+this option changing to `true` will still be accessible over the
+unauthenticated endpoints.
+
+The matrix.org homeserver has already been running with this option enabled
+since September 2024, so most common clients and homeservers should already
+be compatible.
+
+With that said, administrators who wish to disable this feature for broader
+compatibility can still do so by manually configuring
+`enable_authenticated_media: False`.
+
+[`enable_authenticated_media`]: usage/configuration/config_documentation.md#enable_authenticated_media
+
+
 # Upgrading to v1.119.0
 
 ## Minimum supported Python version

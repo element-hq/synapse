@@ -231,6 +231,8 @@ class EventContentFields:
     ROOM_NAME: Final = "name"
 
     MEMBERSHIP: Final = "membership"
+    MEMBERSHIP_DISPLAYNAME: Final = "displayname"
+    MEMBERSHIP_AVATAR_URL: Final = "avatar_url"
 
     # Used in m.room.guest_access events.
     GUEST_ACCESS: Final = "guest_access"

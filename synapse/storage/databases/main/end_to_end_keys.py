@@ -1453,6 +1453,54 @@ class EndToEndKeyWorkerStore(EndToEndKeyBackgroundStore, CacheInvalidationWorker
             impl,
         )
 
+    async def delete_old_otks_for_next_user_batch(
+        self, after_user_id: str, number_of_users: int
+    ) -> Tuple[List[str], int]:
+        """Deletes old OTKs belonging to the next batch of users
+
+        Returns:
+            `(users, rows)`, where:
+             * `users` is the user IDs of the updated users. An empty list if we are done.
+             * `rows` is the number of deleted rows
+        """
+
+        def impl(txn: LoggingTransaction) -> Tuple[List[str], int]:
+            # Find a batch of users
+            txn.execute(
+                """
+                SELECT DISTINCT(user_id) FROM e2e_one_time_keys_json
+                    WHERE user_id > ?
+                    ORDER BY user_id
+                    LIMIT ?
+                """,
+                (after_user_id, number_of_users),
+            )
+            users = [row[0] for row in txn.fetchall()]
+            if len(users) == 0:
+                return users, 0
+
+            # Delete any old OTKs belonging to those users.
+            #
+            # We only actually consider OTKs whose key ID is 6 characters long. These
+            # keys were likely made by libolm rather than Vodozemac; libolm only kept
+            # 100 private OTKs, so was far more vulnerable than Vodozemac to throwing
+            # away keys prematurely.
+            clause, args = make_in_list_sql_clause(
+                txn.database_engine, "user_id", users
+            )
+            sql = f"""
+                DELETE FROM e2e_one_time_keys_json
+                WHERE {clause} AND ts_added_ms < ? AND length(key_id) = 6
+                """
+            args.append(self._clock.time_msec() - (7 * 24 * 3600 * 1000))
+            txn.execute(sql, args)
+
+            return users, txn.rowcount
+
+        return await self.db_pool.runInteraction(
+            "delete_old_otks_for_next_user_batch", impl
+        )
+
 
 class EndToEndKeyStore(EndToEndKeyWorkerStore, SQLBaseStore):
     def __init__(

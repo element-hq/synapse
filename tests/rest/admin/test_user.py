@@ -45,6 +45,7 @@ from synapse.rest.client import (
     devices,
     login,
     logout,
+    media,
     profile,
     register,
     room,
@@ -3221,6 +3222,7 @@ class UserRestTestCase(unittest.HomeserverTestCase):
         self.assertIn("consent_ts", content)
         self.assertIn("external_ids", content)
         self.assertIn("last_seen_ts", content)
+        self.assertIn("suspended", content)
 
         # This key was removed intentionally. Ensure it is not accidentally re-included.
         self.assertNotIn("password_hash", content)
@@ -3517,6 +3519,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
         login.register_servlets,
+        media.register_servlets,
     ]
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -4023,7 +4026,7 @@ class UserMediaRestTestCase(unittest.HomeserverTestCase):
         # Try to access a media and to create `last_access_ts`
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=user_token,
         )
@@ -5028,7 +5031,6 @@ class UserSuspensionTestCase(unittest.HomeserverTestCase):
 
         self.store = hs.get_datastores().main
 
-    @override_config({"experimental_features": {"msc3823_account_suspension": True}})
     def test_suspend_user(self) -> None:
         # test that suspending user works
         channel = self.make_request(
