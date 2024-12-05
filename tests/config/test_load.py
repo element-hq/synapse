@@ -131,6 +131,8 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         [
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
+            "recaptcha_private_key_path: /does/not/exist",
+            "recaptcha_public_key_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
             * (hiredis is not None),
         ]
@@ -151,6 +153,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "registration_shared_secret_path: {}",
                 lambda c: c.registration.registration_shared_secret,
+            ),
+            (
+                "recaptcha_private_key_path: {}",
+                lambda c: c.captcha.recaptcha_private_key,
+            ),
+            (
+                "recaptcha_public_key_path: {}",
+                lambda c: c.captcha.recaptcha_public_key,
             ),
             *[
                 (
