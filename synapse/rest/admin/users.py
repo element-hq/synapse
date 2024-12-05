@@ -983,7 +983,7 @@ class UserAdminServlet(RestServlet):
 
 class UserMembershipRestServlet(RestServlet):
     """
-    Get room list of an user.
+    Get list of joined room ID's for a user.
     """
 
     PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/joined_rooms$")
@@ -997,10 +997,15 @@ class UserMembershipRestServlet(RestServlet):
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
+        from_ts = parse_integer(request, "from_ts")
 
-        room_ids = await self.store.get_rooms_for_user(user_id)
-        ret = {"joined_rooms": list(room_ids), "total": len(room_ids)}
-        return HTTPStatus.OK, ret
+        if from_ts is not None:
+            room_ids = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
+        else:
+            room_ids = await self.store.get_rooms_for_user(user_id)
+        rooms_response = {"joined_rooms": list(room_ids), "total": len(room_ids)}
+
+        return HTTPStatus.OK, rooms_response
 
 
 class PushersRestServlet(RestServlet):
@@ -1501,3 +1506,27 @@ class RedactUserStatus(RestServlet):
                 }
         else:
             raise NotFoundError("redact id '%s' not found" % redact_id)
+
+
+class UserInvitesCount(RestServlet):
+    """
+    Return the count of invites that the user has sent after the given timestamp
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/sent_invite_count")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+        from_ts = parse_integer(request, "from_ts", required=True)
+
+        sent_invite_count = await self.store.get_sent_invite_count_by_user(
+            user_id, from_ts
+        )
+
+        return HTTPStatus.OK, {"invite_count": sent_invite_count}
