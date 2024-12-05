@@ -275,58 +275,6 @@ class UnstableProfileRestServlet(RestServlet):
 
         return 200, await self.profile_handler.get_profile(user_id)
 
-    async def on_PATCH(
-        self, request: SynapseRequest, user_id: str
-    ) -> Tuple[int, JsonDict]:
-        requester = await self.auth.get_user_by_req(request)
-        user = UserID.from_string(user_id)
-        is_admin = await self.auth.is_server_admin(requester)
-
-        content = parse_json_object_from_request(request)
-
-        for field_name in content.keys():
-            if not field_name:
-                raise SynapseError(
-                    400, "Field name too short", errcode=Codes.INVALID_PARAM
-                )
-
-            if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-                raise SynapseError(
-                    400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
-                )
-
-        propagate = _read_propagate(self.hs, request)
-
-        requester_suspended = (
-            await self.hs.get_datastores().main.get_user_suspended_status(
-                requester.user.to_string()
-            )
-        )
-
-        if requester_suspended:
-            raise SynapseError(
-                403,
-                "Updating profile while account is suspended is not allowed.",
-                Codes.USER_ACCOUNT_SUSPENDED,
-            )
-
-        # TODO This isn't idempotent.
-        for field_name, new_value in content.items():
-            if field_name == ProfileFields.DISPLAYNAME:
-                await self.profile_handler.set_displayname(
-                    user, requester, new_value, is_admin, propagate=propagate
-                )
-            elif field_name == ProfileFields.AVATAR_URL:
-                await self.profile_handler.set_avatar_url(
-                    user, requester, new_value, is_admin, propagate=propagate
-                )
-            else:
-                await self.profile_handler.set_profile_field(
-                    user, requester, field_name, new_value, is_admin
-                )
-
-        return 200, {}
-
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:

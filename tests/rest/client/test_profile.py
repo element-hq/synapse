@@ -567,29 +567,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             channel.json_body, {"custom_field": "test", "displayname": "blah"}
         )
 
-        # Updating with PATCH should work.
-        channel = self.make_request(
-            "PATCH",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
-            content={"custom_field": "new_Value", "extra_field": "value"},
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
-        )
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {
-                "custom_field": "new_Value",
-                "displayname": "blah",
-                "extra_field": "value",
-            },
-        )
-
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_non_string(self) -> None:
         """Non-string fields are supported for custom fields."""
@@ -830,34 +807,6 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             {
                 "avatar_url": "mxc://test/good",
                 "displayname": "test",
-                "custom": "foo",
-            },
-        )
-
-        # Update some fields.
-        channel = self.make_request(
-            "PATCH",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
-            content={
-                "avatar_url": "mxc://test/second",
-                "displayname": "new_name",
-                "new_field": "test",
-            },
-            access_token=self.owner_tok,
-        )
-        self.assertEqual(channel.code, 200, channel.result)
-
-        channel = self.make_request(
-            "GET",
-            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}",
-        )
-        self.assertEqual(channel.code, HTTPStatus.OK, channel.result)
-        self.assertEqual(
-            channel.json_body,
-            {
-                "avatar_url": "mxc://test/second",
-                "displayname": "new_name",
-                "new_field": "test",
                 "custom": "foo",
             },
         )
