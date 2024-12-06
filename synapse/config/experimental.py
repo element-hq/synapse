@@ -80,6 +80,23 @@ def _check_client_secret(
     instance.client_secret()
 
 
+def _check_admin_token(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+) -> None:
+    if instance._admin_token and instance._admin_token_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.admin_token` and "
+                "`experimental_features.msc3861.admin_token_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "admin_token"),
+        )
+    # Check client secret can be retrieved
+    instance.admin_token()
+
+
 @attr.s(slots=True, frozen=True)
 class MSC3861:
     """Configuration for MSC3861: Matrix architecture change to delegate authentication via OIDC"""
@@ -184,13 +201,28 @@ class MSC3861:
     )
     """The URL of the My Account page on the OIDC Provider as per MSC2965."""
 
-    admin_token: Optional[str] = attr.ib(
+    _admin_token: Optional[str] = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
     )
     """
     A token that should be considered as an admin token.
     This is used by the OIDC provider, to make admin calls to Synapse.
+    """
+
+    _admin_token_path: Optional[str] = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_admin_token,
+        ],
+    )
+    """
+    Alternative to `admin_token`: allows the secret to be specified in an
+    external file.
     """
 
     def client_secret(self) -> Optional[str]:
@@ -204,6 +236,18 @@ class MSC3861:
                 ("experimental_features", "msc3861", "client_secret_path"),
             ).strip()
         return self._client_secret
+
+    def admin_token(self) -> Optional[str]:
+        """Returns the admin token.
+
+        If admin_token_path is given, the token is always read from file.
+        """
+        if self._admin_token_path:
+            return read_file(
+                self._admin_token_path,
+                ("experimental_features", "msc3861", "admin_token_path"),
+            ).strip()
+        return self._admin_token
 
     def check_config_conflicts(self, root: RootConfig) -> None:
         """Checks for any configuration conflicts with other parts of Synapse.

@@ -19,7 +19,7 @@
 #
 #
 import logging
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 from urllib.parse import urlencode
 
 from authlib.oauth2 import ClientAuth
@@ -119,7 +119,7 @@ class MSC3861DelegatedAuth(BaseAuth):
         self._clock = hs.get_clock()
         self._http_client = hs.get_proxied_http_client()
         self._hostname = hs.hostname
-        self._admin_token = self._config.admin_token
+        self._admin_token: Callable[[], Optional[str]] = self._config.admin_token
 
         self._issuer_metadata = RetryOnExceptionCachedCall[OpenIDProviderMetadata](
             self._load_metadata
@@ -278,7 +278,7 @@ class MSC3861DelegatedAuth(BaseAuth):
             requester = await self.get_user_by_access_token(access_token, allow_expired)
 
         # Do not record requests from MAS using the virtual `__oidc_admin` user.
-        if access_token != self._admin_token:
+        if access_token != self._admin_token():
             await self._record_request(request, requester)
 
         if not allow_guest and requester.is_guest:
@@ -319,7 +319,8 @@ class MSC3861DelegatedAuth(BaseAuth):
         token: str,
         allow_expired: bool = False,
     ) -> Requester:
-        if self._admin_token is not None and token == self._admin_token:
+        admin_token = self._admin_token()
+        if admin_token is not None and token == admin_token:
             # XXX: This is a temporary solution so that the admin API can be called by
             # the OIDC provider. This will be removed once we have OIDC client
             # credentials grant support in matrix-authentication-service.
