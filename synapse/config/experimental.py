@@ -27,7 +27,7 @@ import attr.validators
 
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config import ConfigError
-from synapse.config._base import Config, RootConfig
+from synapse.config._base import Config, RootConfig, read_file
 from synapse.types import JsonDict
 
 # Determine whether authlib is installed.
@@ -61,6 +61,23 @@ def _parse_jwks(jwks: Optional[JsonDict]) -> Optional["JsonWebKey"]:
     from authlib.jose.rfc7517 import JsonWebKey
 
     return JsonWebKey.import_key(jwks)
+
+
+def _check_client_secret(
+    instance: "MSC3861", _attribute: attr.Attribute, _value: Optional[str]
+) -> None:
+    if instance._client_secret and instance._client_secret_path:
+        raise ConfigError(
+            (
+                "You have configured both "
+                "`experimental_features.msc3861.client_secret` and "
+                "`experimental_features.msc3861.client_secret_path`. "
+                "These are mutually incompatible."
+            ),
+            ("experimental", "msc3861", "client_secret"),
+        )
+    # Check client secret can be retrieved
+    instance.client_secret()
 
 
 @attr.s(slots=True, frozen=True)
@@ -97,13 +114,28 @@ class MSC3861:
     )
     """The auth method used when calling the introspection endpoint."""
 
-    client_secret: Optional[str] = attr.ib(
+    _client_secret: Optional[str] = attr.ib(
         default=None,
-        validator=attr.validators.optional(attr.validators.instance_of(str)),
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
     )
     """
     The client secret to use when calling the introspection endpoint,
     when using any of the client_secret_* client auth methods.
+    """
+
+    _client_secret_path: Optional[str] = attr.ib(
+        default=None,
+        validator=[
+            attr.validators.optional(attr.validators.instance_of(str)),
+            _check_client_secret,
+        ],
+    )
+    """
+    Alternative to `client_secret`: allows the secret to be specified in an
+    external file.
     """
 
     jwk: Optional["JsonWebKey"] = attr.ib(default=None, converter=_parse_jwks)
@@ -133,7 +165,7 @@ class MSC3861:
                 ClientAuthMethod.CLIENT_SECRET_BASIC,
                 ClientAuthMethod.CLIENT_SECRET_JWT,
             )
-            and self.client_secret is None
+            and self.client_secret() is None
         ):
             raise ConfigError(
                 f"A client secret must be provided when using the {value} client auth method",
@@ -160,6 +192,18 @@ class MSC3861:
     A token that should be considered as an admin token.
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
+
+    def client_secret(self) -> Optional[str]:
+        """Returns the client secret.
+
+        If client_secret_path is given, the secret is always read from file.
+        """
+        if self._client_secret_path:
+            return read_file(
+                self._client_secret_path,
+                ("experimental_features", "msc3861", "client_secret_path"),
+            ).strip()
+        return self._client_secret
 
     def check_config_conflicts(self, root: RootConfig) -> None:
         """Checks for any configuration conflicts with other parts of Synapse.

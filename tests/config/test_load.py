@@ -131,6 +131,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         [
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
+            "experimental_features:\n  msc3861:\n    client_secret_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
             * (hiredis is not None),
         ]
@@ -151,6 +152,10 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "registration_shared_secret_path: {}",
                 lambda c: c.registration.registration_shared_secret,
+            ),
+            (
+                "experimental_features:\n  msc3861:\n    client_secret_path: {}",
+                lambda c: c.experimental.msc3861.client_secret(),
             ),
             *[
                 (

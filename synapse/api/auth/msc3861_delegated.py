@@ -133,9 +133,10 @@ class MSC3861DelegatedAuth(BaseAuth):
             )
         else:
             # Else use the client secret
-            assert self._config.client_secret, "No client_secret provided"
+            client_secret = self._config.client_secret()
+            assert client_secret, "No client_secret provided"
             self._client_auth = ClientAuth(
-                self._config.client_id, self._config.client_secret, auth_method
+                self._config.client_id, client_secret, auth_method
             )
 
     async def _load_metadata(self) -> OpenIDProviderMetadata:
