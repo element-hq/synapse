@@ -34,6 +34,7 @@ pyo3 = { version = "0.21.0", features = [
     "macros",
     "anyhow",
     "abi3",
+    "abi3-py39",
 ] }
 pyo3-log = "0.10.0"
 pythonize = "0.21.0"
