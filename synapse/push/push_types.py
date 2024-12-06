@@ -18,9 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import List, Optional
-
-from typing_extensions import TypedDict
+from typing import List, Optional, TypedDict
 
 
 class EmailReason(TypedDict, total=False):
