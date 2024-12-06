@@ -1,1 +1,1 @@
-Removed redundant regular expressions for account data, receipts and presence requests from the documentation on generic_worker. Contributed by @evoL.
+Reorganized regular expressions for account data, receipts and presence requests in the documentation on generic_worker. This is because POST requests to those paths require the worker to be configured as a stream writer. Contributed by @evoL.
