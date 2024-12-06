@@ -292,7 +292,9 @@ class UnstableProfileRestServlet(RestServlet):
 
             if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
                 raise SynapseError(
-                    400, f"Field name too long: {field_name}", errcode=Codes.TOO_LARGE
+                    400,
+                    f"Field name too long: {field_name}",
+                    errcode=Codes.KEY_TOO_LARGE,
                 )
 
         propagate = _read_propagate(self.hs, request)
@@ -441,7 +443,7 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.TOO_LARGE)
+            raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
 
         propagate = _read_propagate(self.hs, request)
 

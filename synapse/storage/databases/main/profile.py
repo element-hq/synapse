@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Dict, Optional, Tuple, cast
 from canonicaljson import encode_canonical_json
 
 from synapse.api.constants import ProfileFields
-from synapse.api.errors import StoreError
+from synapse.api.errors import Codes, StoreError
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
     DatabasePool,
@@ -366,7 +366,7 @@ class ProfileWorkerStore(SQLBaseStore):
         total_bytes += len(encode_canonical_json({new_field_name: new_value}))
 
         if total_bytes > MAX_PROFILE_SIZE:
-            raise StoreError(400, "Profile too large")
+            raise StoreError(400, "Profile too large", Codes.PROFILE_TOO_LARGE)
 
     async def set_profile_displayname(
         self, user_id: UserID, new_displayname: Optional[str]
