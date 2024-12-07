@@ -174,6 +174,7 @@ class VersionsRestServlet(RestServlet):
                     "org.matrix.msc4151": self.config.experimental.msc4151_enabled,
                     # Simplified sliding sync
                     "org.matrix.simplified_msc3575": msc3575_enabled,
+                    "org.matrix.msc4174": self.config.experimental.msc4174.enabled,
                 },
             },
         )

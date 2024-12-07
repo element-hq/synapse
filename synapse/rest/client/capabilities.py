@@ -92,6 +92,12 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": self.config.experimental.msc3664_enabled,
             }
 
+        if self.config.experimental.msc4174.enabled:
+            response["capabilities"]["org.matrix.msc4174.webpush"] = {
+                "enabled": True,
+                "vapid": self.config.experimental.msc4174.vapid_app_server_key,
+            }
+
         return HTTPStatus.OK, response
 
 
