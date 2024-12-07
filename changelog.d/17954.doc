@@ -1,1 +1,1 @@
-Reorganized regular expressions for account data, receipts and presence requests in the documentation on generic_worker. This is because POST requests to those paths require the worker to be configured as a stream writer. Contributed by @evoL.
+Update `synapse.app.generic_worker` documentation to only recommend `GET` requests for stream writer routes by default, unless the worker is also configured as a stream writer. Contributed by @evoL.
