@@ -1866,6 +1866,25 @@ rc_federation:
   concurrent: 5
 ```
 ---
+### `rc_delayed_event`
+
+
+Ratelimiting settings for delayed event management.
+
+This is a ratelimiting option that ratelimits
+attempts to restart, cancel, or view delayed events
+based on the account the client is using.
+It defaults to: `per_second: 10`, `burst_count: 100`.
+
+Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
+
+Example configuration:
+```yaml
+rc_delayed_event:
+  per_second: 5
+  burst_count: 50
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 Sets outgoing federation transaction frequency for sending read-receipts,
