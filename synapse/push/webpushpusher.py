@@ -300,7 +300,9 @@ class HttpDelayedRequest:
     status_code: int = 200
     text: Optional[str] = None
 
-    def __init__(self, endpoint: str, data: bytes, webpush_headers: CaseInsensitiveDict):
+    def __init__(
+        self, endpoint: str, data: bytes, webpush_headers: CaseInsensitiveDict
+    ):
         self.endpoint = endpoint
         self.data = data
         self.webpush_headers = webpush_headers
