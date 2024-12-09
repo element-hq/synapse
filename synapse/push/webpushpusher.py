@@ -300,10 +300,10 @@ class HttpDelayedRequest:
     status_code: int = 200
     text: Optional[str] = None
 
-    def __init__(self, endpoint: str, data: bytes, vapid_headers: CaseInsensitiveDict):
+    def __init__(self, endpoint: str, data: bytes, webpush_headers: CaseInsensitiveDict):
         self.endpoint = endpoint
         self.data = data
-        self.vapid_headers = vapid_headers
+        self.webpush_headers = webpush_headers
 
     def execute(
         self, http_client: SimpleHttpClient, low_priority: bool, topic: bytes
@@ -311,9 +311,9 @@ class HttpDelayedRequest:
         # Convert the headers to the camelcase version.
         headers = {
             b"User-Agent": ["sygnal"],
-            b"Content-Encoding": [self.vapid_headers["content-encoding"]],
-            b"Authorization": [self.vapid_headers["authorization"]],
-            b"TTL": [self.vapid_headers["ttl"]],
+            b"Content-Encoding": [self.webpush_headers["content-encoding"]],
+            b"Authorization": [self.webpush_headers["authorization"]],
+            b"TTL": [self.webpush_headers["ttl"]],
             b"Urgency": ["low" if low_priority else "normal"],
         }
         if topic:

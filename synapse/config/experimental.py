@@ -283,7 +283,7 @@ class MSC4174Config:
     vapid_contact_email: str = ""
     vapid_private_key: str = ""
     vapid_app_server_key: str = ""
-    ttl: int = 15 * 60
+    ttl: int = 12 * 60 * 60
 
 
 class ExperimentalConfig(Config):
