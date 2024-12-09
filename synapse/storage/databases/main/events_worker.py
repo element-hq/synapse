@@ -104,9 +104,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ONE_HOUR_MS = 60 * 60 * 1000
-ONE_DAY_MS = 24 * ONE_HOUR_MS
-
 
 class DatabaseCorruptionError(RuntimeError):
     """We found an event in the DB that has a persisted event ID that doesn't

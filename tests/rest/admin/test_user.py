@@ -62,9 +62,6 @@ from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.test_utils import SMALL_PNG
 from tests.unittest import override_config
 
-ONE_HOUR_MS = 60 * 60 * 1000
-ONE_DAY_MS = 24 * ONE_HOUR_MS
-
 
 class UserRegisterTestCase(unittest.HomeserverTestCase):
     servlets = [
