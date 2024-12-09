@@ -484,6 +484,9 @@ class FederationServer(FederationBase):
                 # event, we can't derive the `event_id` so there is nothing to use as
                 # the `pdu_results` key. Best we can do is just log for our own record
                 # and move on.
+
+                # If an `event_id` happened to be provided in the
+                # event dictionary, then use that.
                 if possible_event_id != _UNKNOWN_EVENT_ID:
                     pdu_results[possible_event_id] = {
                         "error": f"Failed to convert JSON into event: {e}"
