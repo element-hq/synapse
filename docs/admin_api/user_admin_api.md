@@ -509,15 +509,6 @@ The following parameters should be set in the URL:
 
 - `user_id` - fully qualified: for example, `@user:server.com`.
 
-The following should be set as query parameters in the URL:
-
-- `from_ts` - int. Optional. A timestamp in ms from the unix 
-   epoch - only rooms joined after the provided timestamp will be returned.
-   This works by comparing the provided timestamp to the `received_ts`
-   column in the `events` table.
-   Note: https://currentmillis.com/ is a useful tool for converting dates
-   into timestamps and vice versa.
-
 **Response**
 
 The following fields are returned in the JSON response body:
@@ -549,8 +540,6 @@ The following should be set as query parameters in the URL:
    Note: https://currentmillis.com/ is a useful tool for converting dates
    into timestamps and vice versa.
 
-
-
 A response body like the following is returned:
 
 ```json
@@ -559,6 +548,39 @@ A response body like the following is returned:
 }
 ```
 
+_Added in Synapse 1.121.0_
+
+## Get the cumulative number of rooms a user has joined after a given timestamp
+
+Fetches the number of rooms that the user joined after the given timestamp, even
+if they have subsequently left/been banned from those rooms.
+
+```
+GET /_synapse/admin/v1/users/$<user_id/cumulative_joined_room_count
+```
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+* `user_id`: fully qualified: for example, `@user:server.com`
+
+The following should be set as query parameters in the URL:
+
+* `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
+   invites sent after the provided timestamp will be returned.
+   This works by comparing the provided timestamp to the `received_ts`
+   column in the `events` table.
+   Note: https://currentmillis.com/ is a useful tool for converting dates
+   into timestamps and vice versa.
+
+A response body like the following is returned:
+
+```json
+{
+  "cumulative_joined_room_count": 30
+}
+```
 _Added in Synapse 1.121.0_
 
 ## Account Data

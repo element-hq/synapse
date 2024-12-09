@@ -997,12 +997,8 @@ class UserMembershipRestServlet(RestServlet):
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
         await assert_requester_is_admin(self.auth, request)
-        from_ts = parse_integer(request, "from_ts")
 
-        if from_ts is not None:
-            room_ids = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
-        else:
-            room_ids = await self.store.get_rooms_for_user(user_id)
+        room_ids = await self.store.get_rooms_for_user(user_id)
         rooms_response = {"joined_rooms": list(room_ids), "total": len(room_ids)}
 
         return HTTPStatus.OK, rooms_response
@@ -1530,3 +1526,26 @@ class UserInvitesCount(RestServlet):
         )
 
         return HTTPStatus.OK, {"invite_count": sent_invite_count}
+
+
+class UserJoinedRoomCount(RestServlet):
+    """
+    Return the count of rooms that the user has joined after the given timestamp, even
+    if they have subsequently left/been banned from those rooms.
+    """
+
+    PATTERNS = admin_patterns("/users/(?P<user_id>[^/]*)/cumulative_joined_room_count")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, user_id: str
+    ) -> Tuple[int, JsonDict]:
+        await assert_requester_is_admin(self._auth, request)
+        from_ts = parse_integer(request, "from_ts", required=True)
+
+        joined_rooms = await self.store.get_rooms_for_user_by_date(user_id, from_ts)
+
+        return HTTPStatus.OK, {"cumulative_joined_room_count": len(joined_rooms)}

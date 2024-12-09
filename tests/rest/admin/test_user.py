@@ -3389,41 +3389,6 @@ class UserMembershipRestTestCase(unittest.HomeserverTestCase):
         self.assertEqual(1, channel.json_body["total"])
         self.assertEqual([local_and_remote_room_id], channel.json_body["joined_rooms"])
 
-    def test_from_ts_param(self) -> None:
-        """
-        Tests filtering joined room results by timestamp
-        """
-        # Create rooms and join, grab timestamp before room creation
-        before_room_creation_timestamp = self.hs.get_clock().time_msec()
-        other_user_tok = self.login("user", "pass")
-        number_rooms = 5
-        for _ in range(number_rooms):
-            self.helper.create_room_as(self.other_user, tok=other_user_tok)
-
-        # get a timestamp after room creation and join
-        after_room_creation = self.hs.get_clock().time_msec()
-
-        # Get rooms using this timestamp, there should be none since all rooms were created and joined
-        # before provided timestamp
-        channel = self.make_request(
-            "GET",
-            f"{self.url}?from_ts={int(after_room_creation)}",
-            access_token=self.admin_user_tok,
-        )
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(0, channel.json_body["total"])
-
-        # fetch rooms with the older timestamp before they were created and joined, this should
-        # return the rooms
-        channel = self.make_request(
-            "GET",
-            f"{self.url}?from_ts={int(before_room_creation_timestamp)}",
-            access_token=self.admin_user_tok,
-        )
-        self.assertEqual(200, channel.code, msg=channel.json_body)
-        self.assertEqual(number_rooms, channel.json_body["total"])
-        self.assertEqual(number_rooms, len(channel.json_body["joined_rooms"]))
-
 
 class PushersRestTestCase(unittest.HomeserverTestCase):
     servlets = [
@@ -5618,7 +5583,9 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        after_invites_sent_ts = self.hs.get_clock().time_msec() + 1 # add a ms of space between invite and ts
+        after_invites_sent_ts = (
+            self.hs.get_clock().time_msec() + 1
+        )  # add a ms of space between invite and ts
 
         # fetch invites with timestamp, none should be returned
         channel = self.make_request(
@@ -5672,3 +5639,121 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 8)
+
+
+class GetCumulativeJoinedRoomCountForUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        admin.register_servlets,
+        room.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.admin = self.register_user("thomas", "pass", True)
+        self.admin_tok = self.login("thomas", "pass")
+
+        self.bad_user = self.register_user("teresa", "pass")
+        self.bad_user_tok = self.login("teresa", "pass")
+
+    def test_user_cumulative_joined_room_count(self) -> None:
+        """
+        Tests proper count returned from /cumulative_joined_room_count endpoint
+        """
+        # Create rooms and join, grab timestamp before room creation
+        before_room_creation_timestamp = self.hs.get_clock().time_msec()
+
+        joined_rooms = []
+        for _ in range(3):
+            room = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+            self.helper.join(
+                room, user=self.bad_user, expect_code=200, tok=self.bad_user_tok
+            )
+            joined_rooms.append(room)
+
+        # get a timestamp after room creation and join
+        after_room_creation = self.hs.get_clock().time_msec()
+
+        # Get rooms using this timestamp, there should be none since all rooms were created and joined
+        # before provided timestamp
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(after_room_creation)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(0, channel.json_body["cumulative_joined_room_count"])
+
+        # fetch rooms with the older timestamp before they were created and joined, this should
+        # return the rooms
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )
+
+    def test_user_joined_room_count_includes_left_and_banned_rooms(self) -> None:
+        """
+        Tests proper count returned from /joined_room_count endpoint when user has left
+        or been banned from joined rooms
+        """
+        # Create rooms and join, grab timestamp before room creation
+        before_room_creation_timestamp = self.hs.get_clock().time_msec()
+
+        joined_rooms = []
+        for _ in range(3):
+            room = self.helper.create_room_as(self.admin, tok=self.admin_tok)
+            self.helper.join(
+                room, user=self.bad_user, expect_code=200, tok=self.bad_user_tok
+            )
+            joined_rooms.append(room)
+
+        # fetch rooms with the older timestamp before they were created and joined
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )
+
+        # have the user banned from/leave the joined rooms
+        self.helper.ban(
+            joined_rooms[0],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
+        self.helper.change_membership(
+            joined_rooms[1],
+            src=self.bad_user,
+            targ=self.bad_user,
+            membership="leave",
+            expect_code=200,
+            tok=self.bad_user_tok,
+        )
+        self.helper.ban(
+            joined_rooms[2],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
+
+        # fetch the joined room count again, the number should remain the same as the collected joined rooms
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/users/{self.bad_user}/cumulative_joined_room_count?from_ts={int(before_room_creation_timestamp)}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(200, channel.code, msg=channel.json_body)
+        self.assertEqual(
+            len(joined_rooms), channel.json_body["cumulative_joined_room_count"]
+        )

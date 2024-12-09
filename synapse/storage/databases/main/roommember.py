@@ -1574,7 +1574,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
     async def get_rooms_for_user_by_date(self, user_id: str, from_ts: int) -> frozenset:
         """
-        Fetch a list of rooms that the user has joined since the given timestamp.
+        Fetch a list of rooms that the user has joined since the given timestamp, including
+        those they subsequently have left/been banned from.
 
         Args:
             user_id: user ID of the user to search for
@@ -1584,19 +1585,16 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         def _get_rooms_for_user_by_join_date_txn(
             txn: LoggingTransaction, user_id: str, timestamp: int
         ) -> frozenset:
-            # Note that matching on c.type = 'm.room.member' allows us to benefit from
-            # this index: "current_state_events_member_index" btree (state_key) WHERE type = 'm.room.member'::text
-            # on the current_state_events_table
             sql = """
-                    SELECT rm.room_id
-                    FROM room_memberships AS rm
-                    INNER JOIN events AS e USING (event_id)
-                    WHERE rm.user_id = ?
-                        AND rm.membership = 'join'
-                        AND e.type = 'm.room.member'
-                        AND e.received_ts > ?
+                SELECT rm.room_id
+                FROM room_memberships AS rm
+                INNER JOIN events AS e USING (event_id)
+                WHERE rm.user_id = ?
+                    AND rm.membership = 'join'
+                    AND e.type = 'm.room.member'
+                    AND e.received_ts > ?
             """
-            txn.execute(sql, (user_id, from_ts))
+            txn.execute(sql, (user_id, timestamp))
             return frozenset([r[0] for r in txn])
 
         return await self.db_pool.runInteraction(
