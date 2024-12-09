@@ -39,6 +39,7 @@ from synapse.logging.opentracing import (
     trace,
 )
 from synapse.storage.databases.main.roommember import extract_heroes_from_room_summary
+from synapse.storage.databases.main.state_deltas import StateDelta
 from synapse.storage.databases.main.stream import PaginateFunction
 from synapse.storage.roommember import (
     MemberSummary,
@@ -48,6 +49,7 @@ from synapse.types import (
     MutableStateMap,
     PersistedEventPosition,
     Requester,
+    RoomStreamToken,
     SlidingSyncStreamToken,
     StateMap,
     StrCollection,
@@ -471,6 +473,64 @@ class SlidingSyncHandler:
         return state_map
 
     @trace
+    async def get_current_state_deltas_for_room(
+        self,
+        room_id: str,
+        room_membership_for_user_at_to_token: RoomsForUserType,
+        from_token: RoomStreamToken,
+        to_token: RoomStreamToken,
+    ) -> List[StateDelta]:
+        """
+        Get the state deltas between two tokens taking into account the user's
+        membership. If the user is LEAVE/BAN, we will only get the state deltas up to
+        their LEAVE/BAN event (inclusive).
+
+        (> `from_token` and <= `to_token`)
+        """
+        membership = room_membership_for_user_at_to_token.membership
+        # We don't know how to handle `membership` values other than these. The
+        # code below would need to be updated.
+        assert membership in (
+            Membership.JOIN,
+            Membership.INVITE,
+            Membership.KNOCK,
+            Membership.LEAVE,
+            Membership.BAN,
+        )
+
+        # People shouldn't see past their leave/ban event
+        if membership in (
+            Membership.LEAVE,
+            Membership.BAN,
+        ):
+            to_bound = (
+                room_membership_for_user_at_to_token.event_pos.to_room_stream_token()
+            )
+        # If we are participating in the room, we can get the latest current state in
+        # the room
+        elif membership == Membership.JOIN:
+            to_bound = to_token
+        # We can only rely on the stripped state included in the invite/knock event
+        # itself so there will never be any state deltas to send down.
+        elif membership in (Membership.INVITE, Membership.KNOCK):
+            return []
+        else:
+            # We don't know how to handle this type of membership yet
+            #
+            # FIXME: We should use `assert_never` here but for some reason
+            # the exhaustive matching doesn't recognize the `Never` here.
+            # assert_never(membership)
+            raise AssertionError(
+                f"Unexpected membership {membership} that we don't know how to handle yet"
+            )
+
+        return await self.store.get_current_state_deltas_for_room(
+            room_id=room_id,
+            from_token=from_token,
+            to_token=to_bound,
+        )
+
+    @trace
     async def get_room_sync_data(
         self,
         sync_config: SlidingSyncConfig,
@@ -755,13 +815,19 @@ class SlidingSyncHandler:
 
             stripped_state = []
             if invite_or_knock_event.membership == Membership.INVITE:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("invite_room_state", [])
+                invite_state = invite_or_knock_event.unsigned.get(
+                    "invite_room_state", []
                 )
+                if not isinstance(invite_state, list):
+                    invite_state = []
+
+                stripped_state.extend(invite_state)
             elif invite_or_knock_event.membership == Membership.KNOCK:
-                stripped_state.extend(
-                    invite_or_knock_event.unsigned.get("knock_room_state", [])
-                )
+                knock_state = invite_or_knock_event.unsigned.get("knock_room_state", [])
+                if not isinstance(knock_state, list):
+                    knock_state = []
+
+                stripped_state.extend(knock_state)
 
             stripped_state.append(strip_event(invite_or_knock_event))
 
@@ -790,8 +856,9 @@ class SlidingSyncHandler:
             # TODO: Limit the number of state events we're about to send down
             # the room, if its too many we should change this to an
             # `initial=True`?
-            deltas = await self.store.get_current_state_deltas_for_room(
+            deltas = await self.get_current_state_deltas_for_room(
                 room_id=room_id,
+                room_membership_for_user_at_to_token=room_membership_for_user_at_to_token,
                 from_token=from_bound,
                 to_token=to_token.room_key,
             )

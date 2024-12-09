@@ -213,7 +213,7 @@ jobs:
           tar -cvJf debs.tar.xz debs
       - name: Attach to release
         # Pinned to work around https://github.com/softprops/action-gh-release/issues/445
-        uses: softprops/action-gh-release@v2.0.5
+        uses: softprops/action-gh-release@v0.1.15
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
