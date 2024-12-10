@@ -1,0 +1,1 @@
+Fix a race when registering via email 3pid where 2 different user ids would be created.
