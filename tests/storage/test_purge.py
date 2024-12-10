@@ -25,6 +25,7 @@ from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.util import Clock
 
+from tests.test_utils.event_injection import inject_event
 from tests.unittest import HomeserverTestCase
 
 
@@ -128,3 +129,76 @@ class PurgeTests(HomeserverTestCase):
         self.store._invalidate_local_get_event_cache(create_event.event_id)
         self.get_failure(self.store.get_event(create_event.event_id), NotFoundError)
         self.get_failure(self.store.get_event(first["event_id"]), NotFoundError)
+
+    def test_state_groups_state_decreases(self) -> None:
+        response = self.helper.send(self.room_id, body="first")
+        first_event_id = response["event_id"]
+
+        batches = []
+
+        previous_event_id = first_event_id
+        for i in range(50):
+            state_event1 = self.get_success(
+                inject_event(
+                    self.hs,
+                    type="test.state",
+                    sender=self.user_id,
+                    state_key="",
+                    room_id=self.room_id,
+                    content={"key": i, "e": 1},
+                    prev_event_ids=[previous_event_id],
+                    origin_server_ts=1,
+                )
+            )
+
+            state_event2 = self.get_success(
+                inject_event(
+                    self.hs,
+                    type="test.state",
+                    sender=self.user_id,
+                    state_key="",
+                    room_id=self.room_id,
+                    content={"key": i, "e": 2},
+                    prev_event_ids=[previous_event_id],
+                    origin_server_ts=2,
+                )
+            )
+
+            # print(state_event2.origin_server_ts - state_event1.origin_server_ts)
+
+            message_event = self.get_success(
+                inject_event(
+                    self.hs,
+                    type="dummy_event",
+                    sender=self.user_id,
+                    room_id=self.room_id,
+                    content={},
+                    prev_event_ids=[state_event1.event_id, state_event2.event_id],
+                )
+            )
+
+            token = self.get_success(
+                self.store.get_topological_token_for_event(state_event1.event_id)
+            )
+            batches.append(token)
+
+            previous_event_id = message_event.event_id
+
+        self.helper.send(self.room_id, body="last event")
+
+        def count_state_groups() -> int:
+            sql = "SELECT COUNT(*) FROM state_groups_state WHERE room_id = ?"
+            rows = self.get_success(
+                self.store.db_pool.execute("test_deduplicate_joins", sql, self.room_id)
+            )
+            return rows[0][0]
+
+        print(count_state_groups())
+        for token in batches:
+            token_str = self.get_success(token.to_string(self.hs.get_datastores().main))
+            self.get_success(
+                self._storage_controllers.purge_events.purge_history(
+                    self.room_id, token_str, False
+                )
+            )
+            print(count_state_groups())
