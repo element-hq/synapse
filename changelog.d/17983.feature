@@ -1,0 +1,1 @@
+Add `macaroon_secret_key_path` config option.
