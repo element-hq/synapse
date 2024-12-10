@@ -31,6 +31,11 @@ from tests import unittest
 
 
 class UpdateUpsertManyTests(unittest.HomeserverTestCase):
+    """
+    Integration tests for the "simple" SQL generating methods in SQLBaseStore that
+    actually run against a database.
+    """
+
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
         self.storage = hs.get_datastores().main
 
@@ -128,6 +133,65 @@ class UpdateUpsertManyTests(unittest.HomeserverTestCase):
         self.assertEqual(
             set(self._dump_table_to_tuple()),
             {(1, "user1", "hello"), (2, "user2", "bleb")},
+        )
+
+    def test_upsert_many_with_insertion_values(self) -> None:
+        """
+        Upsert_many will only insert the
+        `insertion_value_names`/`insertion_value_values` (not on update/conflict)
+        """
+        # Add some data to an empty table
+        key_names = ["id", "username"]
+        key_values = [[1, "user1"], [2, "user2"]]
+        value_names: List[str] = []
+        value_values: List[List[str]] = []
+        insertion_value_names = ["value"]
+        insertion_value_values = [["hello"], ["there"]]
+
+        self.get_success(
+            self.storage.db_pool.runInteraction(
+                "test",
+                self.storage.db_pool.simple_upsert_many_txn,
+                self.table_name,
+                key_names,
+                key_values,
+                value_names,
+                value_values,
+                insertion_value_names=insertion_value_names,
+                insertion_value_values=insertion_value_values,
+            )
+        )
+
+        # Check results are what we expect
+        self.assertEqual(
+            set(self._dump_table_to_tuple()),
+            {(1, "user1", "hello"), (2, "user2", "there")},
+        )
+
+        # Update only user2
+        key_values = [[2, "user2"]]
+        # Since this row already exists, when we try to insert it again, it should not
+        # insert the value again.
+        insertion_value_values = [["again"]]
+
+        self.get_success(
+            self.storage.db_pool.runInteraction(
+                "test",
+                self.storage.db_pool.simple_upsert_many_txn,
+                self.table_name,
+                key_names,
+                key_values,
+                value_names,
+                value_values,
+                insertion_value_names=insertion_value_names,
+                insertion_value_values=insertion_value_values,
+            )
+        )
+
+        # Check results are what we expect
+        self.assertEqual(
+            set(self._dump_table_to_tuple()),
+            {(1, "user1", "hello"), (2, "user2", "there")},
         )
 
     def test_simple_update_many(self) -> None:
