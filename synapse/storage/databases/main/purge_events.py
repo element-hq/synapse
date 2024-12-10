@@ -20,7 +20,7 @@
 #
 
 import logging
-from typing import Any, List, Set, Tuple, cast
+from typing import Any, Set, Tuple, cast
 
 from synapse.api.errors import SynapseError
 from synapse.storage.database import LoggingTransaction
@@ -332,7 +332,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         return referenced_state_groups
 
-    async def purge_room(self, room_id: str) -> List[int]:
+    async def purge_room(self, room_id: str) -> None:
         """Deletes all record of a room
 
         Args:
@@ -348,7 +348,7 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         # purge any of those rows which were added during the first.
 
         logger.info("[purge] Starting initial main purge of [1/2]")
-        state_groups_to_delete = await self.db_pool.runInteraction(
+        await self.db_pool.runInteraction(
             "purge_room",
             self._purge_room_txn,
             room_id=room_id,
@@ -356,18 +356,15 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
         )
 
         logger.info("[purge] Starting secondary main purge of [2/2]")
-        state_groups_to_delete.extend(
-            await self.db_pool.runInteraction(
-                "purge_room",
-                self._purge_room_txn,
-                room_id=room_id,
-            ),
+        await self.db_pool.runInteraction(
+            "purge_room",
+            self._purge_room_txn,
+            room_id=room_id,
         )
+
         logger.info("[purge] Done with main purge")
 
-        return state_groups_to_delete
-
-    def _purge_room_txn(self, txn: LoggingTransaction, room_id: str) -> List[int]:
+    def _purge_room_txn(self, txn: LoggingTransaction, room_id: str) -> None:
         # This collides with event persistence so we cannot write new events and metadata into
         # a room while deleting it or this transaction will fail.
         if isinstance(self.database_engine, PostgresEngine):
@@ -380,19 +377,6 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             # Disable statement timeouts for this transaction; purging rooms can
             # take a while!
             txn.execute("SET LOCAL statement_timeout = 0")
-
-        # First, fetch all the state groups that should be deleted, before
-        # we delete that information.
-        txn.execute(
-            """
-                SELECT DISTINCT state_group FROM events
-                INNER JOIN event_to_state_groups USING(event_id)
-                WHERE events.room_id = ?
-            """,
-            (room_id,),
-        )
-
-        state_groups = [row[0] for row in txn]
 
         # Get all the auth chains that are referenced by events that are to be
         # deleted.
@@ -489,6 +473,8 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
             logger.info("[purge] removing from %s", table)
             txn.execute("DELETE FROM %s WHERE room_id=?" % (table,), (room_id,))
 
+        self._purge_room_state_txn(txn, room_id)
+
         # Other tables we do NOT need to clear out:
         #
         #  - blocked_rooms
@@ -514,4 +500,37 @@ class PurgeEventsStore(StateGroupWorkerStore, CacheInvalidationWorkerStore):
 
         self._invalidate_caches_for_room_and_stream(txn, room_id)
 
-        return state_groups
+    def _purge_room_state_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+    ) -> None:
+        # Delete all edges that reference a state group linked to room_id
+        logger.info("[purge] removing %s from state_group_edges", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
+
+        # state_groups_state table has a room_id column but no index on it, unlike state_groups,
+        # so we delete them by matching the room_id through the state_groups table.
+        logger.info("[purge] removing %s from state_groups_state", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_groups_state AS sgs WHERE sgs.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
+
+        logger.info("[purge] removing %s from state_groups", room_id)
+        self.db_pool.simple_delete_many_txn(
+            txn,
+            table="state_groups",
+            column="room_id",
+            values=[room_id],
+            keyvalues={},
+        )
