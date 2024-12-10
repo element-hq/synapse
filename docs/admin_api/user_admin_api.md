@@ -40,6 +40,7 @@ It returns a JSON body like the following:
     "erased": false,
     "shadow_banned": 0,
     "creation_ts": 1560432506,
+    "last_seen_ts": 1732919539393,
     "appservice_id": null,
     "consent_server_notice_sent": null,
     "consent_version": null,
