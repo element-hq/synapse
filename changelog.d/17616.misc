@@ -1,0 +1,1 @@
+Overload DatabasePool.simple_select_one_txn to return non-None when the allow_none parameter is False.
