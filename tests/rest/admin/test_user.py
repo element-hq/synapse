@@ -5031,7 +5031,6 @@ class UserSuspensionTestCase(unittest.HomeserverTestCase):
 
         self.store = hs.get_datastores().main
 
-    @override_config({"experimental_features": {"msc3823_account_suspension": True}})
     def test_suspend_user(self) -> None:
         # test that suspending user works
         channel = self.make_request(
