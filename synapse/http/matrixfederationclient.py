@@ -34,6 +34,7 @@ from typing import (
     Dict,
     Generic,
     List,
+    Literal,
     Optional,
     TextIO,
     Tuple,
@@ -48,7 +49,6 @@ import treq
 from canonicaljson import encode_canonical_json
 from prometheus_client import Counter
 from signedjson.sign import sign_json
-from typing_extensions import Literal
 
 from twisted.internet import defer
 from twisted.internet.error import DNSLookupError

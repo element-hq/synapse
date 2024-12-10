@@ -31,6 +31,7 @@ from typing import (
     List,
     Optional,
     Type,
+    TypedDict,
     TypeVar,
     Union,
 )
@@ -52,7 +53,6 @@ from pymacaroons.exceptions import (
     MacaroonInitException,
     MacaroonInvalidSignatureException,
 )
-from typing_extensions import TypedDict
 
 from twisted.web.client import readBody
 from twisted.web.http_headers import Headers

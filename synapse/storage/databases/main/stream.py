@@ -50,6 +50,7 @@ from typing import (
     Dict,
     Iterable,
     List,
+    Literal,
     Mapping,
     Optional,
     Protocol,
@@ -61,7 +62,7 @@ from typing import (
 
 import attr
 from immutabledict import immutabledict
-from typing_extensions import Literal, assert_never
+from typing_extensions import assert_never
 
 from twisted.internet import defer
 
