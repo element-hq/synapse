@@ -2620,7 +2620,7 @@ class EventsWorkerStore(SQLBaseStore):
                   WHERE rm.sender = ?
                     AND rm.membership = 'invite'
                     AND e.type = 'm.room.member'
-                    AND e.received_ts >= ?
+                    AND e.received_ts > ?
             """
 
             txn.execute(sql, (user_id, from_ts))
