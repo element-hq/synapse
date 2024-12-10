@@ -548,7 +548,7 @@ A response body like the following is returned:
 }
 ```
 
-_Added in Synapse 1.121.0_
+_Added in Synapse 1.122.0_
 
 ## Get the cumulative number of rooms a user has joined after a given timestamp
 
@@ -581,7 +581,7 @@ A response body like the following is returned:
   "cumulative_joined_room_count": 30
 }
 ```
-_Added in Synapse 1.121.0_
+_Added in Synapse 1.122.0_
 
 ## Account Data
 Gets information about account data for a specific `user_id`.
