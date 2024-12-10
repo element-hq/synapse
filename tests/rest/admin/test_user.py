@@ -5520,9 +5520,6 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.bad_user = self.register_user("teresa", "pass")
         self.bad_user_tok = self.login("teresa", "pass")
 
-        self.to_kick = self.register_user("kick_me", "pass")
-        self.to_kick_tok = self.login("kick_me", "pass")
-
         self.random_users = []
         for i in range(4):
             self.random_users.append(self.register_user(f"user{i}", f"pass{i}"))
@@ -5531,8 +5528,9 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         self.room2 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
         self.room3 = self.helper.create_room_as(self.bad_user, tok=self.bad_user_tok)
 
-        self.helper.join(self.room1, self.to_kick, tok=self.to_kick_tok)
-
+    @unittest.override_config(
+        {"rc_invites": {"per_issuer": {"per_second": 1000, "burst_count": 1000}}}
+    )
     def test_get_user_invite_count_new_invites_test_case(self) -> None:
         """
         Test that new invites that arrive after a provided timestamp are counted
@@ -5553,9 +5551,6 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
         self.assertEqual(channel.json_body["invite_count"], 8)
-
-        # advance clock slightly to avoid ratelimiting when sending new invites
-        self.reactor.advance(60)
 
         # send some more invites, they should show up in addition to original 8 using same timestamp
         for user in self.random_users:
@@ -5580,9 +5575,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        after_invites_sent_ts = (
-            self.hs.get_clock().time_msec() + 1
-        )  # add a ms of space between invite and ts
+        after_invites_sent_ts = self.hs.get_clock().time_msec()
 
         # fetch invites with timestamp, none should be returned
         channel = self.make_request(
@@ -5597,13 +5590,20 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         """
         Test that kicks and bans are not counted in invite count
         """
+        to_kick_user_id = self.register_user("kick_me", "pass")
+        to_kick_tok = self.login("kick_me", "pass")
+
+        self.helper.join(self.room1, to_kick_user_id, tok=to_kick_tok)
+
         # grab a current timestamp
         before_invites_sent_ts = self.hs.get_clock().time_msec()
 
         # bad user sends some invites (8)
         for room_id in [self.room1, self.room2]:
             for user in self.random_users:
-                self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
+                self.helper.invite(
+                    room_id, src=self.bad_user, targ=user, tok=self.bad_user_tok
+                )
 
         # fetch using timestamp, all invites sent should be counted
         channel = self.make_request(
@@ -5623,7 +5623,7 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             f"/_matrix/client/v3/rooms/{self.room1}/kick",
-            content={"user_id": f"{self.to_kick}"},
+            content={"user_id": f"{to_kick_user_id}"},
             access_token=self.bad_user_tok,
             shorthand=False,
         )
@@ -5721,28 +5721,24 @@ class GetCumulativeJoinedRoomCountForUserTestCase(unittest.HomeserverTestCase):
         )
 
         # have the user banned from/leave the joined rooms
-        self.helper.ban(
-            joined_rooms[0],
-            src=self.admin,
-            targ=self.bad_user,
-            expect_code=200,
-            tok=self.admin_tok,
-        )
-        self.helper.change_membership(
-            joined_rooms[1],
-            src=self.bad_user,
-            targ=self.bad_user,
-            membership="leave",
-            expect_code=200,
-            tok=self.bad_user_tok,
-        )
-        self.helper.ban(
-            joined_rooms[2],
-            src=self.admin,
-            targ=self.bad_user,
-            expect_code=200,
-            tok=self.admin_tok,
-        )
+        for i, room in enumerate(joined_rooms):
+            if i == 1:
+                self.helper.change_membership(
+                    room,
+                    src=self.bad_user,
+                    targ=self.bad_user,
+                    membership="leave",
+                    expect_code=200,
+                    tok=self.bad_user_tok,
+                )
+            else:
+                self.helper.ban(
+                    room,
+                    src=self.admin,
+                    targ=self.bad_user,
+                    expect_code=200,
+                    tok=self.admin_tok,
+                )
 
         # fetch the joined room count again, the number should remain the same as the collected joined rooms
         channel = self.make_request(
