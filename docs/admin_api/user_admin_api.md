@@ -534,7 +534,7 @@ The following parameters should be set in the URL:
 The following should be set as query parameters in the URL:
 
 * `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
-   invites sent after the provided timestamp will be returned.
+   invites sent at or after the provided timestamp will be returned.
    This works by comparing the provided timestamp to the `received_ts`
    column in the `events` table.
    Note: https://currentmillis.com/ is a useful tool for converting dates
@@ -568,7 +568,7 @@ The following parameters should be set in the URL:
 The following should be set as query parameters in the URL:
 
 * `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
-   invites sent after the provided timestamp will be returned.
+   invites sent at or after the provided timestamp will be returned.
    This works by comparing the provided timestamp to the `received_ts`
    column in the `events` table.
    Note: https://currentmillis.com/ is a useful tool for converting dates

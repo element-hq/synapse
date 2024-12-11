@@ -1530,7 +1530,7 @@ class UserInvitesCount(RestServlet):
 
 class UserJoinedRoomCount(RestServlet):
     """
-    Return the count of rooms that the user has joined after the given timestamp, even
+    Return the count of rooms that the user has joined at or after the given timestamp, even
     if they have subsequently left/been banned from those rooms.
     """
 

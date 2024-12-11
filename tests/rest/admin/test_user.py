@@ -5574,7 +5574,8 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
             for user in self.random_users:
                 self.helper.invite(room_id, self.bad_user, user, tok=self.bad_user_tok)
 
-        after_invites_sent_ts = self.hs.get_clock().time_msec()
+        # add a msec between last invite and ts
+        after_invites_sent_ts = self.hs.get_clock().time_msec() + 1
 
         # fetch invites with timestamp, none should be returned
         channel = self.make_request(
@@ -5667,8 +5668,8 @@ class GetCumulativeJoinedRoomCountForUserTestCase(unittest.HomeserverTestCase):
             )
             joined_rooms.append(room)
 
-        # get a timestamp after room creation and join
-        after_room_creation = self.hs.get_clock().time_msec()
+        # get a timestamp after room creation and join, add a msec between last join and ts
+        after_room_creation = self.hs.get_clock().time_msec() + 1
 
         # Get rooms using this timestamp, there should be none since all rooms were created and joined
         # before provided timestamp

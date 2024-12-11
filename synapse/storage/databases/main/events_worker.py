@@ -2601,7 +2601,7 @@ class EventsWorkerStore(SQLBaseStore):
 
     async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
         """
-        Get the number of invites sent by the given user after the provided timestamp.
+        Get the number of invites sent by the given user at or after the provided timestamp.
 
         Args:
             user_id: user ID to search against
@@ -2620,7 +2620,7 @@ class EventsWorkerStore(SQLBaseStore):
                   WHERE rm.sender = ?
                     AND rm.membership = 'invite'
                     AND e.type = 'm.room.member'
-                    AND e.received_ts > ?
+                    AND e.received_ts >= ?
             """
 
             txn.execute(sql, (user_id, from_ts))
