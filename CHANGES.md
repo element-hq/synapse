@@ -1,17 +1,14 @@
 # Synapse 1.121.0 (2024-12-11)
 
+This release contains the security fixes from [v1.120.2](https://github.com/element-hq/synapse/releases/tag/v1.120.2).
+
 ### Internal Changes
 
 - Fix release process to not create duplicate releases. ([\#18025](https://github.com/element-hq/synapse/issues/18025))
 
 
 
-
 # Synapse 1.121.0rc1 (2024-12-04)
-
-This release candidate contains the security fixes from [v1.120.2](https://github.com/element-hq/synapse/releases/tag/v1.120.2).
-
-New changes listed below.
 
 ### Features
 
