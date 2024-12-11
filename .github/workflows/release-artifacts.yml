@@ -221,3 +221,7 @@ jobs:
             Sdist/*
             Wheel*/*
             debs.tar.xz
+          # if it's not already published, keep the release as a draft.
+          draft: true
+          # mark it as a prerelease if the tag contains 'rc'.
+          prerelease: ${{ contains(github.ref, 'rc') }}
