@@ -1,3 +1,14 @@
+# Synapse 1.121.1 (2024-12-11)
+
+This release contains a fix for our docker build CI. It is functionally identical to 1.121.0, whose changelog is below.
+
+### Internal Changes
+
+- Downgrade the Ubuntu GHA runner when building docker images. ([\#18026](https://github.com/element-hq/synapse/issues/18026))
+
+
+
+
 # Synapse 1.121.0 (2024-12-11)
 
 This release contains the security fixes from [v1.120.2](https://github.com/element-hq/synapse/releases/tag/v1.120.2).
