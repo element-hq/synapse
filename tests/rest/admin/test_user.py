@@ -5623,9 +5623,8 @@ class GetInvitesFromUserTestCase(unittest.HomeserverTestCase):
         channel = self.make_request(
             "POST",
             f"/_matrix/client/v3/rooms/{self.room1}/kick",
-            content={"user_id": f"{to_kick_user_id}"},
+            content={"user_id": to_kick_user_id},
             access_token=self.bad_user_tok,
-            shorthand=False,
         )
         self.assertEqual(channel.code, 200)
 
@@ -5721,24 +5720,28 @@ class GetCumulativeJoinedRoomCountForUserTestCase(unittest.HomeserverTestCase):
         )
 
         # have the user banned from/leave the joined rooms
-        for i, room in enumerate(joined_rooms):
-            if i == 1:
-                self.helper.change_membership(
-                    room,
-                    src=self.bad_user,
-                    targ=self.bad_user,
-                    membership="leave",
-                    expect_code=200,
-                    tok=self.bad_user_tok,
-                )
-            else:
-                self.helper.ban(
-                    room,
-                    src=self.admin,
-                    targ=self.bad_user,
-                    expect_code=200,
-                    tok=self.admin_tok,
-                )
+        self.helper.ban(
+            joined_rooms[0],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
+        self.helper.change_membership(
+            joined_rooms[1],
+            src=self.bad_user,
+            targ=self.bad_user,
+            membership="leave",
+            expect_code=200,
+            tok=self.bad_user_tok,
+        )
+        self.helper.ban(
+            joined_rooms[2],
+            src=self.admin,
+            targ=self.bad_user,
+            expect_code=200,
+            tok=self.admin_tok,
+        )
 
         # fetch the joined room count again, the number should remain the same as the collected joined rooms
         channel = self.make_request(

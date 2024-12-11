@@ -1572,7 +1572,9 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             get_sliding_sync_room_for_user_batch_txn,
         )
 
-    async def get_rooms_for_user_by_date(self, user_id: str, from_ts: int) -> frozenset:
+    async def get_rooms_for_user_by_date(
+        self, user_id: str, from_ts: int
+    ) -> FrozenSet[str]:
         """
         Fetch a list of rooms that the user has joined at or after the given timestamp, including
         those they subsequently have left/been banned from.
