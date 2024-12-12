@@ -3050,7 +3050,7 @@ PURGE_TABLES = [
     "pusher_throttle",
     "room_account_data",
     "room_tags",
-    # "state_groups",  # Current impl leaves orphaned state groups around.
+    "state_groups",
     "state_groups_state",
     "federation_inbound_events_staging",
 ]
