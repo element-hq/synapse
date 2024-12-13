@@ -1877,7 +1877,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.120.2</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.121.1</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -10635,7 +10635,7 @@ be used. If this happens, Synapse will not call any of the subsequent implementa
 this callback.</p>
 <h3 id="check_username_for_spam"><a class="header" href="#check_username_for_spam"><code>check_username_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.37.0</em></p>
-<pre><code class="language-python">async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) -&gt; bool
+<pre><code class="language-python">async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -&gt; bool
 </code></pre>
 <p>Called when computing search results in the user directory. The module must return a
 <code>bool</code> indicating whether the given user should be excluded from user directory 
@@ -10651,6 +10651,7 @@ if this user has not set an avatar.</li>
 </ul>
 <p>The module is given a copy of the original dictionary, so modifying it from within the
 module cannot modify a user's profile when included in user directory search results.</p>
+<p>The requester_id parameter is the ID of the user that called the user directory API.</p>
 <p>If multiple modules implement this callback, they will be considered in order. If a
 callback returns <code>False</code>, Synapse falls through to the next one. The value of the first
 callback that does not return <code>False</code> will be used. If this happens, Synapse will not call
