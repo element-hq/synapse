@@ -81,7 +81,7 @@ class TestRecaptchaAuthChecker(unittest.TestCase):
 
         d = ensureDeferred(self.recaptcha_checker.check_auth(authdict, clientip))
         f = self.failureResultOf(d, LoginError)
-        self.assertEqual(f.value.errcode, Codes.MISSING_PARAM)
+        self.assertEqual(f.value.errcode, Codes.UNAUTHORIZED)
 
     def test_check_auth_missing_response(self: "TestRecaptchaAuthChecker") -> None:
         """Test that authentication fails when the user captcha response is missing."""
