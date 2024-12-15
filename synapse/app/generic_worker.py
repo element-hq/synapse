@@ -28,6 +28,7 @@ from twisted.web.resource import Resource
 import synapse
 import synapse.events
 from synapse.api.urls import (
+    ADMIN_PREFIX,
     CLIENT_API_PREFIX,
     FEDERATION_PREFIX,
     LEGACY_MEDIA_PREFIX,
@@ -52,7 +53,7 @@ from synapse.logging.context import LoggingContext
 from synapse.metrics import METRICS_PREFIX, MetricsResource, RegistryProxy
 from synapse.replication.http import REPLICATION_PREFIX, ReplicationRestResource
 from synapse.rest import ClientRestResource
-from synapse.rest.admin import register_servlets_for_media_repo
+from synapse.rest.admin import AdminRestResource, register_servlets_for_media_repo
 from synapse.rest.health import HealthResource
 from synapse.rest.key.v2 import KeyResource
 from synapse.rest.synapse.client import build_synapse_client_resource_tree
@@ -207,7 +208,7 @@ class GenericWorkerServer(HomeServer):
                                 MEDIA_R0_PREFIX: media_repo,
                                 MEDIA_V3_PREFIX: media_repo,
                                 LEGACY_MEDIA_PREFIX: media_repo,
-                                "/_synapse/admin": admin_resource,
+                                ADMIN_PREFIX: admin_resource,
                             }
                         )
 
@@ -247,6 +248,9 @@ class GenericWorkerServer(HomeServer):
 
                 if name == "replication":
                     resources[REPLICATION_PREFIX] = ReplicationRestResource(self)
+
+                if name == "admin":
+                    resources[ADMIN_PREFIX] = AdminRestResource(self)
 
         # Attach additional resources registered by modules.
         resources.update(self._module_web_resources)
