@@ -609,8 +609,8 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
     &quot;admin&quot;: true
 }
 </code></pre>
-<h2 id="list-room-memberships-of-a-user"><a class="header" href="#list-room-memberships-of-a-user">List room memberships of a user</a></h2>
-<p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is member.</p>
+<h2 id="list-joined-rooms-of-a-user"><a class="header" href="#list-joined-rooms-of-a-user">List joined rooms of a user</a></h2>
+<p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is joined to and is a member of (participating in).</p>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/joined_rooms
 </code></pre>
@@ -637,6 +637,56 @@ member are returned.</p>
 <li><code>joined_rooms</code> - An array of <code>room_id</code>.</li>
 <li><code>total</code> - Number of rooms.</li>
 </ul>
+<h2 id="get-the-number-of-invites-sent-by-the-user"><a class="header" href="#get-the-number-of-invites-sent-by-the-user">Get the number of invites sent by the user</a></h2>
+<p>Fetches the number of invites sent by the provided user ID across all rooms
+after the given timestamp.</p>
+<pre><code>GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code>: fully qualified: for example, <code>@user:server.com</code></li>
+</ul>
+<p>The following should be set as query parameters in the URL:</p>
+<ul>
+<li><code>from_ts</code>: int, required. A timestamp in ms from the unix epoch. Only
+invites sent at or after the provided timestamp will be returned.
+This works by comparing the provided timestamp to the <code>received_ts</code>
+column in the <code>events</code> table.
+Note: https://currentmillis.com/ is a useful tool for converting dates
+into timestamps and vice versa.</li>
+</ul>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">{
+  &quot;invite_count&quot;: 30
+}
+</code></pre>
+<p><em>Added in Synapse 1.122.0</em></p>
+<h2 id="get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp"><a class="header" href="#get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp">Get the cumulative number of rooms a user has joined after a given timestamp</a></h2>
+<p>Fetches the number of rooms that the user joined after the given timestamp, even
+if they have subsequently left/been banned from those rooms.</p>
+<pre><code>GET /_synapse/admin/v1/users/$&lt;user_id/cumulative_joined_room_count
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code>: fully qualified: for example, <code>@user:server.com</code></li>
+</ul>
+<p>The following should be set as query parameters in the URL:</p>
+<ul>
+<li><code>from_ts</code>: int, required. A timestamp in ms from the unix epoch. Only
+invites sent at or after the provided timestamp will be returned.
+This works by comparing the provided timestamp to the <code>received_ts</code>
+column in the <code>events</code> table.
+Note: https://currentmillis.com/ is a useful tool for converting dates
+into timestamps and vice versa.</li>
+</ul>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">{
+  &quot;cumulative_joined_room_count&quot;: 30
+}
+</code></pre>
+<p><em>Added in Synapse 1.122.0</em></p>
 <h2 id="account-data"><a class="header" href="#account-data">Account Data</a></h2>
 <p>Gets information about account data for a specific <code>user_id</code>.</p>
 <p>The API is:</p>
