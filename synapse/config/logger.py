@@ -360,5 +360,6 @@ def setup_logging(
         "Licensed under the AGPL 3.0 license. Website: https://github.com/element-hq/synapse"
     )
     logging.info("Server hostname: %s", config.server.server_name)
+    logging.info("Public Base URL: %s", config.server.public_baseurl)
     logging.info("Instance name: %s", hs.get_instance_name())
     logging.info("Twisted reactor: %s", type(reactor).__name__)

@@ -1165,12 +1165,23 @@ class ApplicationServicesHandlerOtkCountsTestCase(unittest.HomeserverTestCase):
         self.hs.get_datastores().main.services_cache = [self._service]
 
         # Register some appservice users
-        self._sender_user, self._sender_device = self.register_appservice_user(
+        user_id, device_id = self.register_appservice_user(
             "as.sender", self._service_token
         )
-        self._namespaced_user, self._namespaced_device = self.register_appservice_user(
+        # With MSC4190 enabled, there will not be a device created
+        # during AS registration. However MSC4190 is not enabled
+        # in this test. It may become the default behaviour in the
+        # future, in which case this test will need to be updated.
+        assert device_id is not None
+        self._sender_user = user_id
+        self._sender_device = device_id
+
+        user_id, device_id = self.register_appservice_user(
             "_as_user1", self._service_token
         )
+        assert device_id is not None
+        self._namespaced_user = user_id
+        self._namespaced_device = device_id
 
         # Register a real user as well.
         self._real_user = self.register_user("real.user", "meow")
