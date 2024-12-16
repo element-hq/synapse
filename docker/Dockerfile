@@ -20,14 +20,17 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-ARG PYTHON_VERSION=3.12
+ARG PYTHON_VERSION=3.13
 
 ###
 ### Stage 0: generate requirements.txt
 ###
-# We hardcode the use of Debian bookworm here because this could change upstream
-# and other Dockerfiles used for testing are expecting bookworm.
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS requirements
+### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
+###
+FROM --platform=$BUILDPLATFORM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS requirements
+
+# Tell apt to keep downloaded package files, as we're using cache mounts.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
 # RUN --mount is specific to buildkit and is documented at
 # https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/syntax.md#build-mounts-run---mount.
@@ -37,23 +40,7 @@ RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && apt-get install -yqq \
-  build-essential curl git libffi-dev libssl-dev pkg-config \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install rust and ensure its in the PATH.
-# (Rust may be needed to compile `cryptography`---which is one of poetry's
-# dependencies---on platforms that don't have a `cryptography` wheel.
-ENV RUSTUP_HOME=/rust
-ENV CARGO_HOME=/cargo
-ENV PATH=/cargo/bin:/rust/bin:$PATH
-RUN mkdir /rust /cargo
-
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
-
-# arm64 builds consume a lot of memory if `CARGO_NET_GIT_FETCH_WITH_CLI` is not
-# set to true, so we expose it as a build-arg.
-ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
+  build-essential curl git libffi-dev libssl-dev pkg-config
 
 # We install poetry in its own build stage to avoid its dependencies conflicting with
 # synapse's dependencies.
@@ -89,6 +76,9 @@ RUN if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
 ###
 FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS builder
 
+# Tell apt to keep downloaded package files, as we're using cache mounts.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
 # install the OS build deps
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -107,8 +97,7 @@ RUN \
   git \
   curl \
   libicu-dev \
-  pkg-config \
-  && rm -rf /var/lib/apt/lists/*
+  pkg-config
 
 
 # Install rust and ensure its in the PATH
@@ -155,32 +144,69 @@ RUN --mount=type=cache,target=/synapse/target,sharing=locked \
   fi
 
 ###
-### Stage 2: runtime
+## Stage 2: runtime dependencies download for ARM64 and AMD64
+###
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:bookworm-slim AS runtime-deps
+
+# Tell apt to keep downloaded package files, as we're using cache mounts.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# Add both target architectures
+RUN dpkg --add-architecture arm64
+RUN dpkg --add-architecture amd64
+
+ARG PYTHON_VERSION
+
+ENV UV_PYTHON_INSTALL_DIR=/tmp/uv-python-install
+RUN uv python install \
+  cpython-${PYTHON_VERSION}-linux-aarch64-gnu \
+  cpython-${PYTHON_VERSION}-linux-x86_64_v2-gnu
+
+RUN mkdir -p /install-amd64/usr /install-arm64/usr
+RUN mv ${UV_PYTHON_INSTALL_DIR}/cpython-*-linux-aarch64-gnu/ /install-arm64/usr/local
+RUN mv ${UV_PYTHON_INSTALL_DIR}/cpython-*-linux-x86_64_v2-gnu/ /install-amd64/usr/local
+
+RUN \
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update -qq && \
+  for arch in arm64 amd64; do \
+    mkdir -p /tmp/debs-${arch} && \
+    cd /tmp/debs-${arch} && \
+    apt-get download \
+      gosu:${arch} \
+      libjpeg62-turbo:${arch} \
+      libpq5:${arch} \
+      libwebp7:${arch} \
+      xmlsec1:${arch} \
+      libjemalloc2:${arch} \
+      libicu72:${arch} \
+      zlib1g:${arch} \
+      && \
+    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
+    for deb in *.deb; do \
+      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+      echo "Process: ${package_name}"; \
+      dpkg --ctrl-tarfile $deb | tar -Oxvf - ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
+      dpkg --extract $deb /install-${arch} || exit 10; \
+    done \
+  done
+
+
+###
+### Stage 3: runtime
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm
+FROM gcr.io/distroless/cc-debian12:debug
+
+ARG TARGETARCH
 
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
 LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  curl \
-  gosu \
-  libjpeg62-turbo \
-  libpq5 \
-  libwebp7 \
-  xmlsec1 \
-  libjemalloc2 \
-  libicu72 \
-  libssl-dev \
-  openssl \
-  && rm -rf /var/lib/apt/lists/*
-
+COPY --from=runtime-deps /install-${TARGETARCH} /
 COPY --from=builder /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
@@ -190,4 +216,4 @@ EXPOSE 8008/tcp 8009/tcp 8448/tcp
 ENTRYPOINT ["/start.py"]
 
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
-  CMD curl -fSs http://localhost:8008/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8008/health
