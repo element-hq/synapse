@@ -42,12 +42,12 @@ from typing import (
     Set,
     Tuple,
     Type,
+    TypedDict,
     TypeVar,
     cast,
 )
 
 import yaml
-from typing_extensions import TypedDict
 
 from twisted.internet import defer, reactor as reactor_
 

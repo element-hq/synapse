@@ -20,10 +20,19 @@
 #
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TypedDict,
+    Union,
+    cast,
+)
 
 import attr
-from typing_extensions import TypedDict
 
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore

@@ -40,6 +40,7 @@ from typing import (
     Any,
     Awaitable,
     Callable,
+    Literal,
     Optional,
     Tuple,
     Type,
@@ -49,7 +50,7 @@ from typing import (
 )
 
 import attr
-from typing_extensions import Literal, ParamSpec
+from typing_extensions import ParamSpec
 
 from twisted.internet import defer, threads
 from twisted.python.threadpool import ThreadPool

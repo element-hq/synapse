@@ -30,10 +30,9 @@ from typing import (
     List,
     Optional,
     Tuple,
+    TypedDict,
     Union,
 )
-
-from typing_extensions import TypedDict
 
 from synapse.api.constants import ApprovalNoticeMedium
 from synapse.api.errors import (
