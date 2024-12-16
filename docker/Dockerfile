@@ -20,45 +20,16 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
+ARG DEBIAN_VERSION=bookworm
 ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=1.8.3
 
 ###
 ### Stage 0: generate requirements.txt
 ###
-# We hardcode the use of Debian bookworm here because this could change upstream
-# and other Dockerfiles used for testing are expecting bookworm.
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS requirements
-
-# RUN --mount is specific to buildkit and is documented at
-# https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/syntax.md#build-mounts-run---mount.
-# Here we use it to set up a cache for apt (and below for pip), to improve
-# rebuild speeds on slow connections.
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  build-essential curl git libffi-dev libssl-dev pkg-config \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install rust and ensure its in the PATH.
-# (Rust may be needed to compile `cryptography`---which is one of poetry's
-# dependencies---on platforms that don't have a `cryptography` wheel.
-ENV RUSTUP_HOME=/rust
-ENV CARGO_HOME=/cargo
-ENV PATH=/cargo/bin:/rust/bin:$PATH
-RUN mkdir /rust /cargo
-
-RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
-
-# arm64 builds consume a lot of memory if `CARGO_NET_GIT_FETCH_WITH_CLI` is not
-# set to true, so we expose it as a build-arg.
-ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
-
-# We install poetry in its own build stage to avoid its dependencies conflicting with
-# synapse's dependencies.
-RUN --mount=type=cache,target=/root/.cache/pip \
-  pip install --user "poetry==1.3.2"
+### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
+###
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS requirements
 
 WORKDIR /synapse
 
@@ -78,38 +49,20 @@ ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
 # Export the dependencies, but only if we're actually going to use the Poetry lockfile.
 # Otherwise, just create an empty requirements file so that the Dockerfile can
 # proceed.
-RUN if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-  /root/.local/bin/poetry export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
+ARG POETRY_VERSION
+RUN --mount=type=cache,target=/root/.cache/uv \
+  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
+    uvx poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
   else \
-  touch /synapse/requirements.txt; \
+    touch /synapse/requirements.txt; \
   fi
 
 ###
 ### Stage 1: builder
 ###
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-${DEBIAN_VERSION} AS builder
 
-# install the OS build deps
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  build-essential \
-  libffi-dev \
-  libjpeg-dev \
-  libpq-dev \
-  libssl-dev \
-  libwebp-dev \
-  libxml++2.6-dev \
-  libxslt1-dev \
-  openssl \
-  zlib1g-dev \
-  git \
-  curl \
-  libicu-dev \
-  pkg-config \
-  && rm -rf /var/lib/apt/lists/*
-
+ENV UV_LINK_MODE=copy
 
 # Install rust and ensure its in the PATH
 ENV RUSTUP_HOME=/rust
@@ -118,7 +71,6 @@ ENV PATH=/cargo/bin:/rust/bin:$PATH
 RUN mkdir /rust /cargo
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
-
 
 # arm64 builds consume a lot of memory if `CARGO_NET_GIT_FETCH_WITH_CLI` is not
 # set to true, so we expose it as a build-arg.
@@ -131,8 +83,8 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
 #
 # This is aiming at installing the `[tool.poetry.depdendencies]` from pyproject.toml.
 COPY --from=requirements /synapse/requirements.txt /synapse/
-RUN --mount=type=cache,target=/root/.cache/pip \
-  pip install --prefix="/install" --no-deps --no-warn-script-location -r /synapse/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv pip install --prefix="/install" --no-deps -r /synapse/requirements.txt
 
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
@@ -146,41 +98,75 @@ ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
 # Install the synapse package itself.
 # If we have populated requirements.txt, we don't install any dependencies
 # as we should already have those from the previous `pip install` step.
-RUN --mount=type=cache,target=/synapse/target,sharing=locked \
+RUN \
+  --mount=type=cache,target=/root/.cache/uv \
+  --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-  pip install --prefix="/install" --no-deps --no-warn-script-location /synapse[all]; \
+    uv pip install --prefix="/install" --no-deps /synapse[all]; \
   else \
-  pip install --prefix="/install" --no-warn-script-location /synapse[all]; \
+    uv pip install --prefix="/install" /synapse[all]; \
   fi
 
 ###
-### Stage 2: runtime
+### Stage 2: runtime dependencies download for ARM64 and AMD64
+###
+FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+
+# Tell apt to keep downloaded package files, as we're using cache mounts.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
+
+# Add both target architectures
+RUN dpkg --add-architecture arm64
+RUN dpkg --add-architecture amd64
+
+# Fetch the runtime dependencies debs for both architectures
+RUN \
+  --mount=type=cache,target=/var/cache/apt,sharing=locked \
+  --mount=type=cache,target=/var/lib/apt,sharing=locked \
+  apt-get update -qq && \
+  for arch in arm64 amd64; do \
+    mkdir -p /tmp/debs-${arch} && \
+    cd /tmp/debs-${arch} && \
+    apt-get download \
+      curl:${arch} \
+      gosu:${arch} \
+      libjpeg62-turbo:${arch} \
+      libpq5:${arch} \
+      libwebp7:${arch} \
+      xmlsec1:${arch} \
+      libjemalloc2:${arch} \
+      libicu72:${arch} \
+      openssl:${arch} || exit 10; \
+  done
+
+# Extract the debs for each architecture
+RUN \
+  for arch in arm64 amd64; do \
+    mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
+    for deb in /tmp/debs-${arch}/*.deb; do \
+      package_name=$(dpkg-deb -I ${deb} | awk '/^ Package: .*$/ {print $2}'); \
+      echo "Process: ${package_name}"; \
+      dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
+      dpkg --extract $deb /install-${arch} || exit 10; \
+    done \
+  done
+
+
+###
+### Stage 3: runtime
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm
+FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
+
+ARG TARGETARCH
 
 LABEL org.opencontainers.image.url='https://matrix.org/docs/projects/server/synapse'
 LABEL org.opencontainers.image.documentation='https://github.com/element-hq/synapse/blob/master/docker/README.md'
 LABEL org.opencontainers.image.source='https://github.com/element-hq/synapse.git'
 LABEL org.opencontainers.image.licenses='AGPL-3.0-or-later'
 
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  curl \
-  gosu \
-  libjpeg62-turbo \
-  libpq5 \
-  libwebp7 \
-  xmlsec1 \
-  libjemalloc2 \
-  libicu72 \
-  libssl-dev \
-  openssl \
-  && rm -rf /var/lib/apt/lists/*
-
+COPY --from=runtime-deps /install-${TARGETARCH} /
 COPY --from=builder /install /usr/local
 COPY ./docker/start.py /start.py
 COPY ./docker/conf /conf
