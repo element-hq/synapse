@@ -21,31 +21,23 @@
 # in `poetry export` in the past.
 
 ARG PYTHON_VERSION=3.13
+ARG POETRY_VERSION=1.3.2
 
 ###
 ### Stage 0: generate requirements.txt
 ###
 ### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
 ###
-FROM --platform=$BUILDPLATFORM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS requirements
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS requirements
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 
-# RUN --mount is specific to buildkit and is documented at
-# https://github.com/moby/buildkit/blob/master/frontend/dockerfile/docs/syntax.md#build-mounts-run---mount.
-# Here we use it to set up a cache for apt (and below for pip), to improve
-# rebuild speeds on slow connections.
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && apt-get install -yqq \
   build-essential curl git libffi-dev libssl-dev pkg-config
-
-# We install poetry in its own build stage to avoid its dependencies conflicting with
-# synapse's dependencies.
-RUN --mount=type=cache,target=/root/.cache/pip \
-  pip install --user "poetry==1.3.2"
 
 WORKDIR /synapse
 
@@ -65,16 +57,20 @@ ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
 # Export the dependencies, but only if we're actually going to use the Poetry lockfile.
 # Otherwise, just create an empty requirements file so that the Dockerfile can
 # proceed.
-RUN if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-  /root/.local/bin/poetry export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
+ARG POETRY_VERSION
+RUN --mount=type=cache,target=/root/.cache/uv \
+  if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
+    uvx poetry@${POETRY_VERSION} export --extras all -o /synapse/requirements.txt ${TEST_ONLY_SKIP_DEP_HASH_VERIFICATION:+--without-hashes}; \
   else \
-  touch /synapse/requirements.txt; \
+    touch /synapse/requirements.txt; \
   fi
 
 ###
 ### Stage 1: builder
 ###
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-bookworm AS builder
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+
+ENV UV_LINK_MODE=copy
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
@@ -108,7 +104,6 @@ RUN mkdir /rust /cargo
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable --profile minimal
 
-
 # arm64 builds consume a lot of memory if `CARGO_NET_GIT_FETCH_WITH_CLI` is not
 # set to true, so we expose it as a build-arg.
 ARG CARGO_NET_GIT_FETCH_WITH_CLI=false
@@ -120,8 +115,8 @@ ENV CARGO_NET_GIT_FETCH_WITH_CLI=$CARGO_NET_GIT_FETCH_WITH_CLI
 #
 # This is aiming at installing the `[tool.poetry.depdendencies]` from pyproject.toml.
 COPY --from=requirements /synapse/requirements.txt /synapse/
-RUN --mount=type=cache,target=/root/.cache/pip \
-  pip install --prefix="/install" --no-deps --no-warn-script-location -r /synapse/requirements.txt
+RUN --mount=type=cache,target=/root/.cache/uv \
+  uv pip install --prefix="/install" --no-deps -r /synapse/requirements.txt
 
 # Copy over the rest of the synapse source code.
 COPY synapse /synapse/synapse/
@@ -135,12 +130,14 @@ ARG TEST_ONLY_IGNORE_POETRY_LOCKFILE
 # Install the synapse package itself.
 # If we have populated requirements.txt, we don't install any dependencies
 # as we should already have those from the previous `pip install` step.
-RUN --mount=type=cache,target=/synapse/target,sharing=locked \
+RUN \
+  --mount=type=cache,target=/root/.cache/uv \
+  --mount=type=cache,target=/synapse/target,sharing=locked \
   --mount=type=cache,target=${CARGO_HOME}/registry,sharing=locked \
   if [ -z "$TEST_ONLY_IGNORE_POETRY_LOCKFILE" ]; then \
-  pip install --prefix="/install" --no-deps --no-warn-script-location /synapse[all]; \
+    uv pip install --prefix="/install" --no-deps /synapse[all]; \
   else \
-  pip install --prefix="/install" --no-warn-script-location /synapse[all]; \
+    uv pip install --prefix="/install" /synapse[all]; \
   fi
 
 ###
