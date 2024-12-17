@@ -2699,6 +2699,16 @@ otherwise, a secret key is derived from the signing key.</p>
 <pre><code class="language-yaml">macaroon_secret_key: &lt;PRIVATE STRING&gt;
 </code></pre>
 <hr />
+<h3 id="macaroon_secret_key_path"><a class="header" href="#macaroon_secret_key_path"><code>macaroon_secret_key_path</code></a></h3>
+<p>An alternative to <a href="#macaroon_secret_key"><code>macaroon_secret_key</code></a>:
+allows the secret key to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">macaroon_secret_key_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.121.0.</em></p>
+<hr />
 <h3 id="form_secret"><a class="header" href="#form_secret"><code>form_secret</code></a></h3>
 <p>A secret which is used to calculate HMACs for form values, to stop
 falsification of values. Must be specified for the User Consent
