@@ -22,6 +22,7 @@
 import logging
 from typing import TYPE_CHECKING, Callable, Dict, Optional
 
+import synapse.config.experimental
 from synapse.push import Pusher, PusherConfig
 from synapse.push.emailpusher import EmailPusher
 from synapse.push.httppusher import HttpPusher
@@ -41,6 +42,14 @@ class PusherFactory:
         self.pusher_types: Dict[str, Callable[[HomeServer, PusherConfig], Pusher]] = {
             "http": HttpPusher
         }
+
+        if (
+            synapse.config.experimental.HAS_PYWEBPUSH
+            and self.config.experimental.msc4174.enabled
+        ):
+            from synapse.push.webpushpusher import WebPushPusher
+
+            self.pusher_types["webpush"] = WebPushPusher
 
         logger.info("email enable notifs: %r", hs.config.email.email_enable_notifs)
         if hs.config.email.email_enable_notifs:
