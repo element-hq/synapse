@@ -1,0 +1,1 @@
+Reduce size of the Docker image by using a base image based on [distroless](https://github.com/GoogleContainerTools/distroless).
