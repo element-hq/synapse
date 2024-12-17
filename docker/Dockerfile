@@ -28,16 +28,7 @@ ARG POETRY_VERSION=1.8.3
 ###
 ### This stage is platform-agnostic, so we can use the build platform in case of cross-compilation.
 ###
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS requirements
-
-# Tell apt to keep downloaded package files, as we're using cache mounts.
-RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
-
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  build-essential curl git libffi-dev libssl-dev pkg-config
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm AS requirements
 
 WORKDIR /synapse
 
