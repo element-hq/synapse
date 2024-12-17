@@ -68,7 +68,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 ### Stage 1: builder
 ###
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
 
 ENV UV_LINK_MODE=copy
 
