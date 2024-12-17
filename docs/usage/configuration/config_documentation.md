@@ -3092,6 +3092,22 @@ Example configuration:
 macaroon_secret_key: <PRIVATE STRING>
 ```
 ---
+### `macaroon_secret_key_path`
+
+An alternative to [`macaroon_secret_key`](#macaroon_secret_key):
+allows the secret key to be specified in an external file.
+
+The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.
+
+Example configuration:
+```yaml
+macaroon_secret_key_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.121.0._
+
+---
 ### `form_secret`
 
 A secret which is used to calculate HMACs for form values, to stop
