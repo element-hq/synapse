@@ -68,33 +68,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 ###
 ### Stage 1: builder
 ###
-FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm-slim AS builder
+FROM ghcr.io/astral-sh/uv:python${PYTHON_VERSION}-bookworm AS builder
 
 ENV UV_LINK_MODE=copy
-
-# Tell apt to keep downloaded package files, as we're using cache mounts.
-RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
-
-# install the OS build deps
-RUN \
-  --mount=type=cache,target=/var/cache/apt,sharing=locked \
-  --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update -qq && apt-get install -yqq \
-  build-essential \
-  libffi-dev \
-  libjpeg-dev \
-  libpq-dev \
-  libssl-dev \
-  libwebp-dev \
-  libxml++2.6-dev \
-  libxslt1-dev \
-  openssl \
-  zlib1g-dev \
-  git \
-  curl \
-  libicu-dev \
-  pkg-config
-
 
 # Install rust and ensure its in the PATH
 ENV RUSTUP_HOME=/rust
@@ -143,7 +119,7 @@ RUN \
 ###
 ## Stage 2: runtime dependencies download for ARM64 and AMD64
 ###
-FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:bookworm-slim AS runtime-deps
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:bookworm AS runtime-deps
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
