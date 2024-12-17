@@ -20,8 +20,8 @@
 # `poetry export | pip install -r /dev/stdin`, but beware: we have experienced bugs in
 # in `poetry export` in the past.
 
-ARG PYTHON_VERSION=3.13
-ARG POETRY_VERSION=1.3.2
+ARG PYTHON_VERSION=3.12
+ARG POETRY_VERSION=1.8.3
 
 ###
 ### Stage 0: generate requirements.txt
