@@ -661,9 +661,12 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
             )
         )
 
-        with patch.object(
-            fed_client, "make_membership_event", mock_make_membership_event
-        ), patch.object(fed_client, "send_join", mock_send_join):
+        with (
+            patch.object(
+                fed_client, "make_membership_event", mock_make_membership_event
+            ),
+            patch.object(fed_client, "send_join", mock_send_join),
+        ):
             # Join and check that our join event is rejected
             # (The join event is rejected because it doesn't have any signatures)
             join_exc = self.get_failure(
@@ -708,9 +711,12 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
         fed_handler = self.hs.get_federation_handler()
         store = self.hs.get_datastores().main
 
-        with patch.object(
-            fed_handler, "_sync_partial_state_room", mock_sync_partial_state_room
-        ), patch.object(store, "is_partial_state_room", mock_is_partial_state_room):
+        with (
+            patch.object(
+                fed_handler, "_sync_partial_state_room", mock_sync_partial_state_room
+            ),
+            patch.object(store, "is_partial_state_room", mock_is_partial_state_room),
+        ):
             # Start the partial state sync.
             fed_handler._start_partial_state_room_sync("hs1", {"hs2"}, "room_id")
             self.assertEqual(mock_sync_partial_state_room.call_count, 1)
@@ -760,9 +766,12 @@ class PartialJoinTestCase(unittest.FederatingHomeserverTestCase):
         fed_handler = self.hs.get_federation_handler()
         store = self.hs.get_datastores().main
 
-        with patch.object(
-            fed_handler, "_sync_partial_state_room", mock_sync_partial_state_room
-        ), patch.object(store, "is_partial_state_room", mock_is_partial_state_room):
+        with (
+            patch.object(
+                fed_handler, "_sync_partial_state_room", mock_sync_partial_state_room
+            ),
+            patch.object(store, "is_partial_state_room", mock_is_partial_state_room),
+        ):
             # Start the partial state sync.
             fed_handler._start_partial_state_room_sync("hs1", {"hs2"}, "room_id")
             self.assertEqual(mock_sync_partial_state_room.call_count, 1)

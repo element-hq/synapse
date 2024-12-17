@@ -152,6 +152,14 @@ class SyncRestServlet(RestServlet):
         filter_id = parse_string(request, "filter")
         full_state = parse_boolean(request, "full_state", default=False)
 
+        use_state_after = False
+        if await self.store.is_feature_enabled(
+            user.to_string(), ExperimentalFeature.MSC4222
+        ):
+            use_state_after = parse_boolean(
+                request, "org.matrix.msc4222.use_state_after", default=False
+            )
+
         logger.debug(
             "/sync: user=%r, timeout=%r, since=%r, "
             "set_presence=%r, filter_id=%r, device_id=%r",
@@ -184,6 +192,7 @@ class SyncRestServlet(RestServlet):
             full_state,
             device_id,
             last_ignore_accdata_streampos,
+            use_state_after,
         )
 
         if filter_id is None:
@@ -220,6 +229,7 @@ class SyncRestServlet(RestServlet):
             filter_collection=filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            use_state_after=use_state_after,
         )
 
         since_token = None
@@ -258,7 +268,7 @@ class SyncRestServlet(RestServlet):
         # We know that the the requester has an access token since appservices
         # cannot use sync.
         response_content = await self.encode_response(
-            time_now, sync_result, requester, filter_collection
+            time_now, sync_config, sync_result, requester, filter_collection
         )
 
         logger.debug("Event formatting complete")
@@ -268,6 +278,7 @@ class SyncRestServlet(RestServlet):
     async def encode_response(
         self,
         time_now: int,
+        sync_config: SyncConfig,
         sync_result: SyncResult,
         requester: Requester,
         filter: FilterCollection,
@@ -292,7 +303,7 @@ class SyncRestServlet(RestServlet):
         )
 
         joined = await self.encode_joined(
-            sync_result.joined, time_now, serialize_options
+            sync_config, sync_result.joined, time_now, serialize_options
         )
 
         invited = await self.encode_invited(
@@ -304,7 +315,7 @@ class SyncRestServlet(RestServlet):
         )
 
         archived = await self.encode_archived(
-            sync_result.archived, time_now, serialize_options
+            sync_config, sync_result.archived, time_now, serialize_options
         )
 
         logger.debug("building sync response dict")
@@ -372,6 +383,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_joined")
     async def encode_joined(
         self,
+        sync_config: SyncConfig,
         rooms: List[JoinedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
@@ -380,6 +392,7 @@ class SyncRestServlet(RestServlet):
         Encode the joined rooms in a sync result
 
         Args:
+            sync_config
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
@@ -389,7 +402,11 @@ class SyncRestServlet(RestServlet):
         joined = {}
         for room in rooms:
             joined[room.room_id] = await self.encode_room(
-                room, time_now, joined=True, serialize_options=serialize_options
+                sync_config,
+                room,
+                time_now,
+                joined=True,
+                serialize_options=serialize_options,
             )
 
         return joined
@@ -419,7 +436,12 @@ class SyncRestServlet(RestServlet):
             )
             unsigned = dict(invite.get("unsigned", {}))
             invite["unsigned"] = unsigned
-            invited_state = list(unsigned.pop("invite_room_state", []))
+
+            invited_state = unsigned.pop("invite_room_state", [])
+            if not isinstance(invited_state, list):
+                invited_state = []
+
+            invited_state = list(invited_state)
             invited_state.append(invite)
             invited[room.room_id] = {"invite_state": {"events": invited_state}}
 
@@ -459,7 +481,10 @@ class SyncRestServlet(RestServlet):
             # Extract the stripped room state from the unsigned dict
             # This is for clients to get a little bit of information about
             # the room they've knocked on, without revealing any sensitive information
-            knocked_state = list(unsigned.pop("knock_room_state", []))
+            knocked_state = unsigned.pop("knock_room_state", [])
+            if not isinstance(knocked_state, list):
+                knocked_state = []
+            knocked_state = list(knocked_state)
 
             # Append the actual knock membership event itself as well. This provides
             # the client with:
@@ -477,6 +502,7 @@ class SyncRestServlet(RestServlet):
     @trace_with_opname("sync.encode_archived")
     async def encode_archived(
         self,
+        sync_config: SyncConfig,
         rooms: List[ArchivedSyncResult],
         time_now: int,
         serialize_options: SerializeEventConfig,
@@ -485,6 +511,7 @@ class SyncRestServlet(RestServlet):
         Encode the archived rooms in a sync result
 
         Args:
+            sync_config
             rooms: list of sync results for rooms this user is joined to
             time_now: current time - used as a baseline for age calculations
             serialize_options: Event serializer options
@@ -494,13 +521,18 @@ class SyncRestServlet(RestServlet):
         joined = {}
         for room in rooms:
             joined[room.room_id] = await self.encode_room(
-                room, time_now, joined=False, serialize_options=serialize_options
+                sync_config,
+                room,
+                time_now,
+                joined=False,
+                serialize_options=serialize_options,
             )
 
         return joined
 
     async def encode_room(
         self,
+        sync_config: SyncConfig,
         room: Union[JoinedSyncResult, ArchivedSyncResult],
         time_now: int,
         joined: bool,
@@ -508,6 +540,7 @@ class SyncRestServlet(RestServlet):
     ) -> JsonDict:
         """
         Args:
+            sync_config
             room: sync result for a single room
             time_now: current time - used as a baseline for age calculations
             token_id: ID of the user's auth token - used for namespacing
@@ -548,13 +581,20 @@ class SyncRestServlet(RestServlet):
 
         account_data = room.account_data
 
+        # We either include a `state` or `state_after` field depending on
+        # whether the client has opted in to the newer `state_after` behavior.
+        if sync_config.use_state_after:
+            state_key_name = "org.matrix.msc4222.state_after"
+        else:
+            state_key_name = "state"
+
         result: JsonDict = {
             "timeline": {
                 "events": serialized_timeline,
                 "prev_batch": await room.timeline.prev_batch.to_string(self.store),
                 "limited": room.timeline.limited,
             },
-            "state": {"events": serialized_state},
+            state_key_name: {"events": serialized_state},
             "account_data": {"events": account_data},
         }
 
@@ -688,6 +728,7 @@ class SlidingSyncE2eeRestServlet(RestServlet):
             filter_collection=self.only_member_events_filter_collection,
             is_guest=requester.is_guest,
             device_id=device_id,
+            use_state_after=False,  # We don't return any rooms so this flag is a no-op
         )
 
         since_token = None

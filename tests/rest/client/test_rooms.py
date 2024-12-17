@@ -1337,17 +1337,13 @@ class RoomJoinTestCase(RoomBase):
             "POST", f"/join/{self.room1}", access_token=self.tok2
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         channel = self.make_request(
             "POST", f"/rooms/{self.room1}/join", access_token=self.tok2
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_knock_on_room(self) -> None:
         # set the user as suspended
@@ -1361,9 +1357,7 @@ class RoomJoinTestCase(RoomBase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 403)
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_invite_to_room(self) -> None:
         # set the user as suspended
@@ -1376,9 +1370,7 @@ class RoomJoinTestCase(RoomBase):
             access_token=self.tok1,
             content={"user_id": self.user2},
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
 
 class RoomAppserviceTsParamTestCase(unittest.HomeserverTestCase):
@@ -2894,6 +2886,68 @@ class RoomMembershipReasonTestCase(unittest.HomeserverTestCase):
         self.assertEqual(event_content.get("reason"), reason, channel.result)
 
 
+class RoomForgottenTestCase(unittest.HomeserverTestCase):
+    """
+    Test forget/forgotten rooms
+    """
+
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = hs.get_datastores().main
+
+    def test_room_not_forgotten_after_unban(self) -> None:
+        """
+        Test what happens when someone is banned from a room, they forget the room, and
+        some time later are unbanned.
+
+        Currently, when they are unbanned, the room isn't forgotten anymore which may or
+        may not be expected.
+        """
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        room_id = self.helper.create_room_as(user2_id, tok=user2_tok, is_public=True)
+        self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # User1 is banned and forgets the room
+        self.helper.ban(room_id, src=user2_id, targ=user1_id, tok=user2_tok)
+        # User1 forgets the room
+        self.get_success(self.store.forget(user1_id, room_id))
+
+        # The room should show up as forgotten
+        forgotten_room_ids = self.get_success(
+            self.store.get_forgotten_rooms_for_user(user1_id)
+        )
+        self.assertIncludes(forgotten_room_ids, {room_id}, exact=True)
+
+        # Unban user1
+        self.helper.change_membership(
+            room=room_id,
+            src=user2_id,
+            targ=user1_id,
+            membership=Membership.LEAVE,
+            tok=user2_tok,
+        )
+
+        # Room is no longer forgotten because it's a new membership
+        #
+        # XXX: Is this how we actually want it to behave? It seems like ideally, the
+        # room forgotten status should only be reset when the user decides to join again
+        # (or is invited/knocks). This way the room remains forgotten for any ban/leave
+        # transitions.
+        forgotten_room_ids = self.get_success(
+            self.store.get_forgotten_rooms_for_user(user1_id)
+        )
+        self.assertIncludes(forgotten_room_ids, set(), exact=True)
+
+
 class LabelsTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets_for_client_rest_resource,
@@ -3949,9 +4003,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             access_token=self.tok1,
             content={"body": "hello", "msgtype": "m.text"},
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_change_profile_data(self) -> None:
         # set the user as suspended
@@ -3964,9 +4016,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"avatar_url": "mxc://matrix.org/wefh34uihSDRGhw34"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         channel2 = self.make_request(
             "PUT",
@@ -3975,9 +4025,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"displayname": "something offensive"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel2.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel2.json_body["errcode"], "M_USER_SUSPENDED")
 
     def test_suspended_user_cannot_redact_messages_other_than_their_own(self) -> None:
         # first user sends message
@@ -4011,9 +4059,7 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             content={"reason": "bogus"},
             shorthand=False,
         )
-        self.assertEqual(
-            channel.json_body["errcode"], "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
-        )
+        self.assertEqual(channel.json_body["errcode"], "M_USER_SUSPENDED")
 
         # but can redact their own
         channel = self.make_request(

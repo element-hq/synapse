@@ -215,9 +215,6 @@ class HttpListenerConfig:
     additional_resources: Dict[str, dict] = attr.Factory(dict)
     tag: Optional[str] = None
     request_id_header: Optional[str] = None
-    # If true, the listener will return CORS response headers compatible with MSC3886:
-    # https://github.com/matrix-org/matrix-spec-proposals/pull/3886
-    experimental_cors_msc3886: bool = False
 
 
 @attr.s(slots=True, frozen=True, auto_attribs=True)
@@ -335,8 +332,14 @@ class ServerConfig(Config):
             logger.info("Using default public_baseurl %s", public_baseurl)
         else:
             self.serve_client_wellknown = True
+            # Ensure that public_baseurl ends with a trailing slash
             if public_baseurl[-1] != "/":
                 public_baseurl += "/"
+
+        # Scrutinize user-provided config
+        if not isinstance(public_baseurl, str):
+            raise ConfigError("Must be a string", ("public_baseurl",))
+
         self.public_baseurl = public_baseurl
 
         # check that public_baseurl is valid
@@ -1004,7 +1007,6 @@ def parse_listener_def(num: int, listener: Any) -> ListenerConfig:
             additional_resources=listener.get("additional_resources", {}),
             tag=listener.get("tag"),
             request_id_header=listener.get("request_id_header"),
-            experimental_cors_msc3886=listener.get("experimental_cors_msc3886", False),
         )
 
     if socket_path:

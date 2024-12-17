@@ -30,7 +30,7 @@ from twisted.web.resource import Resource
 import synapse.rest.admin
 from synapse.http.server import JsonResource
 from synapse.rest.admin import VersionServlet
-from synapse.rest.client import login, room
+from synapse.rest.client import login, media, room
 from synapse.server import HomeServer
 from synapse.util import Clock
 
@@ -60,6 +60,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         synapse.rest.admin.register_servlets,
         synapse.rest.admin.register_servlets_for_media_repo,
         login.register_servlets,
+        media.register_servlets,
         room.register_servlets,
     ]
 
@@ -74,7 +75,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         """Ensure a piece of media is quarantined when trying to access it."""
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id}",
             shorthand=False,
             access_token=admin_user_tok,
         )
@@ -131,7 +132,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Attempt to access the media
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_name_and_media_id}",
+            f"/_matrix/client/v1/media/download/{server_name_and_media_id}",
             shorthand=False,
             access_token=non_admin_user_tok,
         )
@@ -295,7 +296,7 @@ class QuarantineMediaTestCase(unittest.HomeserverTestCase):
         # Attempt to access each piece of media
         channel = self.make_request(
             "GET",
-            f"/_matrix/media/v3/download/{server_and_media_id_2}",
+            f"/_matrix/client/v1/media/download/{server_and_media_id_2}",
             shorthand=False,
             access_token=non_admin_user_tok,
         )

@@ -132,9 +132,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - sytest-tag: focal
+          - sytest-tag: bullseye
 
-          - sytest-tag: focal
+          - sytest-tag: bullseye
             postgres: postgres
             workers: workers
             redis: redis

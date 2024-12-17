@@ -249,10 +249,12 @@ class HomeServer(metaclass=abc.ABCMeta):
     """
 
     REQUIRED_ON_BACKGROUND_TASK_STARTUP = [
+        "admin",
         "account_validity",
         "auth",
         "deactivate_account",
         "delayed_events",
+        "e2e_keys",  # for the `delete_old_otks` scheduled-task handler
         "message",
         "pagination",
         "profile",

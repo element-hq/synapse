@@ -157,7 +157,7 @@ sudo pip install py-bcrypt
 
 #### Alpine Linux
 
-6543 maintains [Synapse packages for Alpine Linux](https://pkgs.alpinelinux.org/packages?name=synapse&branch=edge) in the community repository. Install with:
+Jahway603 maintains [Synapse packages for Alpine Linux](https://pkgs.alpinelinux.org/packages?name=synapse&branch=edge) in the community repository. Install with:
 
 ```sh
 sudo apk add synapse
@@ -208,7 +208,7 @@ When following this route please make sure that the [Platform-specific prerequis
 System requirements:
 
 - POSIX-compliant system (tested on Linux & OS X)
-- Python 3.8 or later, up to Python 3.11.
+- Python 3.9 or later, up to Python 3.13.
 - At least 1GB of free RAM if you want to join large public rooms like #matrix:matrix.org
 
 If building on an uncommon architecture for which pre-built wheels are
@@ -655,6 +655,10 @@ your loopback and RFC1918 IP addresses are blacklisted.
 This also requires the optional `lxml` python dependency to be  installed. This
 in turn requires the `libxml2` library to be available - on  Debian/Ubuntu this
 means `apt-get install libxml2-dev`, or equivalent for your OS.
+
+### Backups
+
+Don't forget to take [backups](../usage/administration/backups.md) of your new server!
 
 ### Troubleshooting Installation
 
