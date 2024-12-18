@@ -121,26 +121,34 @@ RUN dpkg --add-architecture arm64
 RUN dpkg --add-architecture amd64
 
 # Fetch the runtime dependencies debs for both architectures
+# We do that by building a recursive list of packages we need to download with `apt-cache depends`
+# and then downloading them with `apt-get download`.
 RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
+  apt-get install -y --no-install-recommends rsync && \
+  apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
+      curl \
+      gosu \
+      libjpeg62-turbo \
+      libpq5 \
+      libwebp7 \
+      xmlsec1 \
+      libjemalloc2 \
+      libicu \
+    | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
     cd /tmp/debs-${arch} && \
-    apt-get download \
-      curl:${arch} \
-      gosu:${arch} \
-      libjpeg62-turbo:${arch} \
-      libpq5:${arch} \
-      libwebp7:${arch} \
-      xmlsec1:${arch} \
-      libjemalloc2:${arch} \
-      libicu72:${arch} \
-      openssl:${arch} || exit 10; \
+    apt-get download $(sed "s/$/:${arch}/" /tmp/pkg-list); \
   done
 
 # Extract the debs for each architecture
+# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
+# libraries to the right place, else the `COPY` won't work.
+# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
+# already present in the runtime image.
 RUN \
   for arch in arm64 amd64; do \
     mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
@@ -149,7 +157,9 @@ RUN \
       echo "Process: ${package_name}"; \
       dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
       dpkg --extract $deb /install-${arch} || exit 10; \
-    done \
+    done; \
+    rsync -avr /install-${arch}/lib/ /install-${arch}/usr/lib; \
+    rm -rf /install-${arch}/lib /install-${arch}/lib64; \
   done
 
 
