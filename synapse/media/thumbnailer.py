@@ -67,6 +67,11 @@ class ThumbnailError(Exception):
 class Thumbnailer:
     FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG"}
 
+    # Which image formats we allow Pillow to open.
+    # This should intentionally be kept restrictive, because the decoder of any
+    # format in this list becomes part of our trusted computing base.
+    PILLOW_FORMATS = ("jpeg", "png", "webp", "gif")
+
     @staticmethod
     def set_limits(max_image_pixels: int) -> None:
         Image.MAX_IMAGE_PIXELS = max_image_pixels
@@ -76,7 +81,7 @@ class Thumbnailer:
         self._closed = False
 
         try:
-            self.image = Image.open(input_path)
+            self.image = Image.open(input_path, formats=self.PILLOW_FORMATS)
         except OSError as e:
             # If an error occurs opening the image, a thumbnail won't be able to
             # be generated.

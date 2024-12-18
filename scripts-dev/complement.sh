@@ -195,6 +195,10 @@ if [ -z "$skip_docker_build" ]; then
         # Build the unified Complement image (from the worker Synapse image we just built).
         echo_if_github "::group::Build Docker image: complement/Dockerfile"
         $CONTAINER_RUNTIME build -t complement-synapse \
+            `# This is the tag we end up pushing to the registry (see` \
+            `# .github/workflows/push_complement_image.yml) so let's just label it now` \
+            `# so people can reference it by the same name locally.` \
+            -t ghcr.io/element-hq/synapse/complement-synapse \
             -f "docker/complement/Dockerfile" "docker/complement"
         echo_if_github "::endgroup::"
 

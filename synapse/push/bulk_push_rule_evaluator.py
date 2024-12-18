@@ -371,7 +371,7 @@ class BulkPushRuleEvaluator:
                 "Deferred[Tuple[int, Tuple[dict, Optional[int]], Dict[str, Dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
-                        run_in_background(  # type: ignore[call-arg]
+                        run_in_background(  # type: ignore[call-overload]
                             self.store.get_number_joined_users_in_room,
                             event.room_id,  # type: ignore[arg-type]
                         ),
@@ -382,10 +382,10 @@ class BulkPushRuleEvaluator:
                             event_id_to_event,
                         ),
                         run_in_background(self._related_events, event),
-                        run_in_background(  # type: ignore[call-arg]
+                        run_in_background(  # type: ignore[call-overload]
                             self.store.get_subset_users_in_room_with_profiles,
-                            event.room_id,  # type: ignore[arg-type]
-                            rules_by_user.keys(),  # type: ignore[arg-type]
+                            event.room_id,
+                            rules_by_user.keys(),
                         ),
                     ),
                     consumeErrors=True,
