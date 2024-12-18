@@ -473,7 +473,7 @@ class AdminHandler:
                     "type": EventTypes.Redaction,
                     "content": {"reason": reason} if reason else {},
                     "room_id": room,
-                    "sender": user_id,
+                    "sender": requester.user.to_string(),
                 }
                 if room_version.updated_redaction_rules:
                     event_dict["content"]["redacts"] = event.event_id
