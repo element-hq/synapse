@@ -43,6 +43,7 @@ class PurgeEventsStorageController:
 
         with nested_logging_context(room_id):
             await self.stores.main.purge_room(room_id)
+            await self.stores.state.purge_room_state(room_id)
 
     async def purge_history(
         self, room_id: str, token: str, delete_local_events: bool

@@ -839,3 +839,45 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
         return dict(rows)
+
+    async def purge_room_state(self, room_id: str) -> None:
+        return await self.db_pool.runInteraction(
+            "purge_room_state",
+            self._purge_room_state_txn,
+            room_id,
+        )
+
+    def _purge_room_state_txn(
+        self,
+        txn: LoggingTransaction,
+        room_id: str,
+    ) -> None:
+        # Delete all edges that reference a state group linked to room_id
+        logger.info("[purge] removing %s from state_group_edges", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
+
+        # state_groups_state table has a room_id column but no index on it, unlike state_groups,
+        # so we delete them by matching the room_id through the state_groups table.
+        logger.info("[purge] removing %s from state_groups_state", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_groups_state AS sgs WHERE sgs.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
+
+        logger.info("[purge] removing %s from state_groups", room_id)
+        self.db_pool.simple_delete_many_txn(
+            txn,
+            table="state_groups",
+            column="room_id",
+            values=[room_id],
+            keyvalues={},
+        )
