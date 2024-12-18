@@ -89,7 +89,7 @@ class ReplicationEndpointFactory:
                 location_config.port,
             )
             if scheme == "https":
-                endpoint = wrapClientTLS(
+                wrapped_endpoint = wrapClientTLS(
                     # The 'port' argument below isn't actually used by the function
                     self.context_factory.creatorForNetloc(
                         location_config.host.encode("utf-8"),
@@ -97,6 +97,8 @@ class ReplicationEndpointFactory:
                     ),
                     endpoint,
                 )
+                return wrapped_endpoint
+
             return endpoint
         elif isinstance(location_config, InstanceUnixLocationConfig):
             return UNIXClientEndpoint(self.reactor, location_config.path)

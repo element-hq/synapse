@@ -673,8 +673,9 @@ This setting has the following sub-options:
    TLS via STARTTLS *if the SMTP server supports it*. If this option is set,
    Synapse will refuse to connect unless the server supports STARTTLS.
 * `enable_tls`: By default, if the server supports TLS, it will be used, and the server
-   must present a certificate that is valid for 'smtp_host'. If this option
+   must present a certificate that is valid for `tlsname`. If this option
    is set to false, TLS will not be used.
+* `tlsname`: The domain name the SMTP server's TLS certificate must be valid for, defaulting to `smtp_host`.
 * `notif_from`: defines the "From" address to use when sending emails.
     It must be set if email sending is enabled. The placeholder '%(app)s' will be replaced by the application name,
     which is normally set in `app_name`, but may be overridden by the
@@ -741,6 +742,7 @@ email:
   force_tls: true
   require_transport_security: true
   enable_tls: false
+  tlsname: mail.server.example.com
   notif_from: "Your Friendly %(app)s homeserver <noreply@example.com>"
   app_name: my_branded_matrix_server
   enable_notifs: true
@@ -3091,6 +3093,22 @@ Example configuration:
 ```yaml
 macaroon_secret_key: <PRIVATE STRING>
 ```
+---
+### `macaroon_secret_key_path`
+
+An alternative to [`macaroon_secret_key`](#macaroon_secret_key):
+allows the secret key to be specified in an external file.
+
+The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.
+
+Example configuration:
+```yaml
+macaroon_secret_key_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.121.0._
+
 ---
 ### `form_secret`
 

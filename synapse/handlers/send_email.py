@@ -47,15 +47,45 @@ logger = logging.getLogger(__name__)
 _is_old_twisted = parse_version(twisted.__version__) < parse_version("21")
 
 
-class _NoTLSESMTPSender(ESMTPSender):
-    """Extend ESMTPSender to disable TLS
+class _BackportESMTPSender(ESMTPSender):
+    """Extend old versions of ESMTPSender to configure TLS.
 
-    Unfortunately, before Twisted 21.2, ESMTPSender doesn't give an easy way to disable
-    TLS, so we override its internal method which it uses to generate a context factory.
+    Unfortunately, before Twisted 21.2, ESMTPSender doesn't give an easy way to
+    disable TLS, or to configure the hostname used for TLS certificate validation.
+    This backports the `hostname` parameter for that functionality.
     """
 
+    __hostname: Optional[str]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """"""
+        self.__hostname = kwargs.pop("hostname", None)
+        super().__init__(*args, **kwargs)
+
     def _getContextFactory(self) -> Optional[IOpenSSLContextFactory]:
-        return None
+        if self.context is not None:
+            return self.context
+        elif self.__hostname is None:
+            return None  # disable TLS if hostname is None
+        return optionsForClientTLS(self.__hostname)
+
+
+class _BackportESMTPSenderFactory(ESMTPSenderFactory):
+    """An ESMTPSenderFactory for _BackportESMTPSender.
+
+    This backports the `hostname` parameter, to disable or configure TLS.
+    """
+
+    __hostname: Optional[str]
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self.__hostname = kwargs.pop("hostname", None)
+        super().__init__(*args, **kwargs)
+
+    def protocol(self, *args: Any, **kwargs: Any) -> ESMTPSender:  # type: ignore
+        # this overrides ESMTPSenderFactory's `protocol` attribute, with a Callable
+        # instantiating our _BackportESMTPSender, providing the hostname parameter
+        return _BackportESMTPSender(*args, **kwargs, hostname=self.__hostname)
 
 
 async def _sendmail(
@@ -71,6 +101,7 @@ async def _sendmail(
     require_tls: bool = False,
     enable_tls: bool = True,
     force_tls: bool = False,
+    tlsname: Optional[str] = None,
 ) -> None:
     """A simple wrapper around ESMTPSenderFactory, to allow substitution in tests
 
@@ -88,39 +119,33 @@ async def _sendmail(
         enable_tls: True to enable STARTTLS. If this is False and require_tls is True,
            the request will fail.
         force_tls: True to enable Implicit TLS.
+        tlsname: the domain name expected as the TLS certificate's commonname,
+           defaults to smtphost.
     """
     msg = BytesIO(msg_bytes)
     d: "Deferred[object]" = Deferred()
+    if not enable_tls:
+        tlsname = None
+    elif tlsname is None:
+        tlsname = smtphost
 
-    def build_sender_factory(**kwargs: Any) -> ESMTPSenderFactory:
-        return ESMTPSenderFactory(
-            username,
-            password,
-            from_addr,
-            to_addr,
-            msg,
-            d,
-            heloFallback=True,
-            requireAuthentication=require_auth,
-            requireTransportSecurity=require_tls,
-            **kwargs,
-        )
-
-    factory: IProtocolFactory
-    if _is_old_twisted:
-        # before twisted 21.2, we have to override the ESMTPSender protocol to disable
-        # TLS
-        factory = build_sender_factory()
-
-        if not enable_tls:
-            factory.protocol = _NoTLSESMTPSender
-    else:
-        # for twisted 21.2 and later, there is a 'hostname' parameter which we should
-        # set to enable TLS.
-        factory = build_sender_factory(hostname=smtphost if enable_tls else None)
+    factory: IProtocolFactory = (
+        _BackportESMTPSenderFactory if _is_old_twisted else ESMTPSenderFactory
+    )(
+        username,
+        password,
+        from_addr,
+        to_addr,
+        msg,
+        d,
+        heloFallback=True,
+        requireAuthentication=require_auth,
+        requireTransportSecurity=require_tls,
+        hostname=tlsname,
+    )
 
     if force_tls:
-        factory = TLSMemoryBIOFactory(optionsForClientTLS(smtphost), True, factory)
+        factory = TLSMemoryBIOFactory(optionsForClientTLS(tlsname), True, factory)
 
     endpoint = HostnameEndpoint(
         reactor, smtphost, smtpport, timeout=30, bindAddress=None
@@ -148,6 +173,7 @@ class SendEmailHandler:
         self._require_transport_security = hs.config.email.require_transport_security
         self._enable_tls = hs.config.email.enable_smtp_tls
         self._force_tls = hs.config.email.force_tls
+        self._tlsname = hs.config.email.email_tlsname
 
         self._sendmail = _sendmail
 
@@ -227,4 +253,5 @@ class SendEmailHandler:
             require_tls=self._require_transport_security,
             enable_tls=self._enable_tls,
             force_tls=self._force_tls,
+            tlsname=self._tlsname,
         )

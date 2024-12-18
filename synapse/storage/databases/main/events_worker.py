@@ -339,6 +339,16 @@ class EventsWorkerStore(SQLBaseStore):
             writers=["master"],
         )
 
+        # Added to accommodate some queries for the admin API in order to fetch/filter
+        # membership events by when it was received
+        self.db_pool.updates.register_background_index_update(
+            update_name="events_received_ts_index",
+            index_name="received_ts_idx",
+            table="events",
+            columns=("received_ts",),
+            where_clause="type = 'm.room.member'",
+        )
+
     def get_un_partial_stated_events_token(self, instance_name: str) -> int:
         return (
             self._un_partial_stated_events_stream_id_gen.get_current_token_for_writer(
@@ -2587,6 +2597,44 @@ class EventsWorkerStore(SQLBaseStore):
                 _BackgroundUpdates.SLIDING_SYNC_JOINED_ROOMS_BG_UPDATE,
                 _BackgroundUpdates.SLIDING_SYNC_MEMBERSHIP_SNAPSHOTS_BG_UPDATE,
             )
+        )
+
+    async def get_sent_invite_count_by_user(self, user_id: str, from_ts: int) -> int:
+        """
+        Get the number of invites sent by the given user at or after the provided timestamp.
+
+        Args:
+            user_id: user ID to search against
+            from_ts: a timestamp in milliseconds from the unix epoch. Filters against
+                `events.received_ts`
+
+        """
+
+        def _get_sent_invite_count_by_user_txn(
+            txn: LoggingTransaction, user_id: str, from_ts: int
+        ) -> int:
+            sql = """
+                  SELECT COUNT(rm.event_id)
+                  FROM room_memberships AS rm
+                  INNER JOIN events AS e USING(event_id)
+                  WHERE rm.sender = ?
+                    AND rm.membership = 'invite'
+                    AND e.type = 'm.room.member'
+                    AND e.received_ts >= ?
+            """
+
+            txn.execute(sql, (user_id, from_ts))
+            res = txn.fetchone()
+
+            if res is None:
+                return 0
+            return int(res[0])
+
+        return await self.db_pool.runInteraction(
+            "_get_sent_invite_count_by_user_txn",
+            _get_sent_invite_count_by_user_txn,
+            user_id,
+            from_ts,
         )
 
     @cached(tree=True)
