@@ -727,7 +727,7 @@ class ReplicationCommandHandler:
     ) -> None:
         """Called when get a new NEW_ACTIVE_TASK command."""
         if self._task_scheduler:
-            self._task_scheduler.launch_task_by_id(cmd.data)
+            self._task_scheduler.on_new_task(cmd.data)
 
     def new_connection(self, connection: IReplicationConnection) -> None:
         """Called when we have a new connection."""
@@ -857,7 +857,7 @@ UpdateRow = TypeVar("UpdateRow")
 
 
 def _batch_updates(
-    updates: Iterable[Tuple[UpdateToken, UpdateRow]]
+    updates: Iterable[Tuple[UpdateToken, UpdateRow]],
 ) -> Iterator[Tuple[UpdateToken, List[UpdateRow]]]:
     """Collect stream updates with the same token together
 

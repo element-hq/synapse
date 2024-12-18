@@ -41,8 +41,6 @@ def run_create(cur: LoggingTransaction, database_engine: BaseDatabaseEngine) -> 
                 (user_id, filter_id);
             DROP TABLE user_filters;
             ALTER TABLE user_filters_migration RENAME TO user_filters;
-        """ % (
-        select_clause,
-    )
+        """ % (select_clause,)
 
     execute_statements_from_stream(cur, StringIO(sql))

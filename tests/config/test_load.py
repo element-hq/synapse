@@ -19,17 +19,27 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+import tempfile
+from typing import Callable
+
 import yaml
+from parameterized import parameterized
 
 from synapse.config import ConfigError
+from synapse.config._base import RootConfig
 from synapse.config.homeserver import HomeServerConfig
 
 from tests.config.utils import ConfigFileTestCase
 
+try:
+    import hiredis
+except ImportError:
+    hiredis = None  # type: ignore
+
 
 class ConfigLoadingFileTestCase(ConfigFileTestCase):
     def test_load_fails_if_server_name_missing(self) -> None:
-        self.generate_config_and_remove_lines_containing("server_name")
+        self.generate_config_and_remove_lines_containing(["server_name"])
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
         with self.assertRaises(ConfigError):
@@ -66,7 +76,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             )
 
     def test_load_succeeds_if_macaroon_secret_key_missing(self) -> None:
-        self.generate_config_and_remove_lines_containing("macaroon")
+        self.generate_config_and_remove_lines_containing(["macaroon"])
         config1 = HomeServerConfig.load_config("", ["-c", self.config_file])
         config2 = HomeServerConfig.load_config("", ["-c", self.config_file])
         config3 = HomeServerConfig.load_or_generate_config("", ["-c", self.config_file])
@@ -101,7 +111,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self.assertTrue(config3.registration.enable_registration)
 
     def test_stats_enabled(self) -> None:
-        self.generate_config_and_remove_lines_containing("enable_metrics")
+        self.generate_config_and_remove_lines_containing(["enable_metrics"])
         self.add_lines_to_config(["enable_metrics: true"])
 
         # The default Metrics Flags are off by default.
@@ -116,3 +126,56 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self.add_lines_to_config(["trust_identity_server_for_password_resets: true"])
         with self.assertRaises(ConfigError):
             HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    @parameterized.expand(
+        [
+            "turn_shared_secret_path: /does/not/exist",
+            "registration_shared_secret_path: /does/not/exist",
+            "macaroon_secret_key_path: /does/not/exist",
+            *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
+            * (hiredis is not None),
+        ]
+    )
+    def test_secret_files_missing(self, config_str: str) -> None:
+        self.generate_config()
+        self.add_lines_to_config(["", config_str])
+
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config("", ["-c", self.config_file])
+
+    @parameterized.expand(
+        [
+            (
+                "turn_shared_secret_path: {}",
+                lambda c: c.voip.turn_shared_secret.encode("utf-8"),
+            ),
+            (
+                "registration_shared_secret_path: {}",
+                lambda c: c.registration.registration_shared_secret.encode("utf-8"),
+            ),
+            (
+                "macaroon_secret_key_path: {}",
+                lambda c: c.key.macaroon_secret_key,
+            ),
+            *[
+                (
+                    "redis:\n  enabled: true\n  password_path: {}",
+                    lambda c: c.redis.redis_password.encode("utf-8"),
+                )
+            ]
+            * (hiredis is not None),
+        ]
+    )
+    def test_secret_files_existing(
+        self, config_line: str, get_secret: Callable[[RootConfig], str]
+    ) -> None:
+        self.generate_config_and_remove_lines_containing(
+            ["registration_shared_secret", "macaroon_secret_key"]
+        )
+        with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
+            secret_file.write(b"53C237")
+
+            self.add_lines_to_config(["", config_line.format(secret_file.name)])
+            config = HomeServerConfig.load_config("", ["-c", self.config_file])
+
+            self.assertEqual(get_secret(config), b"53C237")

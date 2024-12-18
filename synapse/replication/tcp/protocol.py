@@ -23,6 +23,7 @@ protocols.
 
 An explanation of this protocol is available in docs/tcp_replication.md
 """
+
 import fcntl
 import logging
 import struct

@@ -138,7 +138,7 @@ class ThumbnailResource(RestServlet):
     ) -> None:
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
-        await self.auth.get_user_by_req(request)
+        await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)
@@ -229,7 +229,7 @@ class DownloadResource(RestServlet):
         # Validate the server name, raising if invalid
         parse_and_validate_server_name(server_name)
 
-        await self.auth.get_user_by_req(request)
+        await self.auth.get_user_by_req(request, allow_guest=True)
 
         set_cors_headers(request)
         set_corp_headers(request)

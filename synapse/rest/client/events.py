@@ -20,6 +20,7 @@
 #
 
 """This module contains REST servlets to do with event streaming, /events."""
+
 import logging
 from typing import TYPE_CHECKING, Dict, List, Tuple, Union
 

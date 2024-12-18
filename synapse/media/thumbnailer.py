@@ -67,6 +67,11 @@ class ThumbnailError(Exception):
 class Thumbnailer:
     FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG"}
 
+    # Which image formats we allow Pillow to open.
+    # This should intentionally be kept restrictive, because the decoder of any
+    # format in this list becomes part of our trusted computing base.
+    PILLOW_FORMATS = ("jpeg", "png", "webp", "gif")
+
     @staticmethod
     def set_limits(max_image_pixels: int) -> None:
         Image.MAX_IMAGE_PIXELS = max_image_pixels
@@ -76,7 +81,7 @@ class Thumbnailer:
         self._closed = False
 
         try:
-            self.image = Image.open(input_path)
+            self.image = Image.open(input_path, formats=self.PILLOW_FORMATS)
         except OSError as e:
             # If an error occurs opening the image, a thumbnail won't be able to
             # be generated.
@@ -206,7 +211,7 @@ class Thumbnailer:
     def _encode_image(self, output_image: Image.Image, output_type: str) -> BytesIO:
         output_bytes_io = BytesIO()
         fmt = self.FORMATS[output_type]
-        if fmt == "JPEG":
+        if fmt == "JPEG" or fmt == "PNG" and output_image.mode == "CMYK":
             output_image = output_image.convert("RGB")
         output_image.save(output_bytes_io, fmt, quality=80)
         return output_bytes_io
@@ -259,6 +264,7 @@ class ThumbnailProvider:
         media_storage: MediaStorage,
     ):
         self.hs = hs
+        self.reactor = hs.get_reactor()
         self.media_repo = media_repo
         self.media_storage = media_storage
         self.store = hs.get_datastores().main
@@ -347,7 +353,12 @@ class ThumbnailProvider:
                 if responder:
                     if for_federation:
                         await respond_with_multipart_responder(
-                            self.hs.get_clock(), request, responder, media_info
+                            self.hs.get_clock(),
+                            request,
+                            responder,
+                            info.type,
+                            info.length,
+                            None,
                         )
                         return
                     else:
@@ -359,7 +370,7 @@ class ThumbnailProvider:
         logger.debug("We don't have a thumbnail of that size. Generating")
 
         # Okay, so we generate one.
-        file_path = await self.media_repo.generate_local_exact_thumbnail(
+        thumbnail_result = await self.media_repo.generate_local_exact_thumbnail(
             media_id,
             desired_width,
             desired_height,
@@ -368,16 +379,21 @@ class ThumbnailProvider:
             url_cache=bool(media_info.url_cache),
         )
 
-        if file_path:
+        if thumbnail_result:
+            file_path, file_info = thumbnail_result
+            assert file_info.thumbnail is not None
+
             if for_federation:
                 await respond_with_multipart_responder(
                     self.hs.get_clock(),
                     request,
-                    FileResponder(open(file_path, "rb")),
-                    media_info,
+                    FileResponder(self.hs, open(file_path, "rb")),
+                    file_info.thumbnail.type,
+                    file_info.thumbnail.length,
+                    None,
                 )
             else:
-                await respond_with_file(request, desired_type, file_path)
+                await respond_with_file(self.hs, request, desired_type, file_path)
         else:
             logger.warning("Failed to generate thumbnail")
             raise SynapseError(400, "Failed to generate thumbnail.")
@@ -455,7 +471,7 @@ class ThumbnailProvider:
         )
 
         if file_path:
-            await respond_with_file(request, desired_type, file_path)
+            await respond_with_file(self.hs, request, desired_type, file_path)
         else:
             logger.warning("Failed to generate thumbnail")
             raise SynapseError(400, "Failed to generate thumbnail.")
@@ -579,7 +595,12 @@ class ThumbnailProvider:
                 if for_federation:
                     assert media_info is not None
                     await respond_with_multipart_responder(
-                        self.hs.get_clock(), request, responder, media_info
+                        self.hs.get_clock(),
+                        request,
+                        responder,
+                        file_info.thumbnail.type,
+                        file_info.thumbnail.length,
+                        None,
                     )
                     return
                 else:
@@ -633,7 +654,12 @@ class ThumbnailProvider:
             if for_federation:
                 assert media_info is not None
                 await respond_with_multipart_responder(
-                    self.hs.get_clock(), request, responder, media_info
+                    self.hs.get_clock(),
+                    request,
+                    responder,
+                    file_info.thumbnail.type,
+                    file_info.thumbnail.length,
+                    None,
                 )
             else:
                 await respond_with_responder(

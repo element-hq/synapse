@@ -131,15 +131,11 @@ jobs:
         with:
           install-project: "false"
 
-      - name: Import order (isort)
-        run: poetry run isort --check --diff .
+      - name: Run ruff check
+        run: poetry run ruff check --output-format=github .
 
-      - name: Code style (black)
-        run: poetry run black --check --diff .
-
-      - name: Semantic checks (ruff)
-        # --quiet suppresses the update check.
-        run: poetry run ruff check --quiet .
+      - name: Run ruff format
+        run: poetry run ruff format --check .
 
   lint-mypy:
     runs-on: ubuntu-latest
@@ -401,7 +397,7 @@ jobs:
     needs:
       - linting-done
       - changes
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -413,12 +409,12 @@ jobs:
       # their build dependencies
       - run: |
           sudo apt-get -qq update
-          sudo apt-get -qq install build-essential libffi-dev python-dev \
+          sudo apt-get -qq install build-essential libffi-dev python3-dev \
             libxml2-dev libxslt-dev xmlsec1 zlib1g-dev libjpeg-dev libwebp-dev
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.8'
+          python-version: '3.9'
 
       - name: Prepare old deps
         if: steps.cache-poetry-old-deps.outputs.cache-hit != 'true'
@@ -462,7 +458,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["pypy-3.8"]
+        python-version: ["pypy-3.9"]
         extras: ["all"]
 
     steps:
@@ -584,11 +580,11 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: "3.8"
+          - python-version: "3.9"
             postgres-version: "11"
 
-          - python-version: "3.11"
-            postgres-version: "15"
+          - python-version: "3.13"
+            postgres-version: "17"
 
     services:
       postgres:

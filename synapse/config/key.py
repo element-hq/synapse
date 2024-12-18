@@ -43,7 +43,7 @@ from unpaddedbase64 import decode_base64
 from synapse.types import JsonDict
 from synapse.util.stringutils import random_string, random_string_with_symbols
 
-from ._base import Config, ConfigError
+from ._base import Config, ConfigError, read_file
 
 if TYPE_CHECKING:
     from signedjson.key import VerifyKeyWithExpiry
@@ -90,6 +90,11 @@ wish to use another server for this purpose.
 To suppress this warning and continue using 'matrix.org', admins should set
 'suppress_key_server_warning' to 'true' in homeserver.yaml.
 --------------------------------------------------------------------------------"""
+
+CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR = """\
+Conflicting options 'macaroon_secret_key' and 'macaroon_secret_key_path' are
+both defined in config file.
+"""
 
 logger = logging.getLogger(__name__)
 
@@ -166,10 +171,16 @@ class KeyConfig(Config):
             )
         )
 
-        macaroon_secret_key: Optional[str] = config.get(
-            "macaroon_secret_key", self.root.registration.registration_shared_secret
-        )
-
+        macaroon_secret_key = config.get("macaroon_secret_key")
+        macaroon_secret_key_path = config.get("macaroon_secret_key_path")
+        if macaroon_secret_key_path:
+            if macaroon_secret_key:
+                raise ConfigError(CONFLICTING_MACAROON_SECRET_KEY_OPTS_ERROR)
+            macaroon_secret_key = read_file(
+                macaroon_secret_key_path, "macaroon_secret_key_path"
+            ).strip()
+        if not macaroon_secret_key:
+            macaroon_secret_key = self.root.registration.registration_shared_secret
         if not macaroon_secret_key:
             # Unfortunately, there are people out there that don't have this
             # set. Lets just be "nice" and derive one from their secret key.
@@ -200,16 +211,13 @@ class KeyConfig(Config):
             )
             form_secret = 'form_secret: "%s"' % random_string_with_symbols(50)
 
-        return (
-            """\
+        return """\
         %(macaroon_secret_key)s
         %(form_secret)s
         signing_key_path: "%(base_key_name)s.signing.key"
         trusted_key_servers:
           - server_name: "matrix.org"
-        """
-            % locals()
-        )
+        """ % locals()
 
     def read_signing_keys(self, signing_key_path: str, name: str) -> List[SigningKey]:
         """Read the signing keys in the given path.
@@ -249,7 +257,9 @@ class KeyConfig(Config):
             if is_signing_algorithm_supported(key_id):
                 key_base64 = key_data["key"]
                 key_bytes = decode_base64(key_base64)
-                verify_key: "VerifyKeyWithExpiry" = decode_verify_key_bytes(key_id, key_bytes)  # type: ignore[assignment]
+                verify_key: "VerifyKeyWithExpiry" = decode_verify_key_bytes(
+                    key_id, key_bytes
+                )  # type: ignore[assignment]
                 verify_key.expired = key_data["expired_ts"]
                 keys[key_id] = verify_key
             else:

@@ -66,6 +66,7 @@ from tests.media.test_media_storage import (
     SVG,
     TestImage,
     empty_file,
+    small_cmyk_jpeg,
     small_lossless_webp,
     small_png,
     small_png_with_transparency,
@@ -1916,6 +1917,7 @@ class RemoteDownloadLimiterTestCase(unittest.HomeserverTestCase):
 test_images = [
     small_png,
     small_png_with_transparency,
+    small_cmyk_jpeg,
     small_lossless_webp,
     empty_file,
     SVG,
@@ -1957,7 +1959,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             """A mock for MatrixFederationHttpClient.federation_get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]], bytes]],
             ) -> Tuple[int, Dict[bytes, List[bytes]], bytes]:
                 data, response = r
                 output_stream.write(data)
@@ -1991,7 +1993,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
             """A mock for MatrixFederationHttpClient.get_file."""
 
             def write_to(
-                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]]
+                r: Tuple[bytes, Tuple[int, Dict[bytes, List[bytes]]]],
             ) -> Tuple[int, Dict[bytes, List[bytes]]]:
                 data, response = r
                 output_stream.write(data)
@@ -2400,7 +2402,7 @@ class DownloadAndThumbnailTestCase(unittest.HomeserverTestCase):
 
             if expected_body is not None:
                 self.assertEqual(
-                    channel.result["body"], expected_body, channel.result["body"]
+                    channel.result["body"], expected_body, channel.result["body"].hex()
                 )
             else:
                 # ensure that the result is at least some valid image

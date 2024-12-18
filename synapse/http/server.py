@@ -233,7 +233,7 @@ def return_html_error(
 
 
 def wrap_async_request_handler(
-    h: Callable[["_AsyncResource", "SynapseRequest"], Awaitable[None]]
+    h: Callable[["_AsyncResource", "SynapseRequest"], Awaitable[None]],
 ) -> Callable[["_AsyncResource", "SynapseRequest"], "defer.Deferred[None]"]:
     """Wraps an async request handler so that it calls request.processing.
 
@@ -920,15 +920,6 @@ def set_cors_headers(request: "SynapseRequest") -> None:
         request.setHeader(
             b"Access-Control-Expose-Headers",
             b"Synapse-Trace-Id, Server, ETag",
-        )
-    elif request.experimental_cors_msc3886:
-        request.setHeader(
-            b"Access-Control-Allow-Headers",
-            b"X-Requested-With, Content-Type, Authorization, Date, If-Match, If-None-Match",
-        )
-        request.setHeader(
-            b"Access-Control-Expose-Headers",
-            b"ETag, Location, X-Max-Bytes",
         )
     else:
         request.setHeader(

@@ -19,7 +19,6 @@
 #
 #
 import abc
-import cgi
 import codecs
 import logging
 import random
@@ -792,7 +791,7 @@ class MatrixFederationHttpClient:
                                 url_str,
                                 _flatten_response_never_received(e),
                             )
-                            body = None
+                            body = b""
 
                         exc = HttpResponseException(
                             response.code, response_phrase, body
@@ -1756,8 +1755,10 @@ class MatrixFederationHttpClient:
                 request.destination,
                 str_url,
             )
+            # We don't know how large the response will be upfront, so limit it to
+            # the `max_size` config value.
             length, headers, _, _ = await self._simple_http_client.get_file(
-                str_url, output_stream, expected_size
+                str_url, output_stream, max_size
             )
 
         logger.info(
@@ -1811,8 +1812,9 @@ def check_content_type_is(headers: Headers, expected_content_type: str) -> None:
         )
 
     c_type = content_type_headers[0].decode("ascii")  # only the first header
-    val, options = cgi.parse_header(c_type)
-    if val != expected_content_type:
+    # Extract the 'essence' of the mimetype, removing any parameter
+    c_type_parsed = c_type.split(";", 1)[0].strip()
+    if c_type_parsed != expected_content_type:
         raise RequestSendFailed(
             RuntimeError(
                 f"Remote server sent Content-Type header of '{c_type}', not '{expected_content_type}'",

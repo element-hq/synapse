@@ -304,9 +304,9 @@ class BulkPushRuleEvaluator:
                     if relation_type == "m.thread" and event.content.get(
                         "m.relates_to", {}
                     ).get("is_falling_back", False):
-                        related_events["m.in_reply_to"][
-                            "im.vector.is_falling_back"
-                        ] = ""
+                        related_events["m.in_reply_to"]["im.vector.is_falling_back"] = (
+                            ""
+                        )
 
         return related_events
 
@@ -371,8 +371,9 @@ class BulkPushRuleEvaluator:
                 "Deferred[Tuple[int, Tuple[dict, Optional[int]], Dict[str, Dict[str, JsonValue]], Mapping[str, ProfileInfo]]]",
                 gather_results(
                     (
-                        run_in_background(  # type: ignore[call-arg]
-                            self.store.get_number_joined_users_in_room, event.room_id  # type: ignore[arg-type]
+                        run_in_background(  # type: ignore[call-overload]
+                            self.store.get_number_joined_users_in_room,
+                            event.room_id,  # type: ignore[arg-type]
                         ),
                         run_in_background(
                             self._get_power_levels_and_sender_level,
@@ -381,10 +382,10 @@ class BulkPushRuleEvaluator:
                             event_id_to_event,
                         ),
                         run_in_background(self._related_events, event),
-                        run_in_background(  # type: ignore[call-arg]
+                        run_in_background(  # type: ignore[call-overload]
                             self.store.get_subset_users_in_room_with_profiles,
-                            event.room_id,  # type: ignore[arg-type]
-                            rules_by_user.keys(),  # type: ignore[arg-type]
+                            event.room_id,
+                            rules_by_user.keys(),
                         ),
                     ),
                     consumeErrors=True,
@@ -435,6 +436,7 @@ class BulkPushRuleEvaluator:
             self._related_event_match_enabled,
             event.room_version.msc3931_push_features,
             self.hs.config.experimental.msc1767_enabled,  # MSC3931 flag
+            self.hs.config.experimental.msc4210_enabled,
         )
 
         for uid, rules in rules_by_user.items():

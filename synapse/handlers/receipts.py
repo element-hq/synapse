@@ -286,8 +286,14 @@ class ReceiptEventSource(EventSource[MultiWriterStreamToken, JsonMapping]):
         room_ids: Iterable[str],
         is_guest: bool,
         explicit_room_id: Optional[str] = None,
+        to_key: Optional[MultiWriterStreamToken] = None,
     ) -> Tuple[List[JsonMapping], MultiWriterStreamToken]:
-        to_key = self.get_current_key()
+        """
+        Find read receipts for given rooms (> `from_token` and <= `to_token`)
+        """
+
+        if to_key is None:
+            to_key = self.get_current_key()
 
         if from_key == to_key:
             return [], to_key

@@ -1175,7 +1175,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 SET quarantined_by = ?
                 WHERE media_origin = ? AND media_id = ?
             """,
-            ((quarantined_by, origin, media_id) for origin, media_id in remote_mxcs),
+            [(quarantined_by, origin, media_id) for origin, media_id in remote_mxcs],
         )
         total_media_quarantined += txn.rowcount if txn.rowcount > 0 else 0
 
@@ -1382,6 +1382,30 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         partial_state_rooms = {row[0] for row in rows}
         return {room_id: room_id in partial_state_rooms for room_id in room_ids}
 
+    @cached(max_entries=10000, iterable=True)
+    async def get_partial_rooms(self) -> AbstractSet[str]:
+        """Get any "partial-state" rooms which the user is in.
+
+        This is fast as the set of partially stated rooms at any point across
+        the whole server is small, and so such a query is fast. This is also
+        faster than looking up whether a set of room ID's are partially stated
+        via `is_partial_state_room_batched(...)` because of the sheer amount of
+        CPU time looking all the rooms up in the cache.
+        """
+
+        def _get_partial_rooms_for_user_txn(
+            txn: LoggingTransaction,
+        ) -> AbstractSet[str]:
+            sql = """
+                SELECT room_id FROM partial_state_rooms
+            """
+            txn.execute(sql)
+            return {room_id for (room_id,) in txn}
+
+        return await self.db_pool.runInteraction(
+            "get_partial_rooms_for_user", _get_partial_rooms_for_user_txn
+        )
+
     async def get_join_event_id_and_device_lists_stream_id_for_partial_state(
         self, room_id: str
     ) -> Tuple[str, int]:
@@ -1562,6 +1586,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
         direction: Direction = Direction.BACKWARDS,
         user_id: Optional[str] = None,
         room_id: Optional[str] = None,
+        event_sender_user_id: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], int]:
         """Retrieve a paginated list of event reports
 
@@ -1572,6 +1597,8 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 oldest first (forwards)
             user_id: search for user_id. Ignored if user_id is None
             room_id: search for room_id. Ignored if room_id is None
+                event_sender_user_id: search for the sender of the reported event. Ignored if
+                event_sender_user_id is None
         Returns:
             Tuple of:
                 json list of event reports
@@ -1591,6 +1618,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                 filters.append("er.room_id LIKE ?")
                 args.extend(["%" + room_id + "%"])
 
+            if event_sender_user_id:
+                filters.append("events.sender = ?")
+                args.extend([event_sender_user_id])
+
             if direction == Direction.BACKWARDS:
                 order = "DESC"
             else:
@@ -1606,11 +1637,10 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
             sql = """
                 SELECT COUNT(*) as total_event_reports
                 FROM event_reports AS er
+                LEFT JOIN events USING(event_id)
                 JOIN room_stats_state ON room_stats_state.room_id = er.room_id
                 {}
-                """.format(
-                where_clause
-            )
+                """.format(where_clause)
             txn.execute(sql, args)
             count = cast(Tuple[int], txn.fetchone())[0]
 
@@ -1626,8 +1656,7 @@ class RoomWorkerStore(CacheInvalidationWorkerStore):
                     room_stats_state.canonical_alias,
                     room_stats_state.name
                 FROM event_reports AS er
-                LEFT JOIN events
-                    ON events.event_id = er.event_id
+                LEFT JOIN events USING(event_id)
                 JOIN room_stats_state
                     ON room_stats_state.room_id = er.room_id
                 {where_clause}
@@ -2343,6 +2372,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms)
 
     async def write_partial_state_rooms_join_event_id(
         self,
@@ -2527,7 +2557,9 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             still contains events with partial state.
         """
         try:
-            async with self._un_partial_stated_rooms_stream_id_gen.get_next() as un_partial_state_room_stream_id:
+            async with (
+                self._un_partial_stated_rooms_stream_id_gen.get_next() as un_partial_state_room_stream_id
+            ):
                 await self.db_pool.runInteraction(
                     "clear_partial_state_room",
                     self._clear_partial_state_room_txn,
@@ -2564,6 +2596,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         self._invalidate_cache_and_stream(
             txn, self._get_partial_state_servers_at_join, (room_id,)
         )
+        self._invalidate_all_cache_and_stream(txn, self.get_partial_rooms)
 
         DatabasePool.simple_insert_txn(
             txn,

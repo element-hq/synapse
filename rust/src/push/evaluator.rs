@@ -105,6 +105,9 @@ pub struct PushRuleEvaluator {
     /// If MSC3931 (room version feature flags) is enabled. Usually controlled by the same
     /// flag as MSC1767 (extensible events core).
     msc3931_enabled: bool,
+
+    // If MSC4210 (remove legacy mentions) is enabled.
+    msc4210_enabled: bool,
 }
 
 #[pymethods]
@@ -122,6 +125,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled,
         room_version_feature_flags,
         msc3931_enabled,
+        msc4210_enabled,
     ))]
     pub fn py_new(
         flattened_keys: BTreeMap<String, JsonValue>,
@@ -133,6 +137,7 @@ impl PushRuleEvaluator {
         related_event_match_enabled: bool,
         room_version_feature_flags: Vec<String>,
         msc3931_enabled: bool,
+        msc4210_enabled: bool,
     ) -> Result<Self, Error> {
         let body = match flattened_keys.get("content.body") {
             Some(JsonValue::Value(SimpleJsonValue::Str(s))) => s.clone().into_owned(),
@@ -150,6 +155,7 @@ impl PushRuleEvaluator {
             related_event_match_enabled,
             room_version_feature_flags,
             msc3931_enabled,
+            msc4210_enabled,
         })
     }
 
@@ -161,6 +167,7 @@ impl PushRuleEvaluator {
     ///
     /// Returns the set of actions, if any, that match (filtering out any
     /// `dont_notify` and `coalesce` actions).
+    #[pyo3(signature = (push_rules, user_id=None, display_name=None))]
     pub fn run(
         &self,
         push_rules: &FilteredPushRules,
@@ -176,7 +183,8 @@ impl PushRuleEvaluator {
 
             // For backwards-compatibility the legacy mention rules are disabled
             // if the event contains the 'm.mentions' property.
-            if self.has_mentions
+            // Additionally, MSC4210 always disables the legacy rules.
+            if (self.has_mentions || self.msc4210_enabled)
                 && (rule_id == "global/override/.m.rule.contains_display_name"
                     || rule_id == "global/content/.m.rule.contains_user_name"
                     || rule_id == "global/override/.m.rule.roomnotif")
@@ -229,6 +237,7 @@ impl PushRuleEvaluator {
     }
 
     /// Check if the given condition matches.
+    #[pyo3(signature = (condition, user_id=None, display_name=None))]
     fn matches(
         &self,
         condition: Condition,
@@ -526,6 +535,7 @@ fn push_rule_evaluator() {
         true,
         vec![],
         true,
+        false,
     )
     .unwrap();
 
@@ -555,6 +565,7 @@ fn test_requires_room_version_supports_condition() {
         false,
         flags,
         true,
+        false,
     )
     .unwrap();
 
@@ -582,7 +593,7 @@ fn test_requires_room_version_supports_condition() {
     };
     let rules = PushRules::new(vec![custom_rule]);
     result = evaluator.run(
-        &FilteredPushRules::py_new(rules, BTreeMap::new(), true, false, true, false),
+        &FilteredPushRules::py_new(rules, BTreeMap::new(), true, false, true, false, false),
         None,
         None,
     );

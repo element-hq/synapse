@@ -660,12 +660,10 @@ class RegisterRestServlet(RestServlet):
             if not password_hash:
                 raise SynapseError(400, "Missing params: password", Codes.MISSING_PARAM)
 
-            desired_username = (
-                await (
-                    self.password_auth_provider.get_username_for_registration(
-                        auth_result,
-                        params,
-                    )
+            desired_username = await (
+                self.password_auth_provider.get_username_for_registration(
+                    auth_result,
+                    params,
                 )
             )
 
@@ -716,11 +714,9 @@ class RegisterRestServlet(RestServlet):
                 session_id
             )
 
-            display_name = (
-                await (
-                    self.password_auth_provider.get_displayname_for_registration(
-                        auth_result, params
-                    )
+            display_name = await (
+                self.password_auth_provider.get_displayname_for_registration(
+                    auth_result, params
                 )
             )
 
@@ -795,9 +791,12 @@ class RegisterRestServlet(RestServlet):
         body: JsonDict,
         should_issue_refresh_token: bool = False,
     ) -> JsonDict:
-        user_id = await self.registration_handler.appservice_register(
+        user_id, appservice = await self.registration_handler.appservice_register(
             username, as_token
         )
+        if appservice.msc4190_device_management:
+            body["inhibit_login"] = True
+
         return await self._create_registration_details(
             user_id,
             body,
@@ -961,7 +960,7 @@ class RegisterAppServiceOnlyRestServlet(RestServlet):
 
         as_token = self.auth.get_access_token_from_request(request)
 
-        user_id = await self.registration_handler.appservice_register(
+        user_id, _ = await self.registration_handler.appservice_register(
             desired_username, as_token
         )
         return 200, {"user_id": user_id}

@@ -20,8 +20,7 @@
 #
 #
 
-""" This is an implementation of a Matrix homeserver.
-"""
+"""This is an implementation of a Matrix homeserver."""
 
 import os
 import sys
@@ -40,8 +39,8 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # Note that we use an (unneeded) variable here so that pyupgrade doesn't nuke the
 # if-statement completely.
 py_version = sys.version_info
-if py_version < (3, 8):
-    print("Synapse requires Python 3.8 or above.")
+if py_version < (3, 9):
+    print("Synapse requires Python 3.9 or above.")
     sys.exit(1)
 
 # Allow using the asyncio reactor via env var.

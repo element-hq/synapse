@@ -23,6 +23,7 @@
 The VALID_SERVER_COMMANDS and VALID_CLIENT_COMMANDS define which commands are
 allowed to be sent by which side.
 """
+
 import abc
 import logging
 from typing import List, Optional, Tuple, Type, TypeVar
@@ -494,7 +495,7 @@ class LockReleasedCommand(Command):
 
 
 class NewActiveTaskCommand(_SimpleCommand):
-    """Sent to inform instance handling background tasks that a new active task is available to run.
+    """Sent to inform instance handling background tasks that a new task is ready to run.
 
     Format::
 
