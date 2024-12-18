@@ -21,6 +21,7 @@
 # in `poetry export` in the past.
 
 ARG DEBIAN_VERSION=bookworm
+ARG DEBIAN_VERSION_NUMERIC=12
 ARG PYTHON_VERSION=3.12
 ARG POETRY_VERSION=1.8.3
 
@@ -109,9 +110,9 @@ RUN \
   fi
 
 ###
-### Stage 2: runtime dependencies download for ARM64 and AMD64
+## Stage 2: runtime dependencies download for ARM64 and AMD64
 ###
-FROM --platform=$BUILDPLATFORM docker.io/library/debian:${DEBIAN_VERSION} AS runtime-deps
+FROM --platform=$BUILDPLATFORM ghcr.io/astral-sh/uv:${DEBIAN_VERSION} AS runtime-deps
 
 # Tell apt to keep downloaded package files, as we're using cache mounts.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
@@ -120,6 +121,15 @@ RUN rm -f /etc/apt/apt.conf.d/docker-clean; echo 'Binary::apt::APT::Keep-Downloa
 RUN dpkg --add-architecture arm64
 RUN dpkg --add-architecture amd64
 
+ARG PYTHON_VERSION
+RUN uv python install \
+  cpython-${PYTHON_VERSION}-linux-aarch64-gnu \
+  cpython-${PYTHON_VERSION}-linux-x86_64_v2-gnu
+
+RUN mkdir -p /install-amd64/usr/lib /install-arm64/usr/lib
+RUN mv $(uv python dir)/cpython-*-linux-aarch64-gnu/ /install-arm64/usr/local
+RUN mv $(uv python dir)/cpython-*-linux-x86_64_v2-gnu/ /install-amd64/usr/local
+
 # Fetch the runtime dependencies debs for both architectures
 # We do that by building a recursive list of packages we need to download with `apt-cache depends`
 # and then downloading them with `apt-get download`.
@@ -127,16 +137,16 @@ RUN \
   --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
   apt-get update -qq && \
-  apt-get install -y --no-install-recommends rsync && \
   apt-cache depends --recurse --no-recommends --no-suggests --no-conflicts --no-breaks --no-replaces --no-enhances --no-pre-depends \
-      curl \
       gosu \
+      zlib1g \
       libjpeg62-turbo \
       libpq5 \
       libwebp7 \
       xmlsec1 \
       libjemalloc2 \
       libicu \
+      openssl \
     | grep '^\w' > /tmp/pkg-list && \
   for arch in arm64 amd64; do \
     mkdir -p /tmp/debs-${arch} && \
@@ -145,10 +155,6 @@ RUN \
   done
 
 # Extract the debs for each architecture
-# On the runtime image, /lib is a symlink to /usr/lib, so we need to copy the
-# libraries to the right place, else the `COPY` won't work.
-# On amd64, we'll also have a /lib64 folder with ld-linux-x86-64.so.2, which is
-# already present in the runtime image.
 RUN \
   for arch in arm64 amd64; do \
     mkdir -p /install-${arch}/var/lib/dpkg/status.d/ && \
@@ -158,8 +164,6 @@ RUN \
       dpkg --ctrl-tarfile $deb | tar -Ox ./control > /install-${arch}/var/lib/dpkg/status.d/${package_name}; \
       dpkg --extract $deb /install-${arch} || exit 10; \
     done; \
-    rsync -avr /install-${arch}/lib/ /install-${arch}/usr/lib; \
-    rm -rf /install-${arch}/lib /install-${arch}/lib64; \
   done
 
 
@@ -167,7 +171,7 @@ RUN \
 ### Stage 3: runtime
 ###
 
-FROM docker.io/library/python:${PYTHON_VERSION}-slim-${DEBIAN_VERSION}
+FROM gcr.io/distroless/base-nossl-debian${DEBIAN_VERSION_NUMERIC}:debug
 
 ARG TARGETARCH
 
@@ -186,4 +190,4 @@ EXPOSE 8008/tcp 8009/tcp 8448/tcp
 ENTRYPOINT ["/start.py"]
 
 HEALTHCHECK --start-period=5s --interval=15s --timeout=5s \
-  CMD curl -fSs http://localhost:8008/health || exit 1
+  CMD wget --quiet --tries=1 --spider http://localhost:8008/health || exit 1
