@@ -42,8 +42,8 @@ class PurgeEventsStorageController:
         """Deletes all record of a room"""
 
         with nested_logging_context(room_id):
-            state_groups_to_delete = await self.stores.main.purge_room(room_id)
-            await self.stores.state.purge_room_state(room_id, state_groups_to_delete)
+            await self.stores.main.purge_room(room_id)
+            await self.stores.state.purge_room_state(room_id)
 
     async def purge_history(
         self, room_id: str, token: str, delete_local_events: bool
