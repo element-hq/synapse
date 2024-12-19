@@ -2078,6 +2078,82 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(403, channel.code, msg=channel.json_body)
         self.assertEqual(Codes.FORBIDDEN, channel.json_body["errcode"])
 
+    def test_get_room_participants(self) -> None:
+        """
+        Test that /_synapse/admin/v1/rooms/{room_id}/participants returns a list of
+        currently joined users who have posted, and that the list does not contain room
+        members who have not posted
+        """
+
+        participant = self.register_user("participant", "pass")
+        participant_tok = self.login("participant", "pass")
+        room_id = self.helper.create_room_as(participant, tok=participant_tok)
+
+        participant2 = self.register_user("participant2", "pass")
+        participant2_tok = self.login("participant2", "pass")
+        self.helper.join(room_id, participant2, tok=participant2_tok)
+
+        # have some lurkers join the room
+        for i in range(5):
+            user = self.register_user(f"user{i}", "pass")
+            user_tok = self.login(f"user{i}", "pass")
+            self.helper.join(room_id, user, tok=user_tok)
+
+        # double-check the room membership total, should be 7
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/members",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        self.assertEqual(channel.json_body["total"], 7)
+
+        # participants send messages
+        self.helper.send_event(
+            room_id,
+            "m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "nefarious activity",
+            },
+            tok=participant_tok,
+        )
+
+        self.helper.send_event(
+            room_id,
+            "m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "more nefarious activity",
+            },
+            tok=participant2_tok,
+        )
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/participants",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        participants = channel.json_body["participants"]
+        self.assertEqual(len(participants), 2)
+        self.assertIn(participant, participants)
+        self.assertIn(participant2, participants)
+
+        # have participants leave room
+        self.helper.leave(room_id, participant, tok=participant_tok)
+        self.helper.leave(room_id, participant2, tok=participant2_tok)
+
+        # there should no longer be any active participants
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/participants",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        participants = channel.json_body["participants"]
+        self.assertEqual(len(participants), 0)
+
 
 class RoomMessagesTestCase(unittest.HomeserverTestCase):
     servlets = [

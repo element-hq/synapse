@@ -989,3 +989,28 @@ class RoomTimestampToEventRestServlet(RestServlet):
             "event_id": event_id,
             "origin_server_ts": origin_server_ts,
         }
+
+
+class RoomParticipantsRestServlet(RestServlet):
+    """
+    This endpoint allows admins to fetch currently joined members of a room who
+    have also posted to the room.
+
+    GET /_synapse/admin/v1/rooms/{room_id}/participants
+    """
+
+    PATTERNS = admin_patterns("/rooms/(?P<room_id>[^/]*)/participants$")
+
+    def __init__(self, hs: "HomeServer"):
+        self._auth = hs.get_auth()
+        self._store = hs.get_datastores().main
+
+    async def on_GET(
+        self, request: SynapseRequest, room_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self._auth.get_user_by_req(request)
+        await assert_user_is_admin(self._auth, requester)
+
+        participants = await self._store.get_participants_in_room(room_id)
+
+        return HTTPStatus.OK, {"participants": list(participants)}

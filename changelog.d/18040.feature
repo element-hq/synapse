@@ -1,0 +1,1 @@
+Add an admin endpoint to fetch the participants in a room.

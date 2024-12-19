@@ -371,6 +371,30 @@ A response body like the following is returned:
 }
 ```
 
+# Room Participants
+
+The room participants API allows the admin to get a list of current room members who have
+also posted to the room.
+
+The API is:
+
+```
+GET /_synapse/admin/v1/rooms/<room_id>/participants
+```
+
+A response body like the following is returned:
+
+```json
+{
+  "participants": [
+    "@foo:matrix.org",
+    "@bar:matrix.org",
+    "@foobar:matrix.org"
+  ]
+}
+```
+
+
 # Room State API
 
 The Room State admin API allows server admins to get a list of all state events in a room.
