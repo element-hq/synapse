@@ -319,11 +319,9 @@ class StreamChangeCache:
         Mark all entities as changed. This is useful when the cache is invalidated and
         there may be some potential change for all of the entities.
         """
-        # All entities are at the same stream position now.
-        self._cache = SortedDict({stream_pos: set(self._entity_to_key.keys())})
-        self._entity_to_key = {
-            entity: stream_pos for entity in self._entity_to_key.keys()
-        }
+        self._cache.clear()
+        self._entity_to_key.clear()
+        self._earliest_known_stream_pos = stream_pos
 
     def _evict(self) -> None:
         """
