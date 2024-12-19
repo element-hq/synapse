@@ -268,6 +268,15 @@ class StreamChangeCacheTests(unittest.HomeserverTestCase):
 
         cache.all_entities_changed(5)
 
-        self.assertEqual(cache.get_max_pos_of_last_change("user@foo.com"), 5)
-        self.assertEqual(cache.get_max_pos_of_last_change("bar@baz.net"), 5)
-        self.assertEqual(cache.get_max_pos_of_last_change("user@elsewhere.org"), 5)
+        # Everything should be marked as changed before the stream position where the
+        # change occurred.
+        self.assertTrue(cache.has_entity_changed("user@foo.com", 4))
+        self.assertTrue(cache.has_entity_changed("bar@baz.net", 4))
+        self.assertTrue(cache.has_entity_changed("user@elsewhere.org", 4))
+
+        # Nothing should be marked as changed at/after the stream position where the
+        # change occurred. In other words, nothing has changed since the stream position
+        # 5.
+        self.assertFalse(cache.has_entity_changed("user@foo.com", 5))
+        self.assertFalse(cache.has_entity_changed("bar@baz.net", 5))
+        self.assertFalse(cache.has_entity_changed("user@elsewhere.org", 5))
