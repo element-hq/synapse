@@ -896,10 +896,10 @@ class ApplicationServicesHandler:
         results = await make_deferred_yieldable(
             defer.DeferredList(
                 [
-                    run_in_background(
+                    run_in_background(  # type: ignore[call-overload]
                         self.appservice_api.claim_client_keys,
                         # We know this must be an app service.
-                        self.store.get_app_service_by_id(service_id),  # type: ignore[arg-type]
+                        self.store.get_app_service_by_id(service_id),
                         service_query,
                     )
                     for service_id, service_query in query_by_appservice.items()
@@ -952,10 +952,10 @@ class ApplicationServicesHandler:
         results = await make_deferred_yieldable(
             defer.DeferredList(
                 [
-                    run_in_background(
+                    run_in_background(  # type: ignore[call-overload]
                         self.appservice_api.query_keys,
                         # We know this must be an app service.
-                        self.store.get_app_service_by_id(service_id),  # type: ignore[arg-type]
+                        self.store.get_app_service_by_id(service_id),
                         service_query,
                     )
                     for service_id, service_query in query_by_appservice.items()
