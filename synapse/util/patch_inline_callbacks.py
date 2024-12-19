@@ -162,7 +162,7 @@ def _check_yield_points(
                     d = result.throwExceptionIntoGenerator(gen)
                 else:
                     d = gen.send(result)
-            except (StopIteration, defer._DefGen_Return) as e:
+            except StopIteration as e:
                 if current_context() != expected_context:
                     # This happens when the context is lost sometime *after* the
                     # final yield and returning. E.g. we forgot to yield on a
@@ -183,7 +183,7 @@ def _check_yield_points(
                         )
                     )
                     changes.append(err)
-                # The `StopIteration` or `_DefGen_Return` contains the return value from the
+                # The `StopIteration` contains the return value from the
                 # generator.
                 return cast(T, e.value)
 
