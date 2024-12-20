@@ -358,6 +358,13 @@ The API is:
 GET /_synapse/admin/v1/rooms/<room_id>/members
 ```
 
+**Parameters**
+
+The following query parameters are available:
+
+* `participant` - Optional. If provided and set to true, only returns currently joined members who have
+  also posted to the room. Defaults to false. 
+
 A response body like the following is returned:
 
 ```json
@@ -370,30 +377,6 @@ A response body like the following is returned:
   "total": 3
 }
 ```
-
-# Room Participants
-
-The room participants API allows the admin to get a list of current room members who have
-also posted to the room.
-
-The API is:
-
-```
-GET /_synapse/admin/v1/rooms/<room_id>/participants
-```
-
-A response body like the following is returned:
-
-```json
-{
-  "participants": [
-    "@foo:matrix.org",
-    "@bar:matrix.org",
-    "@foobar:matrix.org"
-  ]
-}
-```
-
 
 # Room State API
 
