@@ -2035,6 +2035,34 @@ class RoomTestCase(unittest.HomeserverTestCase):
         # the create_room already does the right thing, so no need to verify that we got
         # the state events it created.
 
+    def test_room_state_param(self) -> None:
+        """Test that filtering by state event type works when requesting state"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.member",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        # only one member has joined so there should be one membership event
+        self.assertEqual(1, len(state))
+        event = state[0]
+        self.assertEqual(event["type"], "m.room.member")
+        self.assertEqual(event["state_key"], self.admin_user)
+
+    def test_room_state_bad_param(self) -> None:
+        """Test that request with param not conforming to 'm.room.*' will be rejected"""
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.something.else",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(400, channel.code)
+
     def _set_canonical_alias(
         self, room_id: str, test_alias: str, admin_user_tok: str
     ) -> None:
