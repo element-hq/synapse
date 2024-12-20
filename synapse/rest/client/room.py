@@ -783,9 +783,9 @@ class RoomMessageListRestServlet(RestServlet):
         # decorator on `get_number_joined_users_in_room` doesn't play well with
         # the type system. Maybe in the future, it can use some ParamSpec
         # wizardry to fix it up.
-        room_member_count_deferred = run_in_background(  # type: ignore[call-arg]
+        room_member_count_deferred = run_in_background(  # type: ignore[call-overload]
             self.store.get_number_joined_users_in_room,
-            room_id,  # type: ignore[arg-type]
+            room_id,
         )
 
         requester = await self.auth.get_user_by_req(request, allow_guest=True)

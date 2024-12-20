@@ -161,7 +161,7 @@ class UserDirectoryHandler(StateDeltasHandler):
         non_spammy_users = []
         for user in results["results"]:
             if not await self._spam_checker_module_callbacks.check_username_for_spam(
-                user
+                user, user_id
             ):
                 non_spammy_users.append(user)
         results["results"] = non_spammy_users
