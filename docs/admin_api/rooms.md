@@ -358,6 +358,13 @@ The API is:
 GET /_synapse/admin/v1/rooms/<room_id>/members
 ```
 
+**Parameters**
+
+The following query parameters are available:
+
+* `participant` - Optional. If provided and set to true, only returns currently joined members who have
+  also posted to the room. Defaults to false. 
+
 A response body like the following is returned:
 
 ```json
