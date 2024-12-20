@@ -1606,7 +1606,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             from_ts,
         )
 
-    async def get_participants_in_room(self, room_id: str) -> FrozenSet[str]:
+    async def get_participants_in_room(self, room_id: str) -> Sequence[str]:
         """
         Return a list of all currently joined room members who have posted
         in the given room.
@@ -1617,7 +1617,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
 
         def _get_participants_in_room_txn(
             txn: LoggingTransaction, room_id: str
-        ) -> frozenset:
+        ) -> List[str]:
             sql = """
                 SELECT DISTINCT c.state_key
                 FROM current_state_events AS c
@@ -1628,7 +1628,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
                     AND c.state_key = e.sender
             """
             txn.execute(sql, (room_id,))
-            return frozenset([r[0] for r in txn])
+            return [r[0] for r in txn]
 
         return await self.db_pool.runInteraction(
             "_get_participants_in_room_txn", _get_participants_in_room_txn, room_id

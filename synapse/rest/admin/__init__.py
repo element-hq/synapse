@@ -81,7 +81,6 @@ from synapse.rest.admin.rooms import (
     RoomEventContextServlet,
     RoomMembersRestServlet,
     RoomMessagesRestServlet,
-    RoomParticipantsRestServlet,
     RoomRestServlet,
     RoomRestV2Servlet,
     RoomStateRestServlet,
@@ -321,7 +320,6 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ListDestinationsRestServlet(hs).register(http_server)
     RoomMessagesRestServlet(hs).register(http_server)
     RoomTimestampToEventRestServlet(hs).register(http_server)
-    RoomParticipantsRestServlet(hs).register(http_server)
     UserReplaceMasterCrossSigningKeyRestServlet(hs).register(http_server)
     UserByExternalId(hs).register(http_server)
     UserByThreePid(hs).register(http_server)
