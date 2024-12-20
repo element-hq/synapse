@@ -1,0 +1,2 @@
+Add a test to verify remote user messages can be redacted via admin api redaction endpoint if requester
+is admin in room.
