@@ -58,6 +58,7 @@ class DelayedEventsHandler:
         self._config = hs.config
         self._clock = hs.get_clock()
         self._request_ratelimiter = hs.get_request_ratelimiter()
+        self._delayed_event_ratelimiter = hs.get_delayed_event_ratelimiter()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
 
@@ -227,6 +228,8 @@ class DelayedEventsHandler:
         Raises:
             SynapseError: if the delayed event fails validation checks.
         """
+        # Use standard request limiter for scheduling new delayed events.
+        # TODO: Instead apply rateliming based on the scheduled send time.
         await self._request_ratelimiter.ratelimit(requester)
 
         self._event_creation_handler.validator.validate_builder(
@@ -285,7 +288,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
         next_send_ts = await self._store.cancel_delayed_event(
@@ -308,7 +311,7 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
         next_send_ts = await self._store.restart_delayed_event(
@@ -332,6 +335,8 @@ class DelayedEventsHandler:
             NotFoundError: if no matching delayed event could be found.
         """
         assert self._is_master
+        # Use standard request limiter for sending delayed events on-demand,
+        # as an on-demand send is similar to sending a regular event.
         await self._request_ratelimiter.ratelimit(requester)
         await self._initialized_from_db
 
@@ -415,7 +420,7 @@ class DelayedEventsHandler:
 
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
-        await self._request_ratelimiter.ratelimit(requester)
+        await self._delayed_event_ratelimiter.ratelimit(requester)
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart
         )
