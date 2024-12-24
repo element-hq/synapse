@@ -60,6 +60,7 @@ from synapse.util import Clock
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
 from tests.test_utils import SMALL_PNG
+from tests.test_utils.event_injection import inject_event
 from tests.unittest import override_config
 
 
@@ -5407,6 +5408,64 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
                     matches.append((event_id, event))
         # we redacted 6 messages
         self.assertEqual(len(matches), 6)
+
+    def test_redactions_for_remote_user_succeed_with_admin_priv_in_room(self) -> None:
+        """
+        Test that if the admin requester has privileges in a room, redaction requests
+        succeed for a remote user
+        """
+
+        # inject some messages from remote user and collect event ids
+        original_message_ids = []
+        for i in range(5):
+            event = self.get_success(
+                inject_event(
+                    self.hs,
+                    room_id=self.rm1,
+                    type="m.room.message",
+                    sender="@remote:remote_server",
+                    content={"msgtype": "m.text", "body": f"nefarious_chatter{i}"},
+                )
+            )
+            original_message_ids.append(event.event_id)
+
+        # make a request to redact user's messages in room
+        # the server admin created this room so has admin privilege in room
+        channel = self.make_request(
+            "POST",
+            "/_synapse/admin/v1/user/@remote:remote_server/redact",
+            content={"rooms": [self.rm1]},
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        id = channel.json_body.get("redact_id")
+
+        # check that there were no failed redactions
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/user/redact_status/{id}",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+        self.assertEqual(channel.json_body.get("status"), "complete")
+        failed_redactions = channel.json_body.get("failed_redactions")
+        self.assertEqual(failed_redactions, {})
+
+        filter = json.dumps({"types": [EventTypes.Redaction]})
+        channel = self.make_request(
+            "GET",
+            f"rooms/{self.rm1}/messages?filter={filter}&limit=50",
+            access_token=self.admin_tok,
+        )
+        self.assertEqual(channel.code, 200)
+
+        matches = []
+        for event in channel.json_body["chunk"]:
+            for event_id in original_message_ids:
+                if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
+                    matches.append((event_id, event))
+        # we originally sent 5 messages so 5 should be redacted
+        self.assertEqual(len(matches), 5)
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
