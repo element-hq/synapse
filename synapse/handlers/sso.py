@@ -813,7 +813,7 @@ class SsoHandler:
 
             # bail if user already has the same avatar
             profile = await self._profile_handler.get_profile(user_id)
-            if profile["avatar_url"] is not None:
+            if "avatar_url" in profile:
                 server_name = profile["avatar_url"].split("/")[-2]
                 media_id = profile["avatar_url"].split("/")[-1]
                 if self._is_mine_server_name(server_name):
