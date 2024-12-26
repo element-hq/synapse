@@ -127,16 +127,6 @@ class ReportRoomRestServlet(RestServlet):
         self.clock = hs.get_clock()
         self.store = hs.get_datastores().main
 
-        # TODO: Remove the unstable variant after 2-3 releases
-        # https://github.com/element-hq/synapse/issues/17373
-        if hs.config.experimental.msc4151_enabled:
-            self.PATTERNS.append(
-                re.compile(
-                    f"^{CLIENT_API_PREFIX}/unstable/org.matrix.msc4151"
-                    "/rooms/(?P<room_id>[^/]*)/report$"
-                )
-            )
-
     class PostBody(RequestBodyModel):
         reason: StrictStr
 
