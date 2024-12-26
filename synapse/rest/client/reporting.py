@@ -20,13 +20,11 @@
 #
 
 import logging
-import re
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Tuple
 
 from synapse._pydantic_compat import StrictStr
 from synapse.api.errors import AuthError, Codes, NotFoundError, SynapseError
-from synapse.api.urls import CLIENT_API_PREFIX
 from synapse.http.server import HttpServer
 from synapse.http.servlet import (
     RestServlet,
