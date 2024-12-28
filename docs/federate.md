@@ -7,7 +7,7 @@ yours to send messages.
 
 The `server_name` configured in the Synapse configuration file (often
 `homeserver.yaml`) defines how resources (users, rooms, etc.) will be
-identified (eg: `@user:example.com`, `#room:example.com`). By default,
+identified (eg: `@user:example.com`, `!room:example.com`). By default,
 it is also the domain that other servers will use to try to reach your
 server (via port 8448). This is easy to set up and will work provided
 you set the `server_name` to match your machine's public DNS hostname.
