@@ -877,7 +877,5 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         self.db_pool.simple_delete_many_txn(
             txn,
             table="state_groups",
-            column="room_id",
-            values=[room_id],
-            keyvalues={},
+            keyvalues={"room_id": room_id},
         )
