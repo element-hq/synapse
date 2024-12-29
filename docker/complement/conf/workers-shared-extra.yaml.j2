@@ -7,6 +7,7 @@
 #}
 
 ## Server ##
+public_baseurl: http://127.0.0.1:8008/
 report_stats: False
 trusted_key_servers: []
 enable_registration: true
@@ -104,6 +105,16 @@ experimental_features:
   msc3967_enabled: true
   # Expose a room summary for public rooms
   msc3266_enabled: true
+  # Send to-device messages to application services
+  msc2409_to_device_messages_enabled: true
+  # Allow application services to masquerade devices
+  msc3202_device_masquerading: true
+  # Sending device list changes, one-time key counts and fallback key usage to application services
+  msc3202_transaction_extensions: true
+  # Proxy OTK claim requests to exclusive ASes
+  msc3983_appservice_otk_claims: true
+  # Proxy key queries to exclusive ASes
+  msc3984_appservice_key_query: true
 
 server_notices:
   system_mxid_localpart: _server

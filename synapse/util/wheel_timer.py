@@ -47,7 +47,6 @@ class WheelTimer(Generic[T]):
         """
         self.bucket_size: int = bucket_size
         self.entries: List[_Entry[T]] = []
-        self.current_tick: int = 0
 
     def insert(self, now: int, obj: T, then: int) -> None:
         """Inserts object into timer.
@@ -78,11 +77,10 @@ class WheelTimer(Generic[T]):
                 self.entries[max(min_key, then_key) - min_key].elements.add(obj)
                 return
 
-        next_key = now_key + 1
         if self.entries:
-            last_key = self.entries[-1].end_key
+            last_key = self.entries[-1].end_key + 1
         else:
-            last_key = next_key
+            last_key = now_key + 1
 
         # Handle the case when `then` is in the past and `entries` is empty.
         then_key = max(last_key, then_key)

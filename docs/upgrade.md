@@ -117,6 +117,59 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.122.0
+
+## Dropping support for PostgreSQL 11 and 12
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 11 and 12, as they are no longer supported upstream.
+This release of Synapse requires PostgreSQL 13+.
+
+# Upgrading to v1.120.0
+
+## Removal of experimental MSC3886 feature
+
+[MSC3886](https://github.com/matrix-org/matrix-spec-proposals/pull/3886)
+has been closed (and will not enter the Matrix spec). As such, we are
+removing the experimental support for it in this release.
+
+The `experimental_features.msc3886_endpoint` configuration option has
+been removed.
+
+## Authenticated media is now enforced by default
+
+The [`enable_authenticated_media`] configuration option now defaults to true.
+
+This means that clients and remote (federated) homeservers now need to use
+the authenticated media endpoints in order to download media from your
+homeserver.
+
+As an exception, existing media that was stored on the server prior to
+this option changing to `true` will still be accessible over the
+unauthenticated endpoints.
+
+The matrix.org homeserver has already been running with this option enabled
+since September 2024, so most common clients and homeservers should already
+be compatible.
+
+With that said, administrators who wish to disable this feature for broader
+compatibility can still do so by manually configuring
+`enable_authenticated_media: False`.
+
+[`enable_authenticated_media`]: usage/configuration/config_documentation.md#enable_authenticated_media
+
+
+# Upgrading to v1.119.0
+
+## Minimum supported Python version
+
+The minimum supported Python version has been increased from v3.8 to v3.9.
+You will need Python 3.9+ to run Synapse v1.119.0 (due out Nov 7th, 2024).
+
+If you use current versions of the Matrix.org-distributed Docker images, no action is required.
+Please note that support for Ubuntu `focal` was dropped as well since it uses Python 3.8.
+
+
 # Upgrading to v1.111.0
 
 ## New worker endpoints for authenticated client and federation media

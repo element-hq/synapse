@@ -673,8 +673,9 @@ This setting has the following sub-options:
    TLS via STARTTLS *if the SMTP server supports it*. If this option is set,
    Synapse will refuse to connect unless the server supports STARTTLS.
 * `enable_tls`: By default, if the server supports TLS, it will be used, and the server
-   must present a certificate that is valid for 'smtp_host'. If this option
+   must present a certificate that is valid for `tlsname`. If this option
    is set to false, TLS will not be used.
+* `tlsname`: The domain name the SMTP server's TLS certificate must be valid for, defaulting to `smtp_host`.
 * `notif_from`: defines the "From" address to use when sending emails.
     It must be set if email sending is enabled. The placeholder '%(app)s' will be replaced by the application name,
     which is normally set in `app_name`, but may be overridden by the
@@ -741,6 +742,7 @@ email:
   force_tls: true
   require_transport_security: true
   enable_tls: false
+  tlsname: mail.server.example.com
   notif_from: "Your Friendly %(app)s homeserver <noreply@example.com>"
   app_name: my_branded_matrix_server
   enable_notifs: true
@@ -1887,12 +1889,33 @@ Config options related to Synapse's media store.
 
 When set to true, all subsequent media uploads will be marked as authenticated, and will not be available over legacy
 unauthenticated media endpoints (`/_matrix/media/(r0|v3|v1)/download` and `/_matrix/media/(r0|v3|v1)/thumbnail`) - requests for authenticated media over these endpoints will result in a 404. All media, including authenticated media, will be available over the authenticated media endpoints `_matrix/client/v1/media/download` and `_matrix/client/v1/media/thumbnail`. Media uploaded prior to setting this option to true will still be available over the legacy endpoints. Note if the setting is switched to false
-after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to false, but
-this will change to true in a future Synapse release.
+after enabling, media marked as authenticated will be available over legacy endpoints. Defaults to true (previously false). In a future release of Synapse, this option will be removed and become always-on.
+
+In all cases, authenticated requests to download media will succeed, but for unauthenticated requests, this
+case-by-case breakdown describes whether media downloads are permitted:
+
+* `enable_authenticated_media = False`:
+  * unauthenticated client or homeserver requesting local media: allowed
+  * unauthenticated client or homeserver requesting remote media: allowed as long as the media is in the cache,
+    or as long as the remote homeserver does not require authentication to retrieve the media
+* `enable_authenticated_media = True`:
+  * unauthenticated client or homeserver requesting local media:
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+  * unauthenticated client or homeserver requesting remote media: the same as for local media;
+    allowed if the media was stored on the server whilst `enable_authenticated_media` was `False` (or in a previous Synapse version where this option did not exist);
+    otherwise denied.
+
+It is especially notable that media downloaded before this option existed (in older Synapse versions), or whilst this option was set to `False`,
+will perpetually be available over the legacy, unauthenticated endpoint, even after this option is set to `True`.
+This is for backwards compatibility with older clients and homeservers that do not yet support requesting authenticated media;
+those older clients or homeservers will not be cut off from media they can already see.
+
+_Changed in Synapse 1.120:_ This option now defaults to `True` when not set, whereas before this version it defaulted to `False`.
 
 Example configuration:
 ```yaml
-enable_authenticated_media: true
+enable_authenticated_media: false
 ```
 ---
 ### `enable_media_repo`
@@ -3071,6 +3094,22 @@ Example configuration:
 macaroon_secret_key: <PRIVATE STRING>
 ```
 ---
+### `macaroon_secret_key_path`
+
+An alternative to [`macaroon_secret_key`](#macaroon_secret_key):
+allows the secret key to be specified in an external file.
+
+The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.
+
+Example configuration:
+```yaml
+macaroon_secret_key_path: /path/to/secrets/file
+```
+
+_Added in Synapse 1.121.0._
+
+---
 ### `form_secret`
 
 A secret which is used to calculate HMACs for form values, to stop
@@ -3107,6 +3146,15 @@ it was last used.
 
 It is possible to build an entry from an old `signing.key` file using the
 `export_signing_key` script which is provided with synapse.
+
+If you have lost the private key file, you can ask another server you trust to
+tell you the public keys it has seen from your server. To fetch the keys from
+`matrix.org`, try something like:
+
+```
+curl https://matrix-federation.matrix.org/_matrix/key/v2/query/myserver.example.com |
+  jq '.server_keys | map(.verify_keys) | add'
+```
 
 Example configuration:
 ```yaml
@@ -4371,9 +4419,9 @@ It is possible to scale the processes that handle sending outbound federation re
 by running a [`generic_worker`](../../workers.md#synapseappgeneric_worker) and adding it's [`worker_name`](#worker_name) to
 a `federation_sender_instances` map. Doing so will remove handling of this function from
 the main process. Multiple workers can be added to this map, in which case the work is
-balanced across them. 
+balanced across them.
 
-The way that the load balancing works is any outbound federation request will be assigned 
+The way that the load balancing works is any outbound federation request will be assigned
 to a federation sender worker based on the hash of the destination server name. This
 means that all requests being sent to the same destination will be processed by the same
 worker instance. Multiple `federation_sender_instances` are useful if there is a federation
@@ -4730,7 +4778,7 @@ This setting has the following sub-options:
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
-* `worker_to_run_on`: Which worker to run this module on. This must match 
+* `worker_to_run_on`: Which worker to run this module on. This must match
   the "worker_name". If not set or `null`, invites will be accepted on the
   main process.
 

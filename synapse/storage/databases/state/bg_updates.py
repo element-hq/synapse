@@ -112,8 +112,8 @@ class StateGroupBackgroundUpdateStore(SQLBaseStore):
         Returns:
             Map from state_group to a StateMap at that point.
         """
-
-        state_filter = state_filter or StateFilter.all()
+        if state_filter is None:
+            state_filter = StateFilter.all()
 
         results: Dict[int, MutableStateMap[str]] = {group: {} for group in groups}
 

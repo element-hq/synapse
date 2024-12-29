@@ -560,9 +560,15 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
         self.assertEqual(channel.code, 401, channel.json_body)
 
     def expect_unrecognized(
-        self, method: str, path: str, content: Union[bytes, str, JsonDict] = ""
+        self,
+        method: str,
+        path: str,
+        content: Union[bytes, str, JsonDict] = "",
+        auth: bool = False,
     ) -> None:
-        channel = self.make_request(method, path, content)
+        channel = self.make_request(
+            method, path, content, access_token="token" if auth else None
+        )
 
         self.assertEqual(channel.code, 404, channel.json_body)
         self.assertEqual(
@@ -648,8 +654,25 @@ class MSC3861OAuthDelegation(HomeserverTestCase):
 
     def test_device_management_endpoints_removed(self) -> None:
         """Test that device management endpoints that were removed in MSC2964 are no longer available."""
-        self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices")
-        self.expect_unrecognized("DELETE", "/_matrix/client/v3/devices/{DEVICE}")
+
+        # Because we still support those endpoints with ASes, it checks the
+        # access token before returning 404
+        self.http_client.request = AsyncMock(
+            return_value=FakeResponse.json(
+                code=200,
+                payload={
+                    "active": True,
+                    "sub": SUBJECT,
+                    "scope": " ".join([MATRIX_USER_SCOPE, MATRIX_DEVICE_SCOPE]),
+                    "username": USERNAME,
+                },
+            )
+        )
+
+        self.expect_unrecognized("POST", "/_matrix/client/v3/delete_devices", auth=True)
+        self.expect_unrecognized(
+            "DELETE", "/_matrix/client/v3/devices/{DEVICE}", auth=True
+        )
 
     def test_openid_endpoints_removed(self) -> None:
         """Test that OpenID id_token endpoints that were removed in MSC2964 are no longer available."""

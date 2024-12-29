@@ -124,6 +124,7 @@ class AdminHandler:
             "consent_ts": user_info.consent_ts,
             "user_type": user_info.user_type,
             "is_guest": user_info.is_guest,
+            "suspended": user_info.suspended,
         }
 
         if self._msc3866_enabled:
@@ -472,7 +473,7 @@ class AdminHandler:
                     "type": EventTypes.Redaction,
                     "content": {"reason": reason} if reason else {},
                     "room_id": room,
-                    "sender": user_id,
+                    "sender": requester.user.to_string(),
                 }
                 if room_version.updated_redaction_rules:
                     event_dict["content"]["redacts"] = event.event_id
