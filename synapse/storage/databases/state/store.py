@@ -874,7 +874,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
         logger.info("[purge] removing %s from state_groups", room_id)
-        self.db_pool.simple_delete_many_txn(
+        self.db_pool.simple_delete_txn(
             txn,
             table="state_groups",
             keyvalues={"room_id": room_id},
