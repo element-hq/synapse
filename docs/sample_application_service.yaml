@@ -1,0 +1,17 @@
+# Sample application service configuration file
+# Usage:
+# add this directive to homeserver.yaml to activate this application service:
+# app_service_config_files:
+#   - docs/sample_application_service.yaml
+
+id: <id>
+url: null
+as_token: <as_token>
+hs_token: <hs_token>
+sender_localpart: <sender_localpart>
+namespaces:
+  users:
+    - exclusive: false
+      regex: ".*"
+  aliases: []
+  rooms: []
