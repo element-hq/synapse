@@ -286,12 +286,15 @@ class UserServlet(SCIMServlet):
         requester = await self.auth.get_user_by_req(request)
         await assert_user_is_admin(self.auth, requester)
 
-        body = parse_json_object_from_request(request)
-        request_user = User.model_validate(
-            body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST
-        )
-
         try:
+            body = parse_json_object_from_request(request)
+            original_user = await self.get_scim_user(user_id)
+            request_user = User.model_validate(
+                body,
+                scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST,
+                original=original_user,
+            )
+
             user_id_obj = UserID.from_string(user_id)
 
             threepids = await self.store.user_get_threepids(user_id)

@@ -18,8 +18,7 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from twisted.internet.task import deferLater
 from twisted.test.proto_helpers import MemoryReactor
@@ -104,33 +103,43 @@ class TestTaskScheduler(HomeserverTestCase):
                 )
             )
 
-        # This is to give the time to the active tasks to finish
-        self.reactor.advance(1)
+        def get_tasks_of_status(status: TaskStatus) -> List[ScheduledTask]:
+            tasks = (
+                self.get_success(self.task_scheduler.get_task(task_id))
+                for task_id in task_ids
+            )
+            return [t for t in tasks if t is not None and t.status == status]
 
-        # Check that only MAX_CONCURRENT_RUNNING_TASKS tasks has run and that one
-        # is still scheduled.
-        tasks = [
-            self.get_success(self.task_scheduler.get_task(task_id))
-            for task_id in task_ids
-        ]
-
+        # At this point, there should be MAX_CONCURRENT_RUNNING_TASKS active tasks and
+        # one scheduled task.
         self.assertEquals(
-            len(
-                [t for t in tasks if t is not None and t.status == TaskStatus.COMPLETE]
-            ),
+            len(get_tasks_of_status(TaskStatus.ACTIVE)),
             TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
         )
+        self.assertEquals(
+            len(get_tasks_of_status(TaskStatus.SCHEDULED)),
+            1,
+        )
 
-        scheduled_tasks = [
-            t for t in tasks if t is not None and t.status == TaskStatus.ACTIVE
-        ]
-        self.assertEquals(len(scheduled_tasks), 1)
-
-        # We need to wait for the next run of the scheduler loop
-        self.reactor.advance((TaskScheduler.SCHEDULE_INTERVAL_MS / 1000))
+        # Give the time to the active tasks to finish
         self.reactor.advance(1)
 
-        # Check that the last task has been properly executed after the next scheduler loop run
+        # Check that MAX_CONCURRENT_RUNNING_TASKS tasks have run and that one
+        # is still scheduled.
+        self.assertEquals(
+            len(get_tasks_of_status(TaskStatus.COMPLETE)),
+            TaskScheduler.MAX_CONCURRENT_RUNNING_TASKS,
+        )
+        scheduled_tasks = get_tasks_of_status(TaskStatus.SCHEDULED)
+        self.assertEquals(len(scheduled_tasks), 1)
+
+        # The scheduled task should start 0.1s after the first of the active tasks
+        # finishes
+        self.reactor.advance(0.1)
+        self.assertEquals(len(get_tasks_of_status(TaskStatus.ACTIVE)), 1)
+
+        # ... and should finally complete after another second
+        self.reactor.advance(1)
         prev_scheduled_task = self.get_success(
             self.task_scheduler.get_task(scheduled_tasks[0].id)
         )

@@ -78,7 +78,7 @@ class TwistedHttpClient(HttpClient):
             url, data, headers_dict={"Content-Type": ["application/json"]}
         )
         body = yield readBody(response)
-        defer.returnValue((response.code, body))
+        return response.code, body
 
     @defer.inlineCallbacks
     def get_json(self, url, args=None):
@@ -88,7 +88,7 @@ class TwistedHttpClient(HttpClient):
             url = "%s?%s" % (url, qs)
         response = yield self._create_get_request(url)
         body = yield readBody(response)
-        defer.returnValue(json.loads(body))
+        return json.loads(body)
 
     def _create_put_request(self, url, json_data, headers_dict: Optional[dict] = None):
         """Wrapper of _create_request to issue a PUT request"""
@@ -134,7 +134,7 @@ class TwistedHttpClient(HttpClient):
             response = yield self._create_request(method, url)
 
         body = yield readBody(response)
-        defer.returnValue(json.loads(body))
+        return json.loads(body)
 
     @defer.inlineCallbacks
     def _create_request(
@@ -173,7 +173,7 @@ class TwistedHttpClient(HttpClient):
         if self.verbose:
             print("Status %s %s" % (response.code, response.phrase))
             print(pformat(list(response.headers.getAllRawHeaders())))
-        defer.returnValue(response)
+        return response
 
     def sleep(self, seconds):
         d = defer.Deferred()
