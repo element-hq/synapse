@@ -5429,8 +5429,8 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
             )
             original_message_ids.append(event.event_id)
 
-        # make a request to redact user's messages in room
-        # the server admin created this room so has admin privilege in room
+        # send a request to redact a remote user's messages in a room.
+        # the server admin created this room and has admin privilege in room
         channel = self.make_request(
             "POST",
             "/_synapse/admin/v1/user/@remote:remote_server/redact",
@@ -5459,13 +5459,13 @@ class UserRedactionTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(channel.code, 200)
 
-        matches = []
         for event in channel.json_body["chunk"]:
             for event_id in original_message_ids:
                 if event["type"] == "m.room.redaction" and event["redacts"] == event_id:
-                    matches.append((event_id, event))
+                    original_message_ids.remove(event_id)
+                    break
         # we originally sent 5 messages so 5 should be redacted
-        self.assertEqual(len(matches), 5)
+        self.assertEqual(len(original_message_ids), 0)
 
 
 class UserRedactionBackgroundTaskTestCase(BaseMultiWorkerStreamTestCase):
