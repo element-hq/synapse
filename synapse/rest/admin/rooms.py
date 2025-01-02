@@ -468,11 +468,6 @@ class RoomStateRestServlet(RestServlet):
         type = parse_string(request, "type")
 
         if type:
-            if not type.startswith("m.room."):
-                raise SynapseError(
-                    HTTPStatus.BAD_REQUEST,
-                    "Type must be a room state event.",
-                )
             state_filter = StateFilter(
                 types=immutabledict({type: None}),
                 include_others=False,

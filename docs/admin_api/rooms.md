@@ -390,7 +390,7 @@ GET /_synapse/admin/v1/rooms/<room_id>/state
 The following query parameter is available:
 
 * `type` - The type of room state event to filter by, eg "m.room.create". If provided, only state events
-    of this type will be returned. 
+    of this type will be returned (regardless of their `state_key` value).
 
 A response body like the following is returned:
 

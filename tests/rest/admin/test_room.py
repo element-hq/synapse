@@ -2052,16 +2052,34 @@ class RoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(event["type"], "m.room.member")
         self.assertEqual(event["state_key"], self.admin_user)
 
-    def test_room_state_bad_param(self) -> None:
-        """Test that request with param not conforming to 'm.room.*' will be rejected"""
+    def test_room_state_param_empty(self) -> None:
+        """Test that passing an empty string as state filter param returns no state events"""
         room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.something.else",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=''",
             access_token=self.admin_user_tok,
         )
-        self.assertEqual(400, channel.code)
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(0, len(state))
+
+    def test_room_state_param_not_in_room(self) -> None:
+        """
+        Test that passing a state filter param for a state event not in the room
+        returns no state events
+        """
+        room_id = self.helper.create_room_as(self.admin_user, tok=self.admin_user_tok)
+
+        channel = self.make_request(
+            "GET",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=m.room.custom",
+            access_token=self.admin_user_tok,
+        )
+        self.assertEqual(200, channel.code)
+        state = channel.json_body["state"]
+        self.assertEqual(0, len(state))
 
     def _set_canonical_alias(
         self, room_id: str, test_alias: str, admin_user_tok: str
