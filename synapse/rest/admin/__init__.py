@@ -118,6 +118,7 @@ from synapse.rest.admin.users import (
     UserTokenRestServlet,
     WhoisRestServlet,
 )
+from synapse.rest.scim import HAS_SCIM2, register_scim_servlets
 from synapse.types import JsonDict, RoomStreamToken, TaskStatus
 from synapse.util import SYNAPSE_VERSION
 
@@ -337,6 +338,9 @@ def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     BackgroundUpdateStartJobRestServlet(hs).register(http_server)
     ExperimentalFeaturesRestServlet(hs).register(http_server)
     SuspendAccountRestServlet(hs).register(http_server)
+
+    if HAS_SCIM2:
+        register_scim_servlets(hs, http_server)
 
 
 def register_servlets_for_client_rest_resource(

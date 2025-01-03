@@ -18,21 +18,25 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
-from typing import Any, Awaitable, Callable, Dict
+from http import HTTPStatus
+from typing import Any, Awaitable, BinaryIO, Callable, Dict, List, Optional, Tuple
 from unittest.mock import AsyncMock, Mock
 
 from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
+from twisted.web.http_headers import Headers
 
 import synapse.types
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.errors import AuthError, Codes, SynapseError
+from synapse.http.client import RawHeaders
 from synapse.rest import admin
 from synapse.server import HomeServer
 from synapse.types import JsonDict, UserID
 from synapse.util import Clock
 
 from tests import unittest
+from tests.test_utils import SMALL_PNG, FakeResponse
 
 
 class ProfileTestCase(unittest.HomeserverTestCase):
@@ -46,6 +50,10 @@ class ProfileTestCase(unittest.HomeserverTestCase):
 
         self.query_handlers: Dict[str, Callable[[dict], Awaitable[JsonDict]]] = {}
 
+        self.http_client = Mock(spec=["get_file"])
+        self.http_client.get_file.side_effect = mock_get_file
+        self.http_client.user_agent = b"Synapse Test"
+
         def register_query_handler(
             query_type: str, handler: Callable[[dict], Awaitable[JsonDict]]
         ) -> None:
@@ -57,7 +65,13 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             federation_client=self.mock_federation,
             federation_server=Mock(),
             federation_registry=self.mock_registry,
+            proxied_blocklisted_http_client=self.http_client,
         )
+
+        self.media_repo = (
+            hs.get_media_repository() if hs.config.media.can_load_media_repo else None
+        )
+
         return hs
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
@@ -398,3 +412,143 @@ class ProfileTestCase(unittest.HomeserverTestCase):
                     user_id=UserID.from_string("@rin:test"),
                 )
             )
+
+    def test_set_avatar_from_http_url(self) -> None:
+        """Tests successfully setting the avatar of a newly created user"""
+        # Create a new user to set avatar for
+        reg_handler = self.hs.get_registration_handler()
+        user_id = self.get_success(reg_handler.register_user(approved=True))
+
+        self.assertTrue(
+            self.get_success(
+                self.handler.set_avatar_from_http_url(
+                    user_id,
+                    "http://my.server/me.png",
+                    self.media_repo,
+                    self.http_client,
+                    "sso_avatar_",
+                )
+            )
+        )
+
+        # Ensure avatar is set on this newly created user,
+        # so no need to compare for the exact image
+        profile_handler = self.hs.get_profile_handler()
+        profile = self.get_success(profile_handler.get_profile(user_id))
+        self.assertIsNot(profile["avatar_url"], None)
+
+    @unittest.override_config({"max_avatar_size": 1})
+    def test_set_avatar_too_big_image(self) -> None:
+        """Tests that saving an avatar fails when it is too big"""
+        # any random user works since image check is supposed to fail
+        user_id = "@sso-user:test"
+
+        self.assertFalse(
+            self.get_success(
+                self.handler.set_avatar_from_http_url(
+                    user_id,
+                    "http://my.server/me.png",
+                    self.media_repo,
+                    self.http_client,
+                    "sso_avatar_",
+                )
+            )
+        )
+
+    @unittest.override_config({"allowed_avatar_mimetypes": ["image/jpeg"]})
+    def test_set_avatar_incorrect_mime_type(self) -> None:
+        """Tests that saving an avatar fails when its mime type is not allowed"""
+        # any random user works since image check is supposed to fail
+        user_id = "@sso-user:test"
+
+        self.assertFalse(
+            self.get_success(
+                self.handler.set_avatar_from_http_url(
+                    user_id,
+                    "http://my.server/me.png",
+                    self.media_repo,
+                    self.http_client,
+                    "sso_avatar_",
+                )
+            )
+        )
+
+    def test_skip_saving_avatar_when_not_changed(self) -> None:
+        """Tests whether saving of avatar correctly skips if the avatar hasn't
+        changed"""
+        # Create a new user to set avatar for
+        reg_handler = self.hs.get_registration_handler()
+        user_id = self.get_success(reg_handler.register_user(approved=True))
+
+        # set avatar for the first time, should be a success
+        self.assertTrue(
+            self.get_success(
+                self.handler.set_avatar_from_http_url(
+                    user_id,
+                    "http://my.server/me.png",
+                    self.media_repo,
+                    self.http_client,
+                    "sso_avatar_",
+                )
+            )
+        )
+
+        # get avatar picture for comparison after another attempt
+        profile_handler = self.hs.get_profile_handler()
+        profile = self.get_success(profile_handler.get_profile(user_id))
+        url_to_match = profile["avatar_url"]
+
+        # set same avatar for the second time, should be a success
+        self.assertTrue(
+            self.get_success(
+                self.handler.set_avatar_from_http_url(
+                    user_id,
+                    "http://my.server/me.png",
+                    self.media_repo,
+                    self.http_client,
+                    "sso_avatar_",
+                )
+            )
+        )
+
+        # compare avatar picture's url from previous step
+        profile = self.get_success(profile_handler.get_profile(user_id))
+        self.assertEqual(profile["avatar_url"], url_to_match)
+
+
+async def mock_get_file(
+    url: str,
+    output_stream: BinaryIO,
+    max_size: Optional[int] = None,
+    headers: Optional[RawHeaders] = None,
+    is_allowed_content_type: Optional[Callable[[str], bool]] = None,
+) -> Tuple[int, Dict[bytes, List[bytes]], str, int]:
+    fake_response = FakeResponse(code=404)
+    if url == "http://my.server/me.png":
+        fake_response = FakeResponse(
+            code=200,
+            headers=Headers(
+                {"Content-Type": ["image/png"], "Content-Length": [str(len(SMALL_PNG))]}
+            ),
+            body=SMALL_PNG,
+        )
+
+    if max_size is not None and max_size < len(SMALL_PNG):
+        raise SynapseError(
+            HTTPStatus.BAD_GATEWAY,
+            "Requested file is too large > %r bytes" % (max_size,),
+            Codes.TOO_LARGE,
+        )
+
+    if is_allowed_content_type and not is_allowed_content_type("image/png"):
+        raise SynapseError(
+            HTTPStatus.BAD_GATEWAY,
+            (
+                "Requested file's content type not allowed for this operation: %s"
+                % "image/png"
+            ),
+        )
+
+    output_stream.write(fake_response.body)
+
+    return len(SMALL_PNG), {b"Content-Type": [b"image/png"]}, "", 200
