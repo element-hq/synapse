@@ -2058,12 +2058,12 @@ class RoomTestCase(unittest.HomeserverTestCase):
 
         channel = self.make_request(
             "GET",
-            f"/_synapse/admin/v1/rooms/{room_id}/state?type=''",
+            f"/_synapse/admin/v1/rooms/{room_id}/state?type=",
             access_token=self.admin_user_tok,
         )
         self.assertEqual(200, channel.code)
         state = channel.json_body["state"]
-        self.assertEqual(0, len(state))
+        self.assertEqual(5, len(state))
 
     def test_room_state_param_not_in_room(self) -> None:
         """
