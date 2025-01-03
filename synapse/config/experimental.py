@@ -436,9 +436,6 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        # MSC4151: Report room API (Client-Server API)
-        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
-
         # MSC4210: Remove legacy mentions
         self.msc4210_enabled: bool = experimental.get("msc4210_enabled", False)
 
