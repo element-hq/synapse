@@ -132,6 +132,10 @@ class Codes(str, Enum):
     # connection.
     UNKNOWN_POS = "M_UNKNOWN_POS"
 
+    # Part of MSC4133
+    PROFILE_TOO_LARGE = "M_PROFILE_TOO_LARGE"
+    KEY_TOO_LARGE = "M_KEY_TOO_LARGE"
+
 
 class CodeMessageException(RuntimeError):
     """An exception with integer code, a message string attributes and optional headers.
