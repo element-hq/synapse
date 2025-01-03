@@ -1,0 +1,11 @@
+id: <id>
+url: null
+as_token: <as_token>
+hs_token: <hs_token>
+sender_localpart: <sender_localpart>
+namespaces:
+  users:
+    - exclusive: false
+      regex: ".*"
+  aliases: []
+  rooms: []
