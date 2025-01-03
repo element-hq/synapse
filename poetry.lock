@@ -1825,12 +1825,12 @@ plugins = ["importlib-metadata"]
 
 [[package]]
 name = "pyicu"
-version = "2.13.1"
+version = "2.14"
 description = "Python extension wrapping the ICU C++ API"
 optional = true
 python-versions = "*"
 files = [
-    {file = "PyICU-2.13.1.tar.gz", hash = "sha256:d4919085eaa07da12bade8ee721e7bbf7ade0151ca0f82946a26c8f4b98cdceb"},
+    {file = "PyICU-2.14.tar.gz", hash = "sha256:acc7eb92bd5c554ed577249c6978450a4feda0aa6f01470152b3a7b382a02132"},
 ]
 
 [[package]]
