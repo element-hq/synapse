@@ -4465,6 +4465,10 @@ instance_map:
   worker1:
     host: localhost
     port: 8034
+  other:
+    host: localhost
+    port: 8035
+    tls: true
 ```
 Example configuration(#2, for UNIX sockets):
 ```yaml
