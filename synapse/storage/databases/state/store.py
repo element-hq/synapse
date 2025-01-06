@@ -840,60 +840,42 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         return dict(rows)
 
-    async def purge_room_state(
-        self, room_id: str, state_groups_to_delete: Collection[int]
-    ) -> None:
-        """Deletes all record of a room from state tables
-
-        Args:
-            room_id:
-            state_groups_to_delete: State groups to delete
-        """
-
-        logger.info("[purge] Starting state purge")
-        await self.db_pool.runInteraction(
+    async def purge_room_state(self, room_id: str) -> None:
+        return await self.db_pool.runInteraction(
             "purge_room_state",
             self._purge_room_state_txn,
             room_id,
-            state_groups_to_delete,
         )
-        logger.info("[purge] Done with state purge")
 
     def _purge_room_state_txn(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_groups_to_delete: Collection[int],
     ) -> None:
-        # first we have to delete the state groups states
-        logger.info("[purge] removing %s from state_groups_state", room_id)
-
-        self.db_pool.simple_delete_many_txn(
-            txn,
-            table="state_groups_state",
-            column="state_group",
-            values=state_groups_to_delete,
-            keyvalues={},
-        )
-
-        # ... and the state group edges
+        # Delete all edges that reference a state group linked to room_id
         logger.info("[purge] removing %s from state_group_edges", room_id)
-
-        self.db_pool.simple_delete_many_txn(
-            txn,
-            table="state_group_edges",
-            column="state_group",
-            values=state_groups_to_delete,
-            keyvalues={},
+        txn.execute(
+            """
+            DELETE FROM state_group_edges AS sge WHERE sge.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
         )
 
-        # ... and the state groups
-        logger.info("[purge] removing %s from state_groups", room_id)
+        # state_groups_state table has a room_id column but no index on it, unlike state_groups,
+        # so we delete them by matching the room_id through the state_groups table.
+        logger.info("[purge] removing %s from state_groups_state", room_id)
+        txn.execute(
+            """
+            DELETE FROM state_groups_state AS sgs WHERE sgs.state_group IN (
+                SELECT id FROM state_groups AS sg WHERE sg.room_id = ?
+            )""",
+            (room_id,),
+        )
 
-        self.db_pool.simple_delete_many_txn(
+        logger.info("[purge] removing %s from state_groups", room_id)
+        self.db_pool.simple_delete_txn(
             txn,
             table="state_groups",
-            column="id",
-            values=state_groups_to_delete,
-            keyvalues={},
+            keyvalues={"room_id": room_id},
         )
