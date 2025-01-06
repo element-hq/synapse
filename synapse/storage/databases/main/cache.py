@@ -244,7 +244,14 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
                         room_id, token
                     )
-                    self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
+                    # This is commented out purely as a performance optimization. For
+                    # correctness sake, this should be uncommented; but since we purge
+                    # rooms frequently (as we automatically delete rooms where everyone
+                    # has left and forgotten after N days, see
+                    # `forgotten_room_retention_period`), it is detremental to the cache
+                    # hit ratio since this essentially clears the whole cache.
+                    #
+                    # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
                     self._attempt_to_invalidate_cache(row.cache_func, row.keys)
 
