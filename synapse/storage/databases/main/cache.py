@@ -248,19 +248,26 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     # While uncommenting would provide complete correctness, our
                     # automatic forgotten room purge logic (see
                     # `forgotten_room_retention_period`) means this would frequently
-                    # effectively clear the entire cache and probably have a noticable
+                    # clear the entire cache (effectively) and probably have a noticable
                     # impact on the cache hit ratio.
                     #
-                    # Since this stream cache is effectively only used to indicate the
-                    # *absence* of changes, i.e. "nothing has changed between tokens X
-                    # and Y and so don't query the database", not clearing the cache,
-                    # will at worst, report that something changed at token X, at which
-                    # point, we will query the database and discover nothing new is
-                    # there.
+                    # Not updating the cache here is safe because:
+                    #
+                    #  1. `_membership_stream_cache` is only used to indicate the
+                    #     *absence* of changes, i.e. "nothing has changed between tokens
+                    #     X and Y and so return early and don't query the database".
+                    #  2. `_membership_stream_cache` is used when we query data from
+                    #     `current_state_delta_stream` and `room_memberships` but since
+                    #     nothing new is written to the database for those tables when
+                    #     purging/deleting a room (only deleting rows), there is nothing
+                    #     changed to care about.
+                    #
+                    # At worst, the cache might indicate a change at token X, at which
+                    # point, we will query the database and discover nothing is there.
                     #
                     # Ideally, we would make it so that we could clear the cache on a
-                    # more fine-grained level but that's a bit tricky and fiddly to do
-                    # with room membership.
+                    # more granular level but that's a bit complex and fiddly to do with
+                    # room membership.
                     #
                     # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
