@@ -244,12 +244,23 @@ class CacheInvalidationWorkerStore(SQLBaseStore):
                     self._curr_state_delta_stream_cache.entity_has_changed(  # type: ignore[attr-defined]
                         room_id, token
                     )
-                    # This is commented out purely as a performance optimization. For
-                    # correctness sake, this should be uncommented; but since we purge
-                    # rooms frequently (as we automatically delete rooms where everyone
-                    # has left and forgotten after N days, see
-                    # `forgotten_room_retention_period`), it is detremental to the cache
-                    # hit ratio since this essentially clears the whole cache.
+                    # Note: This code is commented out to improve cache performance.
+                    # While uncommenting would provide complete correctness, our
+                    # automatic forgotten room purge logic (see
+                    # `forgotten_room_retention_period`) means this would frequently
+                    # effectively clear the entire cache and probably have a noticable
+                    # impact on the cache hit ratio.
+                    #
+                    # Since this stream cache is effectively only used to indicate the
+                    # *absence* of changes, i.e. "nothing has changed between tokens X
+                    # and Y and so don't query the database", not clearing the cache,
+                    # will at worst, report that something changed at token X, at which
+                    # point, we will query the database and discover nothing new is
+                    # there.
+                    #
+                    # Ideally, we would make it so that we could clear the cache on a
+                    # more fine-grained level but that's a bit tricky and fiddly to do
+                    # with room membership.
                     #
                     # self._membership_stream_cache.all_entities_changed(token)  # type: ignore[attr-defined]
                 else:
