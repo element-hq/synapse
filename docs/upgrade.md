@@ -117,6 +117,14 @@ each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 [the Admin API](usage/administration/admin_api/background_updates.html#status).
 
+# Upgrading to v1.122.0
+
+## Dropping support for PostgreSQL 11 and 12
+
+In line with our [deprecation policy](deprecation_policy.md), we've dropped
+support for PostgreSQL 11 and 12, as they are no longer supported upstream.
+This release of Synapse requires PostgreSQL 13+.
+
 # Upgrading to v1.120.0
 
 ## Removal of experimental MSC3886 feature
