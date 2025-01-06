@@ -1,0 +1,1 @@
+Refactor `get_profile` to no longer include fields with a value of `None`.
