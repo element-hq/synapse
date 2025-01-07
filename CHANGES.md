@@ -1,6 +1,6 @@
 # Synapse 1.122.0rc1 (2025-01-07)
 
-Please note that this version of Synapse drops support for PostgresQL 11 and 12. The minimum version of PostgreSQL supported is now version 13.
+Please note that this version of Synapse drops support for PostgreSQL 11 and 12. The minimum version of PostgreSQL supported is now version 13.
 
 ### Deprecations and Removals
 
