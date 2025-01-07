@@ -1,1 +1,0 @@
-Support stable account suspension from [MSC3823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823).
