@@ -1,9 +1,15 @@
 # Synapse 1.122.0rc1 (2025-01-07)
 
+Please note that this version of Synapse drops support for PostgresQL 11 and 12. The minimum version of PostgreSQL supported is now version 13.
+
+### Deprecations and Removals
+
+- Remove support for PostgreSQL 11 and 12. Contributed by @clokep. ([\#18034](https://github.com/element-hq/synapse/issues/18034))
+
 ### Features
 
 - Added the `email.tlsname` config option.  This allows specifying the domain name used to validate the SMTP server's TLS certificate separately from the `email.smtp_host` to connect to. ([\#17849](https://github.com/element-hq/synapse/issues/17849))
-- Module developers will have access to the user ID of requester when adding `check_username_for_spam` callbacks to `spam_checker_module_callbacks`. Contributed by Wilson@Pangea.chat. ([\#17916](https://github.com/element-hq/synapse/issues/17916))
+- Module developers will have access to the user ID of the requester when adding `check_username_for_spam` callbacks to `spam_checker_module_callbacks`. Contributed by Wilson@Pangea.chat. ([\#17916](https://github.com/element-hq/synapse/issues/17916))
 - Add endpoints to the Admin API to fetch the number of invites the provided user has sent after a given timestamp,
   fetch the number of rooms the provided user has joined after a given timestamp, and get report IDs of event
   reports against a provided user (i.e. where the user was the sender of the reported event). ([\#17948](https://github.com/element-hq/synapse/issues/17948))
@@ -19,17 +25,13 @@
 ### Improved Documentation
 
 - Update `synapse.app.generic_worker` documentation to only recommend `GET` requests for stream writer routes by default, unless the worker is also configured as a stream writer. Contributed by @evoL. ([\#17954](https://github.com/element-hq/synapse/issues/17954))
-- Add previously-undocumented `last_seen_ts` to query user Admin API. ([\#17976](https://github.com/element-hq/synapse/issues/17976))
+- Add documentation for the previously-undocumented `last_seen_ts` query parameter to the query user Admin API. ([\#17976](https://github.com/element-hq/synapse/issues/17976))
 - Improve documentation for the `TaskScheduler` class. ([\#17992](https://github.com/element-hq/synapse/issues/17992))
 - Fix example in reverse proxy docs to include server port. ([\#17994](https://github.com/element-hq/synapse/issues/17994))
-
-### Deprecations and Removals
-
-- Remove support for PostgreSQL 11 and 12. Contributed by @clokep. ([\#18034](https://github.com/element-hq/synapse/issues/18034))
+- Update Alpine Linux Synapse Package Maintainer within the installation instructions. ([\#17846](https://github.com/element-hq/synapse/issues/17846))
 
 ### Internal Changes
 
-- Update Alpine Linux Synapse Package Maintainer within installation.md. ([\#17846](https://github.com/element-hq/synapse/issues/17846))
 - Add `RoomID` & `EventID` rust types. ([\#17996](https://github.com/element-hq/synapse/issues/17996))
 - Fix various type errors across the codebase. ([\#17998](https://github.com/element-hq/synapse/issues/17998))
 - Disable DB statement timeout when doing a room purge since it can be quite long. ([\#18017](https://github.com/element-hq/synapse/issues/18017))
