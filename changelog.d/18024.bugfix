@@ -1,1 +1,0 @@
-Properly purge state groups tables when purging a room with the admin API.
