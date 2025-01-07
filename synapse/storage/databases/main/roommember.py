@@ -1636,6 +1636,81 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             columns=["user_id", "room_id"],
         )
 
+        self.db_pool.updates.register_background_update_handler(
+            "populate_participant_bg_update", self._populate_participant
+        )
+
+    async def _populate_participant(self, progress: JsonDict, batch_size: int) -> int:
+        """
+        Background update to populate column `participant` on `room_memberships` table
+        one room at a time
+        """
+        last_room_id = progress.get("last_room_id", "")
+
+        def _get_current_room_txn(
+            txn: LoggingTransaction, last_room_id: str
+        ) -> Optional[str]:
+            sql = """
+                SELECT room_id from room_memberships WHERE room_id > ?
+                ORDER BY room_id
+                LIMIT 1;
+            """
+            txn.execute(sql, (last_room_id,))
+            res = txn.fetchone()
+            if res:
+                room_id = res[0]
+                return room_id
+            else:
+                return None
+
+        def _background_populate_participant_per_room_txn(
+            txn: LoggingTransaction, current_room_id: str
+        ) -> None:
+            sql = """
+                SELECT DISTINCT rm.user_id
+                FROM room_memberships AS rm
+                INNER JOIN events AS e USING(room_id)
+                WHERE room_id = ?
+                    AND rm.membership = 'join'
+                    AND e.type = 'm.room.message'
+                    AND rm.user_id = e.sender;
+            """
+
+            txn.execute(sql, (current_room_id,))
+            participants = txn.fetchall()
+
+            for participant in participants:
+                self.db_pool.simple_update_txn(
+                    txn,
+                    table="room_memberships",
+                    keyvalues={"user_id": participant},
+                    updatevalues={"participant": True},
+                )
+
+        current_room_id = await self.db_pool.runInteraction(
+            "_get_current_room_txn", _get_current_room_txn, last_room_id
+        )
+        if not current_room_id:
+            await self.db_pool.updates._end_background_update(
+                "populate_participant_bg_update"
+            )
+            return 1
+
+        await self.db_pool.runInteraction(
+            "_background_populate_participant_per_room_txn",
+            _background_populate_participant_per_room_txn,
+            current_room_id,
+        )
+
+        progress["last_room_id"] = current_room_id
+        await self.db_pool.runInteraction(
+            "populate_participant_bg_update",
+            self.db_pool.updates._background_update_progress_txn,
+            "populate_participant_bg_update",
+            progress,
+        )
+        return 1
+
     async def _background_add_membership_profile(
         self, progress: JsonDict, batch_size: int
     ) -> int:
