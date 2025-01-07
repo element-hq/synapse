@@ -1606,6 +1606,35 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             from_ts,
         )
 
+    async def set_room_participation(self, room_id: str, user_id: str) -> None:
+        """
+        Record the provided user as participating in the given room
+
+        Args:
+            room_id: ID of the room to set the participant in
+            user_id: the user ID of the user
+        """
+        await self.db_pool.simple_update(
+            "room_memberships",
+            {"user_id": user_id, "room_id": room_id},
+            {"participant": True},
+            "update_room_participation",
+        )
+
+    async def get_room_participation(self, room_id: str, user_id: str) -> bool:
+        """
+        Check whether a user is listed as a participant in a room
+
+        Args:
+            room_id: ID of the room to check in
+            user_id: user ID of the user
+        """
+        return await self.db_pool.simple_select_one_onecol(
+            "room_memberships",
+            {"user_id": user_id, "room_id": room_id},
+            "participant",
+        )
+
 
 class RoomMemberBackgroundUpdateStore(SQLBaseStore):
     def __init__(
