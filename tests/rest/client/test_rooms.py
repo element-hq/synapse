@@ -4070,3 +4070,50 @@ class UserSuspensionTests(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(channel.code, 200)
+
+
+class RoomParticipantTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        login.register_servlets,
+        room.register_servlets,
+        profile.register_servlets,
+        admin.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.user1 = self.register_user("thomas", "hackme")
+        self.tok1 = self.login("thomas", "hackme")
+
+        self.user2 = self.register_user("teresa", "hackme")
+        self.tok2 = self.login("teresa", "hackme")
+
+        self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.store = hs.get_datastores().main
+
+    def test_sending_message_records_participation(self) -> None:
+        """
+        Test that sending an m.room.message event into a room causes the user to
+        be marked as a participant in that room
+        """
+        self.helper.join(self.room1, self.user2, tok=self.tok2)
+
+        # user has not sent any messages, so should not be a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.room1, self.user2)
+        )
+        self.assertFalse(participant)
+
+        # sending a message should now mark user as participant
+        self.helper.send_event(
+            self.room1,
+            "m.room.message",
+            content={
+                "msgtype": "m.text",
+                "body": "I am engaging in this room",
+            },
+            tok=self.tok2,
+        )
+        participant = self.get_success(
+            self.store.get_room_participation(self.room1, self.user2)
+        )
+        self.assertTrue(participant)
