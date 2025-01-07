@@ -1617,7 +1617,7 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         await self.db_pool.simple_update(
             "room_memberships",
             {"user_id": user_id, "room_id": room_id},
-            {"participant": True},
+            {"participant": 1},
             "update_room_participation",
         )
 
@@ -1713,7 +1713,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
                     txn,
                     table="room_memberships",
                     keyvalues={"user_id": participant},
-                    updatevalues={"participant": True},
+                    updatevalues={"participant": 1},
                 )
 
         current_room_id = await self.db_pool.runInteraction(
