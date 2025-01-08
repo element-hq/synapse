@@ -149,6 +149,38 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
             "_advance_state_epoch", advance_state_epoch_txn, db_autocommit=True
         )
 
+    @cached()
+    async def is_state_group_pending_deletion_before(
+        self, state_epoch: int, state_group: int
+    ) -> bool:
+        """Check if a state group is marked as pending deletion in a previous
+        epoch, but does not check the current epoch."""
+
+        def is_state_group_pending_deletion_before_txn(txn: LoggingTransaction) -> bool:
+            sql = """
+                SELECT 1 FROM state_groups_pending_deletion
+                WHERE state_epoch < ? AND state_group = ?
+            """
+            txn.execute(sql, (state_epoch, state_group))
+
+            return txn.fetchone() is not None
+
+        return await self.db_pool.runInteraction(
+            "is_state_group_pending_deletion_before",
+            is_state_group_pending_deletion_before_txn,
+        )
+
+    async def mark_state_group_as_used(self, state_group: int) -> None:
+        """Mark that a given state group is used"""
+
+        # TODO: Also assert that the state group hasn't advanced too much
+
+        await self.db_pool.simple_delete(
+            table="state_groups_pending_deletion",
+            keyvalues={"state_group": state_group},
+            desc="mark_state_group_as_used",
+        )
+
     def process_replication_rows(
         self,
         stream_name: str,
