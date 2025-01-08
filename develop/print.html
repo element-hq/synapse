@@ -13871,6 +13871,12 @@ If the room does not define a type, the value will be <code>null</code>.</li>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/rooms/&lt;room_id&gt;/state
 </code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following query parameter is available:</p>
+<ul>
+<li><code>type</code> - The type of room state event to filter by, eg &quot;m.room.create&quot;. If provided, only state events
+of this type will be returned (regardless of their <code>state_key</code> value).</li>
+</ul>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
   &quot;state&quot;: [
