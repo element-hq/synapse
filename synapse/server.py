@@ -155,6 +155,7 @@ from synapse.util.macaroons import MacaroonGenerator
 from synapse.util.ratelimitutils import FederationRateLimiter
 from synapse.util.stringutils import random_string
 from synapse.util.task_scheduler import TaskScheduler
+from synapse.util.synapse_ascii import get_logo
 
 logger = logging.getLogger(__name__)
 
@@ -355,6 +356,7 @@ class HomeServer(metaclass=abc.ABCMeta):
 
     def setup(self) -> None:
         logger.info("Setting up.")
+        logger.info(get_logo(self.version_string))
         self.start_time = int(self.get_clock().time())
         self.datastores = Databases(self.DATASTORE_CLASS, self)
         logger.info("Finished setting up.")
