@@ -48,6 +48,7 @@ from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersion
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
 from synapse.logging.opentracing import trace
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.replication.tcp.streams import UnPartialStatedEventStream
 from synapse.replication.tcp.streams.partial_state import UnPartialStatedEventStreamRow
 from synapse.storage._base import SQLBaseStore
@@ -117,6 +118,36 @@ class StateGroupWorkerStore(EventsWorkerStore, SQLBaseStore):
     ):
         super().__init__(database, db_conn, hs)
         self._instance_name: str = hs.get_instance_name()
+
+        if hs.config.worker.run_background_tasks:
+            self._clock.looping_call_now(self._advance_state_epoch, 2 * 60 * 1000)
+
+    @wrap_as_background_process("_advance_state_epoch")
+    async def _advance_state_epoch(self) -> None:
+        """Advances the state epoch, checking that we haven't advanced it too
+        recently.
+        """
+
+        now = self._clock.time_msec()
+        update_if_before_ts = now - 10 * 60 * 1000
+
+        def advance_state_epoch_txn(txn: LoggingTransaction) -> None:
+            sql = """
+                UPDATE state_epoch
+                SET state_epoch = state_epoch + 1, updated_ts = ?
+                WHERE updated_ts <= ?
+            """
+            txn.execute(
+                sql,
+                (
+                    now,
+                    update_if_before_ts,
+                ),
+            )
+
+        await self.db_pool.runInteraction(
+            "_advance_state_epoch", advance_state_epoch_txn, db_autocommit=True
+        )
 
     def process_replication_rows(
         self,

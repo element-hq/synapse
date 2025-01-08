@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS state_epoch (
     CHECK (Lock='X')
 );
 
+INSERT INTO state_epoch (state_epoch, updated_ts) VALUES (0, 0);
+
 CREATE TABLE IF NOT EXISTS state_groups_pending_deletion (
     state_group BIGINT NOT NULL,
     state_epoch BIGINT NOT NULL,
