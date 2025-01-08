@@ -1,0 +1,1 @@
+Add a unit test for the `type` parameter of the [Room State Admin API](https://element-hq.github.io/synapse/develop/admin_api/rooms.html#room-state-api).
