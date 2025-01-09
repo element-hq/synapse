@@ -45,6 +45,7 @@ from twisted.internet.interfaces import IDelayedCall
 from twisted.web.resource import Resource
 
 from synapse.api import errors
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import SynapseError
 from synapse.api.presence import UserPresenceState
 from synapse.config import ConfigError
@@ -1086,7 +1087,10 @@ class ModuleApi:
             content = {}
 
         # Set the profile if not already done by the module.
-        if "avatar_url" not in content or "displayname" not in content:
+        if (
+            ProfileFields.AVATAR_URL not in content
+            or ProfileFields.DISPLAYNAME not in content
+        ):
             try:
                 # Try to fetch the user's profile.
                 profile = await self._hs.get_profile_handler().get_profile(
@@ -1095,8 +1099,8 @@ class ModuleApi:
             except SynapseError as e:
                 # If the profile couldn't be found, use default values.
                 profile = {
-                    "displayname": target_user_id.localpart,
-                    "avatar_url": None,
+                    ProfileFields.DISPLAYNAME: target_user_id.localpart,
+                    ProfileFields.AVATAR_URL: None,
                 }
 
                 if e.code != 404:
@@ -1109,11 +1113,9 @@ class ModuleApi:
                     )
 
             # Set the profile where it needs to be set.
-            if "avatar_url" not in content:
-                content["avatar_url"] = profile["avatar_url"]
-
-            if "displayname" not in content:
-                content["displayname"] = profile["displayname"]
+            for field_name in [ProfileFields.AVATAR_URL, ProfileFields.DISPLAYNAME]:
+                if field_name not in content and field_name in profile:
+                    content[field_name] = profile[field_name]
 
         event_id, _ = await self._hs.get_room_member_handler().update_membership(
             requester=requester,

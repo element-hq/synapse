@@ -243,6 +243,13 @@ class StateDeltasStore(SQLBaseStore):
 
         (> `from_token` and <= `to_token`)
         """
+        # We can bail early if the `from_token` is after the `to_token`
+        if (
+            to_token is not None
+            and from_token is not None
+            and to_token.is_before_or_eq(from_token)
+        ):
+            return []
 
         if (
             from_token is not None

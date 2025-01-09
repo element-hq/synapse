@@ -87,8 +87,7 @@ class Codes(str, Enum):
     WEAK_PASSWORD = "M_WEAK_PASSWORD"
     INVALID_SIGNATURE = "M_INVALID_SIGNATURE"
     USER_DEACTIVATED = "M_USER_DEACTIVATED"
-    # USER_LOCKED = "M_USER_LOCKED"
-    USER_LOCKED = "ORG_MATRIX_MSC3939_USER_LOCKED"
+    USER_LOCKED = "M_USER_LOCKED"
     NOT_YET_UPLOADED = "M_NOT_YET_UPLOADED"
     CANNOT_OVERWRITE_MEDIA = "M_CANNOT_OVERWRITE_MEDIA"
 
@@ -101,8 +100,9 @@ class Codes(str, Enum):
     # The account has been suspended on the server.
     # By opposition to `USER_DEACTIVATED`, this is a reversible measure
     # that can possibly be appealed and reverted.
-    # Part of MSC3823.
-    USER_ACCOUNT_SUSPENDED = "ORG.MATRIX.MSC3823.USER_ACCOUNT_SUSPENDED"
+    # Introduced by MSC3823
+    # https://github.com/matrix-org/matrix-spec-proposals/pull/3823
+    USER_ACCOUNT_SUSPENDED = "M_USER_SUSPENDED"
 
     BAD_ALIAS = "M_BAD_ALIAS"
     # For restricted join rules.

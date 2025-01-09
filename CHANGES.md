@@ -1,3 +1,173 @@
+# Synapse 1.122.0rc1 (2025-01-07)
+
+Please note that this version of Synapse drops support for PostgresQL 11 and 12. The minimum version of PostgreSQL supported is now version 13.
+
+### Deprecations and Removals
+
+- Remove support for PostgreSQL 11 and 12. Contributed by @clokep. ([\#18034](https://github.com/element-hq/synapse/issues/18034))
+
+### Features
+
+- Added the `email.tlsname` config option.  This allows specifying the domain name used to validate the SMTP server's TLS certificate separately from the `email.smtp_host` to connect to. ([\#17849](https://github.com/element-hq/synapse/issues/17849))
+- Module developers will have access to the user ID of the requester when adding `check_username_for_spam` callbacks to `spam_checker_module_callbacks`. Contributed by Wilson@Pangea.chat. ([\#17916](https://github.com/element-hq/synapse/issues/17916))
+- Add endpoints to the Admin API to fetch the number of invites the provided user has sent after a given timestamp,
+  fetch the number of rooms the provided user has joined after a given timestamp, and get report IDs of event
+  reports against a provided user (i.e. where the user was the sender of the reported event). ([\#17948](https://github.com/element-hq/synapse/issues/17948))
+- Support stable account suspension from [MSC3823](https://github.com/matrix-org/matrix-spec-proposals/pull/3823). ([\#17964](https://github.com/element-hq/synapse/issues/17964))
+- Add `macaroon_secret_key_path` config option. ([\#17983](https://github.com/element-hq/synapse/issues/17983))
+
+### Bugfixes
+
+- Fix bug when rejecting withdrew invite with a `third_party_rules` module, where the invite would be stuck for the client. ([\#17930](https://github.com/element-hq/synapse/issues/17930))
+- Properly purge state groups tables when purging a room with the Admin API. ([\#18024](https://github.com/element-hq/synapse/issues/18024))
+- Fix a bug preventing the admin redaction endpoint from working on messages from remote users. ([\#18029](https://github.com/element-hq/synapse/issues/18029), [\#18043](https://github.com/element-hq/synapse/issues/18043))
+
+### Improved Documentation
+
+- Update `synapse.app.generic_worker` documentation to only recommend `GET` requests for stream writer routes by default, unless the worker is also configured as a stream writer. Contributed by @evoL. ([\#17954](https://github.com/element-hq/synapse/issues/17954))
+- Add documentation for the previously-undocumented `last_seen_ts` query parameter to the query user Admin API. ([\#17976](https://github.com/element-hq/synapse/issues/17976))
+- Improve documentation for the `TaskScheduler` class. ([\#17992](https://github.com/element-hq/synapse/issues/17992))
+- Fix example in reverse proxy docs to include server port. ([\#17994](https://github.com/element-hq/synapse/issues/17994))
+- Update Alpine Linux Synapse Package Maintainer within the installation instructions. ([\#17846](https://github.com/element-hq/synapse/issues/17846))
+
+### Internal Changes
+
+- Add `RoomID` & `EventID` rust types. ([\#17996](https://github.com/element-hq/synapse/issues/17996))
+- Fix various type errors across the codebase. ([\#17998](https://github.com/element-hq/synapse/issues/17998))
+- Disable DB statement timeout when doing a room purge since it can be quite long. ([\#18017](https://github.com/element-hq/synapse/issues/18017))
+- Remove some remaining uses of `twisted.internet.defer.returnValue`. Contributed by Colin Watson. ([\#18020](https://github.com/element-hq/synapse/issues/18020))
+- Refactor `get_profile` to no longer include fields with a value of `None`. ([\#18063](https://github.com/element-hq/synapse/issues/18063))
+
+### Updates to locked dependencies
+
+* Bump anyhow from 1.0.93 to 1.0.95. ([\#18012](https://github.com/element-hq/synapse/issues/18012), [\#18045](https://github.com/element-hq/synapse/issues/18045))
+* Bump authlib from 1.3.2 to 1.4.0. ([\#18048](https://github.com/element-hq/synapse/issues/18048))
+* Bump dawidd6/action-download-artifact from 6 to 7. ([\#17981](https://github.com/element-hq/synapse/issues/17981))
+* Bump http from 1.1.0 to 1.2.0. ([\#18013](https://github.com/element-hq/synapse/issues/18013))
+- Bump mypy from 1.11.2 to 1.12.1. ([\#17999](https://github.com/element-hq/synapse/issues/17999))
+* Bump mypy-zope from 1.0.8 to 1.0.9. ([\#18047](https://github.com/element-hq/synapse/issues/18047))
+* Bump pillow from 10.4.0 to 11.0.0. ([\#18015](https://github.com/element-hq/synapse/issues/18015))
+* Bump pydantic from 2.9.2 to 2.10.3. ([\#18014](https://github.com/element-hq/synapse/issues/18014))
+* Bump pyicu from 2.13.1 to 2.14. ([\#18060](https://github.com/element-hq/synapse/issues/18060))
+* Bump pyo3 from 0.23.2 to 0.23.3. ([\#18001](https://github.com/element-hq/synapse/issues/18001))
+* Bump python-multipart from 0.0.16 to 0.0.18. ([\#17985](https://github.com/element-hq/synapse/issues/17985))
+* Bump sentry-sdk from 2.17.0 to 2.19.2. ([\#18061](https://github.com/element-hq/synapse/issues/18061))
+* Bump serde from 1.0.215 to 1.0.217. ([\#18031](https://github.com/element-hq/synapse/issues/18031), [\#18059](https://github.com/element-hq/synapse/issues/18059))
+* Bump serde_json from 1.0.133 to 1.0.134. ([\#18044](https://github.com/element-hq/synapse/issues/18044))
+* Bump twine from 5.1.1 to 6.0.1. ([\#18049](https://github.com/element-hq/synapse/issues/18049))
+
+# Synapse 1.121.1 (2024-12-11)
+
+This release contains a fix for our docker build CI. It is functionally identical to 1.121.0, whose changelog is below.
+
+### Internal Changes
+
+- Downgrade the Ubuntu GHA runner when building docker images. ([\#18026](https://github.com/element-hq/synapse/issues/18026))
+
+
+
+
+# Synapse 1.121.0 (2024-12-11)
+
+### Internal Changes
+
+- Fix release process to not create duplicate releases. ([\#18025](https://github.com/element-hq/synapse/issues/18025))
+
+
+
+# Synapse 1.121.0rc1 (2024-12-04)
+
+### Features
+
+- Support for [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190): device management for Application Services. ([\#17705](https://github.com/element-hq/synapse/issues/17705))
+- Update [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) Sliding Sync to include invite, ban, kick, targets when `$LAZY`-loading room members. ([\#17947](https://github.com/element-hq/synapse/issues/17947))
+- Use stable `M_USER_LOCKED` error code for locked accounts, as per [Matrix 1.12](https://spec.matrix.org/v1.12/client-server-api/#account-locking). ([\#17965](https://github.com/element-hq/synapse/issues/17965))
+- [MSC4076](https://github.com/matrix-org/matrix-spec-proposals/pull/4076): Add `disable_badge_count` to pusher configuration. ([\#17975](https://github.com/element-hq/synapse/issues/17975))
+
+### Bugfixes
+
+- Fix long-standing bug where read receipts could get overly delayed being sent over federation. ([\#17933](https://github.com/element-hq/synapse/issues/17933))
+
+### Improved Documentation
+
+- Add OIDC example configuration for Forgejo (fork of Gitea). ([\#17872](https://github.com/element-hq/synapse/issues/17872))
+- Link to element-docker-demo from contrib/docker*. ([\#17953](https://github.com/element-hq/synapse/issues/17953))
+
+### Internal Changes
+
+- [MSC4108](https://github.com/matrix-org/matrix-spec-proposals/pull/4108): Add a `Content-Type` header on the `PUT` response to work around a faulty behavior in some caching reverse proxies. ([\#17253](https://github.com/element-hq/synapse/issues/17253))
+- Fix incorrect comment in new schema delta. ([\#17936](https://github.com/element-hq/synapse/issues/17936))
+- Raise setuptools_rust version cap to 1.10.2. ([\#17944](https://github.com/element-hq/synapse/issues/17944))
+- Enable encrypted appservice related experimental features in the complement docker image. ([\#17945](https://github.com/element-hq/synapse/issues/17945))
+- Return whether the user is suspended when querying the user account in the Admin API. ([\#17952](https://github.com/element-hq/synapse/issues/17952))
+- Fix new scheduled tasks jumping the queue. ([\#17962](https://github.com/element-hq/synapse/issues/17962))
+- Bump pyo3 and dependencies to v0.23.2. ([\#17966](https://github.com/element-hq/synapse/issues/17966))
+- Update setuptools-rust and fix building abi3 wheels in latest version. ([\#17969](https://github.com/element-hq/synapse/issues/17969))
+- Consolidate SSO redirects through `/_matrix/client/v3/login/sso/redirect(/{idpId})`. ([\#17972](https://github.com/element-hq/synapse/issues/17972))
+- Fix Docker and Complement config to be able to use `public_baseurl`. ([\#17986](https://github.com/element-hq/synapse/issues/17986))
+- Fix building wheels for MacOS which was temporarily disabled in Synapse 1.120.2. ([\#17993](https://github.com/element-hq/synapse/issues/17993))
+- Fix release process to not create duplicate releases. ([\#17970](https://github.com/element-hq/synapse/issues/17970), [\#17995](https://github.com/element-hq/synapse/issues/17995))
+
+
+### Updates to locked dependencies
+
+* Bump bytes from 1.8.0 to 1.9.0. ([\#17982](https://github.com/element-hq/synapse/issues/17982))
+* Bump pysaml2 from 7.3.1 to 7.5.0. ([\#17978](https://github.com/element-hq/synapse/issues/17978))
+* Bump serde_json from 1.0.132 to 1.0.133. ([\#17939](https://github.com/element-hq/synapse/issues/17939))
+* Bump tomli from 2.0.2 to 2.1.0. ([\#17959](https://github.com/element-hq/synapse/issues/17959))
+* Bump tomli from 2.1.0 to 2.2.1. ([\#17979](https://github.com/element-hq/synapse/issues/17979))
+* Bump tornado from 6.4.1 to 6.4.2. ([\#17955](https://github.com/element-hq/synapse/issues/17955))
+
+# Synapse 1.120.2 (2024-12-03)
+
+This version has building of wheels for macOS disabled.
+It is functionally identical to 1.120.1, which contains multiple security fixes.
+If you are already using 1.120.1, there is no need to upgrade to this version.
+
+
+
+# Synapse 1.120.1 (2024-12-03)
+
+This patch release fixes multiple security vulnerabilities, some affecting all prior versions of Synapse. Server administrators are encouraged to update Synapse as soon as possible. We are not aware of these vulnerabilities being exploited in the wild.
+
+Administrators who are unable to update Synapse may use the workarounds described in the linked GitHub Security Advisory below.
+
+### Security advisory
+
+The following issues are fixed in 1.120.1.
+
+- [GHSA-rfq8-j7rh-8hf2](https://github.com/element-hq/synapse/security/advisories/GHSA-rfq8-j7rh-8hf2) / [CVE-2024-52805](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-52805): **Unsupported content types can lead to memory exhaustion**
+
+  Synapse instances which have a high `max_upload_size` and which don't have a reverse proxy in front of them that would otherwise limit upload size are affected.
+
+  Fixed by [4b7154c58501b4bf5e1c2d6c11ebef96529f2fdf](https://github.com/element-hq/synapse/commit/4b7154c58501b4bf5e1c2d6c11ebef96529f2fdf).
+
+- [GHSA-f3r3-h2mq-hx2h](https://github.com/element-hq/synapse/security/advisories/GHSA-f3r3-h2mq-hx2h) / [CVE-2024-52815](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-52815): **Malicious invites via federation can break a user's sync**
+
+  Fixed by [d82e1ed357b7ee21dff83d06cba7a67840cfd464](https://github.com/element-hq/synapse/commit/d82e1ed357b7ee21dff83d06cba7a67840cfd464).
+
+- [GHSA-vp6v-whfm-rv3g](https://github.com/element-hq/synapse/security/advisories/GHSA-vp6v-whfm-rv3g) / [CVE-2024-53863](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-53863): **Synapse can be forced to thumbnail unexpected file formats, invoking potentially untrustworthy decoders**
+
+  Synapse instances can disable dynamic thumbnailing by setting `dynamic_thumbnails` to `false` in the configuration file.
+
+  Fixed by [b64a4e5fbbbf119b6c65aedf0d999b4237d55503](https://github.com/element-hq/synapse/commit/b64a4e5fbbbf119b6c65aedf0d999b4237d55503).
+
+- [GHSA-56w4-5538-8v8h](https://github.com/element-hq/synapse/security/advisories/GHSA-56w4-5538-8v8h) / [CVE-2024-53867](https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2024-53867): **The Sliding Sync feature on Synapse versions between 1.113.0rc1 and 1.120.0 can leak partial room state changes to users no longer in a room**
+
+  Non-state events, like messages, are unaffected.
+
+  Synapse instances can disable the Sliding Sync feature by setting `experimental_features.msc3575_enabled` to `false` in the configuration file.
+
+  Fixed by [4daa533e82f345ce87b9495d31781af570ba3ead](https://github.com/element-hq/synapse/commit/4daa533e82f345ce87b9495d31781af570ba3ead).
+
+See the advisories for more details. If you have any questions, email [security at element.io](mailto:security@element.io).
+
+### Bugfixes
+
+- Fix release process to not create duplicate releases. ([\#17970](https://github.com/element-hq/synapse/issues/17970))
+
+
+
 # Synapse 1.120.0 (2024-11-26)
 
 ### Bugfixes
