@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from synapse.types.state import StateFilter
 
 
+@attr.s(slots=True, auto_attribs=True)
 class UnpersistedEventContextBase(ABC):
     """
     This is a base class for EventContext and UnpersistedEventContext, objects which
@@ -49,9 +50,8 @@ class UnpersistedEventContextBase(ABC):
             app service.
     """
 
-    def __init__(self, storage_controller: "StorageControllers"):
-        self._storage: "StorageControllers" = storage_controller
-        self.app_service: Optional[ApplicationService] = None
+    _storage: "StorageControllers"
+    app_service: Optional[ApplicationService] = attr.field(default=None, init=False)
 
     @abstractmethod
     async def persist(
@@ -132,13 +132,11 @@ class EventContext(UnpersistedEventContextBase):
             incomplete state.
     """
 
-    _storage: "StorageControllers"
     state_group_deltas: Dict[Tuple[int, int], StateMap[str]]
     rejected: Optional[str] = None
     _state_group: Optional[int] = None
     state_group_before_event: Optional[int] = None
     _state_delta_due_to_event: Optional[StateMap[str]] = None
-    app_service: Optional[ApplicationService] = None
 
     partial_state: bool = False
 
@@ -347,7 +345,6 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
             A map of the state before the event, i.e. the state at `state_group_before_event`
     """
 
-    _storage: "StorageControllers"
     state_group_before_event: Optional[int]
     state_group_after_event: Optional[int]
     state_delta_due_to_event: Optional[StateMap[str]]
