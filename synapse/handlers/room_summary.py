@@ -111,7 +111,7 @@ class RoomSummaryHandler:
         # If a user tries to fetch the same page multiple times in quick succession,
         # only process the first attempt and return its result to subsequent requests.
         self._pagination_response_cache: ResponseCache[
-            Tuple[str, str, bool, Optional[int], Optional[int], Optional[str]]
+            Tuple[str, str, bool, Optional[int], Optional[int], Optional[str], Optional[List[str]]]
         ] = ResponseCache(
             hs.get_clock(),
             "get_room_hierarchy",
