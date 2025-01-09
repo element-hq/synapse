@@ -48,9 +48,11 @@ class UnpersistedEventContextBase(ABC):
         _storage: storage controllers for interfacing with the database
         app_service: If the associated event is being sent by a (local) application service, that
             app service.
+        state_epoch: The state epoch of when we created the event, if not an outlier
     """
 
     _storage: "StorageControllers"
+    state_epoch: Optional[int]
     app_service: Optional[ApplicationService] = attr.field(default=None, init=False)
 
     @abstractmethod
@@ -148,6 +150,7 @@ class EventContext(UnpersistedEventContextBase):
         state_delta_due_to_event: Optional[StateMap[str]],
         partial_state: bool,
         state_group_deltas: Dict[Tuple[int, int], StateMap[str]],
+        state_epoch: int,
     ) -> "EventContext":
         return EventContext(
             storage=storage,
@@ -156,6 +159,7 @@ class EventContext(UnpersistedEventContextBase):
             state_delta_due_to_event=state_delta_due_to_event,
             state_group_deltas=state_group_deltas,
             partial_state=partial_state,
+            state_epoch=state_epoch,
         )
 
     @staticmethod
@@ -163,7 +167,11 @@ class EventContext(UnpersistedEventContextBase):
         storage: "StorageControllers",
     ) -> "EventContext":
         """Return an EventContext instance suitable for persisting an outlier event"""
-        return EventContext(storage=storage, state_group_deltas={})
+        return EventContext(
+            storage=storage,
+            state_group_deltas={},
+            state_epoch=None,
+        )
 
     async def persist(self, event: EventBase) -> "EventContext":
         return self
@@ -189,6 +197,7 @@ class EventContext(UnpersistedEventContextBase):
             ),
             "app_service_id": self.app_service.id if self.app_service else None,
             "partial_state": self.partial_state,
+            "state_epoch": self.state_epoch,
         }
 
     @staticmethod
@@ -216,6 +225,7 @@ class EventContext(UnpersistedEventContextBase):
             ),
             rejected=input["rejected"],
             partial_state=input.get("partial_state", False),
+            state_epoch=input.get("state_epoch", None),
         )
 
         app_service_id = input["app_service_id"]
@@ -345,6 +355,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
             A map of the state before the event, i.e. the state at `state_group_before_event`
     """
 
+    state_epoch: int  # `state_epoch` is required for `UnpersistedEventContext`
     state_group_before_event: Optional[int]
     state_group_after_event: Optional[int]
     state_delta_due_to_event: Optional[StateMap[str]]
@@ -387,6 +398,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
                 state_delta_due_to_event=unpersisted_context.state_delta_due_to_event,
                 partial_state=unpersisted_context.partial_state,
                 state_group_deltas=state_group_deltas,
+                state_epoch=unpersisted_context.state_epoch,
             )
             events_and_persisted_context.append((event, context))
         return events_and_persisted_context
@@ -461,6 +473,7 @@ class UnpersistedEventContext(UnpersistedEventContextBase):
             state_delta_due_to_event=self.state_delta_due_to_event,
             state_group_deltas=state_group_deltas,
             partial_state=self.partial_state,
+            state_epoch=self.state_epoch,
         )
 
     def _build_state_group_deltas(self) -> Dict[Tuple[int, int], StateMap]:
