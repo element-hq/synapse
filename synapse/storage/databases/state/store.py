@@ -532,6 +532,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             """
 
             # TODO: Check state epochs
+            #
+            # If prev_group is in state_deletions? => Mark these groups as for
+            # deletion too in the same state epoch. Then clear them when we
+            # persist the events.
 
             is_in_db = self.db_pool.simple_select_one_onecol_txn(
                 txn,
