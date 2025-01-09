@@ -436,9 +436,6 @@ class ExperimentalConfig(Config):
                 ("experimental", "msc4108_delegation_endpoint"),
             )
 
-        # MSC4151: Report room API (Client-Server API)
-        self.msc4151_enabled: bool = experimental.get("msc4151_enabled", False)
-
         # MSC4133: Custom profile fields
         self.msc4133_enabled: bool = experimental.get("msc4133_enabled", False)
 
