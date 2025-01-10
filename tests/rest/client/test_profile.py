@@ -491,6 +491,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_get_custom_field_rejects_bad_username(self) -> None:
@@ -499,6 +500,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{urllib.parse.quote('@alice:')}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field(self) -> None:
@@ -547,6 +549,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/custom_field",
         )
         self.assertEqual(channel.code, HTTPStatus.NOT_FOUND, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_non_string(self) -> None:
@@ -592,6 +595,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             content={"custom_field": "test"},
         )
         self.assertEqual(channel.code, 401, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.MISSING_TOKEN)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_size(self) -> None:
@@ -606,6 +610,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
 
         # Single key is too large.
         key = "c" * 500
@@ -616,6 +621,16 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.KEY_TOO_LARGE)
+
+        channel = self.make_request(
+            "DELETE",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/{key}",
+            content={key: "test"},
+            access_token=self.owner_tok,
+        )
+        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.KEY_TOO_LARGE)
 
         # Key doesn't match body.
         channel = self.make_request(
@@ -625,6 +640,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.MISSING_PARAM)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_set_custom_field_profile_too_long(self) -> None:
@@ -672,6 +688,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
         # Setting an avatar or (longer) display name should not work.
         channel = self.make_request(
@@ -681,6 +698,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
         channel = self.make_request(
             "PUT",
@@ -689,6 +707,7 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             access_token=self.owner_tok,
         )
         self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.PROFILE_TOO_LARGE)
 
         # Removing a single byte should work.
         key = "b"
@@ -745,7 +764,8 @@ class ProfileTestCase(unittest.HomeserverTestCase):
             content={"custom_field": "test"},
             access_token=self.owner_tok,
         )
-        self.assertEqual(channel.code, 400, channel.result)
+        self.assertEqual(channel.code, 403, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.FORBIDDEN)
 
     def _setup_local_files(self, names_and_props: Dict[str, Dict[str, Any]]) -> None:
         """Stores metadata about files in the database.

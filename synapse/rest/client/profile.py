@@ -109,9 +109,7 @@ class ProfileDisplaynameRestServlet(RestServlet):
             new_name = content["displayname"]
         except Exception:
             raise SynapseError(
-                code=400,
-                msg="Unable to parse name",
-                errcode=Codes.BAD_JSON,
+                400, "Missing key 'displayname'", errcode=Codes.MISSING_PARAM
             )
 
         propagate = _read_propagate(self.hs, request)
@@ -301,7 +299,7 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
-            raise SynapseError(400, "Field name too long", errcode=Codes.INVALID_PARAM)
+            raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
 
         content = parse_json_object_from_request(request)
         try:
