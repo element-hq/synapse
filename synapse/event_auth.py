@@ -85,7 +85,7 @@ class _EventSourceStore(Protocol):
     async def get_events(
         self,
         event_ids: StrCollection,
-        redact_behaviour: EventRedactBehaviour,
+        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
     ) -> Dict[str, "EventBase"]: ...
@@ -277,6 +277,7 @@ async def check_state_independent_auth_rules(
 
 
 def check_state_dependent_auth_rules(
+    store: _EventSourceStore,
     event: "EventBase",
     auth_events: Iterable["EventBase"],
 ) -> None:
@@ -295,12 +296,19 @@ def check_state_dependent_auth_rules(
        a bunch of other tests (including, but not limited to, check_state_independent_auth_rules).
 
     Args:
+        store: the datastore; used to fetch the auth events for validation
         event: the event being checked.
         auth_events: the room state to check the events against.
 
     Raises:
         AuthError if the checks fail
     """
+    logger.info(
+        "🛂 Checking state-dependent auth rules for %s auth_events=%s",
+        event,
+        auth_events,
+    )
+
     # there are no state-dependent auth rules for create events.
     if event.type == EventTypes.Create:
         logger.debug("Allowing! %s", event)

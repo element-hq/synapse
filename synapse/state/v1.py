@@ -21,8 +21,6 @@
 import hashlib
 import logging
 from typing import (
-    Awaitable,
-    Callable,
     Dict,
     Iterable,
     List,
@@ -32,11 +30,14 @@ from typing import (
     Tuple,
 )
 
+from typing_extensions import Protocol
+
 from synapse import event_auth
 from synapse.api.constants import EventTypes
 from synapse.api.errors import AuthError
 from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
+from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import MutableStateMap, StateMap, StrCollection
 
 logger = logging.getLogger(__name__)
@@ -45,12 +46,24 @@ logger = logging.getLogger(__name__)
 POWER_KEY = (EventTypes.PowerLevels, "")
 
 
+class StateResolutionStore(Protocol):
+    # This is usually synapse.state.StateResolutionStore, but it's replaced with a
+    # TestStateResolutionStore in tests.
+    async def get_events(
+        self,
+        event_ids: StrCollection,
+        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
+        get_prev_content: bool = False,
+        allow_rejected: bool = False,
+    ) -> Dict[str, EventBase]: ...
+
+
 async def resolve_events_with_store(
     room_id: str,
     room_version: RoomVersion,
     state_sets: Sequence[StateMap[str]],
     event_map: Optional[Dict[str, EventBase]],
-    state_map_factory: Callable[[StrCollection], Awaitable[Dict[str, EventBase]]],
+    state_res_store: StateResolutionStore,
 ) -> StateMap[str]:
     """
     Args:
@@ -92,7 +105,7 @@ async def resolve_events_with_store(
 
     # A map from state event id to event. Only includes the state events which
     # are in conflict (and those in event_map).
-    state_map = await state_map_factory(needed_events)
+    state_map = await state_res_store.get_events(needed_events)
     if event_map is not None:
         state_map.update(event_map)
 
@@ -124,7 +137,7 @@ async def resolve_events_with_store(
         "Asking for %d/%d auth events", len(new_needed_events), new_needed_event_count
     )
 
-    state_map_new = await state_map_factory(new_needed_events)
+    state_map_new = await state_res_store.get_events(new_needed_events)
     for event in state_map_new.values():
         if event.room_id != room_id:
             raise Exception(
@@ -139,7 +152,12 @@ async def resolve_events_with_store(
     state_map.update(state_map_new)
 
     return _resolve_with_state(
-        room_version, unconflicted_state, conflicted_state, auth_events, state_map
+        room_version,
+        unconflicted_state,
+        conflicted_state,
+        auth_events,
+        state_map,
+        state_res_store,
     )
 
 
@@ -231,6 +249,7 @@ def _resolve_with_state(
     conflicted_state_ids: StateMap[Set[str]],
     auth_event_ids: StateMap[str],
     state_map: Dict[str, EventBase],
+    state_res_store: StateResolutionStore,
 ) -> MutableStateMap[str]:
     conflicted_state = {}
     for key, event_ids in conflicted_state_ids.items():
@@ -248,7 +267,7 @@ def _resolve_with_state(
 
     try:
         resolved_state = _resolve_state_events(
-            room_version, conflicted_state, auth_events
+            room_version, conflicted_state, auth_events, state_res_store
         )
     except Exception:
         logger.exception("Failed to resolve state")
@@ -265,6 +284,7 @@ def _resolve_state_events(
     room_version: RoomVersion,
     conflicted_state: StateMap[List[EventBase]],
     auth_events: MutableStateMap[EventBase],
+    state_res_store: StateResolutionStore,
 ) -> StateMap[EventBase]:
     """This is where we actually decide which of the conflicted state to
     use.
@@ -280,7 +300,7 @@ def _resolve_state_events(
         events = conflicted_state[POWER_KEY]
         logger.debug("Resolving conflicted power levels %r", events)
         resolved_state[POWER_KEY] = _resolve_auth_events(
-            room_version, events, auth_events
+            room_version, events, auth_events, state_res_store
         )
 
     auth_events.update(resolved_state)
@@ -289,7 +309,7 @@ def _resolve_state_events(
         if key[0] == EventTypes.JoinRules:
             logger.debug("Resolving conflicted join rules %r", events)
             resolved_state[key] = _resolve_auth_events(
-                room_version, events, auth_events
+                room_version, events, auth_events, state_res_store
             )
 
     auth_events.update(resolved_state)
@@ -298,7 +318,7 @@ def _resolve_state_events(
         if key[0] == EventTypes.Member:
             logger.debug("Resolving conflicted member lists %r", events)
             resolved_state[key] = _resolve_auth_events(
-                room_version, events, auth_events
+                room_version, events, auth_events, state_res_store
             )
 
     auth_events.update(resolved_state)
@@ -306,13 +326,18 @@ def _resolve_state_events(
     for key, events in conflicted_state.items():
         if key not in resolved_state:
             logger.debug("Resolving conflicted state %r:%r", key, events)
-            resolved_state[key] = _resolve_normal_events(events, auth_events)
+            resolved_state[key] = _resolve_normal_events(
+                events, auth_events, state_res_store
+            )
 
     return resolved_state
 
 
 def _resolve_auth_events(
-    room_version: RoomVersion, events: List[EventBase], auth_events: StateMap[EventBase]
+    room_version: RoomVersion,
+    events: List[EventBase],
+    auth_events: StateMap[EventBase],
+    state_res_store: StateResolutionStore,
 ) -> EventBase:
     reverse = list(reversed(_ordered_events(events)))
 
@@ -336,6 +361,7 @@ def _resolve_auth_events(
         try:
             # The signatures have already been checked at this point
             event_auth.check_state_dependent_auth_rules(
+                state_res_store,
                 event,
                 auth_events.values(),
             )
@@ -347,12 +373,15 @@ def _resolve_auth_events(
 
 
 def _resolve_normal_events(
-    events: List[EventBase], auth_events: StateMap[EventBase]
+    events: List[EventBase],
+    auth_events: StateMap[EventBase],
+    state_res_store: StateResolutionStore,
 ) -> EventBase:
     for event in _ordered_events(events):
         try:
             # The signatures have already been checked at this point
             event_auth.check_state_dependent_auth_rules(
+                state_res_store,
                 event,
                 auth_events.values(),
             )

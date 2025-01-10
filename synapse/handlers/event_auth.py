@@ -83,7 +83,7 @@ class EventAuthHandler:
         else:
             auth_events_by_id = await self._store.get_events(auth_event_ids)
 
-        check_state_dependent_auth_rules(event, auth_events_by_id.values())
+        check_state_dependent_auth_rules(self._store, event, auth_events_by_id.values())
 
     def compute_auth_events(
         self,
