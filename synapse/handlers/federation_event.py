@@ -382,6 +382,10 @@ class FederationEventHandler:
             event.event_id,
             event.signatures,
         )
+        # logger.info(
+        #     "📮 on_send_membership_event: received event: %s",
+        #     event,
+        # )
 
         if get_domain_from_id(event.sender) != origin:
             logger.info(
@@ -436,6 +440,10 @@ class FederationEventHandler:
 
         await self._check_for_soft_fail(event, context=context, origin=origin)
         await self._run_push_actions_and_persist_event(event, context)
+        # logger.info(
+        #     "✅ on_send_membership_event: handled event: %s",
+        #     event,
+        # )
         return event, context
 
     async def check_join_restrictions(
@@ -2274,7 +2282,8 @@ class FederationEventHandler:
 
             # After persistence we always need to notify replication there may
             # be new data.
-            self._notifier.notify_replication()
+            # XXX: This already happens in `_notify_persisted_event` -> `on_new_room_events` -> `notify_new_room_events` -> `notify_replication`
+            # self._notifier.notify_replication()
 
             if self._ephemeral_messages_enabled:
                 for event in events:
@@ -2292,6 +2301,8 @@ class FederationEventHandler:
                         str(len(events)),
                     )
                     for event in events:
+                        # TODO: Is this correct?
+                        # if not event.internal_metadata.is_outlier():
                         await self._notify_persisted_event(event, max_stream_token)
 
             return max_stream_token.stream

@@ -1415,6 +1415,9 @@ class EventCreationHandler:
             PartialStateConflictError if attempting to persist a partial state event in
                 a room that has been un-partial stated.
         """
+        for event, _ in events_and_context:
+            logger.info("📮 handle_new_client_event: handling %s", event)
+
         extra_users = extra_users or []
 
         for event, context in events_and_context:
@@ -1460,7 +1463,7 @@ class EventCreationHandler:
                         event, batched_auth_events
                     )
                 except AuthError as err:
-                    logger.warning("Denying new event %r because %s", event, err)
+                    logger.warning("❌ Denying new event %r because %s", event, err)
                     raise err
 
             # Ensure that we can round trip before trying to persist in db
@@ -1492,6 +1495,7 @@ class EventCreationHandler:
             gather_results(deferreds, consumeErrors=True)
         ).addErrback(unwrapFirstError)
 
+        logger.info("✅ handle_new_client_event: handled %s", event)
         return result
 
     async def _persist_events(

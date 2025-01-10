@@ -563,9 +563,10 @@ def _is_membership_change_allowed(
     invite_level = get_named_level(auth_events, "invite", 0)
     ban_level = get_named_level(auth_events, "ban", 50)
 
-    logger.debug(
+    logger.info(
         "_is_membership_change_allowed: %s",
         {
+            "caller_membership": caller.membership if caller else None,
             "caller_in_room": caller_in_room,
             "caller_invited": caller_invited,
             "caller_knocked": caller_knocked,
@@ -677,7 +678,8 @@ def _is_membership_change_allowed(
                 and join_rule == JoinRules.KNOCK_RESTRICTED
             )
         ):
-            if not caller_in_room and not caller_invited:
+            # You can only join the room if you are invited or are already in the room.
+            if not (caller_in_room or caller_invited):
                 raise AuthError(403, "You are not invited to this room.")
         else:
             # TODO (erikj): may_join list
