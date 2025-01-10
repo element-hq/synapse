@@ -468,7 +468,7 @@ class ProfileHandler:
         """Set a new profile field for a user.
 
         Args:
-            target_user: the user whose avatar URL is to be changed.
+            target_user: the user whose profile is to be changed.
             requester: The user attempting to make this change.
             field_name: The name of the profile field to update.
             new_value: The new field value for this user.
@@ -479,7 +479,7 @@ class ProfileHandler:
             raise SynapseError(400, "User is not hosted on this homeserver")
 
         if not by_admin and target_user != requester.user:
-            raise AuthError(400, "Cannot set another user's profile")
+            raise AuthError(403, "Cannot set another user's profile")
 
         await self.store.set_profile_field(target_user, field_name, new_value)
 
@@ -497,12 +497,12 @@ class ProfileHandler:
         by_admin: bool = False,
         deactivation: bool = False,
     ) -> None:
-        """Set a new avatar URL for a user.
+        """Delete a field from a user's profile.
 
         Args:
-            target_user: the user whose avatar URL is to be changed.
+            target_user: the user whose profile is to be changed.
             requester: The user attempting to make this change.
-            field_name: The name of the profile field to update.
+            field_name: The name of the profile field to remove.
             by_admin: Whether this change was made by an administrator.
             deactivation: Whether this change was made while deactivating the user.
         """

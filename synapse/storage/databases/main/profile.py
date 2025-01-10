@@ -287,6 +287,7 @@ class ProfileWorkerStore(SQLBaseStore):
             desc="get_profile_fields",
         )
         # The SQLite driver doesn't automatically convert JSON to
+        # Python objects
         if isinstance(self.database_engine, Sqlite3Engine) and result:
             result = json.loads(result)
         return result or {}
@@ -349,6 +350,7 @@ class ProfileWorkerStore(SQLBaseStore):
         total_bytes = (
             # Discount the opening and closing braces to avoid double counting,
             # but add one for a comma.
+            # -2 + 1 = -1
             (row[0] - 1 if row[0] else 0)
             + (
                 row[1] + len("displayname") + PER_VALUE_EXTRA
@@ -501,7 +503,7 @@ class ProfileWorkerStore(SQLBaseStore):
 
     async def delete_profile_field(self, user_id: UserID, field_name: str) -> None:
         """
-        Set a custom profile field for a user.
+        Remove a custom profile field for a user.
 
         Args:
             user_id: The user's ID.
