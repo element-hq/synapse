@@ -88,7 +88,7 @@ class InviteAutoAccepter:
             self._config.accept_invites_only_from_local_users
             and is_from_local_user is False
         ):
-            return False
+            return
 
         # Check the user is activated.
         recipient = await self._api.get_userinfo_by_id(event.state_key)
