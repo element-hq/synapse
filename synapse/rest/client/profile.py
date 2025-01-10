@@ -94,6 +94,11 @@ class ProfileDisplaynameRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
         requester = await self.auth.get_user_by_req(request, allow_guest=True)
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
@@ -169,6 +174,11 @@ class ProfileAvatarURLRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str
     ) -> Tuple[int, JsonDict]:
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
         requester = await self.auth.get_user_by_req(request)
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
@@ -278,6 +288,11 @@ class UnstableProfileFieldRestServlet(RestServlet):
     async def on_PUT(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> Tuple[int, JsonDict]:
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
         requester = await self.auth.get_user_by_req(request)
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
@@ -329,6 +344,11 @@ class UnstableProfileFieldRestServlet(RestServlet):
     async def on_DELETE(
         self, request: SynapseRequest, user_id: str, field_name: str
     ) -> Tuple[int, JsonDict]:
+        if not UserID.is_valid(user_id):
+            raise SynapseError(
+                HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
+            )
+
         requester = await self.auth.get_user_by_req(request)
         user = UserID.from_string(user_id)
         is_admin = await self.auth.is_server_admin(requester)
