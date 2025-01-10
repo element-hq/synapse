@@ -2836,6 +2836,8 @@ class PersistEventsStore:
                 for backfilled events because backfilled events in the past do
                 not affect the current local state.
         """
+        for event in events:
+            logger.info("🔦 _store_room_members_txn update room_memberships: %s", event)
 
         self.db_pool.simple_insert_many_txn(
             txn,
@@ -2892,6 +2894,10 @@ class PersistEventsStore:
                     Membership.LEAVE,
                 )
 
+                logger.info(
+                    "🔦 _store_room_members_txn update local_current_membership: %s",
+                    event,
+                )
                 self.db_pool.simple_upsert_txn(
                     txn,
                     table="local_current_membership",

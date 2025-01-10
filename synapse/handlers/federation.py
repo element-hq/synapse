@@ -606,6 +606,8 @@ class FederationHandler:
 
             content: The event content to use for the join event.
         """
+        logger.info("🧲 do_invite_join for %s in %s", joinee, room_id)
+
         # TODO: We should be able to call this on workers, but the upgrading of
         # room stuff after join currently doesn't work on workers.
         # TODO: Before we relax this condition, we need to allow re-syncing of
