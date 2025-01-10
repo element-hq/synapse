@@ -87,6 +87,21 @@ class InviteAutoAccepter:
             or is_from_local_user is True
         )
 
+        # Check the user is activated.
+        recipient = await self._api.get_userinfo_by_id(event.state_key)
+
+        # Ignore if the user doesn't exist.
+        if recipient is None:
+            return
+
+        # Never accept invites for deactivated users.
+        if recipient.is_deactivated:
+            return
+
+        # Only accept invites for suspended remote if the configuration mandates it.
+        if not self._config.accept_invites_for_suspended_users and recipient.suspended:
+            return
+
         if (
             is_invite_for_local_user
             and is_allowed_by_direct_message_rules

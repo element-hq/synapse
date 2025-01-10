@@ -40,4 +40,8 @@ class AutoAcceptInvitesConfig(Config):
             "only_from_local_users", False
         )
 
+        self.accept_invites_for_suspended_users = auto_accept_invites_config.get(
+            "accept_invites_for_suspended_users", False
+        )
+
         self.worker_to_run_on = auto_accept_invites_config.get("worker_to_run_on")
