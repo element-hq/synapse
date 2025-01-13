@@ -101,8 +101,8 @@ class InviteAutoAccepter:
         if recipient.is_deactivated:
             return
 
-        # Only accept invites for suspended remote if the configuration mandates it.
-        if not self._config.accept_invites_for_suspended_users and recipient.suspended:
+        # Never accept invites for suspended users.
+        if recipient.suspended:
             return
 
         # Make the user join the room. We run this as a background process to circumvent a race condition

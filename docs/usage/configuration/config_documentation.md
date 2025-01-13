@@ -4775,7 +4775,6 @@ are instead automatically joined to a room when receiving an invite. Set the `en
 enable auto-accepting invites. Defaults to false.
 This setting has the following sub-options:
 * `enabled`: Whether to run the auto-accept invites logic. Defaults to false.
-* `accept_invites_for_suspended_users`: Whether to automatically accept invites for suspended users. Defaults to false. 
 * `only_for_direct_messages`: Whether invites should be automatically accepted for all room types, or only
    for direct messages. Defaults to false.
 * `only_from_local_users`: Whether to only automatically accept invites from users on this homeserver. Defaults to false.
@@ -4791,7 +4790,6 @@ Example configuration:
 ```yaml
 auto_accept_invites:
     enabled: true
-    accept_invites_for_suspended_users: false
     only_for_direct_messages: true
     only_from_local_users: true
     worker_to_run_on: "worker_1"
