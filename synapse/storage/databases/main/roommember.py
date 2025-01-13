@@ -1696,13 +1696,14 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             txn: LoggingTransaction, current_room_id: str
         ) -> None:
             sql = """
-                SELECT DISTINCT rm.user_id
-                FROM room_memberships AS rm
+                SELECT DISTINCT c.state_key
+                FROM current_state_events AS c
                 INNER JOIN events AS e USING(room_id)
                 WHERE room_id = ?
-                    AND rm.membership = 'join'
+                    AND c.membership = 'join'
                     AND e.type = 'm.room.message'
-                    AND rm.user_id = e.sender;
+                    OR e.type = 'm.room.encrypted'
+                    AND c.state_key = e.sender;
             """
 
             txn.execute(sql, (current_room_id,))
@@ -1710,12 +1711,11 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
 
             if res:
                 participants = [user[0] for user in res]
-
                 for participant in participants:
                     self.db_pool.simple_update_txn(
                         txn,
                         table="room_memberships",
-                        keyvalues={"user_id": participant},
+                        keyvalues={"user_id": participant, "room_id": current_room_id},
                         updatevalues={"participant": True},
                     )
 

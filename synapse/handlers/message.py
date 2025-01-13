@@ -1440,7 +1440,7 @@ class EventCreationHandler:
                     )
                     return prev_event
 
-            if event.type == "m.room.message":
+            if event.type == "m.room.message" or event.type == "m.room.encrypted":
                 await self.store.set_room_participation(event.room_id, event.user_id)
 
             if event.internal_metadata.is_out_of_band_membership():

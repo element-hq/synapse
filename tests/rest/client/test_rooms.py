@@ -4088,6 +4088,9 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
         self.tok2 = self.login("teresa", "hackme")
 
         self.room1 = self.helper.create_room_as(room_creator=self.user1, tok=self.tok1)
+        self.room2 = self.helper.create_room_as(
+            self.user1, is_public=False, tok=self.tok1
+        )
         self.store = hs.get_datastores().main
 
     def test_sending_message_records_participation(self) -> None:
@@ -4110,6 +4113,37 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
             content={
                 "msgtype": "m.text",
                 "body": "I am engaging in this room",
+            },
+            tok=self.tok2,
+        )
+        participant = self.get_success(
+            self.store.get_room_participation(self.room1, self.user2)
+        )
+        self.assertTrue(participant)
+
+    def test_sending_encrypted_event_records_participation(self) -> None:
+        """
+        Test that sending an m.room.encrypted event into a room causes the user to
+        be marked as a participant in that room
+        """
+        self.helper.join(self.room1, self.user2, tok=self.tok2)
+
+        # user has not sent any messages, so should not be a participant
+        participant = self.get_success(
+            self.store.get_room_participation(self.room1, self.user2)
+        )
+        self.assertFalse(participant)
+
+        # sending an encrypted event should now mark user as participant
+        self.helper.send_event(
+            self.room1,
+            "m.room.encrypted",
+            content={
+                "algorithm": "m.megolm.v1.aes-sha2",
+                "ciphertext": "AwgAEnACgAkLmt6qF84IK++J7UDH2Za1YVchHyprqTqsg...",
+                "device_id": "RJYKSTBOIE",
+                "sender_key": "IlRMeOPX2e0MurIyfWEucYBRVOEEUMrOHqn/8mLqMjA",
+                "session_id": "X3lUlvLELLYxeTx4yOVu6UDpasGEVO0Jbu+QFnm0cKQ",
             },
             tok=self.tok2,
         )
