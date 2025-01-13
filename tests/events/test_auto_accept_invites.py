@@ -39,7 +39,7 @@ from synapse.module_api import ModuleApi
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import StreamToken, create_requester, UserInfo, UserID
+from synapse.types import StreamToken, UserID, UserInfo, create_requester
 from synapse.util import Clock
 
 from tests.handlers.test_sync import generate_sync_config
@@ -349,6 +349,127 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             join_updates, _ = sync_join(self, invited_user_id)
             self.assertEqual(len(join_updates), 0)
 
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled": True,
+            },
+        }
+    )
+    async def test_ignore_invite_from_missing_user(self) -> None:
+        """Tests that receiving an invite for a missing user is ignored."""
+        inviting_user_id = self.register_user("inviter", "pass")
+        inviting_user_tok = self.login("inviter", "pass")
+
+        # A local user who receives an invite
+        invited_user_id = "@fake:" + self.hs.config.server.server_name
+
+        # Create a room and send an invite to the other user
+        room_id = self.helper.create_room_as(
+            inviting_user_id,
+            tok=inviting_user_tok,
+        )
+
+        self.helper.invite(
+            room_id,
+            inviting_user_id,
+            invited_user_id,
+            tok=inviting_user_tok,
+        )
+
+        join_updates, _ = sync_join(self, inviting_user_id)
+        # Assert that the last event in the room was not a member event for the target user.
+        self.assertEqual(
+            join_updates[0].timeline.events[-1].content["membership"], "invite"
+        )
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled": True,
+            },
+        }
+    )
+    async def test_ignore_invite_from_deactivated_user(self) -> None:
+        """Tests that receiving an invite for a deactivated user is ignored."""
+        inviting_user_id = self.register_user("inviter", "pass", admin=True)
+        inviting_user_tok = self.login("inviter", "pass")
+
+        # A local user who receives an invite
+        invited_user_id = self.register_user("invitee", "pass")
+
+        # Create a room and send an invite to the other user
+        room_id = self.helper.create_room_as(
+            inviting_user_id,
+            tok=inviting_user_tok,
+        )
+
+        channel = self.make_request(
+            "PUT",
+            "/_synapse/admin/v2/users/%s" % invited_user_id,
+            {"deactivated": True},
+            access_token=inviting_user_tok,
+        )
+
+        assert channel.code == 200
+
+        self.helper.invite(
+            room_id,
+            inviting_user_id,
+            invited_user_id,
+            tok=inviting_user_tok,
+        )
+
+        # Check that the invite receiving user has automatically joined the room when syncing
+        join_updates, b = sync_join(self, inviting_user_id)
+        # Assert that the last event in the room was not a member event for the target user.
+        self.assertEqual(
+            join_updates[0].timeline.events[-1].content["membership"], "invite"
+        )
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled": True,
+            },
+        }
+    )
+    async def test_ignore_invite_from_suspended_user(self) -> None:
+        """Tests that receiving an invite for a suspended user is ignored."""
+        inviting_user_id = self.register_user("inviter", "pass", admin=True)
+        inviting_user_tok = self.login("inviter", "pass")
+
+        # A local user who receives an invite
+        invited_user_id = self.register_user("invitee", "pass")
+
+        # Create a room and send an invite to the other user
+        room_id = self.helper.create_room_as(
+            inviting_user_id,
+            tok=inviting_user_tok,
+        )
+
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v1/suspend/{invited_user_id}",
+            {"suspend": True},
+            access_token=inviting_user_tok,
+        )
+
+        assert channel.code == 200
+
+        self.helper.invite(
+            room_id,
+            inviting_user_id,
+            invited_user_id,
+            tok=inviting_user_tok,
+        )
+
+        join_updates, b = sync_join(self, inviting_user_id)
+        # Assert that the last event in the room was not a member event for the target user.
+        self.assertEqual(
+            join_updates[0].timeline.events[-1].content["membership"], "invite"
+        )
+
 
 _request_key = 0
 
@@ -565,139 +686,6 @@ class InviteAutoAccepterInternalTestCase(TestCase):
         cast(
             Mock, specified_module._api.register_third_party_rules_callbacks
         ).assert_called_once()
-
-
-    async def test_ignore_invite_from_missing_user(self) -> None:
-        """Tests that receiving an invite for a missing user is ignored."""
-        invite = MockEvent(
-            sender=self.remote_invitee,
-            state_key=self.invitee,
-            type="m.room.member",
-            content={"membership": "invite"},
-        )
-        self.get_userinfo_by_id.return_value = None
-
-        # Stop mypy from complaining that we give on_new_event a MockEvent rather than an
-        # EventBase.
-        await self.module.on_new_event(event=invite)  # type: ignore[arg-type]
-        self.mocked_update_membership.assert_not_called()
-
-    async def test_ignore_invite_from_deactivated_user(self) -> None:
-        """Tests that receiving an invite for a deactivated user is ignored."""
-        invite = MockEvent(
-            sender=self.remote_invitee,
-            state_key=self.invitee,
-            type="m.room.member",
-            content={"membership": "invite"},
-        )
-        self.get_userinfo_by_id.return_value = UserInfo(
-            user_id=UserID.from_string("@user:test"),
-            is_admin=False,
-            is_guest=False,
-            consent_server_notice_sent=None,
-            consent_ts=None,
-            consent_version=None,
-            appservice_id=None,
-            creation_ts=0,
-            user_type=None,
-            is_deactivated=True,
-            locked=False,
-            is_shadow_banned=False,
-            approved=True,
-            suspended=False,
-        )
-
-        # Stop mypy from complaining that we give on_new_event a MockEvent rather than an
-        # EventBase.
-        await self.module.on_new_event(event=invite)  # type: ignore[arg-type]
-        self.mocked_update_membership.assert_not_called()
-
-    async def test_ignore_invite_from_suspended_user(self) -> None:
-        """Tests that receiving an invite for a suspended user is ignored by default."""
-        invite = MockEvent(
-            sender=self.remote_invitee,
-            state_key=self.invitee,
-            type="m.room.member",
-            content={"membership": "invite"},
-        )
-        self.get_userinfo_by_id.return_value = UserInfo(
-            user_id=UserID.from_string("@user:test"),
-            is_admin=False,
-            is_guest=False,
-            consent_server_notice_sent=None,
-            consent_ts=None,
-            consent_version=None,
-            appservice_id=None,
-            creation_ts=0,
-            user_type=None,
-            is_deactivated=False,
-            locked=False,
-            is_shadow_banned=False,
-            approved=True,
-            suspended=True,
-        )
-
-        # Stop mypy from complaining that we give on_new_event a MockEvent rather than an
-        # EventBase.
-        await self.module.on_new_event(event=invite)  # type: ignore[arg-type]
-        self.mocked_update_membership.assert_not_called()
-
-    async def test_accept_invite_for_suspended_user_if_enabled(
-        self,
-    ) -> None:
-        """Tests that, if the module is configured to accept invites for suspended users, invites
-        are still automatically accepted.
-        """
-        main_module = create_module(
-            config_override={"accept_invites_for_suspended_users": True},
-        )
-
-        get_userinfo_by_id: Mock = main_module._api.get_userinfo_by_id  # type: ignore[assignment]
-        get_userinfo_by_id.return_value = UserInfo(
-            user_id=UserID.from_string("@user:test"),
-            is_admin=False,
-            is_guest=False,
-            consent_server_notice_sent=None,
-            consent_ts=None,
-            consent_version=None,
-            appservice_id=None,
-            creation_ts=0,
-            user_type=None,
-            is_deactivated=False,
-            locked=False,
-            is_shadow_banned=False,
-            approved=True,
-            suspended=True,
-        )
-
-        mocked_update_membership: Mock = main_module._api.update_room_membership  # type: ignore[assignment]
-        join_event = MockEvent(
-            sender="someone",
-            state_key="someone",
-            type="m.room.member",
-            content={"membership": "join"},
-        )
-        mocked_update_membership.return_value = make_awaitable(join_event)
-
-        invite = MockEvent(
-            sender=self.user_id,
-            state_key=self.invitee,
-            type="m.room.member",
-            content={"membership": "invite"},
-        )
-
-        # Stop mypy from complaining that we give on_new_event a MockEvent rather than an
-        # EventBase.
-        await module.on_new_event(event=invite)  # type: ignore[arg-type]
-
-        await self.retry_assertions(
-            mocked_update_membership,
-            1,
-            sender=invite.state_key,
-            target=invite.state_key,
-            room_id=invite.room_id,
-            new_membership="join",
-        )
 
     async def retry_assertions(
         self, mock: Mock, call_count: int, **kwargs: Any
