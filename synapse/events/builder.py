@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 import attr
 from signedjson.types import SigningKey
 
-from synapse.api.constants import MAX_DEPTH, EventTypes, Membership
+from synapse.api.constants import MAX_DEPTH, EventTypes
 from synapse.api.room_versions import (
     KNOWN_EVENT_FORMAT_VERSIONS,
     EventFormatVersions,
@@ -165,34 +165,25 @@ class EventBuilder:
             # part of a `/send` transaction yet and de-outliered. This also helps for
             # any of the other out-of-band membership transitions.
             #
-            # If the state already includes a non-`leave` membership event, then we can
-            # assume the membership event has been de-outliered and we don't need to
-            # check for it.
-            state_membership_event = state_ids.get((EventTypes.Member, ""))
-            state_already_includes_non_leave_membership_event = (
-                state_membership_event is not None
-                # TODO: Check for non-leave membership
-                and False in (Membership.LIST - {Membership.LEAVE})
-            )
-            if (
-                not state_already_includes_non_leave_membership_event
-                and self.type == EventTypes.Member
-                and self.is_mine_id(self.state_key)
-            ):
+            # As an optimization, we could check if the room state already includes a
+            # non-`leave` membership event, then we can assume the membership event has
+            # been de-outliered and we don't need to check for an out-of-band
+            # membership. But we don't have the necessary information from a
+            # `StateMap[str]` and we'll just have to take the hit of this extra lookup
+            # for any membership event for now.
+            if self.type == EventTypes.Member and self.is_mine_id(self.state_key):
                 (
-                    membership,
+                    _membership,
                     member_event_id,
                 ) = await self._store.get_local_current_membership_for_user_in_room(
                     user_id=self.state_key,
                     room_id=self.room_id,
                 )
                 if member_event_id is not None:
-                    # Check to make sure this membership is an outlier indicating that it is indeed
-                    # an out-of-band membership. This is a sanity check to ensure that TODO
-                    # await self._store.get_events(event_ids=[member_event_id])
-                    logger.debug(
-                        f"Adding out-of-band membership event ({member_event_id}) to auth events of {self.type} in {self.room_id} sent by {self.sender}"
-                    )
+                    # There is no need to check if the membership is actually an
+                    # out-of-band membership (`outlier`) as we would end up with the
+                    # same result either way (adding the member event to the
+                    # `auth_event_ids`).
                     auth_event_ids.append(member_event_id)
 
         format_version = self.room_version.event_format
