@@ -338,7 +338,7 @@ installing under virtualenv):</p>
 sudo pip install py-bcrypt
 </code></pre>
 <h4 id="alpine-linux"><a class="header" href="#alpine-linux">Alpine Linux</a></h4>
-<p>6543 maintains <a href="https://pkgs.alpinelinux.org/packages?name=synapse&amp;branch=edge">Synapse packages for Alpine Linux</a> in the community repository. Install with:</p>
+<p>Jahway603 maintains <a href="https://pkgs.alpinelinux.org/packages?name=synapse&amp;branch=edge">Synapse packages for Alpine Linux</a> in the community repository. Install with:</p>
 <pre><code class="language-sh">sudo apk add synapse
 </code></pre>
 <h4 id="void-linux"><a class="header" href="#void-linux">Void Linux</a></h4>
@@ -977,7 +977,7 @@ reverse proxy is using.</p>
         proxy_pass http://localhost:8008;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header Host $host;
+        proxy_set_header Host $host:$server_port;
 
         # Nginx by default only allows file uploads up to 1M in size
         # Increase client_max_body_size to match max_upload_size defined in homeserver.yaml
@@ -1877,7 +1877,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.121.1</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.122.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -1895,6 +1895,11 @@ database migrations are complete. You should wait until background updates from
 each upgrade are complete before moving on to the next upgrade, to avoid
 stacking them up. You can monitor the currently running background updates with
 <a href="usage/administration/admin_api/background_updates.html#status">the Admin API</a>.</p>
+<h1 id="upgrading-to-v11220"><a class="header" href="#upgrading-to-v11220">Upgrading to v1.122.0</a></h1>
+<h2 id="dropping-support-for-postgresql-11-and-12"><a class="header" href="#dropping-support-for-postgresql-11-and-12">Dropping support for PostgreSQL 11 and 12</a></h2>
+<p>In line with our <a href="deprecation_policy.html">deprecation policy</a>, we've dropped
+support for PostgreSQL 11 and 12, as they are no longer supported upstream.
+This release of Synapse requires PostgreSQL 13+.</p>
 <h1 id="upgrading-to-v11200"><a class="header" href="#upgrading-to-v11200">Upgrading to v1.120.0</a></h1>
 <h2 id="removal-of-experimental-msc3886-feature"><a class="header" href="#removal-of-experimental-msc3886-feature">Removal of experimental MSC3886 feature</a></h2>
 <p><a href="https://github.com/matrix-org/matrix-spec-proposals/pull/3886">MSC3886</a>
@@ -4433,8 +4438,11 @@ Synapse will refuse to connect unless the server supports STARTTLS.</p>
 </li>
 <li>
 <p><code>enable_tls</code>: By default, if the server supports TLS, it will be used, and the server
-must present a certificate that is valid for 'smtp_host'. If this option
+must present a certificate that is valid for <code>tlsname</code>. If this option
 is set to false, TLS will not be used.</p>
+</li>
+<li>
+<p><code>tlsname</code>: The domain name the SMTP server's TLS certificate must be valid for, defaulting to <code>smtp_host</code>.</p>
 </li>
 <li>
 <p><code>notif_from</code>: defines the &quot;From&quot; address to use when sending emails.
@@ -4518,6 +4526,7 @@ ownership. Defaults to &quot;[%(server_name)s] Validate your email&quot;</li>
   force_tls: true
   require_transport_security: true
   enable_tls: false
+  tlsname: mail.server.example.com
   notif_from: &quot;Your Friendly %(app)s homeserver &lt;noreply@example.com&gt;&quot;
   app_name: my_branded_matrix_server
   enable_notifs: true
@@ -6388,6 +6397,16 @@ otherwise, a secret key is derived from the signing key.</p>
 <p>Example configuration:</p>
 <pre><code class="language-yaml">macaroon_secret_key: &lt;PRIVATE STRING&gt;
 </code></pre>
+<hr />
+<h3 id="macaroon_secret_key_path"><a class="header" href="#macaroon_secret_key_path"><code>macaroon_secret_key_path</code></a></h3>
+<p>An alternative to <a href="usage/configuration/config_documentation.html#macaroon_secret_key"><code>macaroon_secret_key</code></a>:
+allows the secret key to be specified in an external file.</p>
+<p>The file should be a plain text file, containing only the secret key.
+Synapse reads the secret key from the given file once at startup.</p>
+<p>Example configuration:</p>
+<pre><code class="language-yaml">macaroon_secret_key_path: /path/to/secrets/file
+</code></pre>
+<p><em>Added in Synapse 1.121.0.</em></p>
 <hr />
 <h3 id="form_secret"><a class="header" href="#form_secret"><code>form_secret</code></a></h3>
 <p>A secret which is used to calculate HMACs for form values, to stop
@@ -10635,7 +10654,7 @@ be used. If this happens, Synapse will not call any of the subsequent implementa
 this callback.</p>
 <h3 id="check_username_for_spam"><a class="header" href="#check_username_for_spam"><code>check_username_for_spam</code></a></h3>
 <p><em>First introduced in Synapse v1.37.0</em></p>
-<pre><code class="language-python">async def check_username_for_spam(user_profile: synapse.module_api.UserProfile) -&gt; bool
+<pre><code class="language-python">async def check_username_for_spam(user_profile: synapse.module_api.UserProfile, requester_id: str) -&gt; bool
 </code></pre>
 <p>Called when computing search results in the user directory. The module must return a
 <code>bool</code> indicating whether the given user should be excluded from user directory 
@@ -10651,6 +10670,7 @@ if this user has not set an avatar.</li>
 </ul>
 <p>The module is given a copy of the original dictionary, so modifying it from within the
 module cannot modify a user's profile when included in user directory search results.</p>
+<p>The requester_id parameter is the ID of the user that called the user directory API.</p>
 <p>If multiple modules implement this callback, they will be considered in order. If a
 callback returns <code>False</code>, Synapse falls through to the next one. The value of the first
 callback that does not return <code>False</code> will be used. If this happens, Synapse will not call
@@ -11833,23 +11853,19 @@ information.</p>
 ^/_matrix/client/(api/v1|r0|v3|unstable)/knock/
 ^/_matrix/client/(api/v1|r0|v3|unstable)/profile/
 
-# Account data requests
-^/_matrix/client/(r0|v3|unstable)/.*/tags
-^/_matrix/client/(r0|v3|unstable)/.*/account_data
-
-# Receipts requests
-^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
-^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
-
-# Presence requests
-^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
-
 # User directory search requests
 ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 </code></pre>
 <p>Additionally, the following REST endpoints can be handled for GET requests:</p>
 <pre><code>^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
 ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
+
+# Account data requests
+^/_matrix/client/(r0|v3|unstable)/.*/tags
+^/_matrix/client/(r0|v3|unstable)/.*/account_data
+
+# Presence requests
+^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
 </code></pre>
 <p>Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
@@ -12740,10 +12756,11 @@ returned results. This should be treated as an opaque value and not explicitly s
 anything other than the return value of <code>next_token</code> from a previous call. Defaults to <code>0</code>.</li>
 <li><code>dir</code>: string - Direction of event report order. Whether to fetch the most recent
 first (<code>b</code>) or the oldest first (<code>f</code>). Defaults to <code>b</code>.</li>
-<li><code>user_id</code>: string - Is optional and filters to only return users with user IDs that
-contain this value. This is the user who reported the event and wrote the reason.</li>
-<li><code>room_id</code>: string - Is optional and filters to only return rooms with room IDs that
-contain this value.</li>
+<li><code>user_id</code>: optional string - Filter by the user ID of the reporter. This is the user who reported the event
+and wrote the reason.</li>
+<li><code>room_id</code>: optional string - Filter by room id.</li>
+<li><code>event_sender_user_id</code>: optional string - Filter by the sender of the reported event. This is the user who 
+the report was made against.</li>
 </ul>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
@@ -14633,6 +14650,7 @@ for a server admin: see <a href="admin_api/../usage/administration/admin_api/">A
     &quot;erased&quot;: false,
     &quot;shadow_banned&quot;: 0,
     &quot;creation_ts&quot;: 1560432506,
+    &quot;last_seen_ts&quot;: 1732919539393,
     &quot;appservice_id&quot;: null,
     &quot;consent_server_notice_sent&quot;: null,
     &quot;consent_version&quot;: null,
@@ -15050,8 +15068,8 @@ The parameter <code>logout_devices</code> is optional and defaults to <code>true
     &quot;admin&quot;: true
 }
 </code></pre>
-<h2 id="list-room-memberships-of-a-user"><a class="header" href="#list-room-memberships-of-a-user">List room memberships of a user</a></h2>
-<p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is member.</p>
+<h2 id="list-joined-rooms-of-a-user"><a class="header" href="#list-joined-rooms-of-a-user">List joined rooms of a user</a></h2>
+<p>Gets a list of all <code>room_id</code> that a specific <code>user_id</code> is joined to and is a member of (participating in).</p>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/users/&lt;user_id&gt;/joined_rooms
 </code></pre>
@@ -15078,6 +15096,56 @@ member are returned.</p>
 <li><code>joined_rooms</code> - An array of <code>room_id</code>.</li>
 <li><code>total</code> - Number of rooms.</li>
 </ul>
+<h2 id="get-the-number-of-invites-sent-by-the-user"><a class="header" href="#get-the-number-of-invites-sent-by-the-user">Get the number of invites sent by the user</a></h2>
+<p>Fetches the number of invites sent by the provided user ID across all rooms
+after the given timestamp.</p>
+<pre><code>GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code>: fully qualified: for example, <code>@user:server.com</code></li>
+</ul>
+<p>The following should be set as query parameters in the URL:</p>
+<ul>
+<li><code>from_ts</code>: int, required. A timestamp in ms from the unix epoch. Only
+invites sent at or after the provided timestamp will be returned.
+This works by comparing the provided timestamp to the <code>received_ts</code>
+column in the <code>events</code> table.
+Note: https://currentmillis.com/ is a useful tool for converting dates
+into timestamps and vice versa.</li>
+</ul>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">{
+  &quot;invite_count&quot;: 30
+}
+</code></pre>
+<p><em>Added in Synapse 1.122.0</em></p>
+<h2 id="get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp"><a class="header" href="#get-the-cumulative-number-of-rooms-a-user-has-joined-after-a-given-timestamp">Get the cumulative number of rooms a user has joined after a given timestamp</a></h2>
+<p>Fetches the number of rooms that the user joined after the given timestamp, even
+if they have subsequently left/been banned from those rooms.</p>
+<pre><code>GET /_synapse/admin/v1/users/$&lt;user_id/cumulative_joined_room_count
+</code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following parameters should be set in the URL:</p>
+<ul>
+<li><code>user_id</code>: fully qualified: for example, <code>@user:server.com</code></li>
+</ul>
+<p>The following should be set as query parameters in the URL:</p>
+<ul>
+<li><code>from_ts</code>: int, required. A timestamp in ms from the unix epoch. Only
+invites sent at or after the provided timestamp will be returned.
+This works by comparing the provided timestamp to the <code>received_ts</code>
+column in the <code>events</code> table.
+Note: https://currentmillis.com/ is a useful tool for converting dates
+into timestamps and vice versa.</li>
+</ul>
+<p>A response body like the following is returned:</p>
+<pre><code class="language-json">{
+  &quot;cumulative_joined_room_count&quot;: 30
+}
+</code></pre>
+<p><em>Added in Synapse 1.122.0</em></p>
 <h2 id="account-data"><a class="header" href="#account-data">Account Data</a></h2>
 <p>Gets information about account data for a specific <code>user_id</code>.</p>
 <p>The API is:</p>

@@ -211,10 +211,11 @@ returned results. This should be treated as an opaque value and not explicitly s
 anything other than the return value of <code>next_token</code> from a previous call. Defaults to <code>0</code>.</li>
 <li><code>dir</code>: string - Direction of event report order. Whether to fetch the most recent
 first (<code>b</code>) or the oldest first (<code>f</code>). Defaults to <code>b</code>.</li>
-<li><code>user_id</code>: string - Is optional and filters to only return users with user IDs that
-contain this value. This is the user who reported the event and wrote the reason.</li>
-<li><code>room_id</code>: string - Is optional and filters to only return rooms with room IDs that
-contain this value.</li>
+<li><code>user_id</code>: optional string - Filter by the user ID of the reporter. This is the user who reported the event
+and wrote the reason.</li>
+<li><code>room_id</code>: optional string - Filter by room id.</li>
+<li><code>event_sender_user_id</code>: optional string - Filter by the sender of the reported event. This is the user who 
+the report was made against.</li>
 </ul>
 <p><strong>Response</strong></p>
 <p>The following fields are returned in the JSON response body:</p>
