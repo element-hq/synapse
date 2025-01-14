@@ -19,96 +19,93 @@
 #
 #
 
-from typing import Collection, List, Optional, Union
+import logging
+from typing import Optional, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
+import synapse.rest.admin
+from synapse.api.constants import EventTypes, Membership
 from synapse.api.errors import FederationError
-from synapse.api.room_versions import RoomVersion, RoomVersions
-from synapse.events import EventBase, make_event_from_dict
-from synapse.events.snapshot import EventContext
+from synapse.api.room_versions import RoomVersions
+from synapse.events import make_event_from_dict
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.handlers.device import DeviceListUpdater
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
+from synapse.rest.client import login, room
 from synapse.server import HomeServer
-from synapse.types import JsonDict, UserID, create_requester
+from synapse.types import JsonDict
 from synapse.util import Clock
 from synapse.util.retryutils import NotRetryingDestination
 
 from tests import unittest
 
+logger = logging.getLogger(__name__)
 
-class MessageAcceptTests(unittest.HomeserverTestCase):
+
+class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+    ]
+
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.http_client = Mock()
         return self.setup_test_homeserver(federation_http_client=self.http_client)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        user_id = UserID("us", "test")
-        our_user = create_requester(user_id)
-        room_creator = self.hs.get_room_creation_handler()
-        self.room_id = self.get_success(
-            room_creator.create_room(
-                our_user, room_creator._presets_dict["public_chat"], ratelimit=False
-            )
-        )[0]
-
         self.store = self.hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
+        self.federation_event_handler = self.hs.get_federation_event_handler()
 
-        # Figure out what the most recent event is
-        most_recent = next(
-            iter(
-                self.get_success(
-                    self.hs.get_datastores().main.get_latest_event_ids_in_room(
-                        self.room_id
-                    )
-                )
-            )
+        # Create a local room
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        self.room_id = self.helper.create_room_as(
+            user1_id, tok=user1_tok, is_public=True
         )
 
-        join_event = make_event_from_dict(
-            {
-                "room_id": self.room_id,
-                "sender": "@baduser:test.serv",
-                "state_key": "@baduser:test.serv",
-                "event_id": "$join:test.serv",
-                "depth": 1000,
-                "origin_server_ts": 1,
-                "type": "m.room.member",
-                "origin": "test.servx",
-                "content": {"membership": "join"},
-                "auth_events": [],
-                "prev_state": [(most_recent, {})],
-                "prev_events": [(most_recent, {})],
-            }
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(self.room_id)
         )
 
-        self.handler = self.hs.get_federation_handler()
-        federation_event_handler = self.hs.get_federation_event_handler()
+        # Figure out what the forward extremeties in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
+        )
 
-        async def _check_event_auth(
-            origin: Optional[str], event: EventBase, context: EventContext
-        ) -> None:
-            pass
-
-        federation_event_handler._check_event_auth = _check_event_auth  # type: ignore[method-assign]
-        self.client = self.hs.get_federation_client()
-
-        async def _check_sigs_and_hash_for_pulled_events_and_fetch(
-            dest: str, pdus: Collection[EventBase], room_version: RoomVersion
-        ) -> List[EventBase]:
-            return list(pdus)
-
-        self.client._check_sigs_and_hash_for_pulled_events_and_fetch = (  # type: ignore[method-assign]
-            _check_sigs_and_hash_for_pulled_events_and_fetch  # type: ignore[assignment]
+        # Join a remote user to the room that will attempt to send bad events
+        self.remote_bad_user_id = f"@baduser:{self.OTHER_SERVER_NAME}"
+        self.remote_bad_user_join_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.room_id,
+                    "sender": self.remote_bad_user_id,
+                    "state_key": self.remote_bad_user_id,
+                    "depth": 1000,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Member,
+                    "content": {"membership": Membership.JOIN},
+                    "auth_events": [
+                        state_map[(EventTypes.Create, "")].event_id,
+                        state_map[(EventTypes.JoinRules, "")].event_id,
+                    ],
+                    "prev_events": list(forward_extremity_event_ids),
+                }
+            ),
+            room_version=RoomVersions.V10,
         )
 
         # Send the join, it should return None (which is not an error)
         self.assertEqual(
             self.get_success(
-                federation_event_handler.on_receive_pdu("test.serv", join_event)
+                self.federation_event_handler.on_receive_pdu(
+                    self.OTHER_SERVER_NAME, self.remote_bad_user_join_event
+                )
             ),
             None,
         )
@@ -116,7 +113,7 @@ class MessageAcceptTests(unittest.HomeserverTestCase):
         # Make sure we actually joined the room
         self.assertEqual(
             self.get_success(self.store.get_latest_event_ids_in_room(self.room_id)),
-            {"$join:test.serv"},
+            {self.remote_bad_user_join_event.event_id},
         )
 
     def test_cant_hide_direct_ancestors(self) -> None:
@@ -141,33 +138,35 @@ class MessageAcceptTests(unittest.HomeserverTestCase):
 
         self.http_client.post_json = post_json
 
-        # Figure out what the most recent event is
-        most_recent = next(
-            iter(
-                self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
-            )
+        # Figure out what the forward extremeties in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
         )
 
-        # Now lie about an event
+        # Now lie about an event's prev_events
         lying_event = make_event_from_dict(
-            {
-                "room_id": self.room_id,
-                "sender": "@baduser:test.serv",
-                "event_id": "one:test.serv",
-                "depth": 1000,
-                "origin_server_ts": 1,
-                "type": "m.room.message",
-                "origin": "test.serv",
-                "content": {"body": "hewwo?"},
-                "auth_events": [],
-                "prev_events": [("two:test.serv", {}), (most_recent, {})],
-            }
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": self.room_id,
+                    "sender": self.remote_bad_user_id,
+                    "depth": 1000,
+                    "origin_server_ts": 1,
+                    "type": "m.room.message",
+                    "content": {"body": "hewwo?"},
+                    "auth_events": [],
+                    "prev_events": ["$missing_prev_event"]
+                    + list(forward_extremity_event_ids),
+                }
+            ),
+            room_version=RoomVersions.V10,
         )
 
-        federation_event_handler = self.hs.get_federation_event_handler()
         with LoggingContext("test-context"):
             failure = self.get_failure(
-                federation_event_handler.on_receive_pdu("test.serv", lying_event),
+                self.federation_event_handler.on_receive_pdu(
+                    self.OTHER_SERVER_NAME, lying_event
+                ),
                 FederationError,
             )
 
@@ -182,7 +181,12 @@ class MessageAcceptTests(unittest.HomeserverTestCase):
 
         # Make sure the invalid event isn't there
         extrem = self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
-        self.assertEqual(extrem, {"$join:test.serv"})
+        self.assertEqual(extrem, {self.remote_bad_user_join_event.event_id})
+
+
+class DeviceListResyncTestCase(unittest.HomeserverTestCase):
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.store = self.hs.get_datastores().main
 
     def test_retry_device_list_resync(self) -> None:
         """Tests that device lists are marked as stale if they couldn't be synced, and
@@ -211,8 +215,7 @@ class MessageAcceptTests(unittest.HomeserverTestCase):
 
         # Register a mock on the store so that the incoming update doesn't fail because
         # we don't share a room with the user.
-        store = self.hs.get_datastores().main
-        store.get_rooms_for_user = AsyncMock(return_value=["!someroom:test"])
+        self.store.get_rooms_for_user = AsyncMock(return_value=["!someroom:test"])
 
         # Manually inject a fake device list update. We need this update to include at
         # least one prev_id so that the user's device list will need to be retried.
@@ -238,7 +241,7 @@ class MessageAcceptTests(unittest.HomeserverTestCase):
         # Check that the resync attempt failed and caused the user's device list to be
         # marked as stale.
         need_resync = self.get_success(
-            store.get_user_ids_requiring_device_list_resync()
+            self.store.get_user_ids_requiring_device_list_resync()
         )
         self.assertIn(remote_user_id, need_resync)
 
