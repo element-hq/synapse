@@ -2280,6 +2280,10 @@ class FederationEventHandler:
                 event_and_contexts, backfilled=backfilled
             )
 
+            # After persistence, we always need to notify replication there may be new
+            # data (backfilled or not) because TODO.
+            self._notifier.notify_replication()
+
             if self._ephemeral_messages_enabled:
                 for event in events:
                     # If there's an expiry timestamp on the event, schedule its expiry.
