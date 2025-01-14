@@ -1495,7 +1495,8 @@ class EventCreationHandler:
             gather_results(deferreds, consumeErrors=True)
         ).addErrback(unwrapFirstError)
 
-        logger.info("✅ handle_new_client_event: handled %s", event)
+        for event, _ in events_and_context:
+            logger.info("✅ handle_new_client_event: handled %s", event)
         return result
 
     async def _persist_events(
