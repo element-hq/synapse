@@ -1,3 +1,10 @@
+# Synapse 1.122.0 (2025-01-14)
+
+No significant changes since 1.122.0rc1.
+
+
+
+
 # Synapse 1.122.0rc1 (2025-01-07)
 
 Please note that this version of Synapse drops support for PostgreSQL 11 and 12. The minimum version of PostgreSQL supported is now version 13.
