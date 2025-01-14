@@ -45,7 +45,7 @@ from synapse.handlers.presence import (
     handle_update,
 )
 from synapse.rest import admin
-from synapse.rest.client import room
+from synapse.rest.client import room, login, sync
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.types import JsonDict, UserID, get_domain_from_id
@@ -56,7 +56,11 @@ from tests.replication._base import BaseMultiWorkerStreamTestCase
 
 
 class PresenceUpdateTestCase(unittest.HomeserverTestCase):
-    servlets = [admin.register_servlets]
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -424,6 +428,118 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         wheel_timer.insert.assert_not_called()
+
+    def test_over_ratelimit_offline_to_online_to_unavailable(self) -> None:
+        wheel_timer = Mock()
+        user_id = "@user:pass"
+        now = 5000000
+        sync_url = "/sync?access_token=%s&set_presence=%s"
+
+        # Register the user who syncs presence
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
+
+        # Get the handler (which kicks off a bunch of timers).
+        presence_handler = self.hs.get_presence_handler()
+
+        # Ensure the user is initially offline.
+        prev_state = UserPresenceState.default(user_id)
+        new_state = prev_state.copy_and_replace(
+            state=PresenceState.OFFLINE, last_active_ts=now
+        )
+
+        state, persist_and_notify, federation_ping = handle_update(
+            prev_state,
+            new_state,
+            is_mine=True,
+            wheel_timer=wheel_timer,
+            now=now,
+            persist=False,
+        )
+
+        # Check that the user is offline.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        self.reactor.advance(10)
+        # Send sync request with set_presence=online.
+        channel = self.make_request("GET", sync_url % (access_token, "online"))
+        self.assertEqual(200, channel.code)
+
+        # Assert the user is now online.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Immediately send another sync request with set_presence=unavailable.
+        channel = self.make_request("GET", sync_url % (access_token, "unavailable"))
+        self.assertEqual(200, channel.code)
+
+        # Assert the user is still online and presence update was ignored.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+    def test_within_ratelimit_offline_to_online_to_unavailable(self) -> None:
+        wheel_timer = Mock()
+        user_id = "@user:pass"
+        now = 5000000
+        sync_url = "/sync?access_token=%s&set_presence=%s"
+
+        # Register the user who syncs presence
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
+
+        # Get the handler (which kicks off a bunch of timers).
+        presence_handler = self.hs.get_presence_handler()
+
+        # Ensure the user is initially offline.
+        prev_state = UserPresenceState.default(user_id)
+        new_state = prev_state.copy_and_replace(
+            state=PresenceState.OFFLINE, last_active_ts=now
+        )
+
+        state, persist_and_notify, federation_ping = handle_update(
+            prev_state,
+            new_state,
+            is_mine=True,
+            wheel_timer=wheel_timer,
+            now=now,
+            persist=False,
+        )
+
+        # Check that the user is offline.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        self.reactor.advance(10)
+        # Send sync request with set_presence=online.
+        channel = self.make_request("GET", sync_url % (access_token, "online"))
+        self.assertEqual(200, channel.code)
+
+        # Assert the user is now online.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        # Advance time a sufficient amount to avoid rate limiting.
+        self.reactor.advance(30)
+        # Send another sync request with set_presence=unavailable.
+        channel = self.make_request("GET", sync_url % (access_token, "unavailable"))
+        self.assertEqual(200, channel.code)
+
+        # Assert the user is now unavailable.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.UNAVAILABLE)
 
 
 class PresenceTimeoutTestCase(unittest.TestCase):
