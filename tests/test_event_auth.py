@@ -20,7 +20,7 @@
 #
 
 import unittest
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Collection, Dict, Iterable, List, Optional
 
 from parameterized import parameterized
 
@@ -30,7 +30,7 @@ from synapse.api.errors import AuthError, SynapseError
 from synapse.api.room_versions import EventFormatVersions, RoomVersion, RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.types import JsonDict, StrCollection, get_domain_from_id
+from synapse.types import JsonDict, get_domain_from_id
 
 from tests.test_utils import get_awaitable_result
 
@@ -50,16 +50,14 @@ class _StubEventSourceStore:
 
     async def get_events(
         self,
-        event_ids: StrCollection,
-        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
+        event_ids: Collection[str],
+        redact_behaviour: EventRedactBehaviour,
         get_prev_content: bool = False,
         allow_rejected: bool = False,
     ) -> Dict[str, EventBase]:
         assert allow_rejected
         assert not get_prev_content
-        # TODO: Is `EventRedactBehaviour.as_is` important here? We're changing it to
-        # the default of `EventRedactBehaviour.redact`
-        # assert redact_behaviour == EventRedactBehaviour.as_is
+        assert redact_behaviour == EventRedactBehaviour.as_is
         results = {}
         for e in event_ids:
             if e in self._store:
@@ -86,7 +84,7 @@ class EventAuthTestCase(unittest.TestCase):
         get_awaitable_result(
             event_auth.check_state_independent_auth_rules(event_store, event)
         )
-        event_auth.check_state_dependent_auth_rules(event_store, event, auth_events)
+        event_auth.check_state_dependent_auth_rules(event, auth_events)
 
         # ... but a rejected join_rules event should cause it to be rejected
         rejected_join_rules = _join_rules_event(
@@ -258,11 +256,8 @@ class EventAuthTestCase(unittest.TestCase):
             _join_event(RoomVersions.V1, joiner),
         ]
 
-        event_store = _StubEventSourceStore()
-
         # creator should be able to send state
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _random_state_event(RoomVersions.V1, creator),
             auth_events,
         )
@@ -271,7 +266,6 @@ class EventAuthTestCase(unittest.TestCase):
         self.assertRaises(
             AuthError,
             event_auth.check_state_dependent_auth_rules,
-            event_store,
             _random_state_event(RoomVersions.V1, joiner),
             auth_events,
         )
@@ -297,14 +291,11 @@ class EventAuthTestCase(unittest.TestCase):
             _join_event(RoomVersions.V1, king),
         ]
 
-        event_store = _StubEventSourceStore()
-
         # pleb should not be able to send state
         (
             self.assertRaises(
                 AuthError,
                 event_auth.check_state_dependent_auth_rules,
-                event_store,
                 _random_state_event(RoomVersions.V1, pleb),
                 auth_events,
             ),
@@ -312,7 +303,6 @@ class EventAuthTestCase(unittest.TestCase):
 
         # king should be able to send state
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _random_state_event(RoomVersions.V1, king),
             auth_events,
         )
@@ -325,11 +315,9 @@ class EventAuthTestCase(unittest.TestCase):
             _create_event(RoomVersions.V1, creator),
             _join_event(RoomVersions.V1, creator),
         ]
-        event_store = _StubEventSourceStore()
 
         # creator should be able to send aliases
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _alias_event(RoomVersions.V1, creator),
             auth_events,
         )
@@ -337,7 +325,6 @@ class EventAuthTestCase(unittest.TestCase):
         # Reject an event with no state key.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _alias_event(RoomVersions.V1, creator, state_key=""),
                 auth_events,
             )
@@ -345,14 +332,12 @@ class EventAuthTestCase(unittest.TestCase):
         # If the domain of the sender does not match the state key, reject.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _alias_event(RoomVersions.V1, creator, state_key="test.com"),
                 auth_events,
             )
 
         # Note that the member does *not* need to be in the room.
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _alias_event(RoomVersions.V1, other),
             auth_events,
         )
@@ -365,23 +350,19 @@ class EventAuthTestCase(unittest.TestCase):
             _create_event(RoomVersions.V6, creator),
             _join_event(RoomVersions.V6, creator),
         ]
-        event_store = _StubEventSourceStore()
 
         # creator should be able to send aliases
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _alias_event(RoomVersions.V6, creator),
             auth_events,
         )
 
         # No particular checks are done on the state key.
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _alias_event(RoomVersions.V6, creator, state_key=""),
             auth_events,
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _alias_event(RoomVersions.V6, creator, state_key="test.com"),
             auth_events,
         )
@@ -389,7 +370,6 @@ class EventAuthTestCase(unittest.TestCase):
         # Per standard auth rules, the member must be in the room.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _alias_event(RoomVersions.V6, other),
                 auth_events,
             )
@@ -417,20 +397,14 @@ class EventAuthTestCase(unittest.TestCase):
             room_version, pleb, {"notifications": {"room": 100}}
         )
 
-        event_store = _StubEventSourceStore()
-
         # on room V1, pleb should be able to modify the notifications power level.
         if allow_modification:
-            event_auth.check_state_dependent_auth_rules(
-                event_store, pl_event, auth_events
-            )
+            event_auth.check_state_dependent_auth_rules(pl_event, auth_events)
 
         else:
             # But an MSC2209 room rejects this change.
             with self.assertRaises(AuthError):
-                event_auth.check_state_dependent_auth_rules(
-                    event_store, pl_event, auth_events
-                )
+                event_auth.check_state_dependent_auth_rules(pl_event, auth_events)
 
     def test_join_rules_public(self) -> None:
         """
@@ -446,11 +420,9 @@ class EventAuthTestCase(unittest.TestCase):
                 RoomVersions.V6, creator, "public"
             ),
         }
-        event_store = _StubEventSourceStore()
 
         # Check join.
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -458,7 +430,6 @@ class EventAuthTestCase(unittest.TestCase):
         # A user cannot be force-joined to a room.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _member_event(RoomVersions.V6, pleb, "join", sender=creator),
                 auth_events.values(),
             )
@@ -469,7 +440,6 @@ class EventAuthTestCase(unittest.TestCase):
         )
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V6, pleb),
                 auth_events.values(),
             )
@@ -479,7 +449,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V6, pleb, "leave"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -489,7 +458,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V6, pleb, "join"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -499,7 +467,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V6, pleb, "invite", sender=creator
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -518,12 +485,10 @@ class EventAuthTestCase(unittest.TestCase):
                 RoomVersions.V6, creator, "invite"
             ),
         }
-        event_store = _StubEventSourceStore()
 
         # A join without an invite is rejected.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V6, pleb),
                 auth_events.values(),
             )
@@ -531,7 +496,6 @@ class EventAuthTestCase(unittest.TestCase):
         # A user cannot be force-joined to a room.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _member_event(RoomVersions.V6, pleb, "join", sender=creator),
                 auth_events.values(),
             )
@@ -542,7 +506,6 @@ class EventAuthTestCase(unittest.TestCase):
         )
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V6, pleb),
                 auth_events.values(),
             )
@@ -553,7 +516,6 @@ class EventAuthTestCase(unittest.TestCase):
         )
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V6, pleb),
                 auth_events.values(),
             )
@@ -563,7 +525,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V6, pleb, "join"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -573,7 +534,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V6, pleb, "invite", sender=creator
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V6, pleb),
             auth_events.values(),
         )
@@ -593,11 +553,9 @@ class EventAuthTestCase(unittest.TestCase):
                 RoomVersions.V6, creator, "restricted"
             ),
         }
-        event_store = _StubEventSourceStore()
 
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V6, pleb),
                 auth_events.values(),
             )
@@ -625,7 +583,6 @@ class EventAuthTestCase(unittest.TestCase):
                 RoomVersions.V8, creator, "restricted"
             ),
         }
-        event_store = _StubEventSourceStore()
 
         # A properly formatted join event should work.
         authorised_join_event = _join_event(
@@ -636,7 +593,6 @@ class EventAuthTestCase(unittest.TestCase):
             },
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             authorised_join_event,
             auth_events.values(),
         )
@@ -653,7 +609,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V8, "@inviter:foo.test"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(
                 RoomVersions.V8,
                 pleb,
@@ -667,7 +622,6 @@ class EventAuthTestCase(unittest.TestCase):
         # A join which is missing an authorised server is rejected.
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(RoomVersions.V8, pleb),
                 auth_events.values(),
             )
@@ -681,7 +635,6 @@ class EventAuthTestCase(unittest.TestCase):
         )
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _join_event(
                     RoomVersions.V8,
                     pleb,
@@ -696,7 +649,6 @@ class EventAuthTestCase(unittest.TestCase):
         # *would* be valid, but is sent be a different user.)
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 _member_event(
                     RoomVersions.V8,
                     pleb,
@@ -715,7 +667,6 @@ class EventAuthTestCase(unittest.TestCase):
         )
         with self.assertRaises(AuthError):
             event_auth.check_state_dependent_auth_rules(
-                event_store,
                 authorised_join_event,
                 auth_events.values(),
             )
@@ -725,7 +676,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V8, pleb, "leave"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             authorised_join_event,
             auth_events.values(),
         )
@@ -736,7 +686,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V8, pleb, "join"
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V8, pleb),
             auth_events.values(),
         )
@@ -747,7 +696,6 @@ class EventAuthTestCase(unittest.TestCase):
             RoomVersions.V8, pleb, "invite", sender=creator
         )
         event_auth.check_state_dependent_auth_rules(
-            event_store,
             _join_event(RoomVersions.V8, pleb),
             auth_events.values(),
         )

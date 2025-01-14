@@ -43,7 +43,6 @@ from synapse.api.constants import EventTypes
 from synapse.api.errors import AuthError
 from synapse.api.room_versions import RoomVersion
 from synapse.events import EventBase
-from synapse.storage.databases.main.events_worker import EventRedactBehaviour
 from synapse.types import MutableStateMap, StateMap, StrCollection
 
 logger = logging.getLogger(__name__)
@@ -59,17 +58,13 @@ class Clock(Protocol):
 class StateResolutionStore(Protocol):
     # This is usually synapse.state.StateResolutionStore, but it's replaced with a
     # TestStateResolutionStore in tests.
-    async def get_events(
-        self,
-        event_ids: StrCollection,
-        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
-        get_prev_content: bool = False,
-        allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]: ...
+    def get_events(
+        self, event_ids: StrCollection, allow_rejected: bool = False
+    ) -> Awaitable[Dict[str, EventBase]]: ...
 
-    async def get_auth_chain_difference(
+    def get_auth_chain_difference(
         self, room_id: str, state_sets: List[Set[str]]
-    ) -> Set[str]: ...
+    ) -> Awaitable[Set[str]]: ...
 
 
 # We want to await to the reactor occasionally during state res when dealing
@@ -600,7 +595,6 @@ async def _iterative_auth_checks(
 
         try:
             event_auth.check_state_dependent_auth_rules(
-                state_res_store,
                 event,
                 auth_events.values(),
             )

@@ -24,6 +24,7 @@ from collections import ChainMap, defaultdict
 from typing import (
     TYPE_CHECKING,
     Any,
+    Awaitable,
     Callable,
     DefaultDict,
     Dict,
@@ -731,7 +732,7 @@ class StateResolutionHandler:
                         room_version_obj,
                         state_sets,
                         event_map,
-                        state_res_store,
+                        state_res_store.get_events,
                     )
                 else:
                     return await v2.resolve_events_with_store(
@@ -885,13 +886,9 @@ class StateResolutionStore:
 
     store: "DataStore"
 
-    async def get_events(
-        self,
-        event_ids: StrCollection,
-        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
-        get_prev_content: bool = False,
-        allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]:
+    def get_events(
+        self, event_ids: StrCollection, allow_rejected: bool = False
+    ) -> Awaitable[Dict[str, EventBase]]:
         """Get events from the database
 
         Args:
@@ -902,18 +899,16 @@ class StateResolutionStore:
             An awaitable which resolves to a dict from event_id to event.
         """
 
-        return await self.store.get_events(
+        return self.store.get_events(
             event_ids,
-            # TODO: Is `EventRedactBehaviour.as_is` important here? We're changing it to
-            # the default of `EventRedactBehaviour.redact`
-            redact_behaviour=redact_behaviour,
-            get_prev_content=get_prev_content,
+            redact_behaviour=EventRedactBehaviour.as_is,
+            get_prev_content=False,
             allow_rejected=allow_rejected,
         )
 
-    async def get_auth_chain_difference(
+    def get_auth_chain_difference(
         self, room_id: str, state_sets: List[Set[str]]
-    ) -> Set[str]:
+    ) -> Awaitable[Set[str]]:
         """Given sets of state events figure out the auth chain difference (as
         per state res v2 algorithm).
 
@@ -925,4 +920,4 @@ class StateResolutionStore:
             An awaitable that resolves to a set of event IDs.
         """
 
-        return await self.store.get_auth_chain_difference(room_id, state_sets)
+        return self.store.get_auth_chain_difference(room_id, state_sets)

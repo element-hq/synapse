@@ -938,7 +938,6 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
             AuthError,
         )
         check_state_dependent_auth_rules(
-            main_store,
             rejected_kick_event,
             [create_event, power_levels_event, other_member_event, bert_member_event],
         )

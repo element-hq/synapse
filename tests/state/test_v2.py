@@ -20,6 +20,7 @@
 
 import itertools
 from typing import (
+    Collection,
     Dict,
     Iterable,
     List,
@@ -43,8 +44,7 @@ from synapse.state.v2 import (
     lexicographical_topological_sort,
     resolve_events_with_store,
 )
-from synapse.storage.databases.main.events_worker import EventRedactBehaviour
-from synapse.types import EventID, StateMap, StrCollection
+from synapse.types import EventID, StateMap
 
 from tests import unittest
 
@@ -878,13 +878,9 @@ def pairwise(iterable: Iterable[T]) -> Iterable[Tuple[T, T]]:
 class TestStateResolutionStore:
     event_map: Dict[str, EventBase] = attr.ib()
 
-    async def get_events(
-        self,
-        event_ids: StrCollection,
-        redact_behaviour: EventRedactBehaviour = EventRedactBehaviour.redact,
-        get_prev_content: bool = False,
-        allow_rejected: bool = False,
-    ) -> Dict[str, EventBase]:
+    def get_events(
+        self, event_ids: Collection[str], allow_rejected: bool = False
+    ) -> "defer.Deferred[Dict[str, EventBase]]":
         """Get events from the database
 
         Args:
@@ -895,7 +891,9 @@ class TestStateResolutionStore:
             Dict from event_id to event.
         """
 
-        return {eid: self.event_map[eid] for eid in event_ids if eid in self.event_map}
+        return defer.succeed(
+            {eid: self.event_map[eid] for eid in event_ids if eid in self.event_map}
+        )
 
     def _get_auth_chain(self, event_ids: Iterable[str]) -> List[str]:
         """Gets the full auth chain for a set of events (including rejected
@@ -931,10 +929,10 @@ class TestStateResolutionStore:
 
         return list(result)
 
-    async def get_auth_chain_difference(
-        self, room_id: str, state_sets: List[Set[str]]
-    ) -> Set[str]:
-        chains = [frozenset(self._get_auth_chain(a)) for a in state_sets]
+    def get_auth_chain_difference(
+        self, room_id: str, auth_sets: List[Set[str]]
+    ) -> "defer.Deferred[Set[str]]":
+        chains = [frozenset(self._get_auth_chain(a)) for a in auth_sets]
 
         common = set(chains[0]).intersection(*chains[1:])
-        return set(chains[0]).union(*chains[1:]) - common
+        return defer.succeed(set(chains[0]).union(*chains[1:]) - common)

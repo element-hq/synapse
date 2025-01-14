@@ -1749,7 +1749,7 @@ class FederationEventHandler:
                     await check_state_independent_auth_rules(
                         self._store, event, batched_auth_events=auth_map
                     )
-                    check_state_dependent_auth_rules(self._store, event, auth)
+                    check_state_dependent_auth_rules(event, auth)
                 except AuthError as e:
                     logger.warning("Rejecting %r because %s", event, e)
                     context.rejected = RejectedReason.AUTH_ERROR
@@ -1849,7 +1849,7 @@ class FederationEventHandler:
         #      otherwise it is rejected.
         try:
             await check_state_independent_auth_rules(self._store, event)
-            check_state_dependent_auth_rules(self._store, event, claimed_auth_events)
+            check_state_dependent_auth_rules(event, claimed_auth_events)
         except AuthError as e:
             logger.warning(
                 "While checking auth of %r against auth_events: %s", event, e
@@ -1930,7 +1930,7 @@ class FederationEventHandler:
         )
 
         try:
-            check_state_dependent_auth_rules(self._store, event, calculated_auth_events)
+            check_state_dependent_auth_rules(event, calculated_auth_events)
         except AuthError as e:
             logger.warning(
                 "While checking auth of %r against room state before the event: %s",
@@ -2047,7 +2047,7 @@ class FederationEventHandler:
         )
 
         try:
-            check_state_dependent_auth_rules(self._store, event, current_auth_events)
+            check_state_dependent_auth_rules(event, current_auth_events)
         except AuthError as e:
             logger.warning(
                 "Soft-failing %r (from %s) because %s",
