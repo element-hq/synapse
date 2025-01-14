@@ -2301,8 +2301,6 @@ class FederationEventHandler:
                         str(len(events)),
                     )
                     for event in events:
-                        # TODO: Is this correct?
-                        # if not event.internal_metadata.is_outlier():
                         await self._notify_persisted_event(event, max_stream_token)
 
             return max_stream_token.stream
