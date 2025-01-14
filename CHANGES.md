@@ -61,15 +61,4 @@ No significant changes since 1.122.0rc1.
 * Bump serde_json from 1.0.133 to 1.0.134. ([\#18044](https://github.com/element-hq/synapse/issues/18044))
 * Bump twine from 5.1.1 to 6.0.1. ([\#18049](https://github.com/element-hq/synapse/issues/18049))
 
-# Synapse 1.121.1 (2024-12-11)
-
-This release contains a fix for our docker build CI. It is functionally identical to 1.121.0, whose changelog is below.
-
-### Internal Changes
-
-- Downgrade the Ubuntu GHA runner when building docker images. ([\#18026](https://github.com/element-hq/synapse/issues/18026))
-
-
-
-
 **Changelogs for older versions can be found [here](docs/changelogs/).**
