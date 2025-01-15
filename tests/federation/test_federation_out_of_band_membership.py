@@ -23,6 +23,7 @@ import logging
 import time
 import urllib.parse
 from http import HTTPStatus
+from parameterized import parameterized
 from typing import Any, Callable, Optional, Tuple, TypeVar, Union
 from unittest.mock import Mock
 
@@ -435,12 +436,16 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         """
         self._invite_local_user_to_remote_room_and_join()
 
-    def test_can_join_from_out_of_band_invite_after_we_are_already_participating_in_the_room(
-        self,
+    @parameterized.expand(
+        [("accept invite", Membership.JOIN), ("reject invite", Membership.LEAVE)]
+    )
+    def test_can_x_from_out_of_band_invite_after_we_are_already_participating_in_the_room(
+        self, _test_description, membership_action
     ) -> None:
         """
-        Test to make sure that we can join a room that we were invited to over
-        federation; even after we are already participating in the room.
+        Test to make sure that we can do either a) join the room (accept the invite) or
+        b) reject the invite after being invited to over federation; even if we are
+        already participating in the room
         """
         remote_room_join_result = self._invite_local_user_to_remote_room_and_join()
         remote_room_id = remote_room_join_result.remote_room_id
@@ -527,7 +532,21 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
 
-        # User2 joins the room
-        self.helper.join(
-            remote_room_join_result.remote_room_id, local_user2_id, tok=local_user2_tok
-        )
+        if membership_action == Membership.JOIN:
+            # User2 joins the room
+            self.helper.join(
+                remote_room_join_result.remote_room_id,
+                local_user2_id,
+                tok=local_user2_tok,
+            )
+        elif membership_action == Membership.LEAVE:
+            # User2 rejects the invite
+            self.helper.leave(
+                remote_room_join_result.remote_room_id,
+                local_user2_id,
+                tok=local_user2_tok,
+            )
+        else:
+            raise NotImplementedError(
+                "This test does not support this membership action yet"
+            )
