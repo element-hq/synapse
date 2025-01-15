@@ -127,11 +127,11 @@ class SyncRestServlet(RestServlet):
             cache_name="sync_valid_filter",
         )
 
-        # Ratelimiter for set_presence updates, keyed by requester.
-        self._set_presence_per_user_limiter = Ratelimiter(
+        # Ratelimiter for presence updates, keyed by requester.
+        self._presence_per_user_limiter = Ratelimiter(
             store=self.store,
             clock=self.clock,
-            cfg=hs.config.ratelimiting.rc_set_presence_per_user,
+            cfg=hs.config.ratelimiting.rc_presence_per_user,
         )
 
     async def on_GET(self, request: SynapseRequest) -> Tuple[int, JsonDict]:
@@ -249,7 +249,7 @@ class SyncRestServlet(RestServlet):
 
         # ignore the presence update if the ratelimit is exceeded
         try:
-            await self._set_presence_per_user_limiter.ratelimit(requester)
+            await self._presence_per_user_limiter.ratelimit(requester)
         except LimitExceededError:
             affect_presence = False
             logger.debug("User set_presence ratelimit exceeded; ignoring it.")

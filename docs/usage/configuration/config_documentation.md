@@ -1866,19 +1866,20 @@ rc_federation:
   concurrent: 5
 ```
 ---
-### `rc_set_presence`
+### `rc_presence`
 
 This option sets ratelimiting for presence.
 
-The `rc_set_presence.per_user` option sets rate limits on how often a specific
-users' presence updates are evaluated. Ratelimited presence updates are
+The `rc_presence.per_user` option sets rate limits on how often a specific
+users' presence updates are evaluated. Ratelimited presence updates sent via sync are
 ignored, and no error is returned to the client.
+This option also sets the rate limits used in the `/_matrix/client/v3/presence` endpoint.
 
 `per_user` defaults to `per_second: 0.1`, `burst_count: 1`.
 
 Example configuration:
 ```yaml
-rc_set_presence:
+rc_presence:
   per_user:
     per_second: 0.05
     burst_count: 0.5
