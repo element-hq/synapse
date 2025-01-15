@@ -25,9 +25,10 @@ from parameterized import parameterized
 
 from twisted.test.proto_helpers import MemoryReactor
 
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.api.room_versions import KNOWN_ROOM_VERSIONS, RoomVersions
 from synapse.config.server import DEFAULT_ROOM_VERSION
 from synapse.events import EventBase, make_event_from_dict
+from synapse.federation.federation_base import event_from_pdu_json
 from synapse.rest import admin
 from synapse.rest.client import login, room
 from synapse.server import HomeServer
@@ -83,6 +84,18 @@ class FederationServerTests(unittest.FederatingHomeserverTestCase):
             {"edus": [{"edu_type": "FAIL_EDU_TYPE", "content": {}}]},
         )
         self.assertEqual(500, channel.code, channel.result)
+
+
+def _create_acl_event(content: JsonDict) -> EventBase:
+    return make_event_from_dict(
+        {
+            "room_id": "!a:b",
+            "event_id": "$a:b",
+            "type": "m.room.server_acls",
+            "sender": "@a:b",
+            "content": content,
+        }
+    )
 
 
 class ServerACLsTestCase(unittest.TestCase):
@@ -355,13 +368,76 @@ class SendJoinFederationTests(unittest.FederatingHomeserverTestCase):
     #   is probably sufficient to reassure that the bucket is updated.
 
 
-def _create_acl_event(content: JsonDict) -> EventBase:
-    return make_event_from_dict(
-        {
-            "room_id": "!a:b",
-            "event_id": "$a:b",
-            "type": "m.room.server_acls",
-            "sender": "@a:b",
-            "content": content,
+class StripUnsignedFromEventsTestCase(unittest.TestCase):
+    """
+    Test to make sure that we handle the raw JSON events from federation carefully and
+    strip anything that shouldn't be there.
+    """
+
+    def test_strip_unauthorized_unsigned_values(self) -> None:
+        event1 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event1:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.member",
+            "origin": "test.servx",
+            "content": {"membership": "join"},
+            "auth_events": [],
+            "unsigned": {"malicious garbage": "hackz", "more warez": "more hackz"},
         }
-    )
+        filtered_event = event_from_pdu_json(event1, RoomVersions.V1)
+        # Make sure unauthorized fields are stripped from unsigned
+        self.assertNotIn("more warez", filtered_event.unsigned)
+
+    def test_strip_event_maintains_allowed_fields(self) -> None:
+        event2 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event2:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.member",
+            "origin": "test.servx",
+            "auth_events": [],
+            "content": {"membership": "join"},
+            "unsigned": {
+                "malicious garbage": "hackz",
+                "more warez": "more hackz",
+                "age": 14,
+                "invite_room_state": [],
+            },
+        }
+
+        filtered_event2 = event_from_pdu_json(event2, RoomVersions.V1)
+        self.assertIn("age", filtered_event2.unsigned)
+        self.assertEqual(14, filtered_event2.unsigned["age"])
+        self.assertNotIn("more warez", filtered_event2.unsigned)
+        # Invite_room_state is allowed in events of type m.room.member
+        self.assertIn("invite_room_state", filtered_event2.unsigned)
+        self.assertEqual([], filtered_event2.unsigned["invite_room_state"])
+
+    def test_strip_event_removes_fields_based_on_event_type(self) -> None:
+        event3 = {
+            "sender": "@baduser:test.serv",
+            "state_key": "@baduser:test.serv",
+            "event_id": "$event3:test.serv",
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": "m.room.power_levels",
+            "origin": "test.servx",
+            "content": {},
+            "auth_events": [],
+            "unsigned": {
+                "malicious garbage": "hackz",
+                "more warez": "more hackz",
+                "age": 14,
+                "invite_room_state": [],
+            },
+        }
+        filtered_event3 = event_from_pdu_json(event3, RoomVersions.V1)
+        self.assertIn("age", filtered_event3.unsigned)
+        # Invite_room_state field is only permitted in event type m.room.member
+        self.assertNotIn("invite_room_state", filtered_event3.unsigned)
+        self.assertNotIn("more warez", filtered_event3.unsigned)
