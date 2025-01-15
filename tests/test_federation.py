@@ -20,34 +20,44 @@
 #
 
 import logging
-from typing import Optional, Union
+from http import HTTPStatus
+from typing import Optional, Tuple, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
-import synapse.rest.admin
-from synapse.api.constants import EventTypes, Membership
+from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.errors import FederationError
 from synapse.api.room_versions import RoomVersions
 from synapse.events import make_event_from_dict
+from synapse.events.utils import strip_event
 from synapse.federation.federation_base import event_from_pdu_json
 from synapse.handlers.device import DeviceListUpdater
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
-from synapse.rest.client import login, room
+from synapse.rest import admin
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
 from synapse.util.retryutils import NotRetryingDestination
+from synapse.http.matrixfederationclient import (
+    MatrixFederationRequest,
+)
 
 from tests import unittest
+from tests.utils import test_timeout
 
 logger = logging.getLogger(__name__)
 
 
 class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
+    """
+    Tests to make sure that we don't accept flawed events from federation (incoming).
+    """
+
     servlets = [
-        synapse.rest.admin.register_servlets,
+        admin.register_servlets,
         login.register_servlets,
         room.register_servlets,
     ]
@@ -57,6 +67,8 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         return self.setup_test_homeserver(federation_http_client=self.http_client)
 
     def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
         self.store = self.hs.get_datastores().main
         self.storage_controllers = hs.get_storage_controllers()
         self.federation_event_handler = self.hs.get_federation_event_handler()
@@ -182,6 +194,167 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
         # Make sure the invalid event isn't there
         extrem = self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
         self.assertEqual(extrem, {self.remote_bad_user_join_event.event_id})
+
+
+class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
+    """
+    Tests to make sure that we can join remote rooms over federation.
+    """
+
+    servlets = [
+        admin.register_servlets,
+        room.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
+
+    sync_endpoint = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+
+    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
+        self.federation_http_client = Mock()
+        return self.setup_test_homeserver(
+            federation_http_client=self.federation_http_client
+        )
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        super().prepare(reactor, clock, hs)
+
+        self.store = self.hs.get_datastores().main
+
+    def do_sync(
+        self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
+    ) -> Tuple[JsonDict, str]:
+        """Do a sliding sync request with given body.
+
+        Asserts the request was successful.
+
+        Attributes:
+            sync_body: The full request body to use
+            since: Optional since token
+            tok: Access token to use
+
+        Returns:
+            A tuple of the response body and the `pos` field.
+        """
+
+        sync_path = self.sync_endpoint
+        if since:
+            sync_path += f"?pos={since}"
+
+        channel = self.make_request(
+            method="POST",
+            path=sync_path,
+            content=sync_body,
+            access_token=tok,
+        )
+        self.assertEqual(channel.code, 200, channel.json_body)
+
+        return channel.json_body, channel.json_body["pos"]
+
+    def test_asdf(self) -> None:
+        # Create a local room
+        user1_id = self.register_user("user1", "pass")
+        user1_tok = self.login(user1_id, "pass")
+        user2_id = self.register_user("user2", "pass")
+        user2_tok = self.login(user2_id, "pass")
+
+        # Create a remote room
+        room_creator_user_id = f"@user:{self.OTHER_SERVER_NAME}"
+        room_id = f"!foo:{self.OTHER_SERVER_NAME}"
+        room_version = RoomVersions.V10
+
+        room_create_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": room_id,
+                    "sender": room_creator_user_id,
+                    "depth": 1,
+                    "origin_server_ts": 1,
+                    "type": EventTypes.Create,
+                    "state_key": "",
+                    "content": {
+                        # The `ROOM_CREATOR` field could be removed if we used a room
+                        # version > 10 (in favor of relying on `sender`)
+                        EventContentFields.ROOM_CREATOR: room_creator_user_id,
+                        EventContentFields.ROOM_VERSION: room_version.identifier,
+                    },
+                    "auth_events": [],
+                    "prev_events": [],
+                }
+            ),
+            room_version=RoomVersions.V10,
+        )
+
+        creator_membership_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": room_id,
+                    "sender": room_creator_user_id,
+                    "depth": 2,
+                    "origin_server_ts": 2,
+                    "type": EventTypes.Member,
+                    "state_key": room_creator_user_id,
+                    "content": {"membership": Membership.JOIN},
+                    "auth_events": [room_create_event.event_id],
+                    "prev_events": [room_create_event.event_id],
+                }
+            ),
+            room_version=RoomVersions.V10,
+        )
+
+        # From the remote homeserver, invite user1 on the local homserver
+        user1_invite_membership_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": room_id,
+                    "sender": room_creator_user_id,
+                    "depth": 3,
+                    "origin_server_ts": 3,
+                    "type": EventTypes.Member,
+                    "state_key": user1_id,
+                    "content": {"membership": Membership.INVITE},
+                    "auth_events": [
+                        room_create_event.event_id,
+                        creator_membership_event.event_id,
+                    ],
+                    "prev_events": [creator_membership_event.event_id],
+                }
+            ),
+            room_version=RoomVersions.V10,
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/invite/{room_id}/{user1_invite_membership_event.event_id}",
+            content={
+                "event": user1_invite_membership_event.get_dict(),
+                "invite_room_state": [
+                    strip_event(room_create_event),
+                    strip_event(creator_membership_event),
+                ],
+                "room_version": room_version.identifier,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        # Sync until the local user1 can see the invite
+        with test_timeout(5):
+            while True:
+                response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+                if room_id in response_body["rooms"].keys():
+                    break
+
+        # User1 joins the room
+        self.helper.join(room_id, user1_id, tok=user1_tok)
 
 
 class DeviceListResyncTestCase(unittest.HomeserverTestCase):
