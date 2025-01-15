@@ -132,6 +132,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
+            "form_secret_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
             * (hiredis is not None),
         ]
@@ -157,6 +158,10 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
                 "macaroon_secret_key_path: {}",
                 lambda c: c.key.macaroon_secret_key,
             ),
+            (
+                "form_secret_path: {}",
+                lambda c: c.key.form_secret.encode("utf-8"),
+            ),
             *[
                 (
                     "redis:\n  enabled: true\n  password_path: {}",
@@ -170,7 +175,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
         self, config_line: str, get_secret: Callable[[RootConfig], str]
     ) -> None:
         self.generate_config_and_remove_lines_containing(
-            ["registration_shared_secret", "macaroon_secret_key"]
+            ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
         )
         with tempfile.NamedTemporaryFile(buffering=0) as secret_file:
             secret_file.write(b"53C237")

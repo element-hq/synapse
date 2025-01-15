@@ -96,6 +96,11 @@ Conflicting options 'macaroon_secret_key' and 'macaroon_secret_key_path' are
 both defined in config file.
 """
 
+CONFLICTING_FORM_SECRET_OPTS_ERROR = """\
+Conflicting options 'form_secret' and 'form_secret_path' are both defined in
+config file.
+"""
+
 logger = logging.getLogger(__name__)
 
 
@@ -193,6 +198,11 @@ class KeyConfig(Config):
         # a secret which is used to calculate HMACs for form values, to stop
         # falsification of values
         self.form_secret = config.get("form_secret", None)
+        form_secret_path = config.get("form_secret_path", None)
+        if form_secret_path:
+            if self.form_secret:
+                raise ConfigError(CONFLICTING_FORM_SECRET_OPTS_ERROR)
+            self.form_secret = read_file(form_secret_path, "form_secret_path").strip()
 
     def generate_config_section(
         self,
