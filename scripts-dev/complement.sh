@@ -220,7 +220,7 @@ extra_test_args=()
 
 test_packages=(
     ./tests/csapi
-    # ./tests
+    ./tests
     # ./tests/msc3874
     # ./tests/msc3890
     # ./tests/msc3391

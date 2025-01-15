@@ -445,12 +445,18 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         """
         Test to make sure that we can do either a) join the room (accept the invite) or
         b) reject the invite after being invited to over federation; even if we are
-        already participating in the room
+        already participating in the room.
+
+        This is a regression test to make sure we stress the scenario where even though
+        we are already participating in the room, local users can still react to invites
+        regardless of whether the remote server has told us about the invite event (via
+        a federation `/send` transaction) and we have de-outliered the invite event.
+        Previously, we would mistakenly throw and error saying the user wasn't in the
+        room when they tried to join or reject the invite.
         """
         remote_room_join_result = self._invite_local_user_to_remote_room_and_join()
         remote_room_id = remote_room_join_result.remote_room_id
         room_version = remote_room_join_result.room_version
-        logger.info("asdf remote_room_join_result: %s", remote_room_join_result)
 
         # Create another local user
         local_user2_id = self.register_user("user2", "pass")
