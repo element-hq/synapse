@@ -380,6 +380,10 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         # User1 joins the room
         self.helper.join(remote_room_id, user1_id, tok=user1_tok)
 
+        # Reset the mocks now that user1 has joined the room
+        self.federation_http_client.get_json.side_effect = None
+        self.federation_http_client.put_json.side_effect = None
+
         # Sync until the local user1 can see that they are now joined to the room
         with test_timeout(
             3,
