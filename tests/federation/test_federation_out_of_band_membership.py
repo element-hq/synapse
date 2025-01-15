@@ -314,7 +314,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 }
 
             raise NotImplementedError(
-                f"We have not mocked a response for `get_json(...)` for the following endpoint yet: {destination}{path}"
+                "We have not mocked a response for `get_json(...)` for the following endpoint yet: "
+                + f"{destination}{path}"
             )
 
         self.federation_http_client.get_json.side_effect = get_json
@@ -343,6 +344,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 # We're assuming this is a `ByteParser[SendJoinResponse]`
                 and parser is not None
             ):
+                # As the remote server, we need to sign the event before sending it back
                 user1_join_membership_event_signed = make_event_from_dict(
                     self.add_hashes_and_signatures_from_other_server(data),
                     room_version=room_version,
@@ -369,7 +371,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 )
 
             raise NotImplementedError(
-                f"We have not mocked a response for `put_json(...)` for the following endpoint yet: {destination}{path}"
+                "We have not mocked a response for `put_json(...)` for the following endpoint yet: "
+                + f"{destination}{path} with the following body data: {data}"
             )
 
         self.federation_http_client.put_json.side_effect = put_json
