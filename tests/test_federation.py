@@ -83,7 +83,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
             self.storage_controllers.state.get_current_state(self.room_id)
         )
 
-        # Figure out what the forward extremeties in the room are (the most recent
+        # Figure out what the forward extremities in the room are (the most recent
         # events that aren't tied into the DAG)
         forward_extremity_event_ids = self.get_success(
             self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
@@ -149,7 +149,7 @@ class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
 
         self.http_client.post_json = post_json
 
-        # Figure out what the forward extremeties in the room are (the most recent
+        # Figure out what the forward extremities in the room are (the most recent
         # events that aren't tied into the DAG)
         forward_extremity_event_ids = self.get_success(
             self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
