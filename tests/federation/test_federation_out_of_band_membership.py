@@ -19,6 +19,7 @@
 #
 #
 
+import time
 import logging
 import urllib.parse
 from http import HTTPStatus
@@ -28,20 +29,21 @@ from unittest.mock import Mock
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.errors import FederationError
 from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict
+from synapse.events import make_event_from_dict, EventBase
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.matrixfederationclient import (
     ByteParser,
 )
 from synapse.http.types import QueryParams
-from synapse.logging.context import LoggingContext
 from synapse.rest import admin
 from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
-from synapse.types import JsonDict
+from synapse.types import JsonDict, MutableStateMap, StateMap
+from synapse.types.handlers.sliding_sync import (
+    StateValues,
+)
 from synapse.util import Clock
 
 from tests import unittest
@@ -50,154 +52,28 @@ from tests.utils import test_timeout
 logger = logging.getLogger(__name__)
 
 
-class MessageAcceptTests(unittest.FederatingHomeserverTestCase):
-    """
-    Tests to make sure that we don't accept flawed events from federation (incoming).
-    """
+def required_state_json_to_state_map(required_state: JsonDict) -> StateMap[EventBase]:
+    state_map: MutableStateMap[EventBase] = {}
 
-    servlets = [
-        admin.register_servlets,
-        login.register_servlets,
-        room.register_servlets,
-    ]
-
-    def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.http_client = Mock()
-        return self.setup_test_homeserver(federation_http_client=self.http_client)
-
-    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
-        super().prepare(reactor, clock, hs)
-
-        self.store = self.hs.get_datastores().main
-        self.storage_controllers = hs.get_storage_controllers()
-        self.federation_event_handler = self.hs.get_federation_event_handler()
-
-        # Create a local room
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
-        self.room_id = self.helper.create_room_as(
-            user1_id, tok=user1_tok, is_public=True
+    for state_event_dict in required_state:
+        state_map[(state_event_dict["type"], state_event_dict["state_key"])] = (
+            make_event_from_dict(state_event_dict)
         )
 
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(self.room_id)
-        )
-
-        # Figure out what the forward extremities in the room are (the most recent
-        # events that aren't tied into the DAG)
-        forward_extremity_event_ids = self.get_success(
-            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
-        )
-
-        # Join a remote user to the room that will attempt to send bad events
-        self.remote_bad_user_id = f"@baduser:{self.OTHER_SERVER_NAME}"
-        self.remote_bad_user_join_event = make_event_from_dict(
-            self.add_hashes_and_signatures_from_other_server(
-                {
-                    "room_id": self.room_id,
-                    "sender": self.remote_bad_user_id,
-                    "state_key": self.remote_bad_user_id,
-                    "depth": 1000,
-                    "origin_server_ts": 1,
-                    "type": EventTypes.Member,
-                    "content": {"membership": Membership.JOIN},
-                    "auth_events": [
-                        state_map[(EventTypes.Create, "")].event_id,
-                        state_map[(EventTypes.JoinRules, "")].event_id,
-                    ],
-                    "prev_events": list(forward_extremity_event_ids),
-                }
-            ),
-            room_version=RoomVersions.V10,
-        )
-
-        # Send the join, it should return None (which is not an error)
-        self.assertEqual(
-            self.get_success(
-                self.federation_event_handler.on_receive_pdu(
-                    self.OTHER_SERVER_NAME, self.remote_bad_user_join_event
-                )
-            ),
-            None,
-        )
-
-        # Make sure we actually joined the room
-        self.assertEqual(
-            self.get_success(self.store.get_latest_event_ids_in_room(self.room_id)),
-            {self.remote_bad_user_join_event.event_id},
-        )
-
-    def test_cant_hide_direct_ancestors(self) -> None:
-        """
-        If you send a message, you must be able to provide the direct
-        prev_events that said event references.
-        """
-
-        async def post_json(
-            destination: str,
-            path: str,
-            data: Optional[JsonDict] = None,
-            long_retries: bool = False,
-            timeout: Optional[int] = None,
-            ignore_backoff: bool = False,
-            args: Optional[QueryParams] = None,
-        ) -> Union[JsonDict, list]:
-            # If it asks us for new missing events, give them NOTHING
-            if path.startswith("/_matrix/federation/v1/get_missing_events/"):
-                return {"events": []}
-            return {}
-
-        self.http_client.post_json = post_json
-
-        # Figure out what the forward extremities in the room are (the most recent
-        # events that aren't tied into the DAG)
-        forward_extremity_event_ids = self.get_success(
-            self.hs.get_datastores().main.get_latest_event_ids_in_room(self.room_id)
-        )
-
-        # Now lie about an event's prev_events
-        lying_event = make_event_from_dict(
-            self.add_hashes_and_signatures_from_other_server(
-                {
-                    "room_id": self.room_id,
-                    "sender": self.remote_bad_user_id,
-                    "depth": 1000,
-                    "origin_server_ts": 1,
-                    "type": "m.room.message",
-                    "content": {"body": "hewwo?"},
-                    "auth_events": [],
-                    "prev_events": ["$missing_prev_event"]
-                    + list(forward_extremity_event_ids),
-                }
-            ),
-            room_version=RoomVersions.V10,
-        )
-
-        with LoggingContext("test-context"):
-            failure = self.get_failure(
-                self.federation_event_handler.on_receive_pdu(
-                    self.OTHER_SERVER_NAME, lying_event
-                ),
-                FederationError,
-            )
-
-        # on_receive_pdu should throw an error
-        self.assertEqual(
-            failure.value.args[0],
-            (
-                "ERROR 403: Your server isn't divulging details about prev_events "
-                "referenced in this event."
-            ),
-        )
-
-        # Make sure the invalid event isn't there
-        extrem = self.get_success(self.store.get_latest_event_ids_in_room(self.room_id))
-        self.assertEqual(extrem, {self.remote_bad_user_join_event.event_id})
+    return state_map
 
 
 class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
     """
-    Tests to make sure that we can join remote rooms over federation.
+    Tests to make sure that interactions with out-of-band membership (outliers) works as
+    expected.
+
+     - invites received over federation, before we join the room
+     - *rejections* for said invites
+     - knock events for rooms that we would like to join but have not yet joined.
+
+    See the "Out-of-band membership events" section in
+    `docs/development/room-dag-concepts.md` for more information.
     """
 
     servlets = [
@@ -341,18 +217,28 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             "lists": {
                 "foo-list": {
                     "ranges": [[0, 1]],
-                    "required_state": [],
+                    "required_state": [(EventTypes.Member, StateValues.WILDCARD)],
                     "timeline_limit": 0,
                 }
             }
         }
 
         # Sync until the local user1 can see the invite
-        with test_timeout(5):
+        with test_timeout(
+            3,
+            "Unable to find user1's invite event in the room",
+        ):
             while True:
                 response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-                if room_id in response_body["rooms"].keys():
+                if (
+                    room_id in response_body["rooms"].keys()
+                    # If they have `invite_state` for the room, they are invited
+                    and len(response_body["rooms"][room_id].get("invite_state", [])) > 0
+                ):
                     break
+
+                # Prevent tight-looping to allow the `test_timeout` to work
+                time.sleep(0.1)
 
         user1_join_membership_event_template = make_event_from_dict(
             {
@@ -454,3 +340,24 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         # User1 joins the room
         self.helper.join(room_id, user1_id, tok=user1_tok)
+
+        # Sync until the local user1 can see that they are now joined to the room
+        with test_timeout(
+            3,
+            "Unable to find user1's join event in the room",
+        ):
+            while True:
+                response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+                logger.info("response_body %s", response_body)
+                if room_id in response_body["rooms"].keys():
+                    required_state_map = required_state_json_to_state_map(
+                        response_body["rooms"][room_id]["required_state"]
+                    )
+                    if (
+                        required_state_map.get((EventTypes.Member, user1_id))
+                        is not None
+                    ):
+                        break
+
+                # Prevent tight-looping to allow the `test_timeout` to work
+                time.sleep(0.1)
