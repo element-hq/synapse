@@ -20,8 +20,9 @@
 #
 
 import logging
+import urllib.parse
 from http import HTTPStatus
-from typing import Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, TypeVar, Union
 from unittest.mock import AsyncMock, Mock
 
 from twisted.test.proto_helpers import MemoryReactor
@@ -32,7 +33,11 @@ from synapse.api.room_versions import RoomVersions
 from synapse.events import make_event_from_dict
 from synapse.events.utils import strip_event
 from synapse.federation.federation_base import event_from_pdu_json
+from synapse.federation.transport.client import SendJoinResponse
 from synapse.handlers.device import DeviceListUpdater
+from synapse.http.matrixfederationclient import (
+    ByteParser,
+)
 from synapse.http.types import QueryParams
 from synapse.logging.context import LoggingContext
 from synapse.rest import admin
@@ -41,9 +46,6 @@ from synapse.server import HomeServer
 from synapse.types import JsonDict
 from synapse.util import Clock
 from synapse.util.retryutils import NotRetryingDestination
-from synapse.http.matrixfederationclient import (
-    MatrixFederationRequest,
-)
 
 from tests import unittest
 from tests.utils import test_timeout
@@ -211,7 +213,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
     sync_endpoint = "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
-        self.federation_http_client = Mock()
+        self.federation_http_client = Mock(
+            # spec=MatrixFederationHttpClient
+        )
         return self.setup_test_homeserver(
             federation_http_client=self.federation_http_client
         )
@@ -255,8 +259,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         # Create a local room
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
-        user2_id = self.register_user("user2", "pass")
-        user2_tok = self.login(user2_id, "pass")
+        # user2_id = self.register_user("user2", "pass")
+        # user2_tok = self.login(user2_id, "pass")
 
         # Create a remote room
         room_creator_user_id = f"@user:{self.OTHER_SERVER_NAME}"
@@ -282,7 +286,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "prev_events": [],
                 }
             ),
-            room_version=RoomVersions.V10,
+            room_version=room_version,
         )
 
         creator_membership_event = make_event_from_dict(
@@ -299,7 +303,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "prev_events": [room_create_event.event_id],
                 }
             ),
-            room_version=RoomVersions.V10,
+            room_version=room_version,
         )
 
         # From the remote homeserver, invite user1 on the local homserver
@@ -320,7 +324,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "prev_events": [creator_membership_event.event_id],
                 }
             ),
-            room_version=RoomVersions.V10,
+            room_version=room_version,
         )
         channel = self.make_signed_federation_request(
             "PUT",
@@ -352,6 +356,104 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 response_body, _ = self.do_sync(sync_body, tok=user1_tok)
                 if room_id in response_body["rooms"].keys():
                     break
+
+        user1_join_membership_event_template = make_event_from_dict(
+            {
+                "room_id": room_id,
+                "sender": user1_id,
+                "depth": 4,
+                "origin_server_ts": 4,
+                "type": EventTypes.Member,
+                "state_key": user1_id,
+                "content": {"membership": Membership.JOIN},
+                "auth_events": [
+                    room_create_event.event_id,
+                    user1_invite_membership_event.event_id,
+                ],
+                "prev_events": [user1_invite_membership_event.event_id],
+            },
+            room_version=room_version,
+        )
+
+        T = TypeVar("T")
+
+        async def get_json(
+            destination: str,
+            path: str,
+            args: Optional[QueryParams] = None,
+            retry_on_dns_fail: bool = True,
+            timeout: Optional[int] = None,
+            ignore_backoff: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: Optional[ByteParser[T]] = None,
+        ) -> Union[JsonDict, T]:
+            logger.info("asdf get_json %s %s", destination, path)
+
+            if (
+                path
+                == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(room_id)}/{urllib.parse.quote_plus(user1_id)}"
+            ):
+                return {
+                    "event": user1_join_membership_event_template.get_pdu_json(),
+                    "room_version": room_version.identifier,
+                }
+
+            return {}
+
+        self.federation_http_client.get_json.side_effect = get_json
+
+        async def put_json(
+            destination: str,
+            path: str,
+            args: Optional[QueryParams] = None,
+            data: Optional[JsonDict] = None,
+            json_data_callback: Optional[Callable[[], JsonDict]] = None,
+            long_retries: bool = False,
+            timeout: Optional[int] = None,
+            ignore_backoff: bool = False,
+            backoff_on_404: bool = False,
+            try_trailing_slash_on_400: bool = False,
+            parser: Optional[ByteParser[T]] = None,
+            backoff_on_all_error_codes: bool = False,
+        ) -> Union[JsonDict, T]:
+            logger.info("asdf put_json %s %s parser=%s", destination, path, parser)
+
+            if (
+                path.startswith(
+                    f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(room_id)}/"
+                )
+                and data is not None
+                and data.get("type") == EventTypes.Member
+                and data.get("state_key") == user1_id
+                # We're assuming this is a `ByteParser[SendJoinResponse]`
+                and parser is not None
+            ):
+                user1_join_membership_event_signed = make_event_from_dict(
+                    self.add_hashes_and_signatures_from_other_server(data),
+                    room_version=room_version,
+                )
+
+                return SendJoinResponse(
+                    auth_events=[
+                        room_create_event,
+                        user1_invite_membership_event,
+                    ],
+                    state=[
+                        room_create_event,
+                        creator_membership_event,
+                        user1_invite_membership_event,
+                    ],
+                    event_dict=user1_join_membership_event_signed.get_pdu_json(),
+                    event=user1_join_membership_event_signed,
+                    members_omitted=False,
+                    servers_in_room=[
+                        self.OTHER_SERVER_NAME,
+                    ],
+                )
+
+            return {}
+
+        self.federation_http_client.put_json.side_effect = put_json
 
         # User1 joins the room
         self.helper.join(room_id, user1_id, tok=user1_tok)
