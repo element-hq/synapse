@@ -19,18 +19,18 @@
 #
 #
 
-import time
 import logging
+import time
 import urllib.parse
 from http import HTTPStatus
-from typing import Callable, Optional, Tuple, TypeVar, Union
+from typing import Any, Callable, Optional, Tuple, TypeVar, Union
 from unittest.mock import Mock
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
 from synapse.api.room_versions import RoomVersions
-from synapse.events import make_event_from_dict, EventBase
+from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
 from synapse.http.matrixfederationclient import (
@@ -52,13 +52,31 @@ from tests.utils import test_timeout
 logger = logging.getLogger(__name__)
 
 
-def required_state_json_to_state_map(required_state: JsonDict) -> StateMap[EventBase]:
+def required_state_json_to_state_map(required_state: Any) -> StateMap[EventBase]:
     state_map: MutableStateMap[EventBase] = {}
 
-    for state_event_dict in required_state:
-        state_map[(state_event_dict["type"], state_event_dict["state_key"])] = (
-            make_event_from_dict(state_event_dict)
-        )
+    # Scrutinize JSON values to ensure it's in the expected format
+    if isinstance(required_state, list):
+        for state_event_dict in required_state:
+            if isinstance(state_event_dict, dict):
+                event_type = state_event_dict["type"]
+                event_state_key = state_event_dict["state_key"]
+
+                if isinstance(event_type, str) and isinstance(event_state_key, str):
+                    state_map[(event_type, event_state_key)] = make_event_from_dict(
+                        state_event_dict
+                    )
+                else:
+                    # Yell because we're in a test and this is unexpected
+                    raise AssertionError(
+                        "Each event in `required_state` should have a `type` and `state_key` as strings"
+                    )
+            else:
+                # Yell because we're in a test and this is unexpected
+                raise AssertionError("`required_state` should be a list of event dicts")
+    else:
+        # Yell because we're in a test and this is unexpected
+        raise AssertionError("`required_state` should be a list of event dicts")
 
     return state_map
 
@@ -128,16 +146,23 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         return channel.json_body, channel.json_body["pos"]
 
-    def test_asdf(self) -> None:
-        # Create a local room
+    def test_can_join_from_out_of_band_invite(self) -> None:
+        """
+        Test to make sure that we can join a room that we were invited to over federation.
+
+         1. The remote user invites our local user to a room on their remote server (which
+        creates an out-of-band invite membership for user1 on our local server).
+         2. The local user notices the invite from `/sync`.
+         3. The local user joins the room.
+         4. The local user can see that they are now joined to the room from `/sync`.
+        """
+        # Create a local user
         user1_id = self.register_user("user1", "pass")
         user1_tok = self.login(user1_id, "pass")
-        # user2_id = self.register_user("user2", "pass")
-        # user2_tok = self.login(user2_id, "pass")
 
         # Create a remote room
-        room_creator_user_id = f"@user:{self.OTHER_SERVER_NAME}"
-        room_id = f"!foo:{self.OTHER_SERVER_NAME}"
+        room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
+        room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
         room_version = RoomVersions.V10
 
         room_create_event = make_event_from_dict(
@@ -260,6 +285,12 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         T = TypeVar("T")
 
+        # Mock the remote server responding to our HTTP requests
+        #
+        # We're going to mock the following endpoints so that user1 can join the room:
+        # - GET /_matrix/federation/v1/make_join/{room_id}/{user_id}
+        # - PUT /_matrix/federation/v2/send_join/{room_id}/{user_id}
+        #
         async def get_json(
             destination: str,
             path: str,
@@ -270,8 +301,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             try_trailing_slash_on_400: bool = False,
             parser: Optional[ByteParser[T]] = None,
         ) -> Union[JsonDict, T]:
-            logger.info("asdf get_json %s %s", destination, path)
-
             if (
                 path
                 == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(room_id)}/{urllib.parse.quote_plus(user1_id)}"
@@ -281,7 +310,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "room_version": room_version.identifier,
                 }
 
-            return {}
+            raise NotImplementedError(
+                f"We have not mocked a response for `get_json(...)` for the following endpoint yet: {destination}{path}"
+            )
 
         self.federation_http_client.get_json.side_effect = get_json
 
@@ -298,9 +329,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             try_trailing_slash_on_400: bool = False,
             parser: Optional[ByteParser[T]] = None,
             backoff_on_all_error_codes: bool = False,
-        ) -> Union[JsonDict, T]:
-            logger.info("asdf put_json %s %s parser=%s", destination, path, parser)
-
+        ) -> Union[JsonDict, T, SendJoinResponse]:
             if (
                 path.startswith(
                     f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(room_id)}/"
@@ -334,7 +363,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     ],
                 )
 
-            return {}
+            raise NotImplementedError(
+                f"We have not mocked a response for `put_json(...)` for the following endpoint yet: {destination}{path}"
+            )
 
         self.federation_http_client.put_json.side_effect = put_json
 
@@ -348,7 +379,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         ):
             while True:
                 response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-                logger.info("response_body %s", response_body)
                 if room_id in response_body["rooms"].keys():
                     required_state_map = required_state_json_to_state_map(
                         response_body["rooms"][room_id]["required_state"]

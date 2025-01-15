@@ -38,7 +38,6 @@ from typing import (
 
 import attr
 from typing_extensions import Literal, ParamSpec
-import threading
 
 from synapse.api.constants import EventTypes
 from synapse.api.room_versions import RoomVersions
