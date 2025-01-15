@@ -26,10 +26,12 @@ from http import HTTPStatus
 from typing import Any, Callable, Optional, Tuple, TypeVar, Union
 from unittest.mock import Mock
 
+import attr
+
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventContentFields, EventTypes, Membership
-from synapse.api.room_versions import RoomVersions
+from synapse.api.room_versions import RoomVersion, RoomVersions
 from synapse.events import EventBase, make_event_from_dict
 from synapse.events.utils import strip_event
 from synapse.federation.transport.client import SendJoinResponse
@@ -81,6 +83,16 @@ def required_state_json_to_state_map(required_state: Any) -> StateMap[EventBase]
     return state_map
 
 
+@attr.s(slots=True, auto_attribs=True)
+class RemoteRoomJoinResult:
+    remote_room_id: str
+    room_version: RoomVersion
+    remote_room_creator_user_id: str
+    local_user1_id: str
+    local_user1_tok: str
+    state_map: StateMap[EventBase]
+
+
 class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
     """
     Tests to make sure that interactions with out-of-band membership (outliers) works as
@@ -115,6 +127,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         super().prepare(reactor, clock, hs)
 
         self.store = self.hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
 
     def do_sync(
         self, sync_body: JsonDict, *, since: Optional[str] = None, tok: str
@@ -146,9 +159,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         return channel.json_body, channel.json_body["pos"]
 
-    def test_can_join_from_out_of_band_invite(self) -> None:
+    def _invite_local_user_to_remote_room_and_join(self) -> RemoteRoomJoinResult:
         """
-        Test to make sure that we can join a room that we were invited to over federation.
+        Helper to reproduce this scenario:
 
          1. The remote user invites our local user to a room on their remote server (which
         creates an out-of-band invite membership for user1 on our local server).
@@ -156,9 +169,10 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
          3. The local user joins the room.
          4. The local user can see that they are now joined to the room from `/sync`.
         """
+
         # Create a local user
-        user1_id = self.register_user("user1", "pass")
-        user1_tok = self.login(user1_id, "pass")
+        local_user1_id = self.register_user("user1", "pass")
+        local_user1_tok = self.login(local_user1_id, "pass")
 
         # Create a remote room
         room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
@@ -213,7 +227,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     "depth": 3,
                     "origin_server_ts": 3,
                     "type": EventTypes.Member,
-                    "state_key": user1_id,
+                    "state_key": local_user1_id,
                     "content": {"membership": Membership.INVITE},
                     "auth_events": [
                         room_create_event.event_id,
@@ -231,7 +245,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 "event": user1_invite_membership_event.get_dict(),
                 "invite_room_state": [
                     strip_event(room_create_event),
-                    strip_event(creator_membership_event),
                 ],
                 "room_version": room_version.identifier,
             },
@@ -254,7 +267,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             "Unable to find user1's invite event in the room",
         ):
             while True:
-                response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+                response_body, _ = self.do_sync(sync_body, tok=local_user1_tok)
                 if (
                     remote_room_id in response_body["rooms"].keys()
                     # If they have `invite_state` for the room, they are invited
@@ -271,11 +284,11 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         user1_join_membership_event_template = make_event_from_dict(
             {
                 "room_id": remote_room_id,
-                "sender": user1_id,
+                "sender": local_user1_id,
                 "depth": 4,
                 "origin_server_ts": 4,
                 "type": EventTypes.Member,
-                "state_key": user1_id,
+                "state_key": local_user1_id,
                 "content": {"membership": Membership.JOIN},
                 "auth_events": [
                     room_create_event.event_id,
@@ -306,7 +319,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         ) -> Union[JsonDict, T]:
             if (
                 path
-                == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(remote_room_id)}/{urllib.parse.quote_plus(user1_id)}"
+                == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(remote_room_id)}/{urllib.parse.quote_plus(local_user1_id)}"
             ):
                 return {
                     "event": user1_join_membership_event_template.get_pdu_json(),
@@ -340,7 +353,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 )
                 and data is not None
                 and data.get("type") == EventTypes.Member
-                and data.get("state_key") == user1_id
+                and data.get("state_key") == local_user1_id
                 # We're assuming this is a `ByteParser[SendJoinResponse]`
                 and parser is not None
             ):
@@ -378,7 +391,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.put_json.side_effect = put_json
 
         # User1 joins the room
-        self.helper.join(remote_room_id, user1_id, tok=user1_tok)
+        self.helper.join(remote_room_id, local_user1_id, tok=local_user1_tok)
 
         # Reset the mocks now that user1 has joined the room
         self.federation_http_client.get_json.side_effect = None
@@ -390,16 +403,131 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             "Unable to find user1's join event in the room",
         ):
             while True:
-                response_body, _ = self.do_sync(sync_body, tok=user1_tok)
+                response_body, _ = self.do_sync(sync_body, tok=local_user1_tok)
                 if remote_room_id in response_body["rooms"].keys():
                     required_state_map = required_state_json_to_state_map(
                         response_body["rooms"][remote_room_id]["required_state"]
                     )
                     if (
-                        required_state_map.get((EventTypes.Member, user1_id))
+                        required_state_map.get((EventTypes.Member, local_user1_id))
                         is not None
                     ):
                         break
 
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
+
+        return RemoteRoomJoinResult(
+            remote_room_id=remote_room_id,
+            room_version=room_version,
+            remote_room_creator_user_id=room_creator_user_id,
+            local_user1_id=local_user1_id,
+            local_user1_tok=local_user1_tok,
+            state_map=self.get_success(
+                self.storage_controllers.state.get_current_state(remote_room_id)
+            ),
+        )
+
+    def test_can_join_from_out_of_band_invite(self) -> None:
+        """
+        Test to make sure that we can join a room that we were invited to over
+        federation; even if our server has never participated in the room before.
+        """
+        self._invite_local_user_to_remote_room_and_join()
+
+    def test_can_join_from_out_of_band_invite_after_we_are_already_participating_in_the_room(
+        self,
+    ) -> None:
+        """
+        Test to make sure that we can join a room that we were invited to over
+        federation; even after we are already participating in the room.
+        """
+        remote_room_join_result = self._invite_local_user_to_remote_room_and_join()
+        remote_room_id = remote_room_join_result.remote_room_id
+        room_version = remote_room_join_result.room_version
+        logger.info("asdf remote_room_join_result: %s", remote_room_join_result)
+
+        # Create another local user
+        local_user2_id = self.register_user("user2", "pass")
+        local_user2_tok = self.login(local_user2_id, "pass")
+
+        # From the remote homeserver, invite user2 on the local homserver
+        user2_invite_membership_event = make_event_from_dict(
+            self.add_hashes_and_signatures_from_other_server(
+                {
+                    "room_id": remote_room_id,
+                    "sender": remote_room_join_result.remote_room_creator_user_id,
+                    "depth": 5,
+                    "origin_server_ts": 5,
+                    "type": EventTypes.Member,
+                    "state_key": local_user2_id,
+                    "content": {"membership": Membership.INVITE},
+                    "auth_events": [
+                        remote_room_join_result.state_map[
+                            (EventTypes.Create, "")
+                        ].event_id,
+                        remote_room_join_result.state_map[
+                            (
+                                EventTypes.Member,
+                                remote_room_join_result.remote_room_creator_user_id,
+                            )
+                        ].event_id,
+                    ],
+                    "prev_events": [
+                        remote_room_join_result.state_map[
+                            (EventTypes.Member, remote_room_join_result.local_user1_id)
+                        ].event_id
+                    ],
+                }
+            ),
+            room_version=room_version,
+        )
+        channel = self.make_signed_federation_request(
+            "PUT",
+            f"/_matrix/federation/v2/invite/{remote_room_id}/{user2_invite_membership_event.event_id}",
+            content={
+                "event": user2_invite_membership_event.get_dict(),
+                "invite_room_state": [
+                    strip_event(
+                        remote_room_join_result.state_map[(EventTypes.Create, "")]
+                    ),
+                ],
+                "room_version": room_version.identifier,
+            },
+        )
+        self.assertEqual(channel.code, HTTPStatus.OK, channel.json_body)
+
+        sync_body = {
+            "lists": {
+                "foo-list": {
+                    "ranges": [[0, 1]],
+                    "required_state": [(EventTypes.Member, StateValues.WILDCARD)],
+                    "timeline_limit": 0,
+                }
+            }
+        }
+
+        # Sync until the local user2 can see the invite
+        with test_timeout(
+            3,
+            "Unable to find user2's invite event in the room",
+        ):
+            while True:
+                response_body, _ = self.do_sync(sync_body, tok=local_user2_tok)
+                if (
+                    remote_room_id in response_body["rooms"].keys()
+                    # If they have `invite_state` for the room, they are invited
+                    and len(
+                        response_body["rooms"][remote_room_id].get("invite_state", [])
+                    )
+                    > 0
+                ):
+                    break
+
+                # Prevent tight-looping to allow the `test_timeout` to work
+                time.sleep(0.1)
+
+        # User2 joins the room
+        self.helper.join(
+            remote_room_join_result.remote_room_id, local_user2_id, tok=local_user2_tok
+        )
