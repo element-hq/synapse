@@ -1,0 +1,2 @@
+Updates contribution `docker-compose.yml` PostgreSQL version to v15 since v12 is now deprecated.
+Contributed by @maxkratz.
