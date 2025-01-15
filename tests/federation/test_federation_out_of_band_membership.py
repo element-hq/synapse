@@ -162,13 +162,13 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         # Create a remote room
         room_creator_user_id = f"@remote-user:{self.OTHER_SERVER_NAME}"
-        room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
+        remote_room_id = f"!remote-room:{self.OTHER_SERVER_NAME}"
         room_version = RoomVersions.V10
 
         room_create_event = make_event_from_dict(
             self.add_hashes_and_signatures_from_other_server(
                 {
-                    "room_id": room_id,
+                    "room_id": remote_room_id,
                     "sender": room_creator_user_id,
                     "depth": 1,
                     "origin_server_ts": 1,
@@ -190,7 +190,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         creator_membership_event = make_event_from_dict(
             self.add_hashes_and_signatures_from_other_server(
                 {
-                    "room_id": room_id,
+                    "room_id": remote_room_id,
                     "sender": room_creator_user_id,
                     "depth": 2,
                     "origin_server_ts": 2,
@@ -208,7 +208,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         user1_invite_membership_event = make_event_from_dict(
             self.add_hashes_and_signatures_from_other_server(
                 {
-                    "room_id": room_id,
+                    "room_id": remote_room_id,
                     "sender": room_creator_user_id,
                     "depth": 3,
                     "origin_server_ts": 3,
@@ -226,7 +226,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         )
         channel = self.make_signed_federation_request(
             "PUT",
-            f"/_matrix/federation/v2/invite/{room_id}/{user1_invite_membership_event.event_id}",
+            f"/_matrix/federation/v2/invite/{remote_room_id}/{user1_invite_membership_event.event_id}",
             content={
                 "event": user1_invite_membership_event.get_dict(),
                 "invite_room_state": [
@@ -256,9 +256,12 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             while True:
                 response_body, _ = self.do_sync(sync_body, tok=user1_tok)
                 if (
-                    room_id in response_body["rooms"].keys()
+                    remote_room_id in response_body["rooms"].keys()
                     # If they have `invite_state` for the room, they are invited
-                    and len(response_body["rooms"][room_id].get("invite_state", [])) > 0
+                    and len(
+                        response_body["rooms"][remote_room_id].get("invite_state", [])
+                    )
+                    > 0
                 ):
                     break
 
@@ -267,7 +270,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         user1_join_membership_event_template = make_event_from_dict(
             {
-                "room_id": room_id,
+                "room_id": remote_room_id,
                 "sender": user1_id,
                 "depth": 4,
                 "origin_server_ts": 4,
@@ -285,9 +288,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         T = TypeVar("T")
 
-        # Mock the remote server responding to our HTTP requests
+        # Mock the remote homeserver responding to our HTTP requests
         #
-        # We're going to mock the following endpoints so that user1 can join the room:
+        # We're going to mock the following endpoints so that user1 can join the remote room:
         # - GET /_matrix/federation/v1/make_join/{room_id}/{user_id}
         # - PUT /_matrix/federation/v2/send_join/{room_id}/{user_id}
         #
@@ -303,7 +306,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         ) -> Union[JsonDict, T]:
             if (
                 path
-                == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(room_id)}/{urllib.parse.quote_plus(user1_id)}"
+                == f"/_matrix/federation/v1/make_join/{urllib.parse.quote_plus(remote_room_id)}/{urllib.parse.quote_plus(user1_id)}"
             ):
                 return {
                     "event": user1_join_membership_event_template.get_pdu_json(),
@@ -332,7 +335,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         ) -> Union[JsonDict, T, SendJoinResponse]:
             if (
                 path.startswith(
-                    f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(room_id)}/"
+                    f"/_matrix/federation/v2/send_join/{urllib.parse.quote_plus(remote_room_id)}/"
                 )
                 and data is not None
                 and data.get("type") == EventTypes.Member
@@ -345,6 +348,8 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                     room_version=room_version,
                 )
 
+                # Since they passed in a `parser`, we need to return the type that
+                # they're expecting instead of just a `JsonDict`
                 return SendJoinResponse(
                     auth_events=[
                         room_create_event,
@@ -370,7 +375,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         self.federation_http_client.put_json.side_effect = put_json
 
         # User1 joins the room
-        self.helper.join(room_id, user1_id, tok=user1_tok)
+        self.helper.join(remote_room_id, user1_id, tok=user1_tok)
 
         # Sync until the local user1 can see that they are now joined to the room
         with test_timeout(
@@ -379,9 +384,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         ):
             while True:
                 response_body, _ = self.do_sync(sync_body, tok=user1_tok)
-                if room_id in response_body["rooms"].keys():
+                if remote_room_id in response_body["rooms"].keys():
                     required_state_map = required_state_json_to_state_map(
-                        response_body["rooms"][room_id]["required_state"]
+                        response_body["rooms"][remote_room_id]["required_state"]
                     )
                     if (
                         required_state_map.get((EventTypes.Member, user1_id))
