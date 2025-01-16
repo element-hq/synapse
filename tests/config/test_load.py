@@ -132,6 +132,8 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "turn_shared_secret_path: /does/not/exist",
             "registration_shared_secret_path: /does/not/exist",
             "macaroon_secret_key_path: /does/not/exist",
+            "recaptcha_private_key_path: /does/not/exist",
+            "recaptcha_public_key_path: /does/not/exist",
             *["redis:\n  enabled: true\n  password_path: /does/not/exist"]
             * (hiredis is not None),
         ]
@@ -156,6 +158,14 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             (
                 "macaroon_secret_key_path: {}",
                 lambda c: c.key.macaroon_secret_key,
+            ),
+            (
+                "recaptcha_private_key_path: {}",
+                lambda c: c.captcha.recaptcha_private_key.encode("utf-8"),
+            ),
+            (
+                "recaptcha_public_key_path: {}",
+                lambda c: c.captcha.recaptcha_public_key.encode("utf-8"),
             ),
             *[
                 (
