@@ -345,6 +345,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
         self.federation_http_client.get_json.side_effect = get_json
 
+        # PDU's that hs1 sent to hs2
+        collected_pdus_from_hs1_federation_send: Set[str] = set()
+
         async def put_json(
             destination: str,
             path: str,
@@ -396,6 +399,10 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
                 )
 
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
+                for pdu in data.get("pdus", []):
+                    event = event_from_pdu_json(pdu, room_version)
+                    collected_pdus_from_hs1_federation_send.add(event.event_id)
+
                 # Just acknowledge everything hs1 is trying to send hs2
                 return {
                     event_from_pdu_json(pdu, room_version).event_id: {}
@@ -435,6 +442,15 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
                 # Prevent tight-looping to allow the `test_timeout` to work
                 time.sleep(0.1)
+
+        # Nothing needs to be sent from hs1 to hs2 since we already let the other
+        # homeserver know by doing the `/make_join` and `/send_join` dance.
+        self.assertIncludes(
+            collected_pdus_from_hs1_federation_send,
+            set(),
+            exact=True,
+            message="Didn't expect any events to be sent from hs1 over federation to hs2",
+        )
 
         return RemoteRoomJoinResult(
             remote_room_id=remote_room_id,
@@ -500,7 +516,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
             backoff_on_all_error_codes: bool = False,
         ) -> Union[JsonDict, T]:
             if path.startswith("/_matrix/federation/v1/send/") and data is not None:
-                logger.info("asdf data: %s", data)
                 for pdu in data.get("pdus", []):
                     event = event_from_pdu_json(pdu, room_version)
                     collected_pdus_from_hs1_federation_send.add(event.event_id)
