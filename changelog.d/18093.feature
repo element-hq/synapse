@@ -1,0 +1,1 @@
+Support the new `/auth_metadata` endpoint defined in MSC2965.
