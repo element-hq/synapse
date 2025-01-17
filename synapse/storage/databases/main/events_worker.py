@@ -798,6 +798,12 @@ class EventsWorkerStore(SQLBaseStore):
 
         missing_events_ids = {e for e in event_ids if e not in event_entry_map}
 
+        logger.info(
+            "asdf get_unredacted_events_from_cache_or_db at (1): event_entry_map=%s missing_events_ids=%s",
+            event_entry_map,
+            missing_events_ids,
+        )
+
         # We now look up if we're already fetching some of the events in the DB,
         # if so we wait for those lookups to finish instead of pulling the same
         # events out of the DB multiple times.
@@ -861,6 +867,11 @@ class EventsWorkerStore(SQLBaseStore):
                     db_missing_events = await self._get_events_from_db(
                         missing_events_ids - missing_events.keys(),
                     )
+                    logger.info(
+                        "asdf get_unredacted_events_from_cache_or_db at (1): tried to fetch %s but found db_missing_events=%s",
+                        missing_events_ids - missing_events.keys(),
+                        db_missing_events,
+                    )
                     missing_events.update(db_missing_events)
                 except Exception as e:
                     with PreserveLoggingContext():
@@ -884,6 +895,11 @@ class EventsWorkerStore(SQLBaseStore):
             )
             event_entry_map.update(missing_events)
 
+            logger.info(
+                "asdf get_unredacted_events_from_cache_or_db at (2): event_entry_map=%s",
+                event_entry_map,
+            )
+
         if already_fetching_deferreds:
             # Wait for the other event requests to finish and add their results
             # to ours.
@@ -904,12 +920,35 @@ class EventsWorkerStore(SQLBaseStore):
                     if event_id in already_fetching_ids
                 )
 
+            logger.info(
+                "asdf get_unredacted_events_from_cache_or_db at (3): event_entry_map=%s",
+                event_entry_map,
+            )
+
+        logger.info(
+            "asdf get_unredacted_events_from_cache_or_db at (4): event_entry_map=%s",
+            event_entry_map,
+        )
+
         if not allow_rejected:
+            for event_id, entry in event_entry_map.items():
+                if entry.event.rejected_reason:
+                    logger.info(
+                        "asdf get_unredacted_events_from_cache_or_db saw rejected_reason for event_id=%s rejected_reason=%s",
+                        event_id,
+                        entry.event.rejected_reason,
+                    )
+
             event_entry_map = {
                 event_id: entry
                 for event_id, entry in event_entry_map.items()
                 if not entry.event.rejected_reason
             }
+
+        logger.info(
+            "asdf get_unredacted_events_from_cache_or_db at (5): event_entry_map=%s",
+            event_entry_map,
+        )
 
         return event_entry_map
 

@@ -1272,7 +1272,10 @@ class FederationServer(FederationBase):
                                 origin, event
                             )
                     logger.info(
-                        "✅ handled received PDU in room %s: %s", room_id, event
+                        "✅ handled received PDU in room %s: %s stream_ordering=%s",
+                        room_id,
+                        event,
+                        event.internal_metadata.stream_ordering,
                     )
                 except FederationError as e:
                     # XXX: Ideally we'd inform the remote we failed to process

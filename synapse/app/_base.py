@@ -133,7 +133,6 @@ def start_worker_reactor(
         config: config object
         run_command: callable that actually runs the reactor
     """
-
     logger = logging.getLogger(config.worker.worker_app)
 
     start_reactor(

@@ -583,6 +583,12 @@ class SyncHandler:
             async def current_sync_callback(
                 before_token: StreamToken, after_token: StreamToken
             ) -> Union[SyncResult, E2eeSyncResult]:
+                logger.info(
+                    "asdf notifier saw new event before_token=%s after_token=%s, syncing with since_token=%s",
+                    before_token.room_key.stream,
+                    after_token.room_key.stream,
+                    since_token.room_key.stream if since_token else None,
+                )
                 return await self.current_sync_for_user(
                     sync_config, sync_version, since_token
                 )
@@ -2386,6 +2392,12 @@ class SyncHandler:
         since_token = sync_result_builder.since_token
         user_id = sync_result_builder.sync_config.user.to_string()
 
+        logger.info(
+            "asdf _generate_sync_entry_for_rooms: since_token=%s now_token=%s",
+            since_token.room_key.stream if since_token else None,
+            sync_result_builder.now_token.room_key.stream,
+        )
+
         blocks_all_rooms = (
             sync_result_builder.sync_config.filter_collection.blocks_all_rooms()
         )
@@ -2452,6 +2464,11 @@ class SyncHandler:
             tags_by_room = await self.store.get_tags_for_user(user_id)
 
         log_kv({"rooms_changed": len(room_changes.room_entries)})
+
+        logger.info(
+            "asdf _generate_sync_entry_for_rooms rooms_changed: rooms_changed=%s",
+            room_changes.room_entries,
+        )
 
         room_entries = room_changes.room_entries
         invited = room_changes.invited
@@ -2537,6 +2554,12 @@ class SyncHandler:
         membership_change_events = sync_result_builder.membership_change_events
 
         assert since_token
+
+        logger.info(
+            "asdf _get_room_changes_for_incremental_sync since_token=%s, now_token=%s",
+            since_token.room_key.stream if since_token else None,
+            now_token.room_key.stream,
+        )
 
         mem_change_events_by_room_id: Dict[str, List[EventBase]] = {}
         for event in membership_change_events:
@@ -2710,6 +2733,7 @@ class SyncHandler:
             limit=timeline_limit + 1,
             direction=Direction.BACKWARDS,
         )
+        logger.info("asdf room_to_events results: %s", room_to_events)
 
         # We loop through all room ids, even if there are no new events, in case
         # there are non room events that we need to notify about.
@@ -2885,6 +2909,18 @@ class SyncHandler:
             room_builder.full_state or newly_joined or sync_result_builder.full_state
         )
         events = room_builder.events
+
+        logger.info(
+            "asdf _generate_room_entry since_token=%s upto_token=%s end_token=%s always_include=%s full_state=%s events=%s",
+            room_builder.since_token.room_key.stream
+            if room_builder.since_token
+            else None,
+            room_builder.upto_token.room_key.stream,
+            room_builder.end_token.room_key.stream,
+            always_include,
+            full_state,
+            events,
+        )
 
         # We want to shortcut out as early as possible.
         if not (always_include or account_data or ephemeral or full_state):

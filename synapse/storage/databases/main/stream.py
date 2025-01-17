@@ -700,6 +700,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             When Direction.FORWARDS: from_key < x <= to_key, (ascending order)
             When Direction.BACKWARDS: from_key >= x > to_key, (descending order)
         """
+        before_room_ids_asdf = room_ids
+
         if direction == Direction.FORWARDS:
             room_ids = self._events_stream_cache.get_entities_changed(
                 room_ids, from_key.stream
@@ -711,6 +713,16 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 )
         else:
             assert_never(direction)
+
+        logger.info(
+            "asdf get_room_events_stream_for_rooms from_key=%s, to_key=%s limit=%s direction=%s before_room_ids=%s after_room_ids=%s",
+            from_key.stream,
+            to_key.stream if to_key else None,
+            limit,
+            direction,
+            before_room_ids_asdf,
+            room_ids,
+        )
 
         if not room_ids:
             return {}
@@ -868,6 +880,14 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         else:
             assert_never(direction)
 
+        logger.info(
+            "asdf paginate_room_events_by_stream_ordering has_changed=%s from_key=%s, to_key=%s direction=%s",
+            has_changed,
+            from_key.stream,
+            to_key.stream if to_key else None,
+            direction,
+        )
+
         if not has_changed:
             # Token selection matches what we do below if there are no rows
             return [], to_key if to_key else from_key, False
@@ -902,6 +922,12 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
             fetched_rows = txn.fetchall()
             limited = len(fetched_rows) >= 2 * limit
 
+            logger.info(
+                "asdf paginate_room_events_by_stream_ordering fetched_rows=%s sql=%s",
+                fetched_rows,
+                sql,
+            )
+
             rows = [
                 _EventDictReturn(event_id, None, stream_ordering)
                 for event_id, instance_name, stream_ordering in fetched_rows
@@ -917,6 +943,10 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
                 )
             ]
 
+            logger.info(
+                "asdf paginate_room_events_by_stream_ordering filtered_rows=%s", rows
+            )
+
             if len(rows) > limit:
                 limited = True
 
@@ -930,6 +960,8 @@ class StreamWorkerStore(EventsWorkerStore, SQLBaseStore):
         ret = await self.get_events_as_list(
             [r.event_id for r in rows], get_prev_content=True
         )
+
+        logger.info("asdf paginate_room_events_by_stream_ordering ret=%s", ret)
 
         if rows:
             next_key = generate_next_token(
