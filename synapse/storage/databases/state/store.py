@@ -36,7 +36,11 @@ import attr
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
-from synapse.events.snapshot import UnpersistedEventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    EventContext,
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.logging.opentracing import tag_args, trace
 from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage._base import SQLBaseStore
@@ -169,6 +173,60 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
 
         await self.db_pool.runInteraction(
             "_advance_state_epoch", advance_state_epoch_txn, db_autocommit=True
+        )
+
+    async def get_state_epoch(self) -> int:
+        return await self.db_pool.simple_select_one_onecol(
+            table="state_epoch",
+            retcol="state_epoch",
+            keyvalues={},
+            desc="get_state_epoch",
+        )
+
+    async def mark_state_groups_as_used(
+        self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
+    ) -> None:
+        min_state_epoch = min(ctx.state_epoch for _, ctx in event_and_contexts)
+        state_groups = {
+            ctx.state_group
+            for _, ctx in event_and_contexts
+            if ctx.state_group and not ctx.rejected
+        }
+        state_groups.update(
+            ctx.state_group_before_event
+            for _, ctx in event_and_contexts
+            if ctx.state_group_before_event is not None
+        )
+
+        if not state_groups:
+            return
+
+        await self.db_pool.runInteraction(
+            "mark_state_groups_as_used",
+            self._mark_state_groups_as_used_txn,
+            min_state_epoch,
+            state_groups,
+        )
+
+    def _mark_state_groups_as_used_txn(
+        self, txn: LoggingTransaction, state_epoch: int, state_groups: Collection[int]
+    ) -> None:
+        current_state_epoch = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="state_epoch",
+            retcol="state_epoch",
+            keyvalues={},
+        )
+
+        # TODO: Move to constant. Is the equality correct?
+        if current_state_epoch - state_epoch >= 2:
+            raise Exception("FOO")
+
+        self.db_pool.simple_delete_many_batch_txn(
+            txn,
+            table="state_groups_pending_deletion",
+            keys=("state_group",),
+            values=[(state_group,) for state_group in state_groups],
         )
 
     @cached()
@@ -535,7 +593,11 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             #
             # If prev_group is in state_deletions? => Mark these groups as for
             # deletion too in the same state epoch. Then clear them when we
-            # persist the events.
+            # persist the events. Maybe bump epoch to the latest?
+            #
+            # Deny if scheduled for deletion in an old state epoch that is too old?
+            #
+            # OR just copy over stuff from `prev_group`?
 
             is_in_db = self.db_pool.simple_select_one_onecol_txn(
                 txn,

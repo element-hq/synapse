@@ -194,6 +194,7 @@ class StateHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._events_shard_config = hs.config.worker.events_shard_config
         self._instance_name = hs.get_instance_name()
+        self._state_store = hs.get_datastores().state
 
         self._update_current_state_client = (
             ReplicationUpdateCurrentStateRestServlet.make_client(hs)
@@ -311,6 +312,8 @@ class StateHandler:
         """
         assert not event.internal_metadata.is_outlier()
 
+        state_epoch = await self._state_store.get_state_epoch()  # TODO: Get state epoch
+
         #
         # first of all, figure out the state before the event, unless we
         # already have it.
@@ -396,6 +399,7 @@ class StateHandler:
                 delta_ids_to_state_group_before_event=deltas_to_state_group_before_event,
                 partial_state=partial_state,
                 state_map_before_event=state_ids_before_event,
+                state_epoch=state_epoch,
             )
 
         #
@@ -426,6 +430,7 @@ class StateHandler:
             delta_ids_to_state_group_before_event=deltas_to_state_group_before_event,
             partial_state=partial_state,
             state_map_before_event=state_ids_before_event,
+            state_epoch=state_epoch,
         )
 
     async def compute_event_context(
@@ -511,6 +516,9 @@ class StateHandler:
             ) = await self._state_storage_controller.get_state_group_delta(
                 state_group_id
             )
+
+            # TODO: Check for deleted state groups
+
             return _StateCacheEntry(
                 state=None,
                 state_group=state_group_id,
@@ -663,6 +671,7 @@ class StateResolutionHandler:
         async with self.resolve_linearizer.queue(group_names):
             cache = self._state_cache.get(group_names, None)
             if cache:
+                # TODO: Check for deleted state groups
                 return cache
 
             logger.info(
