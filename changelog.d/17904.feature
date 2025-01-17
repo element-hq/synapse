@@ -1,0 +1,1 @@
+Allow Admin API delete room v2 actions to be run on workers.
