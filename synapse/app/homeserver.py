@@ -368,8 +368,6 @@ def setup(config_options: List[str]) -> SynapseHomeServer:
     synapse.config.logger.setup_logging(hs, config, use_worker_options=False)
 
     logger.info("Setting up server")
-    logger.info("asdf config=%s", config)
-    logger.info("asdf send_federation=%s", config.worker.send_federation)
 
     try:
         hs.setup()

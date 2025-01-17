@@ -219,7 +219,6 @@ class WorkerConfig(Config):
     section = "worker"
 
     def read_config(self, config: JsonDict, **kwargs: Any) -> None:
-        logger.info("asdf WorkerConfig.read_config: %s", config)
         self.worker_app = config.get("worker_app")
 
         # Canonicalise worker_app so that master always has None
@@ -275,12 +274,6 @@ class WorkerConfig(Config):
             "federation_sender_instances",
         )
         self.send_federation = self.instance_name in federation_sender_instances
-        logger.info(
-            "asdf self.send_federation: %s %s %s",
-            self.send_federation,
-            self.instance_name,
-            federation_sender_instances,
-        )
         self.federation_shard_config = ShardedWorkerHandlingConfig(
             federation_sender_instances
         )
@@ -581,6 +574,7 @@ class WorkerConfig(Config):
         Returns:
             A list of worker instance names handling the given duty.
         """
+
         legacy_option = config.get(legacy_option_name, True)
 
         worker_instances = config.get(modern_instance_list_name)
