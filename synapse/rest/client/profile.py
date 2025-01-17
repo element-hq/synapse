@@ -37,6 +37,7 @@ from synapse.http.servlet import (
 from synapse.http.site import SynapseRequest
 from synapse.rest.client._base import client_patterns
 from synapse.types import JsonDict, JsonValue, UserID
+from synapse.util.stringutils import is_namedspaced_grammar
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -300,6 +301,10 @@ class UnstableProfileFieldRestServlet(RestServlet):
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
             raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
+        if not is_namedspaced_grammar(field_name):
+            raise SynapseError(
+                400, "Field name is invalid", errcode=Codes.INVALID_PARAM
+            )
 
         content = parse_json_object_from_request(request)
         try:
@@ -356,6 +361,10 @@ class UnstableProfileFieldRestServlet(RestServlet):
 
         if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
             raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
+        if not is_namedspaced_grammar(field_name):
+            raise SynapseError(
+                400, "Field name is invalid", errcode=Codes.INVALID_PARAM
+            )
 
         propagate = _read_propagate(self.hs, request)
 

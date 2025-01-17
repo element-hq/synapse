@@ -223,7 +223,8 @@ class ProfileWorkerStore(SQLBaseStore):
         """
 
         def get_profile_field(txn: LoggingTransaction) -> JsonValue:
-            # This will error if field_name has double quotes in it.
+            # This will error if field_name has double quotes in it, but that's not
+            # possible due to the grammar.
             field_path = f'$."{field_name}"'
 
             if isinstance(self.database_engine, PostgresEngine):
@@ -341,7 +342,8 @@ class ProfileWorkerStore(SQLBaseStore):
             """
             txn.execute(
                 size_sql,
-                # This will error if field_name has double quotes in it.
+                # This will error if field_name has double quotes in it, but that's not
+                # possible due to the grammar.
                 (f'$."{new_field_name}"', user_id.localpart),
             )
         row = cast(Tuple[Optional[int], Optional[int], Optional[int]], txn.fetchone())
@@ -484,7 +486,8 @@ class ProfileWorkerStore(SQLBaseStore):
                 ON CONFLICT (user_id)
                 DO UPDATE SET full_user_id = EXCLUDED.full_user_id, fields = JSON_SET(COALESCE(profiles.fields, '{}'), ?, JSON(?))
                 """
-                # This will error if field_name has double quotes in it.
+                # This will error if field_name has double quotes in it, but that's not
+                # possible due to the grammar.
                 json_field_name = f'$."{field_name}"'
 
                 txn.execute(
