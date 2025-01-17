@@ -179,12 +179,21 @@ class EventBuilder:
                     user_id=self.state_key,
                     room_id=self.room_id,
                 )
-                if member_event_id is not None:
-                    # There is no need to check if the membership is actually an
-                    # out-of-band membership (`outlier`) as we would end up with the
-                    # same result either way (adding the member event to the
-                    # `auth_event_ids`).
+                # There is no need to check if the membership is actually an
+                # out-of-band membership (`outlier`) as we would end up with the
+                # same result either way (adding the member event to the
+                # `auth_event_ids`).
+                if (
+                    member_event_id is not None
+                    # We only need to be careful about duplicating the event in the
+                    # `auth_event_ids` list (duplicate `type`/`state_key` is part of the
+                    # authorization rules)
+                    and member_event_id not in auth_event_ids
+                ):
                     auth_event_ids.append(member_event_id)
+                    # Also make sure to point to the previous membership event that will
+                    # allow this one to happen so the computed state works out.
+                    prev_event_ids.append(member_event_id)
 
         format_version = self.room_version.event_format
         # The types of auth/prev events changes between event versions.
