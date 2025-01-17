@@ -22,6 +22,7 @@ import logging
 import random
 from typing import TYPE_CHECKING, List, Optional, Union
 
+from synapse.api.constants import ProfileFields
 from synapse.api.errors import (
     AuthError,
     Codes,
@@ -83,7 +84,7 @@ class ProfileHandler:
 
         Returns:
             A JSON dictionary. For local queries this will include the displayname and avatar_url
-            fields. For remote queries it may contain arbitrary information.
+            fields, if set. For remote queries it may contain arbitrary information.
         """
         target_user = UserID.from_string(user_id)
 
@@ -92,10 +93,13 @@ class ProfileHandler:
             if profileinfo.display_name is None and profileinfo.avatar_url is None:
                 raise SynapseError(404, "Profile was not found", Codes.NOT_FOUND)
 
-            return {
-                "displayname": profileinfo.display_name,
-                "avatar_url": profileinfo.avatar_url,
-            }
+            # Do not include display name or avatar if unset.
+            ret = {}
+            if profileinfo.display_name is not None:
+                ret[ProfileFields.DISPLAYNAME] = profileinfo.display_name
+            if profileinfo.avatar_url is not None:
+                ret[ProfileFields.AVATAR_URL] = profileinfo.avatar_url
+            return ret
         else:
             try:
                 result = await self.federation.make_query(

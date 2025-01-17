@@ -163,6 +163,7 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
             "email": {
                 "notif_from": "noreply@test",
                 "force_tls": True,
+                "tlsname": "example.org",
             },
         }
     )
@@ -186,10 +187,9 @@ class SendEmailHandlerTestCaseIPv4(HomeserverTestCase):
         self.assertEqual(host, self.reactor.lookups["localhost"])
         self.assertEqual(port, 465)
         # We need to make sure that TLS is happenning
-        self.assertIsInstance(
-            client_factory._wrappedFactory._testingContextFactory,
-            ClientTLSOptions,
-        )
+        context_factory = client_factory._wrappedFactory._testingContextFactory
+        self.assertIsInstance(context_factory, ClientTLSOptions)
+        self.assertEqual(context_factory._hostname, "example.org")  # tlsname
         # And since we use endpoints, they go through reactor.connectTCP
         # which works differently to connectSSL on the testing reactor
 
