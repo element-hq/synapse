@@ -21,6 +21,8 @@
 #
 import tempfile
 from typing import Callable
+from unittest import mock
+from unittest.mock import Mock
 
 import yaml
 from parameterized import parameterized
@@ -179,3 +181,40 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             config = HomeServerConfig.load_config("", ["-c", self.config_file])
 
             self.assertEqual(get_secret(config), b"53C237")
+
+    @parameterized.expand(
+        [
+            "turn_shared_secret: 53C237",
+            "registration_shared_secret: 53C237",
+            "macaroon_secret_key: 53C237",
+            "recaptcha_private_key: 53C237",
+            "recaptcha_public_key: ¬53C237",
+            "experimental_features:\n  msc3861:\n    enabled: true\n    client_secret: 53C237",
+            'experimental_features:\n  msc3861:\n    enabled: true\n    client_auth_method: private_key_jwt\n    jwk: {"mock": "mock"}',
+            "experimental_features:\n  msc3861:\n    enabled: true\n    admin_token: 53C237",
+            "form_secret: 53C237",
+            *["redis:\n  enabled: true\n  password: 53C237"] * (hiredis is not None),
+        ]
+    )
+    @mock.patch("authlib.jose.rfc7517.JsonWebKey.import_key")
+    def test_no_secrets_in_config(self, config_line: str, _jwkmock: Mock) -> None:
+        self.generate_config_and_remove_lines_containing(
+            ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
+        )
+        # Check strict mode with no offenders.
+        HomeServerConfig.load_config(
+            "", ["-c", self.config_file, "--no-secrets-in-config"]
+        )
+        self.add_lines_to_config(["", config_line])
+        # Check strict mode with a single offender.
+        with self.assertRaises(ConfigError):
+            HomeServerConfig.load_config(
+                "", ["-c", self.config_file, "--no-secrets-in-config"]
+            )
+
+        # FIXME: Remove once there is `client_secret_path` for MSC3861.
+        if "admin_token" in config_line:
+            return
+
+        # Check lenient mode with a single offender.
+        HomeServerConfig.load_config("", ["-c", self.config_file])

@@ -161,7 +161,9 @@ class MSC3861:
     This is used by the OIDC provider, to make admin calls to Synapse.
     """
 
-    def check_config_conflicts(self, root: RootConfig) -> None:
+    def check_config_conflicts(
+        self, root: RootConfig, allow_secrets_in_config: bool
+    ) -> None:
         """Checks for any configuration conflicts with other parts of Synapse.
 
         Raises:
@@ -170,6 +172,24 @@ class MSC3861:
 
         if not self.enabled:
             return
+
+        if self.client_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "client_secret"),
+            )
+
+        if self.jwk and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "jwk"),
+            )
+
+        if self.admin_token and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("experimental", "msc3861", "admin_token"),
+            )
 
         if (
             root.auth.password_enabled_for_reauth
@@ -261,7 +281,9 @@ class ExperimentalConfig(Config):
 
     section = "experimental"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         experimental = config.get("experimental_features") or {}
 
         # MSC3026 (busy presence state)
@@ -405,7 +427,9 @@ class ExperimentalConfig(Config):
             ) from exc
 
         # Check that none of the other config options conflict with MSC3861 when enabled
-        self.msc3861.check_config_conflicts(self.root)
+        self.msc3861.check_config_conflicts(
+            self.root, allow_secrets_in_config=allow_secrets_in_config
+        )
 
         self.msc4028_push_encrypted_events = experimental.get(
             "msc4028_push_encrypted_events", False
