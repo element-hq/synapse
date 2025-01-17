@@ -97,6 +97,18 @@ class CapabilitiesRestServlet(RestServlet):
                 "enabled": True,
             }
 
+            # Ensure this is consistent with the legacy m.set_displayname and
+            # m.set_avatar_url.
+            disallowed = []
+            if self.config.registration.enable_set_displayname:
+                disallowed.append("displayname")
+            if self.config.registration.enable_set_avatar_url:
+                disallowed.append("avatar_url")
+            if disallowed:
+                response["capabilities"]["uk.tcpip.msc4133.profile_fields"][
+                    "disallowed"
+                ] = disallowed
+
         return HTTPStatus.OK, response
 
 
