@@ -23,14 +23,19 @@ from typing import Optional, cast
 from unittest.mock import Mock, call
 
 from parameterized import parameterized
-from signedjson.key import generate_signing_key
+from signedjson.key import (
+    encode_verify_key_base64,
+    generate_signing_key,
+    get_verify_key,
+)
 
 from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
 from synapse.api.presence import UserDevicePresenceState, UserPresenceState
 from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
-from synapse.events.builder import EventBuilder
+from synapse.crypto.event_signing import add_hashes_and_signatures
+from synapse.events import make_event_from_dict
 from synapse.federation.sender import FederationSender
 from synapse.handlers.presence import (
     BUSY_ONLINE_TIMEOUT,
@@ -48,6 +53,7 @@ from synapse.rest import admin
 from synapse.rest.client import room
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
+from synapse.storage.keys import FetchKeyResult
 from synapse.types import JsonDict, UserID, get_domain_from_id
 from synapse.util import Clock
 
@@ -1825,6 +1831,7 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
         # self.event_builder_for_2.hostname = "test2"
 
         self.store = hs.get_datastores().main
+        self.storage_controllers = hs.get_storage_controllers()
         self.state = hs.get_state_handler()
         self._event_auth_handler = hs.get_event_auth_handler()
 
@@ -1942,27 +1949,63 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
 
         room_version = self.get_success(self.store.get_room_version_id(room_id))
 
-        builder = EventBuilder(
-            state=self.state,
-            event_auth_handler=self._event_auth_handler,
-            store=self.store,
-            clock=self.clock,
-            hostname=hostname,
-            signing_key=self.random_signing_key,
+        # poke the other server's signing key into the key store, so that we don't
+        # make requests for it
+        other_server_signature_key = generate_signing_key("test")
+        verify_key = get_verify_key(other_server_signature_key)
+        verify_key_id = "%s:%s" % (verify_key.alg, verify_key.version)
+
+        self.get_success(
+            self.hs.get_datastores().main.store_server_keys_response(
+                hostname,
+                from_server=hostname,
+                ts_added_ms=self.clock.time_msec(),
+                verify_keys={
+                    verify_key_id: FetchKeyResult(
+                        verify_key=verify_key,
+                        valid_until_ts=self.clock.time_msec() + 10000,
+                    ),
+                },
+                response_json={
+                    "verify_keys": {
+                        verify_key_id: {"key": encode_verify_key_base64(verify_key)}
+                    }
+                },
+            )
+        )
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # Figure out what the forward extremities in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(room_id)
+        )
+        event_dict = {
+            "room_id": room_id,
+            "sender": user_id,
+            "state_key": user_id,
+            "depth": 1000,
+            "origin_server_ts": 1,
+            "type": EventTypes.Member,
+            "content": {"membership": Membership.JOIN},
+            "auth_events": [
+                state_map[(EventTypes.Create, "")].event_id,
+                state_map[(EventTypes.JoinRules, "")].event_id,
+            ],
+            "prev_events": list(forward_extremity_event_ids),
+        }
+        add_hashes_and_signatures(
             room_version=KNOWN_ROOM_VERSIONS[room_version],
-            room_id=room_id,
-            type=EventTypes.Member,
-            sender=user_id,
-            state_key=user_id,
-            content={"membership": Membership.JOIN},
+            event_dict=event_dict,
+            signature_name=hostname,
+            signing_key=other_server_signature_key,
         )
-
-        prev_event_ids = self.get_success(
-            self.store.get_latest_event_ids_in_room(room_id)
-        )
-
-        event = self.get_success(
-            builder.build(prev_event_ids=list(prev_event_ids), auth_event_ids=None)
+        event = make_event_from_dict(
+            event_dict,
+            room_version=KNOWN_ROOM_VERSIONS[room_version],
         )
 
         self.get_success(self.federation_event_handler.on_receive_pdu(hostname, event))
