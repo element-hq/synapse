@@ -1415,7 +1415,6 @@ class EventCreationHandler:
             PartialStateConflictError if attempting to persist a partial state event in
                 a room that has been un-partial stated.
         """
-
         extra_users = extra_users or []
 
         for event, context in events_and_context:
