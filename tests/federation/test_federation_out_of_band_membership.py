@@ -104,7 +104,6 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
      - invites received over federation, before we join the room
      - *rejections* for said invites
-     - knock events for rooms that we would like to join but have not yet joined.
 
     See the "Out-of-band membership events" section in
     `docs/development/room-dag-concepts.md` for more information.
