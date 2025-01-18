@@ -33,9 +33,11 @@ from twisted.test.proto_helpers import MemoryReactor
 
 from synapse.api.constants import EventTypes, Membership, PresenceState
 from synapse.api.presence import UserDevicePresenceState, UserPresenceState
-from synapse.api.room_versions import KNOWN_ROOM_VERSIONS
+from synapse.api.room_versions import (
+    RoomVersion,
+)
 from synapse.crypto.event_signing import add_hashes_and_signatures
-from synapse.events import make_event_from_dict
+from synapse.events import EventBase, make_event_from_dict
 from synapse.federation.sender import FederationSender
 from synapse.handlers.presence import (
     BUSY_ONLINE_TIMEOUT,
@@ -1947,7 +1949,51 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
 
         hostname = get_domain_from_id(user_id)
 
-        room_version = self.get_success(self.store.get_room_version_id(room_id))
+        room_version = self.get_success(self.store.get_room_version(room_id))
+
+        state_map = self.get_success(
+            self.storage_controllers.state.get_current_state(room_id)
+        )
+
+        # Figure out what the forward extremities in the room are (the most recent
+        # events that aren't tied into the DAG)
+        forward_extremity_event_ids = self.get_success(
+            self.hs.get_datastores().main.get_latest_event_ids_in_room(room_id)
+        )
+
+        event = self.create_fake_event_from_remote_server(
+            remote_server_name=hostname,
+            event_dict={
+                "room_id": room_id,
+                "sender": user_id,
+                "type": EventTypes.Member,
+                "state_key": user_id,
+                "depth": 1000,
+                "origin_server_ts": 1,
+                "content": {"membership": Membership.JOIN},
+                "auth_events": [
+                    state_map[(EventTypes.Create, "")].event_id,
+                    state_map[(EventTypes.JoinRules, "")].event_id,
+                ],
+                "prev_events": list(forward_extremity_event_ids),
+            },
+            room_version=room_version,
+        )
+
+        self.get_success(self.federation_event_handler.on_receive_pdu(hostname, event))
+
+        # Check that it was successfully persisted.
+        self.get_success(self.store.get_event(event.event_id))
+        self.get_success(self.store.get_event(event.event_id))
+
+    def create_fake_event_from_remote_server(
+        self, remote_server_name: str, event_dict: JsonDict, room_version: RoomVersion
+    ) -> EventBase:
+        """
+        This is similar to what `FederatingHomeserverTestCase` is doing but we don't
+        need all of the extra baggage and we want to be able to create an event from
+        many remote servers.
+        """
 
         # poke the other server's signing key into the key store, so that we don't
         # make requests for it
@@ -1957,8 +2003,8 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
 
         self.get_success(
             self.hs.get_datastores().main.store_server_keys_response(
-                hostname,
-                from_server=hostname,
+                remote_server_name,
+                from_server=remote_server_name,
                 ts_added_ms=self.clock.time_msec(),
                 verify_keys={
                     verify_key_id: FetchKeyResult(
@@ -1974,42 +2020,15 @@ class PresenceJoinTestCase(unittest.HomeserverTestCase):
             )
         )
 
-        state_map = self.get_success(
-            self.storage_controllers.state.get_current_state(room_id)
-        )
-
-        # Figure out what the forward extremities in the room are (the most recent
-        # events that aren't tied into the DAG)
-        forward_extremity_event_ids = self.get_success(
-            self.hs.get_datastores().main.get_latest_event_ids_in_room(room_id)
-        )
-        event_dict = {
-            "room_id": room_id,
-            "sender": user_id,
-            "state_key": user_id,
-            "depth": 1000,
-            "origin_server_ts": 1,
-            "type": EventTypes.Member,
-            "content": {"membership": Membership.JOIN},
-            "auth_events": [
-                state_map[(EventTypes.Create, "")].event_id,
-                state_map[(EventTypes.JoinRules, "")].event_id,
-            ],
-            "prev_events": list(forward_extremity_event_ids),
-        }
         add_hashes_and_signatures(
-            room_version=KNOWN_ROOM_VERSIONS[room_version],
+            room_version=room_version,
             event_dict=event_dict,
-            signature_name=hostname,
+            signature_name=remote_server_name,
             signing_key=other_server_signature_key,
         )
         event = make_event_from_dict(
             event_dict,
-            room_version=KNOWN_ROOM_VERSIONS[room_version],
+            room_version=room_version,
         )
 
-        self.get_success(self.federation_event_handler.on_receive_pdu(hostname, event))
-
-        # Check that it was successfully persisted.
-        self.get_success(self.store.get_event(event.event_id))
-        self.get_success(self.store.get_event(event.event_id))
+        return event
