@@ -382,10 +382,6 @@ class FederationEventHandler:
             event.event_id,
             event.signatures,
         )
-        # logger.info(
-        #     "📮 on_send_membership_event: received event: %s",
-        #     event,
-        # )
 
         if get_domain_from_id(event.sender) != origin:
             logger.info(
@@ -440,10 +436,6 @@ class FederationEventHandler:
 
         await self._check_for_soft_fail(event, context=context, origin=origin)
         await self._run_push_actions_and_persist_event(event, context)
-        # logger.info(
-        #     "✅ on_send_membership_event: handled event: %s",
-        #     event,
-        # )
         return event, context
 
     async def check_join_restrictions(

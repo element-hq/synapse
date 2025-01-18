@@ -1256,7 +1256,6 @@ class FederationServer(FederationBase):
         # has started processing).
         while True:
             async with lock:
-                logger.info("📬 handling received PDU in room %s: %s", room_id, event)
                 try:
                     with nested_logging_context(event.event_id):
                         # We're taking out a lock within a lock, which could
@@ -1271,9 +1270,6 @@ class FederationServer(FederationBase):
                             await self._federation_event_handler.on_receive_pdu(
                                 origin, event
                             )
-                    logger.info(
-                        "✅ handled received PDU in room %s: %s", room_id, event
-                    )
                 except FederationError as e:
                     # XXX: Ideally we'd inform the remote we failed to process
                     # the event, but we can't return an error in the transaction

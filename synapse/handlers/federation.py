@@ -606,8 +606,6 @@ class FederationHandler:
 
             content: The event content to use for the join event.
         """
-        logger.info("🧲 do_invite_join for %s in %s", joinee, room_id)
-
         # TODO: We should be able to call this on workers, but the upgrading of
         # room stuff after join currently doesn't work on workers.
         # TODO: Before we relax this condition, we need to allow re-syncing of
@@ -1053,8 +1051,6 @@ class FederationHandler:
 
         Respond with the now signed event.
         """
-        logger.info("🗳️ on_invite_request: handling event %s", event)
-
         if event.state_key is None:
             raise SynapseError(400, "The invite event did not have a state key")
 
@@ -1131,7 +1127,6 @@ class FederationHandler:
             await self.store.remove_push_actions_from_staging(event.event_id)
             raise
 
-        logger.info("✅ on_invite_request: handled event %s", event)
         return event
 
     async def do_remotely_reject_invite(

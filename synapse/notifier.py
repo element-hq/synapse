@@ -308,7 +308,6 @@ class Notifier:
         notify_new_room_events with the results."""
         event_entries = []
         for event, pos in events_and_pos:
-            logger.info("📨 Notifying about new event %s", event, exc_info=True)
             entry = self.create_pending_room_event_entry(
                 pos,
                 extra_users,

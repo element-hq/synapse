@@ -563,7 +563,7 @@ def _is_membership_change_allowed(
     invite_level = get_named_level(auth_events, "invite", 0)
     ban_level = get_named_level(auth_events, "ban", 50)
 
-    logger.info(
+    logger.debug(
         "_is_membership_change_allowed: %s",
         {
             "caller_membership": caller.membership if caller else None,
