@@ -17,9 +17,9 @@
 # [This file includes modifications made by New Vector Limited]
 #
 #
+from http import HTTPStatus
 from typing import Collection, ContextManager, List, Optional
 from unittest.mock import AsyncMock, Mock, patch
-from http import HTTPStatus
 
 from parameterized import parameterized, parameterized_class
 
