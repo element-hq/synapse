@@ -1873,7 +1873,9 @@ This option sets ratelimiting for presence.
 The `rc_presence.per_user` option sets rate limits on how often a specific
 users' presence updates are evaluated. Ratelimited presence updates sent via sync are
 ignored, and no error is returned to the client.
-This option also sets the rate limits used in the `/_matrix/client/v3/presence` endpoint.
+This option also sets the rate limit for the
+[`PUT /_matrix/client/v3/presence/{userId}/status`](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus)
+endpoint.
 
 `per_user` defaults to `per_second: 0.1`, `burst_count: 1`.
 
