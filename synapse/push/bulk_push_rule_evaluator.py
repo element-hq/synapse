@@ -59,6 +59,7 @@ from synapse.types.state import StateFilter
 from synapse.util import unwrapFirstError
 from synapse.util.async_helpers import gather_results
 from synapse.util.caches import register_cache
+from synapse.util.frozenutils import unfreeze
 from synapse.util.metrics import measure_func
 from synapse.visibility import filter_event_for_clients_with_state
 
@@ -412,7 +413,7 @@ class BulkPushRuleEvaluator:
         # Note that this is done automatically for the sender's power level by
         # _get_power_levels_and_sender_level in its call to get_user_power_level
         # (even for room V10.)
-        notification_levels = power_levels.get("notifications", {})
+        notification_levels = unfreeze(power_levels.get("notifications", {}))
         if not event.room_version.enforce_int_power_levels:
             keys = list(notification_levels.keys())
             for key in keys:
