@@ -186,26 +186,34 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
     async def mark_state_groups_as_used(
         self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
     ) -> None:
-        min_state_epoch = min(ctx.state_epoch for _, ctx in event_and_contexts)
-        state_groups = {
-            ctx.state_group
-            for _, ctx in event_and_contexts
-            if ctx.state_group and not ctx.rejected
-        }
-        state_groups.update(
-            ctx.state_group_before_event
-            for _, ctx in event_and_contexts
-            if ctx.state_group_before_event is not None
-        )
+        referenced_state_groups = []
+        state_epochs = []
+        for event, ctx in event_and_contexts:
+            if ctx.rejected or event.internal_metadata.is_outlier():
+                continue
 
-        if not state_groups:
+            assert ctx.state_epoch is not None
+            assert ctx.state_group is not None
+
+            state_epochs.append(ctx.state_epoch)
+
+            referenced_state_groups.append(ctx.state_group)
+
+            if ctx.state_group_before_event:
+                referenced_state_groups.append(ctx.state_group_before_event)
+
+        if not referenced_state_groups:
+            # We don't reference any state groups, so nothing to do
             return
+
+        assert state_epochs  # If we have state groups we have a state epoch
+        min_state_epoch = min(state_epochs)
 
         await self.db_pool.runInteraction(
             "mark_state_groups_as_used",
             self._mark_state_groups_as_used_txn,
             min_state_epoch,
-            state_groups,
+            referenced_state_groups,
         )
 
     def _mark_state_groups_as_used_txn(

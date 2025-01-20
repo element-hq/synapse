@@ -644,25 +644,7 @@ class EventsPersistenceStorageController:
             # TODO: Add a table to track what state groups we're currently
             # inserting? There's a race where this transaction takes so long
             # that we delete the state groups we're inserting.
-            #
-            # NYARGH: We don't have access to the state store here? Do we do
-            # this a layer above? There's not *that* much happening here?
-
-            min_state_epoch = min(ctx.state_epoch for _, ctx in chunk)
-            state_groups = {
-                ctx.state_group
-                for _, ctx in chunk
-                if ctx.state_group and not ctx.rejected
-            }
-            state_groups.update(
-                ctx.state_group_before_event
-                for _, ctx in chunk
-                if ctx.state_group_before_event is not None
-            )
-            await self.state_store.mark_state_groups_as_used(
-                min_state_epoch,
-                state_groups,
-            )
+            await self.state_store.mark_state_groups_as_used(events_and_contexts)
 
             await self.persist_events_store._persist_events_and_state_updates(
                 room_id,
