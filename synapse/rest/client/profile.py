@@ -303,7 +303,9 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
         if not is_namedspaced_grammar(field_name):
             raise SynapseError(
-                400, "Field name is invalid", errcode=Codes.INVALID_PARAM
+                400,
+                "Field name does not follow Common Namespaced Identifier Grammar",
+                errcode=Codes.INVALID_PARAM
             )
 
         content = parse_json_object_from_request(request)
@@ -363,7 +365,9 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
         if not is_namedspaced_grammar(field_name):
             raise SynapseError(
-                400, "Field name is invalid", errcode=Codes.INVALID_PARAM
+                400,
+                "Field name does not follow Common Namespaced Identifier Grammar",
+                errcode=Codes.INVALID_PARAM
             )
 
         propagate = _read_propagate(self.hs, request)
