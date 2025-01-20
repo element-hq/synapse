@@ -49,7 +49,7 @@ MXC_REGEX = re.compile("^mxc://([^/]+)/([^/#?]+)$")
 # a-z, the rest is a-z, 0-9, -, _, or ..
 #
 # This doesn't check anything about validity of namespaces.
-NAMESPACED_GRAMMAR = re.compile(r"[a-z][a-z0-9_.-]{0,254}")
+NAMESPACED_GRAMMAR = re.compile(r"^[a-z][a-z0-9_.-]{0,254}$")
 
 
 def random_string(length: int) -> str:

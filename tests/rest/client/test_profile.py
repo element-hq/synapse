@@ -494,6 +494,15 @@ class ProfileTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.json_body["errcode"], Codes.NOT_FOUND)
 
     @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
+    def test_get_missing_custom_field_invalid_field_name(self) -> None:
+        channel = self.make_request(
+            "GET",
+            f"/_matrix/client/unstable/uk.tcpip.msc4133/profile/{self.owner}/[custom_field]",
+        )
+        self.assertEqual(channel.code, HTTPStatus.BAD_REQUEST, channel.result)
+        self.assertEqual(channel.json_body["errcode"], Codes.INVALID_PARAM)
+
+    @unittest.override_config({"experimental_features": {"msc4133_enabled": True}})
     def test_get_custom_field_rejects_bad_username(self) -> None:
         channel = self.make_request(
             "GET",

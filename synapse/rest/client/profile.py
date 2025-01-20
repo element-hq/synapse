@@ -272,6 +272,18 @@ class UnstableProfileFieldRestServlet(RestServlet):
                 HTTPStatus.BAD_REQUEST, "Invalid user id", Codes.INVALID_PARAM
             )
 
+        if not field_name:
+            raise SynapseError(400, "Field name too short", errcode=Codes.INVALID_PARAM)
+
+        if len(field_name.encode("utf-8")) > MAX_CUSTOM_FIELD_LEN:
+            raise SynapseError(400, "Field name too long", errcode=Codes.KEY_TOO_LARGE)
+        if not is_namedspaced_grammar(field_name):
+            raise SynapseError(
+                400,
+                "Field name does not follow Common Namespaced Identifier Grammar",
+                errcode=Codes.INVALID_PARAM,
+            )
+
         user = UserID.from_string(user_id)
         await self.profile_handler.check_profile_query_allowed(user, requester_user)
 
@@ -305,7 +317,7 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Field name does not follow Common Namespaced Identifier Grammar",
-                errcode=Codes.INVALID_PARAM
+                errcode=Codes.INVALID_PARAM,
             )
 
         content = parse_json_object_from_request(request)
@@ -367,7 +379,7 @@ class UnstableProfileFieldRestServlet(RestServlet):
             raise SynapseError(
                 400,
                 "Field name does not follow Common Namespaced Identifier Grammar",
-                errcode=Codes.INVALID_PARAM
+                errcode=Codes.INVALID_PARAM,
             )
 
         propagate = _read_propagate(self.hs, request)
