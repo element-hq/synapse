@@ -95,3 +95,48 @@ class PresenceTestCase(unittest.HomeserverTestCase):
 
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(self.presence_handler.set_state.call_count, 0)
+
+    def test_put_presence_over_ratelimit(self) -> None:
+        """
+        Multiple PUTs to the status endpoint without sufficient delay will be rate limited.
+        """
+        self.hs.config.server.presence_enabled = True
+
+        body = {"presence": "here", "status_msg": "beep boop"}
+        channel = self.make_request(
+            "PUT", "/presence/%s/status" % (self.user_id,), body
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+
+        body = {"presence": "here", "status_msg": "beep boop"}
+        channel = self.make_request(
+            "PUT", "/presence/%s/status" % (self.user_id,), body
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(self.presence_handler.set_state.call_count, 1)
+
+    def test_put_presence_within_ratelimit(self) -> None:
+        """
+        Multiple PUTs to the status endpoint with sufficient delay should all call set_state.
+        """
+        self.hs.config.server.presence_enabled = True
+
+        body = {"presence": "here", "status_msg": "beep boop"}
+        channel = self.make_request(
+            "PUT", "/presence/%s/status" % (self.user_id,), body
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+
+        # Advance time a sufficient amount to avoid rate limiting.
+        self.reactor.advance(30)
+
+        body = {"presence": "here", "status_msg": "beep boop"}
+        channel = self.make_request(
+            "PUT", "/presence/%s/status" % (self.user_id,), body
+        )
+
+        self.assertEqual(channel.code, HTTPStatus.OK)
+        self.assertEqual(self.presence_handler.set_state.call_count, 2)

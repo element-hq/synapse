@@ -1868,6 +1868,27 @@ rc_federation:
   concurrent: 5
 ```
 ---
+### `rc_presence`
+
+This option sets ratelimiting for presence.
+
+The `rc_presence.per_user` option sets rate limits on how often a specific
+users' presence updates are evaluated. Ratelimited presence updates sent via sync are
+ignored, and no error is returned to the client.
+This option also sets the rate limit for the
+[`PUT /_matrix/client/v3/presence/{userId}/status`](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus)
+endpoint.
+
+`per_user` defaults to `per_second: 0.1`, `burst_count: 1`.
+
+Example configuration:
+```yaml
+rc_presence:
+  per_user:
+    per_second: 0.05
+    burst_count: 0.5
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 Sets outgoing federation transaction frequency for sending read-receipts,
