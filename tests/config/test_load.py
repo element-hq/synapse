@@ -22,7 +22,6 @@
 import tempfile
 from typing import Callable
 from unittest import mock
-from unittest.mock import Mock
 
 import yaml
 from parameterized import parameterized
@@ -32,6 +31,11 @@ from synapse.config._base import RootConfig
 from synapse.config.homeserver import HomeServerConfig
 
 from tests.config.utils import ConfigFileTestCase
+
+try:
+    import authlib
+except ImportError:
+    authlib = None
 
 try:
     import hiredis
@@ -189,15 +193,38 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "macaroon_secret_key: 53C237",
             "recaptcha_private_key: 53C237",
             "recaptcha_public_key: ¬53C237",
-            "experimental_features:\n  msc3861:\n    enabled: true\n    client_secret: 53C237",
-            'experimental_features:\n  msc3861:\n    enabled: true\n    client_auth_method: private_key_jwt\n    jwk: {"mock": "mock"}',
-            "experimental_features:\n  msc3861:\n    enabled: true\n    admin_token: 53C237",
             "form_secret: 53C237",
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    client_secret: 53C237"
+            ]
+            * (authlib is not None),
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    client_auth_method: private_key_jwt\n"
+                '    jwk: {"mock": "mock"}'
+            ]
+            * (authlib is not None),
+            *[
+                "experimental_features:\n"
+                "  msc3861:\n"
+                "    enabled: true\n"
+                "    admin_token: 53C237"
+            ]
+            * (authlib is not None),
             *["redis:\n  enabled: true\n  password: 53C237"] * (hiredis is not None),
         ]
     )
-    @mock.patch("authlib.jose.rfc7517.JsonWebKey.import_key")
-    def test_no_secrets_in_config(self, config_line: str, _jwkmock: Mock) -> None:
+    def test_no_secrets_in_config(self, config_line: str) -> None:
+        if authlib is not None:
+            patcher = mock.patch("authlib.jose.rfc7517.JsonWebKey.import_key")
+            self.addCleanup(patcher.stop)
+            patcher.start()
+
         self.generate_config_and_remove_lines_containing(
             ["form_secret", "macaroon_secret_key", "registration_shared_secret"]
         )
