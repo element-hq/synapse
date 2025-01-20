@@ -375,7 +375,7 @@ class FederationEventHandlerTests(unittest.FederatingHomeserverTestCase):
 
         In this test, we pretend we are processing a "pulled" event via
         backfill. The pulled event succesfully processes and the backward
-        extremeties are updated along with clearing out any failed pull attempts
+        extremities are updated along with clearing out any failed pull attempts
         for those old extremities.
 
         We check that we correctly cleared failed pull attempts of the

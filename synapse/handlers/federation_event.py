@@ -2272,8 +2272,8 @@ class FederationEventHandler:
                 event_and_contexts, backfilled=backfilled
             )
 
-            # After persistence we always need to notify replication there may
-            # be new data.
+            # After persistence, we always need to notify replication there may be new
+            # data (backfilled or not) because TODO.
             self._notifier.notify_replication()
 
             if self._ephemeral_messages_enabled:
