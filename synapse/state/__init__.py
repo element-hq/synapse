@@ -65,6 +65,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.controllers import StateStorageController
     from synapse.storage.databases.main import DataStore
+    from synapse.storage.databases.state import StateGroupDataStore
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("synapse.state.metrics")
@@ -481,7 +482,10 @@ class StateHandler:
     @trace
     @measure_func()
     async def resolve_state_groups_for_events(
-        self, room_id: str, event_ids: StrCollection, await_full_state: bool = True
+        self,
+        room_id: str,
+        event_ids: StrCollection,
+        await_full_state: bool = True,
     ) -> _StateCacheEntry:
         """Given a list of event_ids this method fetches the state at each
         event, resolves conflicts between them and returns them.
@@ -527,7 +531,15 @@ class StateHandler:
                 state_group_id
             )
 
-            # TODO: Check for deleted state groups
+            # Check if we're trying to delete the given prev group, if so we
+            # pretend we didn't see it.
+            if prev_group:
+                pending_deletion = (
+                    await self._state_store.is_state_group_pending_deletion(prev_group)
+                )
+                if pending_deletion:
+                    prev_group = None
+                    delta_ids = None
 
             return _StateCacheEntry(
                 state=None,
@@ -549,7 +561,7 @@ class StateHandler:
             room_version,
             state_to_resolve,
             None,
-            state_res_store=StateResolutionStore(self.store),
+            state_res_store=StateResolutionStore(self.store, self._state_store),
         )
         return result
 
@@ -681,8 +693,22 @@ class StateResolutionHandler:
         async with self.resolve_linearizer.queue(group_names):
             cache = self._state_cache.get(group_names, None)
             if cache:
-                # TODO: Check for deleted state groups
-                return cache
+                pending_deletion = False
+
+                if cache.state_group:
+                    pending_deletion |= await state_res_store.state_store.is_state_group_pending_deletion(
+                        cache.state_group
+                    )
+
+                if cache.prev_group:
+                    pending_deletion |= await state_res_store.state_store.is_state_group_pending_deletion(
+                        cache.prev_group
+                    )
+
+                if not pending_deletion:
+                    return cache
+                else:
+                    self._state_cache.pop(group_names, None)
 
             logger.info(
                 "Resolving state for %s with groups %s",
@@ -903,7 +929,8 @@ class StateResolutionStore:
     in well defined way.
     """
 
-    store: "DataStore"
+    main_store: "DataStore"
+    state_store: "StateGroupDataStore"
 
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
@@ -918,7 +945,7 @@ class StateResolutionStore:
             An awaitable which resolves to a dict from event_id to event.
         """
 
-        return self.store.get_events(
+        return self.main_store.get_events(
             event_ids,
             redact_behaviour=EventRedactBehaviour.as_is,
             get_prev_content=False,
@@ -939,4 +966,4 @@ class StateResolutionStore:
             An awaitable that resolves to a set of event IDs.
         """
 
-        return self.store.get_auth_chain_difference(room_id, state_sets)
+        return self.main_store.get_auth_chain_difference(room_id, state_sets)

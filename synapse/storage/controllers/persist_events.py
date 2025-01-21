@@ -549,7 +549,7 @@ class EventsPersistenceStorageController:
             room_version,
             state_maps_by_state_group,
             event_map=None,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(self.main_store, self.state_store),
         )
 
         return await res.get_state(self._state_controller, StateFilter.all())
@@ -976,7 +976,7 @@ class EventsPersistenceStorageController:
             room_version,
             state_groups,
             events_map,
-            state_res_store=StateResolutionStore(self.main_store),
+            state_res_store=StateResolutionStore(self.main_store, self.state_store),
         )
 
         state_resolutions_during_persistence.inc()

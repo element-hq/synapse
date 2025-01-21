@@ -237,25 +237,21 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             values=[(state_group,) for state_group in state_groups],
         )
 
-    @cached()
-    async def is_state_group_pending_deletion_before(
-        self, state_epoch: int, state_group: int
-    ) -> bool:
-        """Check if a state group is marked as pending deletion in a previous
-        epoch, but does not check the current epoch."""
+    async def is_state_group_pending_deletion(self, state_group: int) -> bool:
+        """Check if a state group is marked as pending deletion."""
 
-        def is_state_group_pending_deletion_before_txn(txn: LoggingTransaction) -> bool:
+        def is_state_group_pending_deletion_txn(txn: LoggingTransaction) -> bool:
             sql = """
                 SELECT 1 FROM state_groups_pending_deletion
-                WHERE state_epoch < ? AND state_group = ?
+                WHERE state_group = ?
             """
-            txn.execute(sql, (state_epoch, state_group))
+            txn.execute(sql, (state_group,))
 
             return txn.fetchone() is not None
 
         return await self.db_pool.runInteraction(
-            "is_state_group_pending_deletion_before",
-            is_state_group_pending_deletion_before_txn,
+            "is_state_group_pending_deletion",
+            is_state_group_pending_deletion_txn,
         )
 
     async def mark_state_group_as_used(self, state_group: int) -> None:
