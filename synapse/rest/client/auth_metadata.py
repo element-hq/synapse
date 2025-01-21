@@ -90,7 +90,7 @@ class AuthMetadataServlet(RestServlet):
             auth = cast(MSC3861DelegatedAuth, self._auth)
             return 200, await auth.auth_metadata()
         else:
-            # Wouldn't expect this to be reached: the servelet shouldn't have been
+            # Wouldn't expect this to be reached: the servlet shouldn't have been
             # registered. Still, fail gracefully if we are registered for some reason.
             raise SynapseError(
                 404,
