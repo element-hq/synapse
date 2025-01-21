@@ -1,2 +1,2 @@
-Updates contribution `docker-compose.yml` PostgreSQL version to v15 since v12 is now deprecated.
+Updates contributed `docker-compose.yml` file to PostgreSQL v15, as v12 is no longer supported by Synapse.
 Contributed by @maxkratz.
