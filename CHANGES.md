@@ -2,8 +2,8 @@
 
 ### Features
 
-- Implement [MSC4133](https://github.com/matrix-org/matrix-spec-proposals/pull/4133) for custom profile fields. ([\#17488](https://github.com/element-hq/synapse/issues/17488))
-- Add a unit test for the `type` parameter of the [Room State Admin API](https://element-hq.github.io/synapse/develop/admin_api/rooms.html#room-state-api). ([\#18035](https://github.com/element-hq/synapse/issues/18035))
+- Implement [MSC4133](https://github.com/matrix-org/matrix-spec-proposals/pull/4133) for custom profile fields. Contributed by @clokep. ([\#17488](https://github.com/element-hq/synapse/issues/17488))
+- Add a query param `type` to the [Room State Admin API](https://element-hq.github.io/synapse/develop/admin_api/rooms.html#room-state-api) that filters the state event. ([\#18035](https://github.com/element-hq/synapse/issues/18035))
 - Support the new `/auth_metadata` endpoint defined in [MSC2965](https://github.com/matrix-org/matrix-spec-proposals/pull/2965). ([\#18093](https://github.com/element-hq/synapse/issues/18093))
 
 ### Bugfixes
