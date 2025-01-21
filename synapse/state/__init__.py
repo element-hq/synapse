@@ -59,6 +59,7 @@ from synapse.types.state import StateFilter
 from synapse.util.async_helpers import Linearizer
 from synapse.util.caches.expiringcache import ExpiringCache
 from synapse.util.metrics import Measure, measure_func
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
@@ -499,6 +500,15 @@ class StateHandler:
                (ie. they are outliers or unknown)
         """
         logger.debug("resolve_state_groups event_ids %s", event_ids)
+
+        # Check we have the events persisted as non-outliers, to ensure we have
+        # the state.
+        persisted_event_ids = await self.store.have_events_in_timeline(event_ids)
+        missing_event_ids = set(event_ids) - persisted_event_ids
+        if missing_event_ids:
+            raise Exception(
+                f"Trying to resolve state across events we have not persisted: {shortstr(missing_event_ids)}",
+            )
 
         state_groups = await self._state_storage_controller.get_state_group_for_events(
             event_ids, await_full_state=await_full_state
