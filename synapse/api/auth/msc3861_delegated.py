@@ -174,6 +174,12 @@ class MSC3861DelegatedAuth(BaseAuth):
             logger.warning("Failed to load metadata:", exc_info=True)
             return None
 
+    async def auth_metadata(self) -> Dict[str, Any]:
+        """
+        Returns the auth metadata dict
+        """
+        return await self._issuer_metadata.get()
+
     async def _introspection_endpoint(self) -> str:
         """
         Returns the introspection endpoint of the issuer
