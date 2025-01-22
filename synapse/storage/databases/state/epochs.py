@@ -157,7 +157,7 @@ class StateEpochDataStore:
             retcols=("state_group",),
             desc="are_state_groups_pending_deletion",
         )
-        return {row["state_group"] for row in rows}
+        return {row[0] for row in rows}
 
     async def mark_state_group_as_used(self, state_group: int) -> None:
         """Mark that a given state group is used"""
