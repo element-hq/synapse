@@ -152,6 +152,7 @@ class FederationEventHandler:
         self._clock = hs.get_clock()
         self._store = hs.get_datastores().main
         self._state_store = hs.get_datastores().state
+        self._state_epoch_store = hs.get_datastores().state_epochs
         self._storage_controllers = hs.get_storage_controllers()
         self._state_storage_controller = self._storage_controllers.state
 
@@ -582,7 +583,7 @@ class FederationEventHandler:
                         state_maps_to_resolve,
                         event_map=None,
                         state_res_store=StateResolutionStore(
-                            self._store, self._state_store
+                            self._store, self._state_epoch_store
                         ),
                     )
                 )
@@ -1182,7 +1183,9 @@ class FederationEventHandler:
                 room_version,
                 state_maps,
                 event_map={event_id: event},
-                state_res_store=StateResolutionStore(self._store, self._state_store),
+                state_res_store=StateResolutionStore(
+                    self._store, self._state_epoch_store
+                ),
             )
 
         except Exception as e:
@@ -1878,7 +1881,7 @@ class FederationEventHandler:
                     [local_state_id_map, claimed_auth_events_id_map],
                     event_map=None,
                     state_res_store=StateResolutionStore(
-                        self._store, self._state_store
+                        self._store, self._state_epoch_store
                     ),
                 )
             )
@@ -2020,7 +2023,7 @@ class FederationEventHandler:
                     state_sets,
                     event_map=None,
                     state_res_store=StateResolutionStore(
-                        self._store, self._state_store
+                        self._store, self._state_epoch_store
                     ),
                 )
             )

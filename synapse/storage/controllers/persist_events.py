@@ -332,6 +332,7 @@ class EventsPersistenceStorageController:
         # store for now.
         self.main_store = stores.main
         self.state_store = stores.state
+        self._state_epoch_store = stores.state_epochs
 
         assert stores.persist_events
         self.persist_events_store = stores.persist_events
@@ -549,7 +550,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_maps_by_state_group,
             event_map=None,
-            state_res_store=StateResolutionStore(self.main_store, self.state_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_epoch_store
+            ),
         )
 
         return await res.get_state(self._state_controller, StateFilter.all())
@@ -644,7 +647,7 @@ class EventsPersistenceStorageController:
             # TODO: Add a table to track what state groups we're currently
             # inserting? There's a race where this transaction takes so long
             # that we delete the state groups we're inserting.
-            await self.state_store.mark_state_groups_as_used(events_and_contexts)
+            await self._state_epoch_store.mark_state_groups_as_used(events_and_contexts)
 
             await self.persist_events_store._persist_events_and_state_updates(
                 room_id,
@@ -976,7 +979,9 @@ class EventsPersistenceStorageController:
             room_version,
             state_groups,
             events_map,
-            state_res_store=StateResolutionStore(self.main_store, self.state_store),
+            state_res_store=StateResolutionStore(
+                self.main_store, self._state_epoch_store
+            ),
         )
 
         state_resolutions_during_persistence.inc()

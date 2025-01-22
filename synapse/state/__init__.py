@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from synapse.server import HomeServer
     from synapse.storage.controllers import StateStorageController
     from synapse.storage.databases.main import DataStore
-    from synapse.storage.databases.state import StateGroupDataStore
+    from synapse.storage.databases.state.epochs import StateEpochDataStore
 
 logger = logging.getLogger(__name__)
 metrics_logger = logging.getLogger("synapse.state.metrics")
@@ -197,6 +197,7 @@ class StateHandler:
         self._events_shard_config = hs.config.worker.events_shard_config
         self._instance_name = hs.get_instance_name()
         self._state_store = hs.get_datastores().state
+        self._state_epoch_store = hs.get_datastores().state_epochs
 
         self._update_current_state_client = (
             ReplicationUpdateCurrentStateRestServlet.make_client(hs)
@@ -314,7 +315,7 @@ class StateHandler:
         """
         assert not event.internal_metadata.is_outlier()
 
-        state_epoch = await self._state_store.get_state_epoch()  # TODO: Get state epoch
+        state_epoch = await self._state_epoch_store.get_state_epoch()
 
         #
         # first of all, figure out the state before the event, unless we
@@ -535,7 +536,9 @@ class StateHandler:
             # pretend we didn't see it.
             if prev_group:
                 pending_deletion = (
-                    await self._state_store.is_state_group_pending_deletion(prev_group)
+                    await self._state_epoch_store.is_state_group_pending_deletion(
+                        prev_group
+                    )
                 )
                 if pending_deletion:
                     prev_group = None
@@ -561,7 +564,7 @@ class StateHandler:
             room_version,
             state_to_resolve,
             None,
-            state_res_store=StateResolutionStore(self.store, self._state_store),
+            state_res_store=StateResolutionStore(self.store, self._state_epoch_store),
         )
         return result
 
@@ -696,12 +699,12 @@ class StateResolutionHandler:
                 pending_deletion = False
 
                 if cache.state_group:
-                    pending_deletion |= await state_res_store.state_store.is_state_group_pending_deletion(
+                    pending_deletion |= await state_res_store.state_epoch_store.is_state_group_pending_deletion(
                         cache.state_group
                     )
 
                 if cache.prev_group:
-                    pending_deletion |= await state_res_store.state_store.is_state_group_pending_deletion(
+                    pending_deletion |= await state_res_store.state_epoch_store.is_state_group_pending_deletion(
                         cache.prev_group
                     )
 
@@ -930,7 +933,7 @@ class StateResolutionStore:
     """
 
     main_store: "DataStore"
-    state_store: "StateGroupDataStore"
+    state_epoch_store: "StateEpochDataStore"
 
     def get_events(
         self, event_ids: StrCollection, allow_rejected: bool = False
