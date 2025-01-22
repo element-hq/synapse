@@ -718,6 +718,9 @@ class StateResolutionHandler:
                 list(group_names),
             )
 
+            # We double check that none of the state groups are pending
+            # deletion. They shouldn't be as all these state groups should be
+            # referenced.
             pending_deletion = await state_res_store.state_epoch_store.are_state_groups_pending_deletion(
                 group_names
             )
