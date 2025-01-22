@@ -157,3 +157,31 @@ class StateEpochDataStore:
             keyvalues={"state_group": state_group},
             desc="mark_state_group_as_used",
         )
+
+    def check_prev_group_before_insertion_txn(
+        self, txn: LoggingTransaction, prev_group: int, new_groups: Collection[int]
+    ) -> None:
+        sql = """
+            SELECT state_epoch, (SELECT state_epoch FROM state_epoch)
+            FROM state_groups_pending_deletion
+            WHERE state_group = ?
+        """
+        txn.execute(sql, (prev_group,))
+        row = txn.fetchone()
+        if row is not None:
+            pending_deletion_epoch, current_epoch = row
+            if current_epoch - pending_deletion_epoch >= 2:
+                raise Exception("")  # TODO
+
+            self.db_pool.simple_update_txn(
+                txn,
+                table="state_groups_pending_deletion",
+                keyvalues={"state_group": prev_group},
+                updatevalues={"state_epoch": current_epoch},
+            )
+            self.db_pool.simple_insert_many_txn(
+                txn,
+                table="state_groups_pending_deletion",
+                keys=("state_group", "state_epoch"),
+                values=[(state_group, current_epoch) for state_group in new_groups],
+            )

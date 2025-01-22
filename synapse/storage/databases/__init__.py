@@ -118,8 +118,8 @@ class Databases(Generic[DataStoreT]):
                     if state:
                         raise Exception("'state' data store already configured")
 
-                    state = StateGroupDataStore(database, db_conn, hs)
                     state_epochs = StateEpochDataStore(database, db_conn, hs)
+                    state = StateGroupDataStore(database, db_conn, hs, state_epochs)
 
                 db_conn.commit()
 
