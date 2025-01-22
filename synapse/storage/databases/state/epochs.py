@@ -147,6 +147,18 @@ class StateEpochDataStore:
             is_state_group_pending_deletion_txn,
         )
 
+    async def are_state_groups_pending_deletion(
+        self, state_groups: Collection[int]
+    ) -> Collection[int]:
+        rows = await self.db_pool.simple_select_many_batch(
+            table="state_groups_pending_deletion",
+            column="state_group",
+            iterable=state_groups,
+            retcols=("state_group",),
+            desc="are_state_groups_pending_deletion",
+        )
+        return {row["state_group"] for row in rows}
+
     async def mark_state_group_as_used(self, state_group: int) -> None:
         """Mark that a given state group is used"""
 

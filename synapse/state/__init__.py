@@ -696,17 +696,16 @@ class StateResolutionHandler:
         async with self.resolve_linearizer.queue(group_names):
             cache = self._state_cache.get(group_names, None)
             if cache:
-                pending_deletion = False
+                state_groups_to_check = []
+                if cache.state_group is not None:
+                    state_groups_to_check.append(cache.state_group)
 
-                if cache.state_group:
-                    pending_deletion |= await state_res_store.state_epoch_store.is_state_group_pending_deletion(
-                        cache.state_group
-                    )
+                if cache.prev_group is not None:
+                    state_groups_to_check.append(cache.prev_group)
 
-                if cache.prev_group:
-                    pending_deletion |= await state_res_store.state_epoch_store.is_state_group_pending_deletion(
-                        cache.prev_group
-                    )
+                pending_deletion = await state_res_store.state_epoch_store.are_state_groups_pending_deletion(
+                    state_groups_to_check
+                )
 
                 if not pending_deletion:
                     return cache
@@ -718,6 +717,14 @@ class StateResolutionHandler:
                 room_id,
                 list(group_names),
             )
+
+            pending_deletion = await state_res_store.state_epoch_store.are_state_groups_pending_deletion(
+                group_names
+            )
+            if pending_deletion:
+                raise Exception(
+                    f"state groups are pending deletion: {shortstr(pending_deletion)}"
+                )
 
             state_groups_histogram.observe(len(state_groups_ids))
 
