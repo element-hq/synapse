@@ -441,7 +441,7 @@ class EventChainStoreTestCase(HomeserverTestCase):
             persist_events_store._store_event_txn(
                 txn,
                 [
-                    (e, EventContext(self.hs.get_storage_controllers(), {}))
+                    (e, EventContext(self.hs.get_storage_controllers(), 1, {}))
                     for e in events
                 ],
             )
