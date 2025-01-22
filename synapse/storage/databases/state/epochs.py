@@ -13,7 +13,7 @@
 #
 
 
-from typing import TYPE_CHECKING, Collection, Tuple
+from typing import TYPE_CHECKING, Collection, Dict, Optional, Set, Tuple
 
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
@@ -22,13 +22,31 @@ from synapse.storage.database import (
     DatabasePool,
     LoggingDatabaseConnection,
     LoggingTransaction,
+    make_in_list_sql_clause,
 )
+from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
 
 
 class StateEpochDataStore:
+    """Manages state epochs and checks for state group deletion.
+
+    Deleting state groups is challenging as we need to ensure that any in-flight
+    events that are yet to be persisted do not refer to any state groups that we
+    want to delete.
+
+    To handle this, we have a concept of "state epochs", which slowly increment
+    over time. To delete a state group we first add it to the list of "pending
+    deletions" with the current epoch, and wait until a certain number of epochs
+    have passed before attempting to actually delete the state group. If during
+    this period an event that references the state group tries to be persisted,
+    then we check if too many state epochs have passed, if they have we reject
+    the attempt to persist the event, and if not we clear the state groups from
+    the pending deletion list (as they're now referenced).
+    """
+
     def __init__(
         self,
         database: DatabasePool,
@@ -79,7 +97,7 @@ class StateEpochDataStore:
     async def mark_state_groups_as_used(
         self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
     ) -> None:
-        referenced_state_groups = []
+        referenced_state_groups: Set[int] = set()
         state_epochs = []
         for event, ctx in event_and_contexts:
             if ctx.rejected or event.internal_metadata.is_outlier():
@@ -90,10 +108,10 @@ class StateEpochDataStore:
 
             state_epochs.append(ctx.state_epoch)
 
-            referenced_state_groups.append(ctx.state_group)
+            referenced_state_groups.add(ctx.state_group)
 
             if ctx.state_group_before_event:
-                referenced_state_groups.append(ctx.state_group_before_event)
+                referenced_state_groups.add(ctx.state_group_before_event)
 
         if not referenced_state_groups:
             # We don't reference any state groups, so nothing to do
@@ -110,7 +128,7 @@ class StateEpochDataStore:
         )
 
     def _mark_state_groups_as_used_txn(
-        self, txn: LoggingTransaction, state_epoch: int, state_groups: Collection[int]
+        self, txn: LoggingTransaction, state_epoch: int, state_groups: Set[int]
     ) -> None:
         current_state_epoch = self.db_pool.simple_select_one_onecol_txn(
             txn,
@@ -122,6 +140,34 @@ class StateEpochDataStore:
         # TODO: Move to constant. Is the equality correct?
         if current_state_epoch - state_epoch >= 2:
             raise Exception("FOO")
+
+        clause, values = make_in_list_sql_clause(
+            txn.database_engine,
+            "id",
+            state_groups,
+        )
+        sql = f"""
+            SELECT id, state_epoch
+            FROM state_groups
+            LEFT JOIN state_groups_pending_deletion ON (id = state_group)
+            WHERE {clause}
+        """
+        txn.execute(sql, values)
+
+        state_group_to_epoch: Dict[int, Optional[int]] = {row[0]: row[1] for row in txn}
+
+        missing_state_groups = state_groups - state_group_to_epoch.keys()
+        if missing_state_groups:
+            raise Exception(
+                f"state groups have been deleted: {shortstr(missing_state_groups)}"
+            )
+
+        for state_epoch_deletion in state_group_to_epoch.values():
+            if state_epoch_deletion is None:
+                continue
+
+            if current_state_epoch - state_epoch_deletion >= 2:
+                raise Exception("FOO")  # TODO
 
         self.db_pool.simple_delete_many_batch_txn(
             txn,
