@@ -53,6 +53,7 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.unittest import override_config
 
 
 class PresenceUpdateTestCase(unittest.HomeserverTestCase):
@@ -429,6 +430,12 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
 
         wheel_timer.insert.assert_not_called()
 
+    # `rc_presence` is set very high during unit tests to avoid ratelimiting
+    # subtly impacting unrelated tests. We set the ratelimiting back to a
+    # reasonable value for the tests specific to presence ratelimiting.
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
     def test_over_ratelimit_offline_to_online_to_unavailable(self) -> None:
         """
         Send a presence update, check that it went through, immediately send another one and
@@ -436,6 +443,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         """
         self._test_ratelimit_offline_to_online_to_unavailable(ratelimited=True)
 
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
     def test_within_ratelimit_offline_to_online_to_unavailable(self) -> None:
         """
         Send a presence update, check that it went through, advancing time a sufficient amount,
@@ -443,6 +453,9 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         """
         self._test_ratelimit_offline_to_online_to_unavailable(ratelimited=False)
 
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
     def _test_ratelimit_offline_to_online_to_unavailable(
         self, ratelimited: bool
     ) -> None:
