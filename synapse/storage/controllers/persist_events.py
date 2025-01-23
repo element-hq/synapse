@@ -638,20 +638,18 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
-            # TODO: Add a table to track what state groups we're currently
-            # inserting? There's a race where this transaction takes so long
-            # that we delete the state groups we're inserting.
-            await self._state_epoch_store.mark_state_groups_as_used(events_and_contexts)
-
-            await self.persist_events_store._persist_events_and_state_updates(
-                room_id,
-                chunk,
-                state_delta_for_room=state_delta_for_room,
-                new_forward_extremities=new_forward_extremities,
-                use_negative_stream_ordering=backfilled,
-                inhibit_local_membership_updates=backfilled,
-                new_event_links=new_event_links,
-            )
+            async with self._state_epoch_store.persisting_state_group_references(
+                events_and_contexts
+            ):
+                await self.persist_events_store._persist_events_and_state_updates(
+                    room_id,
+                    chunk,
+                    state_delta_for_room=state_delta_for_room,
+                    new_forward_extremities=new_forward_extremities,
+                    use_negative_stream_ordering=backfilled,
+                    inhibit_local_membership_updates=backfilled,
+                    new_event_links=new_event_links,
+                )
 
         return replaced_events
 

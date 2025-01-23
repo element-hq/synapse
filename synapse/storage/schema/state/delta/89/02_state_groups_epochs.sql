@@ -28,3 +28,10 @@ CREATE TABLE IF NOT EXISTS state_groups_pending_deletion (
 );
 
 CREATE INDEX state_groups_pending_deletion_epoch ON state_groups_pending_deletion(state_epoch);
+
+
+CREATE TABLE IF NOT EXISTS state_groups_persisting (
+    state_group BIGINT NOT NULL,
+    instance_name TEXT NOT NULL,
+    PRIMARY KEY (state_group, instance_name)
+);

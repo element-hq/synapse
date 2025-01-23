@@ -13,7 +13,8 @@
 #
 
 
-from typing import TYPE_CHECKING, Collection, Dict, Optional, Set, Tuple
+import contextlib
+from typing import TYPE_CHECKING, AsyncIterator, Collection, Dict, Optional, Set, Tuple
 
 from synapse.events import EventBase
 from synapse.events.snapshot import EventContext
@@ -55,6 +56,10 @@ class StateEpochDataStore:
     ):
         self._clock = hs.get_clock()
         self.db_pool = database
+        self._instance_name = hs.get_instance_name()
+
+        # TODO: Clear from `state_groups_persisting` any holdovers from previous
+        # running instance.
 
         if hs.config.worker.run_background_tasks:
             self._clock.looping_call_now(self._advance_state_epoch, 2 * 60 * 1000)
@@ -92,39 +97,6 @@ class StateEpochDataStore:
             retcol="state_epoch",
             keyvalues={},
             desc="get_state_epoch",
-        )
-
-    async def mark_state_groups_as_used(
-        self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
-    ) -> None:
-        referenced_state_groups: Set[int] = set()
-        state_epochs = []
-        for event, ctx in event_and_contexts:
-            if ctx.rejected or event.internal_metadata.is_outlier():
-                continue
-
-            assert ctx.state_epoch is not None
-            assert ctx.state_group is not None
-
-            state_epochs.append(ctx.state_epoch)
-
-            referenced_state_groups.add(ctx.state_group)
-
-            if ctx.state_group_before_event:
-                referenced_state_groups.add(ctx.state_group_before_event)
-
-        if not referenced_state_groups:
-            # We don't reference any state groups, so nothing to do
-            return
-
-        assert state_epochs  # If we have state groups we have a state epoch
-        min_state_epoch = min(state_epochs)
-
-        await self.db_pool.runInteraction(
-            "mark_state_groups_as_used",
-            self._mark_state_groups_as_used_txn,
-            min_state_epoch,
-            referenced_state_groups,
         )
 
     def _mark_state_groups_as_used_txn(
@@ -174,6 +146,13 @@ class StateEpochDataStore:
             table="state_groups_pending_deletion",
             keys=("state_group",),
             values=[(state_group,) for state_group in state_groups],
+        )
+
+        self.db_pool.simple_insert_many_txn(
+            txn,
+            table="state_groups_persisting",
+            keys=("state_group", "instance_name"),
+            values=[(state_group, self._instance_name) for state_group in state_groups],
         )
 
     async def is_state_group_pending_deletion(self, state_group: int) -> bool:
@@ -242,4 +221,50 @@ class StateEpochDataStore:
                 table="state_groups_pending_deletion",
                 keys=("state_group", "state_epoch"),
                 values=[(state_group, current_epoch) for state_group in new_groups],
+            )
+
+    @contextlib.asynccontextmanager
+    async def persisting_state_group_references(
+        self, event_and_contexts: Collection[Tuple[EventBase, EventContext]]
+    ) -> AsyncIterator[None]:
+        referenced_state_groups: Set[int] = set()
+        state_epochs = []
+        for event, ctx in event_and_contexts:
+            if ctx.rejected or event.internal_metadata.is_outlier():
+                continue
+
+            assert ctx.state_epoch is not None
+            assert ctx.state_group is not None
+
+            state_epochs.append(ctx.state_epoch)
+
+            referenced_state_groups.add(ctx.state_group)
+
+            if ctx.state_group_before_event:
+                referenced_state_groups.add(ctx.state_group_before_event)
+
+        if not referenced_state_groups:
+            # We don't reference any state groups, so nothing to do
+            yield
+            return
+
+        assert state_epochs  # If we have state groups we have a state epoch
+        min_state_epoch = min(state_epochs)
+
+        await self.db_pool.runInteraction(
+            "mark_state_groups_as_used",
+            self._mark_state_groups_as_used_txn,
+            min_state_epoch,
+            referenced_state_groups,
+        )
+
+        try:
+            yield None
+        finally:
+            await self.db_pool.simple_delete_many(
+                table="state_groups_persisting",
+                column="state_group",
+                iterable=referenced_state_groups,
+                keyvalues={"instance_name": self._instance_name},
+                desc="persisting_state_group_references_delete",
             )
