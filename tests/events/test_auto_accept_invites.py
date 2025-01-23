@@ -356,7 +356,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    async def test_ignore_invite_from_missing_user(self) -> None:
+    async def test_ignore_invite_for_missing_user(self) -> None:
         """Tests that receiving an invite for a missing user is ignored."""
         inviting_user_id = self.register_user("inviter", "pass")
         inviting_user_tok = self.login("inviter", "pass")
@@ -390,7 +390,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    async def test_ignore_invite_from_deactivated_user(self) -> None:
+    async def test_ignore_invite_for_deactivated_user(self) -> None:
         """Tests that receiving an invite for a deactivated user is ignored."""
         inviting_user_id = self.register_user("inviter", "pass", admin=True)
         inviting_user_tok = self.login("inviter", "pass")
@@ -434,7 +434,7 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             },
         }
     )
-    async def test_ignore_invite_from_suspended_user(self) -> None:
+    async def test_ignore_invite_for_suspended_user(self) -> None:
         """Tests that receiving an invite for a suspended user is ignored."""
         inviting_user_id = self.register_user("inviter", "pass", admin=True)
         inviting_user_tok = self.login("inviter", "pass")
@@ -452,6 +452,49 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             "PUT",
             f"/_synapse/admin/v1/suspend/{invited_user_id}",
             {"suspend": True},
+            access_token=inviting_user_tok,
+        )
+
+        assert channel.code == 200
+
+        self.helper.invite(
+            room_id,
+            inviting_user_id,
+            invited_user_id,
+            tok=inviting_user_tok,
+        )
+
+        join_updates, b = sync_join(self, inviting_user_id)
+        # Assert that the last event in the room was not a member event for the target user.
+        self.assertEqual(
+            join_updates[0].timeline.events[-1].content["membership"], "invite"
+        )
+
+    @override_config(
+        {
+            "auto_accept_invites": {
+                "enabled": True,
+            },
+        }
+    )
+    async def test_ignore_invite_for_locked_user(self) -> None:
+        """Tests that receiving an invite for a suspended user is ignored."""
+        inviting_user_id = self.register_user("inviter", "pass", admin=True)
+        inviting_user_tok = self.login("inviter", "pass")
+
+        # A local user who receives an invite
+        invited_user_id = self.register_user("invitee", "pass")
+
+        # Create a room and send an invite to the other user
+        room_id = self.helper.create_room_as(
+            inviting_user_id,
+            tok=inviting_user_tok,
+        )
+
+        channel = self.make_request(
+            "PUT",
+            f"/_synapse/admin/v2/users/{invited_user_id}",
+            {"locked": True},
             access_token=inviting_user_tok,
         )
 

@@ -105,6 +105,10 @@ class InviteAutoAccepter:
         if recipient.suspended:
             return
 
+        # Never accept invites for locked users.
+        if recipient.locked:
+            return
+
         # Make the user join the room. We run this as a background process to circumvent a race condition
         # that occurs when responding to invites over federation (see https://github.com/matrix-org/synapse-auto-accept-invite/issues/12)
         run_as_background_process(
