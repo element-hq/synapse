@@ -638,12 +638,6 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
-            # TODO: Clear pending deletion status of state groups that are
-            # referenced. Should we mark as to be deleted in the case we fail to
-            # persist below? No, as we don't know how long the below will take.
-            #
-            # TODO: Check that state epoch isn't too old.
-            #
             # TODO: Add a table to track what state groups we're currently
             # inserting? There's a race where this transaction takes so long
             # that we delete the state groups we're inserting.
