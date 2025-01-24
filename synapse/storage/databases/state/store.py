@@ -474,14 +474,12 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 A list of state groups
             """
 
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = self._epoch_store._check_state_groups_and_bump_deletion_txn(
                 txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+                {prev_group},
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -554,11 +552,6 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 ],
             )
 
-            # We need to check that the prev group isn't about to be deleted
-            self._epoch_store.check_prev_group_before_insertion_txn(
-                txn, prev_group, state_groups
-            )
-
             return events_and_context
 
         return await self.db_pool.runInteraction(
@@ -615,14 +608,12 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 needs to be persisted as a full state.
             """
 
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = self._epoch_store._check_state_groups_and_bump_deletion_txn(
                 txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+                {prev_group},
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -656,11 +647,6 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                     (state_group, room_id, key[0], key[1], state_id)
                     for key, state_id in delta_ids.items()
                 ],
-            )
-
-            # We need to check that the prev group isn't about to be deleted
-            self._epoch_store.check_prev_group_before_insertion_txn(
-                txn, prev_group, [state_group]
             )
 
             return state_group

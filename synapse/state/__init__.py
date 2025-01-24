@@ -315,6 +315,9 @@ class StateHandler:
         """
         assert not event.internal_metadata.is_outlier()
 
+        # Record the state epoch before we start calculating state groups, to
+        # ensure that nothing we're relying on gets deleted. See the store class
+        # docstring for more information.
         state_epoch = await self._state_epoch_store.get_state_epoch()
 
         #
@@ -532,15 +535,15 @@ class StateHandler:
                 state_group_id
             )
 
-            # Check if we're trying to delete the given prev group, if so we
-            # pretend we didn't see it.
             if prev_group:
-                pending_deletion = (
-                    await self._state_epoch_store.is_state_group_pending_deletion(
-                        prev_group
+                # Ensure that we still have the prev group, and ensure we don't
+                # delete it while we're persisting the event.
+                missing_state_group = (
+                    await self._state_epoch_store.check_state_groups_and_bump_deletion(
+                        {prev_group}
                     )
                 )
-                if pending_deletion:
+                if missing_state_group:
                     prev_group = None
                     delta_ids = None
 
@@ -696,20 +699,24 @@ class StateResolutionHandler:
         async with self.resolve_linearizer.queue(group_names):
             cache = self._state_cache.get(group_names, None)
             if cache:
-                state_groups_to_check = []
+                # Check that the returned cache entry doesn't point to deleted
+                # state groups.
+                state_groups_to_check = set()
                 if cache.state_group is not None:
-                    state_groups_to_check.append(cache.state_group)
+                    state_groups_to_check.add(cache.state_group)
 
                 if cache.prev_group is not None:
-                    state_groups_to_check.append(cache.prev_group)
+                    state_groups_to_check.add(cache.prev_group)
 
-                pending_deletion = await state_res_store.state_epoch_store.are_state_groups_pending_deletion(
+                missing_state_groups = await state_res_store.state_epoch_store.check_state_groups_and_bump_deletion(
                     state_groups_to_check
                 )
 
-                if not pending_deletion:
+                if not missing_state_groups:
                     return cache
                 else:
+                    # There are missing state groups, so let's remove the stale
+                    # entry and continue as if it was a cache miss.
                     self._state_cache.pop(group_names, None)
 
             logger.info(
@@ -718,15 +725,14 @@ class StateResolutionHandler:
                 list(group_names),
             )
 
-            # We double check that none of the state groups are pending
-            # deletion. They shouldn't be as all these state groups should be
-            # referenced.
-            pending_deletion = await state_res_store.state_epoch_store.are_state_groups_pending_deletion(
+            # We double check that none of the state groups have been deleted.
+            # They shouldn't be as all these state groups should be referenced.
+            missing_state_groups = await state_res_store.state_epoch_store.check_state_groups_and_bump_deletion(
                 group_names
             )
-            if pending_deletion:
+            if missing_state_groups:
                 raise Exception(
-                    f"state groups are pending deletion: {shortstr(pending_deletion)}"
+                    f"State groups have been deleted: {shortstr(missing_state_groups)}"
                 )
 
             state_groups_histogram.observe(len(state_groups_ids))
