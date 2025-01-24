@@ -247,9 +247,9 @@ class SyncRestServlet(RestServlet):
         # send any outstanding server notices to the user.
         await self._server_notices_sender.on_user_syncing(user.to_string())
 
-        # ignore the presence update if the ratelimit is exceeded
+        # ignore the presence update if the ratelimit is exceeded but do not pause the request
         try:
-            await self._presence_per_user_limiter.ratelimit(requester)
+            await self._presence_per_user_limiter.ratelimit(requester, pause=0)
         except LimitExceededError:
             affect_presence = False
             logger.debug("User set_presence ratelimit exceeded; ignoring it.")
