@@ -25,6 +25,7 @@ from synapse.storage.database import (
     LoggingTransaction,
     make_in_list_sql_clause,
 )
+from synapse.storage.engines import PostgresEngine
 from synapse.util.stringutils import shortstr
 
 if TYPE_CHECKING:
@@ -124,6 +125,15 @@ class StateEpochDataStore:
             LEFT JOIN state_groups_pending_deletion ON (id = state_group)
             WHERE {clause}
         """
+
+        if isinstance(self.db_pool.engine, PostgresEngine):
+            # On postgres we add a row level lock to the rows to ensure that we
+            # conflict with any concurrent DELETEs. `FOR KEY SHARE` lock will
+            # not conflict with other reads.
+            sql += """
+            FOR KEY SHARE OF state_groups
+            """
+
         txn.execute(sql, values)
 
         state_group_to_epoch: Dict[int, Optional[int]] = {row[0]: row[1] for row in txn}
