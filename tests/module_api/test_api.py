@@ -995,9 +995,6 @@ def _test_sending_local_online_presence_to_local_user(
 
     # Now we check that we don't receive *offline* updates using ModuleApi.send_local_online_presence_to.
 
-    # Advance time a sufficient amount to avoid rate limiting.
-    test_case.reactor.advance(30)
-
     # Presence sender goes offline
     send_presence_update(
         test_case,

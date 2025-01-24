@@ -266,9 +266,6 @@ class PresenceRouterTestCase(FederatingHomeserverTestCase):
         self.assertEqual(presence_update.state, "online")
         self.assertEqual(presence_update.status_msg, "boop")
 
-        # Advance time a sufficient amount to avoid rate limiting.
-        self.reactor.advance(30)
-
         # Have all three users send presence
         send_presence_update(
             self,
