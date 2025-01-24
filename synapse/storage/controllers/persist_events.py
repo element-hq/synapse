@@ -638,6 +638,8 @@ class EventsPersistenceStorageController:
                     room_id, [e for e, _ in chunk]
                 )
 
+            # Stop the state groups from being deleted while we're persisting
+            # them.
             async with self._state_epoch_store.persisting_state_group_references(
                 events_and_contexts
             ):

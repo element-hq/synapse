@@ -213,11 +213,12 @@ class StateEpochDataStore:
             return
 
         assert state_epochs  # If we have state groups we have a state epoch
-        # min_state_epoch = min(state_epochs)  # TODO
+        min_state_epoch = min(state_epochs)
 
         await self.db_pool.runInteraction(
             "mark_state_groups_as_used",
             self._mark_state_groups_as_used_txn,
+            min_state_epoch,
             referenced_state_groups,
         )
 
@@ -233,7 +234,7 @@ class StateEpochDataStore:
             )
 
     def _mark_state_groups_as_used_txn(
-        self, txn: LoggingTransaction, state_groups: Set[int]
+        self, txn: LoggingTransaction, min_state_epoch: int, state_groups: Set[int]
     ) -> None:
         """Marks the given state groups as used. Also checks that the given
         state epoch is not too old."""
@@ -244,6 +245,17 @@ class StateEpochDataStore:
             raise Exception(
                 f"state groups have been deleted: {shortstr(missing_state_groups)}"
             )
+
+        # Make sure the state epoch isn't too old.
+        current_epoch = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="state_epoch",
+            retcol="state_epoch",
+            keyvalues={},
+        )
+
+        if current_epoch - min_state_epoch > self.NUMBER_EPOCHS_BEFORE_DELETION:
+            raise Exception("Event took too long to persist")
 
         self.db_pool.simple_delete_many_batch_txn(
             txn,
