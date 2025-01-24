@@ -484,7 +484,7 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
         we are already participating in the room, local users can still react to invites
         regardless of whether the remote server has told us about the invite event (via
         a federation `/send` transaction) and we have de-outliered the invite event.
-        Previously, we would mistakenly throw and error saying the user wasn't in the
+        Previously, we would mistakenly throw an error saying the user wasn't in the
         room when they tried to join or reject the invite.
         """
         remote_room_join_result = self._invite_local_user_to_remote_room_and_join()

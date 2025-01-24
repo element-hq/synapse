@@ -155,9 +155,9 @@ class EventBuilder:
                 self, state_ids
             )
 
-            # Check for out-of-band membership that may that may have been exposed on
-            # `/sync` but the events have not been de-outliered yet so they won't be
-            # part of the room state yet.
+            # Check for out-of-band membership that may have been exposed on `/sync` but
+            # the events have not been de-outliered yet so they won't be part of the
+            # room state yet.
             #
             # This helps in situations where a remote homeserver invites a local user to
             # a room that we're already participating in; and we've persisted the invite
