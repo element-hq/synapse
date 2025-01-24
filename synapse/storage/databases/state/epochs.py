@@ -278,3 +278,39 @@ class StateEpochDataStore:
                 keyvalues={"instance_name": self._instance_name},
                 desc="persisting_state_group_references_delete",
             )
+
+    def get_state_groups_that_can_be_purged(
+        self, txn: LoggingTransaction, state_groups: Collection[int]
+    ) -> Collection[int]:
+        if not state_groups:
+            return state_groups
+
+        current_state_epoch = self.db_pool.simple_select_one_onecol_txn(
+            txn,
+            table="state_epoch",
+            retcol="state_epoch",
+            keyvalues={},
+        )
+
+        clause, args = make_in_list_sql_clause(
+            self.db_pool.engine, column="state_group", iterable=state_groups
+        )
+
+        sql = f"""
+            SELECT state_group FROM (
+                SELECT state_group FROM state_groups_pending_deletion
+                WHERE state_epoch > ?
+                UNION
+                SELECT state_group FROM state_groups_persisting
+            ) AS s
+            WHERE {clause}
+        """
+        args.insert(0, current_state_epoch - 2)
+
+        txn.execute(sql, args)
+
+        can_delete = set(state_groups)
+        for (state_group,) in txn:
+            can_delete.discard(state_group)
+
+        return can_delete
