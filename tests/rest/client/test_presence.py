@@ -29,6 +29,7 @@ from synapse.types import UserID
 from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class PresenceTestCase(unittest.HomeserverTestCase):
@@ -96,6 +97,9 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.OK)
         self.assertEqual(self.presence_handler.set_state.call_count, 0)
 
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
     def test_put_presence_over_ratelimit(self) -> None:
         """
         Multiple PUTs to the status endpoint without sufficient delay will be rate limited.
@@ -117,6 +121,9 @@ class PresenceTestCase(unittest.HomeserverTestCase):
         self.assertEqual(channel.code, HTTPStatus.TOO_MANY_REQUESTS)
         self.assertEqual(self.presence_handler.set_state.call_count, 1)
 
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
     def test_put_presence_within_ratelimit(self) -> None:
         """
         Multiple PUTs to the status endpoint with sufficient delay should all call set_state.
