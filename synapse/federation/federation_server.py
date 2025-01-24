@@ -1256,6 +1256,7 @@ class FederationServer(FederationBase):
         # has started processing).
         while True:
             async with lock:
+                logger.info("handling received PDU in room %s: %s", room_id, event)
                 try:
                     with nested_logging_context(event.event_id):
                         # We're taking out a lock within a lock, which could
