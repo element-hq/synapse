@@ -1,0 +1,1 @@
+Fix rare edge case where state groups could be deleted while we are persisting new events that reference them.
