@@ -24,7 +24,8 @@
 import logging
 from typing import TYPE_CHECKING, Tuple
 
-from synapse.api.errors import AuthError, SynapseError
+from synapse.api.errors import AuthError, Codes, LimitExceededError, SynapseError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.handlers.presence import format_user_presence_state
 from synapse.http.server import HttpServer
 from synapse.http.servlet import RestServlet, parse_json_object_from_request
@@ -48,6 +49,14 @@ class PresenceStatusRestServlet(RestServlet):
         self.presence_handler = hs.get_presence_handler()
         self.clock = hs.get_clock()
         self.auth = hs.get_auth()
+        self.store = hs.get_datastores().main
+
+        # Ratelimiter for presence updates, keyed by requester.
+        self._presence_per_user_limiter = Ratelimiter(
+            store=self.store,
+            clock=self.clock,
+            cfg=hs.config.ratelimiting.rc_presence_per_user,
+        )
 
     async def on_GET(
         self, request: SynapseRequest, user_id: str
@@ -81,6 +90,17 @@ class PresenceStatusRestServlet(RestServlet):
 
         if requester.user != user:
             raise AuthError(403, "Can only set your own presence state")
+
+        # ignore the presence update if the ratelimit is exceeded
+        try:
+            await self._presence_per_user_limiter.ratelimit(requester)
+        except LimitExceededError as e:
+            logger.debug("User presence ratelimit exceeded; ignoring it.")
+            return 429, {
+                "errcode": Codes.LIMIT_EXCEEDED,
+                "error": "Too many requests",
+                "retry_after_ms": e.retry_after_ms,
+            }
 
         state = {}
 
