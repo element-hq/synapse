@@ -52,7 +52,7 @@ from synapse.handlers.presence import (
     handle_update,
 )
 from synapse.rest import admin
-from synapse.rest.client import room
+from synapse.rest.client import login, room, sync
 from synapse.server import HomeServer
 from synapse.storage.database import LoggingDatabaseConnection
 from synapse.storage.keys import FetchKeyResult
@@ -61,10 +61,15 @@ from synapse.util import Clock
 
 from tests import unittest
 from tests.replication._base import BaseMultiWorkerStreamTestCase
+from tests.unittest import override_config
 
 
 class PresenceUpdateTestCase(unittest.HomeserverTestCase):
-    servlets = [admin.register_servlets]
+    servlets = [
+        admin.register_servlets,
+        login.register_servlets,
+        sync.register_servlets,
+    ]
 
     def prepare(
         self, reactor: MemoryReactor, clock: Clock, homeserver: HomeServer
@@ -432,6 +437,102 @@ class PresenceUpdateTestCase(unittest.HomeserverTestCase):
         )
 
         wheel_timer.insert.assert_not_called()
+
+    # `rc_presence` is set very high during unit tests to avoid ratelimiting
+    # subtly impacting unrelated tests. We set the ratelimiting back to a
+    # reasonable value for the tests specific to presence ratelimiting.
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
+    def test_over_ratelimit_offline_to_online_to_unavailable(self) -> None:
+        """
+        Send a presence update, check that it went through, immediately send another one and
+        check that it was ignored.
+        """
+        self._test_ratelimit_offline_to_online_to_unavailable(ratelimited=True)
+
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
+    def test_within_ratelimit_offline_to_online_to_unavailable(self) -> None:
+        """
+        Send a presence update, check that it went through, advancing time a sufficient amount,
+        send another presence update and check that it also worked.
+        """
+        self._test_ratelimit_offline_to_online_to_unavailable(ratelimited=False)
+
+    @override_config(
+        {"rc_presence": {"per_user": {"per_second": 0.1, "burst_count": 1}}}
+    )
+    def _test_ratelimit_offline_to_online_to_unavailable(
+        self, ratelimited: bool
+    ) -> None:
+        """Test rate limit for presence updates sent with sync requests.
+
+        Args:
+            ratelimited: Test rate limited case.
+        """
+        wheel_timer = Mock()
+        user_id = "@user:pass"
+        now = 5000000
+        sync_url = "/sync?access_token=%s&set_presence=%s"
+
+        # Register the user who syncs presence
+        user_id = self.register_user("user", "pass")
+        access_token = self.login("user", "pass")
+
+        # Get the handler (which kicks off a bunch of timers).
+        presence_handler = self.hs.get_presence_handler()
+
+        # Ensure the user is initially offline.
+        prev_state = UserPresenceState.default(user_id)
+        new_state = prev_state.copy_and_replace(
+            state=PresenceState.OFFLINE, last_active_ts=now
+        )
+
+        state, persist_and_notify, federation_ping = handle_update(
+            prev_state,
+            new_state,
+            is_mine=True,
+            wheel_timer=wheel_timer,
+            now=now,
+            persist=False,
+        )
+
+        # Check that the user is offline.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.OFFLINE)
+
+        # Send sync request with set_presence=online.
+        channel = self.make_request("GET", sync_url % (access_token, "online"))
+        self.assertEqual(200, channel.code)
+
+        # Assert the user is now online.
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+        self.assertEqual(state.state, PresenceState.ONLINE)
+
+        if not ratelimited:
+            # Advance time a sufficient amount to avoid rate limiting.
+            self.reactor.advance(30)
+
+        # Send another sync request with set_presence=unavailable.
+        channel = self.make_request("GET", sync_url % (access_token, "unavailable"))
+        self.assertEqual(200, channel.code)
+
+        state = self.get_success(
+            presence_handler.get_state(UserID.from_string(user_id))
+        )
+
+        if ratelimited:
+            # Assert the user is still online and presence update was ignored.
+            self.assertEqual(state.state, PresenceState.ONLINE)
+        else:
+            # Assert the user is now unavailable.
+            self.assertEqual(state.state, PresenceState.UNAVAILABLE)
 
 
 class PresenceTimeoutTestCase(unittest.TestCase):

@@ -200,6 +200,7 @@ def default_config(
             "per_user": {"per_second": 10000, "burst_count": 10000},
         },
         "rc_3pid_validation": {"per_second": 10000, "burst_count": 10000},
+        "rc_presence": {"per_user": {"per_second": 10000, "burst_count": 10000}},
         "saml2_enabled": False,
         "public_baseurl": None,
         "default_identity_server": None,
