@@ -131,7 +131,9 @@ class OutOfBandMembershipTests(unittest.FederatingHomeserverTestCase):
 
     def make_homeserver(self, reactor: MemoryReactor, clock: Clock) -> HomeServer:
         self.federation_http_client = Mock(
-            # spec=MatrixFederationHttpClient
+            # The problem with using `spec=MatrixFederationHttpClient` here is that it
+            # requires everything to be mocked which is a lot of work that I don't want
+            # to do when the code only uses a few methods (`get_json` and `put_json`).
         )
         return self.setup_test_homeserver(
             federation_http_client=self.federation_http_client
