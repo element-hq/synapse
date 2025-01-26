@@ -192,3 +192,37 @@ class PurgeTests(HomeserverTestCase):
         self.assertEqual(second_state, {})
         self.assertEqual(third_state, {})
         self.assertNotEqual(last_state, {})
+
+    def test_purge_state_groups(self) -> None:
+        """Test that when purging we delete the relevant state groups"""
+
+        self.helper.send(self.room_id, body="test1")
+        self.helper.send_state(self.room_id, "org.matrix.test", body={"number": 2})
+        self.helper.send_state(self.room_id, "org.matrix.test", body={"number": 3})
+        self.helper.send(self.room_id, body="test4")
+        last = self.helper.send(self.room_id, body="test5")
+
+        # Get the topological token
+        token = self.get_success(
+            self.store.get_topological_token_for_event(last["event_id"])
+        )
+        token_str = self.get_success(token.to_string(self.hs.get_datastores().main))
+
+        # Purge everything before this topological token
+        self.get_success(
+            self._storage_controllers.purge_events.purge_history(
+                self.room_id, token_str, True
+            )
+        )
+
+        # We expect there to now only be one state group for the room, which is
+        # the state group of the last event (as the only outlier).
+        state_groups = self.get_success(
+            self.state_store.db_pool.simple_select_onecol(
+                table="state_groups",
+                keyvalues={"room_id": self.room_id},
+                retcol="id",
+                desc="test_purge_state_groups",
+            )
+        )
+        self.assertEqual(len(state_groups), 1)

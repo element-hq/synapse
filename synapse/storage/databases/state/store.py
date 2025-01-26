@@ -853,7 +853,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             List[Tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
-                column="prev_state_group",
+                column="state_group",
                 iterable=state_groups,
                 keyvalues={},
                 retcols=("state_group", "prev_state_group"),
