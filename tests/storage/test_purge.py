@@ -40,6 +40,7 @@ class PurgeTests(HomeserverTestCase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
         self.store = hs.get_datastores().main
+        self.state_store = hs.get_datastores().state
         self._storage_controllers = self.hs.get_storage_controllers()
 
     def test_purge_history(self) -> None:
@@ -128,3 +129,37 @@ class PurgeTests(HomeserverTestCase):
         self.store._invalidate_local_get_event_cache(create_event.event_id)
         self.get_failure(self.store.get_event(create_event.event_id), NotFoundError)
         self.get_failure(self.store.get_event(first["event_id"]), NotFoundError)
+
+    def test_purge_state_groups(self) -> None:
+        """Test that when purging we delete the relevant state groups"""
+
+        self.helper.send(self.room_id, body="test1")
+        self.helper.send_state(self.room_id, "org.matrix.test", body={"number": 2})
+        self.helper.send_state(self.room_id, "org.matrix.test", body={"number": 3})
+        self.helper.send(self.room_id, body="test4")
+        last = self.helper.send(self.room_id, body="test5")
+
+        # Get the topological token
+        token = self.get_success(
+            self.store.get_topological_token_for_event(last["event_id"])
+        )
+        token_str = self.get_success(token.to_string(self.hs.get_datastores().main))
+
+        # Purge everything before this topological token
+        self.get_success(
+            self._storage_controllers.purge_events.purge_history(
+                self.room_id, token_str, True
+            )
+        )
+
+        # We expect there to now only be one state group for the room, which is
+        # the state group of the last event (as the only outlier).
+        state_groups = self.get_success(
+            self.state_store.db_pool.simple_select_onecol(
+                table="state_groups",
+                keyvalues={"room_id": self.room_id},
+                retcol="id",
+                desc="test_purge_state_groups",
+            )
+        )
+        self.assertEqual(len(state_groups), 1)
