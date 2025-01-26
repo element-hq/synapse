@@ -128,6 +128,16 @@ class PurgeEventsStorageController:
             next_to_search |= prevs
             state_groups_seen |= prevs
 
+            # We also check to see if anything referencing the state groups are
+            # also unreferenced. This helps ensure that we delete unreferenced
+            # state groups, if we don't then we will de-delta them when we
+            # delete the other state groups leading to increased DB usage.
+            next_edges = await self.stores.state.get_next_state_groups(current_search)
+            nexts = set(next_edges.keys())
+            nexts -= state_groups_seen
+            next_to_search |= nexts
+            state_groups_seen |= nexts
+
         to_delete = state_groups_seen - referenced_groups
 
         return to_delete
