@@ -1002,6 +1002,20 @@ class OidcProvider:
         """
 
         state = generate_token()
+
+        # Generate a nonce 32 characters long. When encoded with base64url later on,
+        # the nonce will be 43 characters when sent to the identity provider.
+        #
+        # While RFC7636 does not specify a minimum length for the `nonce`
+        # parameter, the TI-Messenger IDP_FD spec v1.7.3 does require it to be
+        # between 43 and 128 characters. This spec concerns using Matrix for
+        # communication in German healthcare.
+        # 
+        # As increasing the length only strengthens security, we use this length
+        # to allow TI-Messenger deployments using Synapse to satisfy this
+        # external spec.
+        #
+        # See https://github.com/element-hq/synapse/pull/18109 for more context.
         nonce = generate_token(length=32)
         code_verifier = ""
 
