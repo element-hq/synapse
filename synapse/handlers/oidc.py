@@ -1010,7 +1010,7 @@ class OidcProvider:
         # parameter, the TI-Messenger IDP_FD spec v1.7.3 does require it to be
         # between 43 and 128 characters. This spec concerns using Matrix for
         # communication in German healthcare.
-        # 
+        #
         # As increasing the length only strengthens security, we use this length
         # to allow TI-Messenger deployments using Synapse to satisfy this
         # external spec.
