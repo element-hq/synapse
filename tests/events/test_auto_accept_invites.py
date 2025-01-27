@@ -420,7 +420,6 @@ class AutoAcceptInvitesTestCase(FederatingHomeserverTestCase):
             tok=inviting_user_tok,
         )
 
-        # Check that the invite receiving user has automatically joined the room when syncing
         join_updates, b = sync_join(self, inviting_user_id)
         # Assert that the last event in the room was not a member event for the target user.
         self.assertEqual(
