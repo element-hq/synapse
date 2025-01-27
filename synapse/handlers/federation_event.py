@@ -2272,8 +2272,9 @@ class FederationEventHandler:
                 event_and_contexts, backfilled=backfilled
             )
 
-            # After persistence, we always need to notify replication there may be new
-            # data (backfilled or not) because TODO.
+            # After persistence, we never notify clients (wake up `/sync` streams) about
+            # backfilled events but it's important to let all the workers know about any
+            # new event (backfilled or not) because TODO
             self._notifier.notify_replication()
 
             if self._ephemeral_messages_enabled:
