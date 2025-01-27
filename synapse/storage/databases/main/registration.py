@@ -790,6 +790,25 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             desc="remove_user_external_id",
         )
 
+    async def remove_external_ids_by_user(
+        self, user_id: str
+    ) -> None:
+        """Remove all mappings from external user ids to a mxid
+        If no mappings are not found, this method does nothing.
+
+        Args:
+            user_id: complete mxid that it is mapped to
+        """
+
+        await self.db_pool.simple_delete(
+            table="user_external_ids",
+            keyvalues={
+                "user_id": user_id,
+            },
+            desc="remove_external_ids_by_user",
+        )
+    
+
     async def replace_user_external_id(
         self,
         record_external_ids: List[Tuple[str, str]],
