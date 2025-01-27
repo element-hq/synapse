@@ -807,7 +807,6 @@ class RegistrationWorkerStore(CacheInvalidationWorkerStore):
             },
             desc="remove_external_ids_by_user",
         )
-    
 
     async def replace_user_external_id(
         self,
