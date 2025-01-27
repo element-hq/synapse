@@ -1002,7 +1002,7 @@ class OidcProvider:
         """
 
         state = generate_token()
-        nonce = generate_token()
+        nonce = generate_token(length=32)
         code_verifier = ""
 
         if not client_redirect_url:
