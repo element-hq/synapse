@@ -221,7 +221,8 @@ class Config:
             The number of milliseconds in the duration.
 
         Raises:
-            TypeError, if given something other than an integer or a string
+            TypeError: if given something other than an integer or a string, or the
+                duration is using an incorrect suffix.
             ValueError: if given a string not of the form described above.
         """
         if type(value) is int:  # noqa: E721
@@ -246,6 +247,15 @@ class Config:
             if suffix in sizes:
                 value = value[:-1]
                 size = sizes[suffix]
+            elif suffix.isdigit():
+                #  No suffix is treated as milliseconds.
+                value = value
+                size = 1
+            else:
+                raise TypeError(
+                    f"Bad duration suffix {value} (expected no suffix or one of these suffixes: {sizes.keys()})"
+                )
+
             return int(value) * size
         else:
             raise TypeError(f"Bad duration {value!r}")
