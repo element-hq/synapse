@@ -258,7 +258,9 @@ class Config:
 
             return int(value) * size
         else:
-            raise TypeError(f"Bad duration {value!r}")
+            raise TypeError(
+                f"Bad duration type {value!r} (expected int or string duration)"
+            )
 
     @staticmethod
     def abspath(file_path: str) -> str:
