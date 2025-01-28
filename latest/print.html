@@ -1877,7 +1877,7 @@ v1.61.0.</p>
 <tr><td>v1.85.0 – v1.91.2</td><td>v1.83.0</td></tr>
 <tr><td>v1.92.0 – v1.97.0</td><td>v1.90.0</td></tr>
 <tr><td>v1.98.0 – v1.105.0</td><td>v1.96.0</td></tr>
-<tr><td>v1.105.1 – v1.122.0</td><td>v1.100.0</td></tr>
+<tr><td>v1.105.1 – v1.123.0</td><td>v1.100.0</td></tr>
 </tbody></table>
 <h2 id="upgrading-from-a-very-old-version"><a class="header" href="#upgrading-from-a-very-old-version">Upgrading from a very old version</a></h2>
 <p>You need to read all of the upgrade notes for each version between your current
@@ -7678,6 +7678,10 @@ declared inside the <code>listener</code> block for a <code>replication</code> l
   worker1:
     host: localhost
     port: 8034
+  other:
+    host: localhost
+    port: 8035
+    tls: true
 </code></pre>
 <p>Example configuration(#2, for UNIX sockets):</p>
 <pre><code class="language-yaml">instance_map:
@@ -13871,6 +13875,12 @@ If the room does not define a type, the value will be <code>null</code>.</li>
 <p>The API is:</p>
 <pre><code>GET /_synapse/admin/v1/rooms/&lt;room_id&gt;/state
 </code></pre>
+<p><strong>Parameters</strong></p>
+<p>The following query parameter is available:</p>
+<ul>
+<li><code>type</code> - The type of room state event to filter by, eg &quot;m.room.create&quot;. If provided, only state events
+of this type will be returned (regardless of their <code>state_key</code> value).</li>
+</ul>
 <p>A response body like the following is returned:</p>
 <pre><code class="language-json">{
   &quot;state&quot;: [
