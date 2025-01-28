@@ -225,6 +225,9 @@ class Config:
                 duration is using an incorrect suffix.
             ValueError: if given a string not of the form described above.
         """
+        # For integers, we prefer to use `type(value) is int` instead of
+        # `isinstance(value, int)` because we want to exclude subclasses of int, such as
+        # bool.
         if type(value) is int:  # noqa: E721
             return value
         elif isinstance(value, str):
