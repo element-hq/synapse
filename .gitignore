@@ -27,7 +27,6 @@ __pycache__/
 /*.log.*
 /*.log.config
 /*.pid
-/.python-version
 /*.signing.key
 /env/
 /.venv*/
