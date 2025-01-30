@@ -2159,10 +2159,26 @@ class DatabasePool:
         if rowcount > 1:
             raise StoreError(500, "More than one row matched (%s)" % (table,))
 
-    # Ideally we could use the overload decorator here to specify that the
-    # return type is only optional if allow_none is True, but this does not work
-    # when you call a static method from an instance.
-    # See https://github.com/python/mypy/issues/7781
+    @overload
+    @staticmethod
+    def simple_select_one_txn(
+        txn: LoggingTransaction,
+        table: str,
+        keyvalues: Dict[str, Any],
+        retcols: Collection[str],
+        allow_none: Literal[False] = False,
+    ) -> Tuple[Any, ...]: ...
+
+    @overload
+    @staticmethod
+    def simple_select_one_txn(
+        txn: LoggingTransaction,
+        table: str,
+        keyvalues: Dict[str, Any],
+        retcols: Collection[str],
+        allow_none: Literal[True] = True,
+    ) -> Optional[Tuple[Any, ...]]: ...
+
     @staticmethod
     def simple_select_one_txn(
         txn: LoggingTransaction,
