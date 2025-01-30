@@ -1705,7 +1705,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
         """
         stream_token = progress.get("last_stream_token", None)
 
-        def _get_max_stream_token_txn(txn: LoggingTransaction) -> Optional[str]:
+        def _get_max_stream_token_txn(txn: LoggingTransaction) -> Optional[int]:
             sql = """
                 SELECT event_stream_ordering from room_memberships
                 ORDER BY event_stream_ordering DESC
@@ -1713,7 +1713,8 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             """
             txn.execute(sql)
             res = txn.fetchone()
-            assert res is not None
+            if not res:
+                return 0
             return res[0]
 
         def _background_populate_participant_txn(

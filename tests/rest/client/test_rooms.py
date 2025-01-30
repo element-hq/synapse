@@ -4102,7 +4102,7 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
 
         # user has not sent any messages, so should not be a participant
         participant = self.get_success(
-            self.store.get_room_participation(self.room1, self.user2)
+            self.store.get_room_participation(self.user2, self.room1)
         )
         self.assertFalse(participant)
 
@@ -4117,7 +4117,7 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
             tok=self.tok2,
         )
         participant = self.get_success(
-            self.store.get_room_participation(self.room1, self.user2)
+            self.store.get_room_participation(self.user2, self.room1)
         )
         self.assertTrue(participant)
 
@@ -4130,7 +4130,7 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
 
         # user has not sent any messages, so should not be a participant
         participant = self.get_success(
-            self.store.get_room_participation(self.room1, self.user2)
+            self.store.get_room_participation(self.user2, self.room1)
         )
         self.assertFalse(participant)
 
@@ -4148,6 +4148,6 @@ class RoomParticipantTestCase(unittest.HomeserverTestCase):
             tok=self.tok2,
         )
         participant = self.get_success(
-            self.store.get_room_participation(self.room1, self.user2)
+            self.store.get_room_participation(self.user2, self.room1)
         )
         self.assertTrue(participant)
