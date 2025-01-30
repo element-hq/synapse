@@ -386,6 +386,11 @@ class ServerConfig(Config):
         self.presence_enabled = bool(presence_enabled)
         # Whether to internally track presence, requires that presence is enabled,
         self.track_presence = self.presence_enabled and presence_enabled != "untracked"
+        self.track_offline_presence = (
+            self.presence_enabled
+            and self.track_presence
+            and presence_enabled != "offline_untracked"
+        )
 
         # Determines if presence results for offline users are included on initial/full sync
         self.presence_include_offline_users_on_sync = presence_config.get(
