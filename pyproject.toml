@@ -292,13 +292,12 @@ release = [
     "tomli>=1.2.3",
 ]
 
-[tool.poetry.build]
-script = "build_rust.py"
-generate-setup-file = true
-
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+default-groups = ["dev", "release"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["synapse"]
