@@ -1621,10 +1621,14 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
             sql = """
                 UPDATE room_memberships
                 SET participant = True
-                WHERE user_id = ?
-                AND room_id = ?
-                ORDER BY event_stream_ordering DESC
-                LIMIT 1
+                WHERE (user_id, room_id) IN (
+                    SELECT user_id, room_id
+                    FROM room_memberships
+                    WHERE user_id = ?
+                    AND room_id = ?
+                    ORDER BY event_stream_ordering DESC
+                    LIMIT 1
+                )
             """
             txn.execute(sql, (user_id, room_id))
 
