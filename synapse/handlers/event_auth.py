@@ -334,7 +334,7 @@ class EventAuthHandler:
         # Pull out the other room IDs, invalid data gets filtered.
         result = []
         for allow in allow_list:
-            if not isinstance(allow, (immutabledict, dict)):
+            if not isinstance(allow, (dict, immutabledict)):
                 continue
 
             # If the type is unexpected, skip it.
