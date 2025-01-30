@@ -223,7 +223,9 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
     def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
-        self.assertEqual(1, self.hs.get_datastores().main.get_user_report_ids(self.target_user_id))
+        self.assertEqual(
+            1, self.hs.get_datastores().main.get_user_report_ids(self.target_user_id)
+        )
 
     def test_no_reason(self) -> None:
         data = {"not_reason": "for typechecking"}
@@ -268,7 +270,9 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(200, channel.code, msg=channel.result["body"])
-        self.assertEqual(0, self.hs.get_datastores().main.get_user_report_ids(target_user_id))
+        self.assertEqual(
+            0, self.hs.get_datastores().main.get_user_report_ids(target_user_id)
+        )
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(
