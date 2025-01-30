@@ -12,7 +12,7 @@
 -- <https://www.gnu.org/licenses/agpl-3.0.html>.
 
 -- Add a column `participant` to `room_memberships` table to track whether a room member has sent
--- a `m.room.message` event into a room they are a member of
+-- a `m.room.message` or `m.room.encrypted` event into a room they are a member of
 ALTER TABLE room_memberships ADD COLUMN participant BOOLEAN DEFAULT FALSE;
 
 -- Add a background update to populate `participant` column
