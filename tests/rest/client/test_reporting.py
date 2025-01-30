@@ -28,6 +28,7 @@ from synapse.types import JsonDict
 from synapse.util import Clock
 
 from tests import unittest
+from tests.unittest import override_config
 
 
 class ReportEventTestCase(unittest.HomeserverTestCase):
@@ -191,6 +192,83 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
             channel.json_body["error"],
             msg=channel.result["body"],
         )
+
+    def _assert_status(self, response_status: int, data: JsonDict) -> None:
+        channel = self.make_request(
+            "POST",
+            self.report_path,
+            data,
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(response_status, channel.code, msg=channel.result["body"])
+
+
+@override_config({"experimental_features": {"msc4260_enabled": True}})
+class ReportUserTestCase(unittest.HomeserverTestCase):
+    servlets = [
+        synapse.rest.admin.register_servlets,
+        login.register_servlets,
+        room.register_servlets,
+        reporting.register_servlets,
+    ]
+
+    def prepare(self, reactor: MemoryReactor, clock: Clock, hs: HomeServer) -> None:
+        self.other_user = self.register_user("user", "pass")
+        self.other_user_tok = self.login("user", "pass")
+
+        self.target_user_id = self.register_user("target_user", "pass")
+        self.report_path = f"/_matrix/client/unstable/org.matrix.msc4260/users/{self.target_user_id}/report"
+
+    def test_reason_str(self) -> None:
+        data = {"reason": "this makes me sad"}
+        self._assert_status(200, data)
+        self.assertEqual(1, self.hs.get_datastores().main.get_user_report_ids(self.target_user_id))
+
+    def test_no_reason(self) -> None:
+        data = {"not_reason": "for typechecking"}
+        self._assert_status(400, data)
+
+    def test_reason_nonstring(self) -> None:
+        data = {"reason": 42}
+        self._assert_status(400, data)
+
+    def test_reason_null(self) -> None:
+        data = {"reason": None}
+        self._assert_status(400, data)
+
+    def test_cannot_report_nonlcoal_user(self) -> None:
+        """
+        Tests that we don't accept event reports for users which aren't local users.
+        """
+        channel = self.make_request(
+            "POST",
+            "/_matrix/client/unstable/org.matrix.msc4260/users/@bloop:example.org/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(404, channel.code, msg=channel.result["body"])
+        self.assertEqual(
+            "User does not belong to this server",
+            channel.json_body["error"],
+            msg=channel.result["body"],
+        )
+
+    def test_can_report_nonexistent_user(self) -> None:
+        """
+        Tests that we ignore reports for nonexistent users.
+        """
+        target_user_id = f"@bloop:{self.hs.hostname}"
+        channel = self.make_request(
+            "POST",
+            f"/_matrix/client/unstable/org.matrix.msc4260/users/{target_user_id}/report",
+            {"reason": "i am very sad"},
+            access_token=self.other_user_tok,
+            shorthand=False,
+        )
+        self.assertEqual(200, channel.code, msg=channel.result["body"])
+        self.assertEqual(0, self.hs.get_datastores().main.get_user_report_ids(target_user_id))
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(

@@ -150,6 +150,62 @@ class ReportRoomRestServlet(RestServlet):
         return 200, {}
 
 
+class ReportUserRestServlet(RestServlet):
+    """This endpoint lets clients report a user for abuse.
+
+    Introduced by MSC4260: https://github.com/matrix-org/matrix-spec-proposals/pull/4260
+    """
+
+    # Cast the Iterable to a list so that we can `append` below.
+    PATTERNS = list(
+        client_patterns(
+            "/org.matrix.msc4260/users/(?P<target_user_id>[^/]*)/report$",
+            releases=[],  # unstable only
+            unstable=True,
+            v1=False,
+        )
+    )
+
+    def __init__(self, hs: "HomeServer"):
+        super().__init__()
+        self.hs = hs
+        self.auth = hs.get_auth()
+        self.clock = hs.get_clock()
+        self.store = hs.get_datastores().main
+
+    class PostBody(RequestBodyModel):
+        reason: StrictStr
+
+    async def on_POST(
+        self, request: SynapseRequest, target_user_id: str
+    ) -> Tuple[int, JsonDict]:
+        requester = await self.auth.get_user_by_req(request)
+        user_id = requester.user.to_string()
+
+        body = parse_and_validate_json_object_from_request(request, self.PostBody)
+
+        # We can't deal with non-local users.
+        if not self.hs.is_mine_id(target_user_id):
+            raise NotFoundError("User does not belong to this server")
+
+        user = await self.store.get_user_by_id(target_user_id)
+        if user is None:
+            # raise NotFoundError("User does not exist")
+            return 200, {}  # hide existence
+
+        await self.store.add_user_report(
+            target_user_id=target_user_id,
+            user_id=user_id,
+            reason=body.reason,
+            received_ts=self.clock.time_msec(),
+        )
+
+        return 200, {}
+
+
 def register_servlets(hs: "HomeServer", http_server: HttpServer) -> None:
     ReportEventRestServlet(hs).register(http_server)
     ReportRoomRestServlet(hs).register(http_server)
+
+    if hs.config.experimental.msc4260_enabled:
+        ReportUserRestServlet(hs).register(http_server)

@@ -2303,6 +2303,7 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
 
         self._event_reports_id_gen = IdGenerator(db_conn, "event_reports", "id")
         self._room_reports_id_gen = IdGenerator(db_conn, "room_reports", "id")
+        self._user_reports_id_gen = IdGenerator(db_conn, "user_reports", "id")
 
         self._instance_name = hs.get_instance_name()
 
@@ -2543,6 +2544,45 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
             desc="add_room_report",
         )
         return next_id
+
+    async def add_user_report(
+        self,
+        target_user_id: str,
+        user_id: str,
+        reason: str,
+        received_ts: int,
+    ) -> int:
+        """Add a user report
+
+        Args:
+            target_user_id: The user ID being reported.
+            user_id: User who reported the user.
+            reason: Description that the user specifies.
+            received_ts: Time when the user submitted the report (milliseconds).
+        Returns:
+            Id of the room report.
+        """
+        next_id = self._user_reports_id_gen.get_next()
+        await self.db_pool.simple_insert(
+            table="user_reports",
+            values={
+                "id": next_id,
+                "received_ts": received_ts,
+                "target_user_id": target_user_id,
+                "user_id": user_id,
+                "reason": reason,
+            },
+            desc="add_user_report",
+        )
+        return next_id
+
+    async def get_user_report_ids(self, target_user_id: str) -> List[str]:
+        return await self.db_pool.simple_select_onecol(
+            table="user_reports",
+            keyvalues={"target_user_id": target_user_id},
+            retcol="id",
+            desc="get_user_report_ids",
+        )
 
     async def clear_partial_state_room(self, room_id: str) -> Optional[int]:
         """Clears the partial state flag for a room.
