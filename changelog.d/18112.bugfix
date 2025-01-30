@@ -1,0 +1,1 @@
+Raise an error if someone is using an incorrect suffix in a config duration string.
