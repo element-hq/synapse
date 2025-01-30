@@ -325,6 +325,16 @@ with `client` and `federation` `resources` must be configured in the
 [`worker_listeners`](usage/configuration/config_documentation.md#worker_listeners)
 option in the worker config.
 
+The following admin APIs are now available to be handled by workers, with more forthcoming:
+
+    # Admin APIs
+    "^/_synapse/admin/v2/rooms/.*$"
+
+Note that a [HTTP listener](usage/configuration/config_documentation.md#listeners)
+with `admin` and `replication `resources` must be configured in the
+[`worker_listeners`](usage/configuration/config_documentation.md#worker_listeners)
+option in the worker config.
+
 #### Load balancing
 
 It is possible to run multiple instances of this worker app, with incoming requests

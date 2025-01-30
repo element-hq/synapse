@@ -534,6 +534,8 @@ Valid resource names are:
   for [workers](../../workers.md) and containers without listener e.g.
   [application services](../../workers.md#notifying-application-services).
 
+* `admin`: the admin API (/_synapse/admin)
+
 Example configuration #1:
 ```yaml
 listeners:
