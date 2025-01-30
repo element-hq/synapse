@@ -1641,8 +1641,8 @@ class RoomMemberWorkerStore(EventsWorkerStore, CacheInvalidationWorkerStore):
         Check whether a user is listed as a participant in a room
 
         Args:
-            room_id: ID of the room to check in
             user_id: user ID of the user
+            room_id: ID of the room to check in
         """
 
         def _get_room_participation_txn(
