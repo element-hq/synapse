@@ -1717,7 +1717,7 @@ class RoomMemberBackgroundUpdateStore(SQLBaseStore):
             """
             txn.execute(sql)
             res = txn.fetchone()
-            if not res:
+            if not res[0]:
                 return 0
             return res[0]
 
