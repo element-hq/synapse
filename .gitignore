@@ -16,6 +16,7 @@ _trial_temp*/
 __pycache__/
 
 # We do want poetry, cargo and flake lockfiles.
+!uv.lock
 !poetry.lock
 !Cargo.lock
 !flake.lock
