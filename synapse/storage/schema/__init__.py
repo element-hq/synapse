@@ -155,6 +155,9 @@ Changes in SCHEMA_VERSION = 88
       be posted in response to a resettable timeout or an on-demand action.
     - Add background update to fix data integrity issue in the
       `sliding_sync_membership_snapshots` -> `forgotten` column
+
+Changes in SCHEMA_VERSION = 89
+    - Add `state_groups_pending_deletion` and `state_groups_persisting` tabls.q
 """
 
 

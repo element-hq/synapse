@@ -72,10 +72,10 @@ class StateDeletionDataStore:
     transaction we recheck `state_groups_pending_deletion` table again and see
     that it exists and so continue with the deletion. To prevent this from
     happening we add a `sequence_number` column to
-    `state_groups_pending_deletion`, and during ensure that for a state group
-    we're about to delete that the sequence number doesn't change between steps
-    (a) and (d). So long as we always bump the sequence number whenever an event
-    may become used the race can never happen.
+    `state_groups_pending_deletion`, and during deletion we ensure that for a
+    state group we're about to delete that the sequence number doesn't change
+    between steps (a) and (d). So long as we always bump the sequence number
+    whenever an event may become used the race can never happen.
     """
 
     # How long to wait before we delete state groups. This should be long enough
@@ -118,11 +118,12 @@ class StateDeletionDataStore:
         self, txn: LoggingTransaction, state_groups: AbstractSet[int]
     ) -> Collection[int]:
         existing_state_groups = self._get_existing_groups_with_lock(txn, state_groups)
+
+        self._bump_deletion_txn(txn, existing_state_groups)
+
         missing_state_groups = state_groups - existing_state_groups
         if missing_state_groups:
             return missing_state_groups
-
-        self._bump_deletion_txn(txn, state_groups)
 
         return ()
 
@@ -131,6 +132,9 @@ class StateDeletionDataStore:
     ) -> None:
         """Update any pending deletions of the state group that they may now be
         referenced."""
+
+        if not state_groups:
+            return
 
         now = self._clock.time_msec()
         if isinstance(self.db_pool.engine, PostgresEngine):
