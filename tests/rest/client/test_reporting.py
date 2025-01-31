@@ -220,11 +220,11 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.report_path = f"/_matrix/client/unstable/org.matrix.msc4260/users/{self.target_user_id}/report"
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
-    def test_reason_str(self) -> None:
+    async def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
         self.assertEqual(
-            1, self.hs.get_datastores().main.get_user_report_ids(self.target_user_id)
+            1, await self.hs.get_datastores().main.get_user_report_ids(self.target_user_id)
         )
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
@@ -262,7 +262,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
-    def test_can_report_nonexistent_user(self) -> None:
+    async def test_can_report_nonexistent_user(self) -> None:
         """
         Tests that we ignore reports for nonexistent users.
         """
@@ -276,7 +276,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.result["body"])
         self.assertEqual(
-            0, self.hs.get_datastores().main.get_user_report_ids(target_user_id)
+            0, await self.hs.get_datastores().main.get_user_report_ids(target_user_id)
         )
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
