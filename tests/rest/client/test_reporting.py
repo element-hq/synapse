@@ -220,15 +220,17 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.report_path = f"/_matrix/client/unstable/org.matrix.msc4260/users/{self.target_user_id}/report"
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
-    async def test_reason_str(self) -> None:
+    def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
-        self.assertEqual(
-            1,
-            await self.hs.get_datastores().main.get_user_report_ids(
-                self.target_user_id
-            ),
-        )
+
+        rows = self.get_success(self.hs.get_datastores().main.db_pool.simple_select_onecol(
+            table="user_reports",
+            keyvalues={"target_user_id": self.target_user_id},
+            retcol="id",
+            desc="get_user_report_ids",
+        ))
+        self.assertEqual(len(rows), 1)
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_no_reason(self) -> None:
@@ -265,7 +267,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         )
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
-    async def test_can_report_nonexistent_user(self) -> None:
+    def test_can_report_nonexistent_user(self) -> None:
         """
         Tests that we ignore reports for nonexistent users.
         """
@@ -278,9 +280,14 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
             shorthand=False,
         )
         self.assertEqual(200, channel.code, msg=channel.result["body"])
-        self.assertEqual(
-            0, await self.hs.get_datastores().main.get_user_report_ids(target_user_id)
-        )
+
+        rows = self.get_success(self.hs.get_datastores().main.db_pool.simple_select_onecol(
+            table="user_reports",
+            keyvalues={"target_user_id": self.target_user_id},
+            retcol="id",
+            desc="get_user_report_ids",
+        ))
+        self.assertEqual(len(rows), 0)
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
         channel = self.make_request(

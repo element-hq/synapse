@@ -2576,14 +2576,6 @@ class RoomStore(RoomBackgroundUpdateStore, RoomWorkerStore):
         )
         return next_id
 
-    async def get_user_report_ids(self, target_user_id: str) -> List[str]:
-        return await self.db_pool.simple_select_onecol(
-            table="user_reports",
-            keyvalues={"target_user_id": target_user_id},
-            retcol="id",
-            desc="get_user_report_ids",
-        )
-
     async def clear_partial_state_room(self, room_id: str) -> Optional[int]:
         """Clears the partial state flag for a room.
 
