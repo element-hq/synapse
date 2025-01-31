@@ -22,7 +22,6 @@
 
 import abc
 import collections.abc
-import os
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -48,7 +47,6 @@ from synapse.synapse_rust.events import EventInternalMetadata
 from synapse.types import JsonDict, StrCollection
 from synapse.util.caches import intern_dict
 from synapse.util.frozenutils import freeze
-from synapse.util.stringutils import strtobool
 
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
