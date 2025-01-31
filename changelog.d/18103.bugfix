@@ -1,0 +1,3 @@
+Fixed a bug that disturbed room creation when a check_event_allowed callback was registered by a module and power_level Notifications mapping exists.
+
+Contributed by @c-cal
