@@ -170,7 +170,7 @@ managed by [systemd](../../systemd-with-workers/), this option must be omitted o
 
 This can also be set by the `--daemonize` (`-D`) argument when starting Synapse.
 
-See [`worker_daemonize`](TODO) for more information on daemonizing workers.
+See `worker_daemonize` for more information on daemonizing workers.
 
 Example configuration:
 ```yaml
@@ -646,6 +646,8 @@ listeners:
 ### `manhole`
 
 Turn on the Twisted telnet manhole service on the given port. Defaults to none.
+
+This can also be set by the `--manhole` argument when starting Synapse.
 
 Example configuration:
 ```yaml
