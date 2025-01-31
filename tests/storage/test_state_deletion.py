@@ -271,7 +271,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.assertTrue(can_be_deleted)
 
     def test_race_between_check_and_insert(self) -> None:
-        """Check that we correctly handle the race where we got to delete a
+        """Check that we correctly handle the race where we go to delete a
         state group, check that it is unreferenced, and then it becomes
         referenced just before we delete it."""
 
