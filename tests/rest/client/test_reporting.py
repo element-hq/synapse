@@ -204,7 +204,6 @@ class ReportRoomTestCase(unittest.HomeserverTestCase):
         self.assertEqual(response_status, channel.code, msg=channel.result["body"])
 
 
-@override_config({"experimental_features": {"msc4260_enabled": True}})
 class ReportUserTestCase(unittest.HomeserverTestCase):
     servlets = [
         synapse.rest.admin.register_servlets,
@@ -220,6 +219,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         self.target_user_id = self.register_user("target_user", "pass")
         self.report_path = f"/_matrix/client/unstable/org.matrix.msc4260/users/{self.target_user_id}/report"
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_reason_str(self) -> None:
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
@@ -227,18 +227,22 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
             1, self.hs.get_datastores().main.get_user_report_ids(self.target_user_id)
         )
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_no_reason(self) -> None:
         data = {"not_reason": "for typechecking"}
         self._assert_status(400, data)
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_reason_nonstring(self) -> None:
         data = {"reason": 42}
         self._assert_status(400, data)
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_reason_null(self) -> None:
         data = {"reason": None}
         self._assert_status(400, data)
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_cannot_report_nonlcoal_user(self) -> None:
         """
         Tests that we don't accept event reports for users which aren't local users.
@@ -257,6 +261,7 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
             msg=channel.result["body"],
         )
 
+    @override_config({"experimental_features": {"msc4260_enabled": True}})
     def test_can_report_nonexistent_user(self) -> None:
         """
         Tests that we ignore reports for nonexistent users.
