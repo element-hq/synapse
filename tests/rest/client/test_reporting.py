@@ -224,7 +224,10 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
         self.assertEqual(
-            1, await self.hs.get_datastores().main.get_user_report_ids(self.target_user_id)
+            1,
+            await self.hs.get_datastores().main.get_user_report_ids(
+                self.target_user_id
+            ),
         )
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
