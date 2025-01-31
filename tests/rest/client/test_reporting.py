@@ -224,12 +224,14 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         data = {"reason": "this makes me sad"}
         self._assert_status(200, data)
 
-        rows = self.get_success(self.hs.get_datastores().main.db_pool.simple_select_onecol(
-            table="user_reports",
-            keyvalues={"target_user_id": self.target_user_id},
-            retcol="id",
-            desc="get_user_report_ids",
-        ))
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="user_reports",
+                keyvalues={"target_user_id": self.target_user_id},
+                retcol="id",
+                desc="get_user_report_ids",
+            )
+        )
         self.assertEqual(len(rows), 1)
 
     @override_config({"experimental_features": {"msc4260_enabled": True}})
@@ -281,12 +283,14 @@ class ReportUserTestCase(unittest.HomeserverTestCase):
         )
         self.assertEqual(200, channel.code, msg=channel.result["body"])
 
-        rows = self.get_success(self.hs.get_datastores().main.db_pool.simple_select_onecol(
-            table="user_reports",
-            keyvalues={"target_user_id": self.target_user_id},
-            retcol="id",
-            desc="get_user_report_ids",
-        ))
+        rows = self.get_success(
+            self.hs.get_datastores().main.db_pool.simple_select_onecol(
+                table="user_reports",
+                keyvalues={"target_user_id": self.target_user_id},
+                retcol="id",
+                desc="get_user_report_ids",
+            )
+        )
         self.assertEqual(len(rows), 0)
 
     def _assert_status(self, response_status: int, data: JsonDict) -> None:
