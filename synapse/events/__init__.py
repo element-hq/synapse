@@ -53,17 +53,16 @@ from synapse.util.stringutils import strtobool
 if TYPE_CHECKING:
     from synapse.events.builder import EventBuilder
 
+# Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
+# bugs where we accidentally share e.g. signature dicts. However, converting a
+# dict to frozen_dicts is expensive.
+#
+# NOTE: This is overridden by the configuration by the Synapse worker apps, but
+# for the sake of tests, it is set here while it cannot be configured on the
+# homeserver object itself.
 
-USE_FROZEN_DICTS = False
-"""
-Whether we should use frozen_dict in FrozenEvent. Using frozen_dicts prevents
-bugs where we accidentally share e.g. signature dicts. However, converting a
-dict to frozen_dicts is expensive.
+USE_FROZEN_DICTS = strtobool(os.environ.get("SYNAPSE_USE_FROZEN_DICTS", "0"))
 
-NOTE: This is overridden by the configuration by the Synapse worker apps, but
-for the sake of tests, it is set here because it cannot be configured on the
-homeserver object itself.
-"""
 
 T = TypeVar("T")
 
