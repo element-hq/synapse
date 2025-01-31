@@ -47,7 +47,7 @@ class StateDeletionDataStore:
     groups that we want to delete.
 
     To handle this, we take two approaches. First, before we persist any event
-    we ensure that the state groups still exist and mark in the
+    we ensure that the state group still exists and mark in the
     `state_groups_persisting` table that the state group is about to be used.
     (Note that we have to have the extra table here as state groups and events
     can be in different databases, and thus we can't check for the existence of
@@ -118,8 +118,9 @@ class StateDeletionDataStore:
         self, txn: LoggingTransaction, state_groups: AbstractSet[int]
     ) -> Collection[int]:
         existing_state_groups = self._get_existing_groups_with_lock(txn, state_groups)
-        if state_groups - existing_state_groups:
-            return state_groups - existing_state_groups
+        missing_state_groups = state_groups - existing_state_groups
+        if missing_state_groups:
+            return missing_state_groups
 
         self._bump_deletion_txn(txn, state_groups)
 
@@ -401,7 +402,7 @@ class StateDeletionDataStore:
 
             # Check if the sequence number has changed, if it has then it
             # indicates that the state group may have become referenced since we
-            # checkd.s
+            # checked.
             if state_groups_to_sequence_numbers[state_group] != sequence_number:
                 not_ready_to_be_deleted.add(state_group)
                 continue
@@ -415,7 +416,7 @@ class StateDeletionDataStore:
 
         can_be_deleted = ready_to_be_deleted - not_ready_to_be_deleted
         if not_ready_to_be_deleted:
-            # If there are any state groups that aren't ready to be persisted,
+            # If there are any state groups that aren't ready to be deleted,
             # then we also need to remove any state groups that are referenced
             # by them.
             clause, args = make_in_list_sql_clause(

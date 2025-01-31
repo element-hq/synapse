@@ -53,7 +53,6 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
             self.state_deletion_store.get_pending_deletions([state_group])
         )
 
-        # We shouldn't be able to delete the state group as not enough time as passed
         can_be_deleted = self.get_success(
             self.state_deletion_store.db_pool.runInteraction(
                 "test_existing_pending_deletion_is_cleared",
@@ -235,7 +234,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.assertFalse(can_be_deleted)
 
     def test_deletion_error_during_persistence(self) -> None:
-        """Test that state groups remain marked as for deletion if persisting
+        """Test that state groups remain marked as pending deletion if persisting
         the event fails."""
 
         event, context = self.get_success(
@@ -401,7 +400,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
             )
         )
 
-        # We shouldn't be able to delete the state group as not enough time as passed
+        # We shouldn't be able to delete the state group as not enough time has passed
         can_be_deleted = self.get_success(
             self.state_deletion_store.db_pool.runInteraction(
                 "test_existing_pending_deletion_is_cleared",
