@@ -157,7 +157,7 @@ Changes in SCHEMA_VERSION = 88
       `sliding_sync_membership_snapshots` -> `forgotten` column
 
 Changes in SCHEMA_VERSION = 89
-    - Add `state_groups_pending_deletion` and `state_groups_persisting` tabls.q
+    - Add `state_groups_pending_deletion` and `state_groups_persisting` tables.
 """
 
 
