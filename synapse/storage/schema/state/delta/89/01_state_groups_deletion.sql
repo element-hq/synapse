@@ -28,8 +28,8 @@ CREATE INDEX state_groups_pending_deletion_insertion_ts ON state_groups_pending_
 
 -- Holds the state groups the worker is currently persisting.
 --
--- The `sequence_number` column *must* be updated whenever a state group may
--- have become referenced.
+-- The `sequence_number` column of the `state_groups_pending_deletion` table
+-- *must* be updated whenever a state group may have become referenced.
 CREATE TABLE IF NOT EXISTS state_groups_persisting (
     state_group BIGINT NOT NULL,
     instance_name TEXT NOT NULL,
