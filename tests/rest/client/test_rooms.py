@@ -552,6 +552,64 @@ class RoomStateTestCase(RoomBase):
         self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
         self.assertEqual(channel.json_body, {"membership": "join"})
 
+    def test_get_state_etag_match(self) -> None:
+        """Test that `/rooms/$room_id/state` returns a NOT_MODIFIED response when provided with the correct ETag."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state" % room_id,
+        )
+
+        etagheader = channel.headers.getRawHeaders(b"ETag")
+        self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
+        assert etagheader
+        channel2 = self.make_request(
+            "GET",
+            "/rooms/%s/state" % room_id,
+            custom_headers=[
+                (
+                    b"If-None-Match",
+                    etagheader[0],
+                ),
+            ],
+        )
+        self.assertEqual(
+            HTTPStatus.NOT_MODIFIED,
+            channel2.code,
+            "Responds with not modified when provided with the correct ETag",
+        )
+        self.assertEqual(
+            etagheader,
+            channel2.headers.getRawHeaders(b"ETag"),
+            "returns the same etag",
+        )
+
+    def test_get_state_etag_nonmatch(self) -> None:
+        """Test that `/rooms/$room_id/state` returns a normal response to an unrecognised ETag."""
+        room_id = self.helper.create_room_as(self.user_id)
+        channel = self.make_request(
+            "GET",
+            "/rooms/%s/state" % room_id,
+            custom_headers=(
+                (
+                    b"If-None-Match",
+                    '"notavalidetag"',
+                ),
+            ),
+        )
+
+        self.assertEqual(HTTPStatus.OK, channel.code, msg=channel.result["body"])
+        self.assertCountEqual(
+            [state_event["type"] for state_event in channel.json_list],
+            {
+                "m.room.create",
+                "m.room.power_levels",
+                "m.room.join_rules",
+                "m.room.member",
+                "m.room.history_visibility",
+            },
+        )
+
 
 class RoomsMemberListTestCase(RoomBase):
     """Tests /rooms/$room_id/members/list REST events."""
