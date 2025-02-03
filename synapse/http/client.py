@@ -41,7 +41,7 @@ from canonicaljson import encode_canonical_json
 from netaddr import AddrFormatError, IPAddress, IPSet
 from prometheus_client import Counter
 from typing_extensions import Protocol
-from zope.interface import implementer, provider
+from zope.interface import implementer
 
 from OpenSSL import SSL
 from OpenSSL.SSL import VERIFY_NONE
@@ -225,7 +225,7 @@ class _IPBlockingResolver:
                     recv.addressResolved(address)
             recv.resolutionComplete()
 
-        @provider(IResolutionReceiver)
+        @implementer(IResolutionReceiver)
         class EndpointReceiver:
             @staticmethod
             def resolutionBegan(resolutionInProgress: IHostResolution) -> None:
@@ -239,8 +239,9 @@ class _IPBlockingResolver:
             def resolutionComplete() -> None:
                 _callback()
 
+        endpoint_receiver_wrapper = EndpointReceiver()
         self._reactor.nameResolver.resolveHostName(
-            EndpointReceiver, hostname, portNumber=portNumber
+            endpoint_receiver_wrapper, hostname, portNumber=portNumber
         )
 
         return recv

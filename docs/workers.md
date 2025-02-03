@@ -273,17 +273,6 @@ information.
     ^/_matrix/client/(api/v1|r0|v3|unstable)/knock/
     ^/_matrix/client/(api/v1|r0|v3|unstable)/profile/
 
-    # Account data requests
-    ^/_matrix/client/(r0|v3|unstable)/.*/tags
-    ^/_matrix/client/(r0|v3|unstable)/.*/account_data
-
-    # Receipts requests
-    ^/_matrix/client/(r0|v3|unstable)/rooms/.*/receipt
-    ^/_matrix/client/(r0|v3|unstable)/rooms/.*/read_markers
-
-    # Presence requests
-    ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
-
     # User directory search requests
     ^/_matrix/client/(r0|v3|unstable)/user_directory/search$
 
@@ -291,6 +280,13 @@ Additionally, the following REST endpoints can be handled for GET requests:
 
     ^/_matrix/client/(api/v1|r0|v3|unstable)/pushrules/
     ^/_matrix/client/unstable/org.matrix.msc4140/delayed_events
+
+    # Account data requests
+    ^/_matrix/client/(r0|v3|unstable)/.*/tags
+    ^/_matrix/client/(r0|v3|unstable)/.*/account_data
+
+    # Presence requests
+    ^/_matrix/client/(api/v1|r0|v3|unstable)/presence/
 
 Pagination requests can also be handled, but all requests for a given
 room must be routed to the same instance. Additionally, care must be taken to
