@@ -41,10 +41,11 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.store = hs.get_datastores().main
         self.state_store = hs.get_datastores().state
         self.state_deletion_store = hs.get_datastores().state_deletion
+        self.purge_events = hs.get_storage_controllers().purge_events
 
         # We want to disable the automatic deletion of state groups in the
         # background, so we can do controlled tests.
-        hs.get_storage_controllers().purge_events._delete_state_loop_call.stop()
+        self.purge_events._delete_state_loop_call.stop()
 
         self.user_id = self.register_user("test", "password")
         tok = self.login("test", "password")
@@ -345,7 +346,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
 
     def test_remove_ancestors_from_can_delete(self) -> None:
         """Test that if a state group is not ready to be deleted, we also don't
-        delete anything that is refernced by it"""
+        delete anything that is referenced by it"""
 
         event, context = self.get_success(
             create_event(
@@ -358,7 +359,7 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         )
         assert context.state_group is not None
 
-        # Create a new state group that refernces the one from the event
+        # Create a new state group that references the one from the event
         new_state_group = self.get_success(
             self.state_store.store_state_group(
                 event.event_id,
@@ -413,3 +414,62 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
             )
         )
         self.assertCountEqual(can_be_deleted, [])
+
+    def test_newly_referenced_state_group_gets_removed_from_pending(self) -> None:
+        """Check that if a state group marked for deletion becomes referenced
+        (without being removed from pending deletion table), it gets removed
+        from pending deletion table."""
+
+        event, context = self.get_success(
+            create_event(
+                self.hs,
+                room_id=self.room_id,
+                type="m.test",
+                state_key="",
+                sender=self.user_id,
+            )
+        )
+        assert context.state_group is not None
+
+        # Mark a state group that we're referencing as pending deletion.
+        self.get_success(
+            self.state_deletion_store.mark_state_groups_as_pending_deletion(
+                [context.state_group]
+            )
+        )
+
+        # Advance time enough so we can delete the state group so they're both
+        # ready for deletion.
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
+
+        # Manually insert into the table to mimic the state group getting used.
+        self.get_success(
+            self.store.db_pool.simple_insert(
+                table="event_to_state_groups",
+                values={"state_group": context.state_group, "event_id": event.event_id},
+                desc="test_newly_referenced_state_group_gets_removed_from_pending",
+            )
+        )
+
+        # Manually run the background task to delete pending state groups.
+        self.get_success(self.purge_events._delete_state_groups_loop())
+
+        # The pending deletion flag should be cleared...
+        pending_deletion = self.get_success(
+            self.state_deletion_store.db_pool.simple_select_one_onecol(
+                table="state_groups_pending_deletion",
+                keyvalues={"state_group": context.state_group},
+                retcol="1",
+                allow_none=True,
+                desc="test_newly_referenced_state_group_gets_removed_from_pending",
+            )
+        )
+        self.assertIsNone(pending_deletion)
+
+        # .. but the state should not have been deleted.
+        state = self.get_success(
+            self.state_store._get_state_for_groups([context.state_group])
+        )
+        self.assertGreater(len(state[context.state_group]), 0)
