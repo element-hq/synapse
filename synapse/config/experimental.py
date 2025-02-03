@@ -20,7 +20,8 @@
 #
 
 import enum
-from typing import TYPE_CHECKING, Any, Optional
+from functools import cache
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 
 import attr
 import attr.validators
@@ -41,6 +42,12 @@ except ImportError:
 if TYPE_CHECKING:
     # Only import this if we're type checking, as it might not be installed at runtime.
     from authlib.jose.rfc7517 import JsonWebKey
+
+
+@cache
+def read_secret_from_file_once(file_path: Any, config_path: Iterable[str]) -> str:
+    """Returns the memoized secret read from file."""
+    return read_file(file_path, config_path).strip()
 
 
 class ClientAuthMethod(enum.Enum):
@@ -226,27 +233,21 @@ class MSC3861:
     """
 
     def client_secret(self) -> Optional[str]:
-        """Returns the client secret.
-
-        If client_secret_path is given, the secret is always read from file.
-        """
+        """Returns the secret given via `client_secret` or `client_secret_path`."""
         if self._client_secret_path:
-            return read_file(
+            return read_secret_from_file_once(
                 self._client_secret_path,
                 ("experimental_features", "msc3861", "client_secret_path"),
-            ).strip()
+            )
         return self._client_secret
 
     def admin_token(self) -> Optional[str]:
-        """Returns the admin token.
-
-        If admin_token_path is given, the token is always read from file.
-        """
+        """Returns the admin token given via `admin_token` or `admin_token_path`."""
         if self._admin_token_path:
-            return read_file(
+            return read_secret_from_file_once(
                 self._admin_token_path,
                 ("experimental_features", "msc3861", "admin_token_path"),
-            ).strip()
+            )
         return self._admin_token
 
     def check_config_conflicts(self, root: RootConfig) -> None:
