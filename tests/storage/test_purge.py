@@ -195,3 +195,78 @@ class PurgeTests(HomeserverTestCase):
         self.assertEqual(second_state, {})
         self.assertEqual(third_state, {})
         self.assertNotEqual(last_state, {})
+
+    def test_purge_unreferenced_state_group(self) -> None:
+        """Test that purging a room also gets rid of unreferenced state groups
+        it encounters during the purge.
+
+        This is important, as otherwise these unreferenced state groups get
+        "de-deltaed" during the purge process, consuming lots of disk space.
+        """
+
+        self.helper.send(self.room_id, body="test1")
+        state1 = self.helper.send_state(
+            self.room_id, "org.matrix.test", body={"number": 2}
+        )
+        state2 = self.helper.send_state(
+            self.room_id, "org.matrix.test", body={"number": 3}
+        )
+        self.helper.send(self.room_id, body="test4")
+        last = self.helper.send(self.room_id, body="test5")
+
+        # Create an unreferenced state group that has a prev group of one of the
+        # to-be-purged events.
+        prev_group = self.get_success(
+            self.store._get_state_group_for_event(state1["event_id"])
+        )
+        unreferenced_state_group = self.get_success(
+            self.state_store.store_state_group(
+                event_id=last["event_id"],
+                room_id=self.room_id,
+                prev_group=prev_group,
+                delta_ids={("org.matrix.test", ""): state2["event_id"]},
+                current_state_ids=None,
+            )
+        )
+
+        # Get the topological token
+        token = self.get_success(
+            self.store.get_topological_token_for_event(last["event_id"])
+        )
+        token_str = self.get_success(token.to_string(self.hs.get_datastores().main))
+
+        # Purge everything before this topological token
+        self.get_success(
+            self._storage_controllers.purge_events.purge_history(
+                self.room_id, token_str, True
+            )
+        )
+
+        # Advance so that the background jobs to delete the state groups runs
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
+
+        # We expect that the unreferenced state group has been deleted.
+        row = self.get_success(
+            self.state_store.db_pool.simple_select_one_onecol(
+                table="state_groups",
+                keyvalues={"id": unreferenced_state_group},
+                retcol="id",
+                allow_none=True,
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertIsNone(row)
+
+        # We expect there to now only be one state group for the room, which is
+        # the state group of the last event (as the only outlier).
+        state_groups = self.get_success(
+            self.state_store.db_pool.simple_select_onecol(
+                table="state_groups",
+                keyvalues={"room_id": self.room_id},
+                retcol="id",
+                desc="test_purge_unreferenced_state_group",
+            )
+        )
+        self.assertEqual(len(state_groups), 1)

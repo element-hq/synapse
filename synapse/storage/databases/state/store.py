@@ -853,11 +853,40 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             List[Tuple[int, int]],
             await self.db_pool.simple_select_many_batch(
                 table="state_group_edges",
-                column="prev_state_group",
+                column="state_group",
                 iterable=state_groups,
                 keyvalues={},
                 retcols=("state_group", "prev_state_group"),
                 desc="get_previous_state_groups",
+            ),
+        )
+
+        return dict(rows)
+
+    @trace
+    @tag_args
+    async def get_next_state_groups(
+        self, state_groups: Iterable[int]
+    ) -> Dict[int, int]:
+        """Fetch the groups that have the given state groups as their previous
+        state groups.
+
+        Args:
+            state_groups
+
+        Returns:
+            A mapping from state group to previous state group.
+        """
+
+        rows = cast(
+            List[Tuple[int, int]],
+            await self.db_pool.simple_select_many_batch(
+                table="state_group_edges",
+                column="prev_state_group",
+                iterable=state_groups,
+                keyvalues={},
+                retcols=("state_group", "prev_state_group"),
+                desc="get_next_state_groups",
             ),
         )
 
