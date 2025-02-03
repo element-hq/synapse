@@ -21,9 +21,10 @@
 
 import itertools
 import logging
-from typing import TYPE_CHECKING, Set
+from typing import TYPE_CHECKING, Collection, Mapping, Set
 
 from synapse.logging.context import nested_logging_context
+from synapse.metrics.background_process_metrics import wrap_as_background_process
 from synapse.storage.databases import Databases
 
 if TYPE_CHECKING:
@@ -37,6 +38,11 @@ class PurgeEventsStorageController:
 
     def __init__(self, hs: "HomeServer", stores: Databases):
         self.stores = stores
+
+        if hs.config.worker.run_background_tasks:
+            self._delete_state_loop_call = hs.get_clock().looping_call(
+                self._delete_state_groups_loop, 60
+            )
 
     async def purge_room(self, room_id: str) -> None:
         """Deletes all record of a room"""
@@ -68,11 +74,15 @@ class PurgeEventsStorageController:
             logger.info("[purge] finding state groups that can be deleted")
             sg_to_delete = await self._find_unreferenced_groups(state_groups)
 
-            await self.stores.state.purge_unreferenced_state_groups(
-                room_id, sg_to_delete
+            # Mark these state groups as pending deletion, they will actually
+            # get deleted automatically later.
+            await self.stores.state_deletion.mark_state_groups_as_pending_deletion(
+                sg_to_delete
             )
 
-    async def _find_unreferenced_groups(self, state_groups: Set[int]) -> Set[int]:
+    async def _find_unreferenced_groups(
+        self, state_groups: Collection[int]
+    ) -> Set[int]:
         """Used when purging history to figure out which state groups can be
         deleted.
 
@@ -121,3 +131,65 @@ class PurgeEventsStorageController:
         to_delete = state_groups_seen - referenced_groups
 
         return to_delete
+
+    @wrap_as_background_process("_delete_state_groups_loop")
+    async def _delete_state_groups_loop(self) -> None:
+        """Background task that deletes any state groups that may be pending
+        deletion."""
+
+        while True:
+            next_to_delete = await self.stores.state_deletion.get_next_state_group_collection_to_delete()
+            if next_to_delete is None:
+                break
+
+            (room_id, groups_to_sequences) = next_to_delete
+            made_progress = await self._delete_state_groups(
+                room_id, groups_to_sequences
+            )
+
+            # If no progress was made in deleting the state groups, then we
+            # break to allow a pause before trying again next time we get
+            # called.
+            if not made_progress:
+                break
+
+    async def _delete_state_groups(
+        self, room_id: str, groups_to_sequences: Mapping[int, int]
+    ) -> bool:
+        """Tries to delete the given state groups.
+
+        Returns:
+            Whether we made progress in deleting the state groups (or marking
+            them as referenced).
+        """
+
+        # We double check if any of the state groups have become referenced.
+        # This shouldn't happen, as any usages should cause the state group to
+        # be removed as pending deletion.
+        referenced_state_groups = await self.stores.main.get_referenced_state_groups(
+            groups_to_sequences
+        )
+
+        if referenced_state_groups:
+            # We mark any state groups that have become referenced as being
+            # used.
+            await self.stores.state_deletion.mark_state_groups_as_used(
+                referenced_state_groups
+            )
+
+            # Update list of state groups to remove referenced ones
+            groups_to_sequences = {
+                state_group: sequence_number
+                for state_group, sequence_number in groups_to_sequences.items()
+                if state_group not in referenced_state_groups
+            }
+
+        if not groups_to_sequences:
+            # We made progress here as long as we marked some state groups as
+            # now referenced.
+            return len(referenced_state_groups) > 0
+
+        return await self.stores.state.purge_unreferenced_state_groups(
+            room_id,
+            groups_to_sequences,
+        )

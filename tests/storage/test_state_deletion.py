@@ -42,6 +42,10 @@ class StateDeletionStoreTestCase(HomeserverTestCase):
         self.state_store = hs.get_datastores().state
         self.state_deletion_store = hs.get_datastores().state_deletion
 
+        # We want to disable the automatic deletion of state groups in the
+        # background, so we can do controlled tests.
+        hs.get_storage_controllers().purge_events._delete_state_loop_call.stop()
+
         self.user_id = self.register_user("test", "password")
         tok = self.login("test", "password")
         self.room_id = self.helper.create_room_as(self.user_id, tok=tok)
