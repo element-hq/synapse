@@ -36,7 +36,10 @@ import attr
 
 from synapse.api.constants import EventTypes
 from synapse.events import EventBase
-from synapse.events.snapshot import UnpersistedEventContext, UnpersistedEventContextBase
+from synapse.events.snapshot import (
+    UnpersistedEventContext,
+    UnpersistedEventContextBase,
+)
 from synapse.logging.opentracing import tag_args, trace
 from synapse.storage._base import SQLBaseStore
 from synapse.storage.database import (
@@ -55,6 +58,7 @@ from synapse.util.cancellation import cancellable
 
 if TYPE_CHECKING:
     from synapse.server import HomeServer
+    from synapse.storage.databases.state.deletion import StateDeletionDataStore
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +87,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         database: DatabasePool,
         db_conn: LoggingDatabaseConnection,
         hs: "HomeServer",
+        state_deletion_store: "StateDeletionDataStore",
     ):
         super().__init__(database, db_conn, hs)
+        self._state_deletion_store = state_deletion_store
 
         # Originally the state store used a single DictionaryCache to cache the
         # event IDs for the state types in a given state group to avoid hammering
@@ -467,14 +473,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             Returns:
                 A list of state groups
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
@@ -546,6 +553,7 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                     for key, state_id in context.state_delta_due_to_event.items()
                 ],
             )
+
             return events_and_context
 
         return await self.db_pool.runInteraction(
@@ -601,14 +609,15 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
                 The state group if successfully created, or None if the state
                 needs to be persisted as a full state.
             """
-            is_in_db = self.db_pool.simple_select_one_onecol_txn(
-                txn,
-                table="state_groups",
-                keyvalues={"id": prev_group},
-                retcol="id",
-                allow_none=True,
+
+            # We need to check that the prev group isn't about to be deleted
+            is_missing = (
+                self._state_deletion_store._check_state_groups_and_bump_deletion_txn(
+                    txn,
+                    {prev_group},
+                )
             )
-            if not is_in_db:
+            if is_missing:
                 raise Exception(
                     "Trying to persist state with unpersisted prev_group: %r"
                     % (prev_group,)
