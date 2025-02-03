@@ -243,7 +243,9 @@ class PurgeTests(HomeserverTestCase):
         )
 
         # Advance so that the background jobs to delete the state groups runs
-        self.reactor.advance(10000)
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
 
         # We expect that the unreferenced state group has been deleted.
         row = self.get_success(
