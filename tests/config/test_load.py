@@ -194,6 +194,7 @@ class ConfigLoadingFileTestCase(ConfigFileTestCase):
             "recaptcha_private_key: 53C237",
             "recaptcha_public_key: ¬53C237",
             "form_secret: 53C237",
+            "worker_replication_secret: 53C237",
             *[
                 "experimental_features:\n"
                 "  msc3861:\n"
