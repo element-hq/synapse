@@ -22,10 +22,10 @@
 import logging
 from typing import (
     TYPE_CHECKING,
-    Collection,
     Dict,
     Iterable,
     List,
+    Mapping,
     Optional,
     Set,
     Tuple,
@@ -735,8 +735,10 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
         )
 
     async def purge_unreferenced_state_groups(
-        self, room_id: str, state_groups_to_delete: Collection[int]
-    ) -> None:
+        self,
+        room_id: str,
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
         """Deletes no longer referenced state groups and de-deltas any state
         groups that reference them.
 
@@ -744,21 +746,31 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             room_id: The room the state groups belong to (must all be in the
                 same room).
             state_groups_to_delete: Set of all state groups to delete.
+
+        Returns:
+            Whether any state groups were actually deleted.
         """
 
-        await self.db_pool.runInteraction(
+        return await self.db_pool.runInteraction(
             "purge_unreferenced_state_groups",
             self._purge_unreferenced_state_groups,
             room_id,
-            state_groups_to_delete,
+            state_groups_to_sequence_numbers,
         )
 
     def _purge_unreferenced_state_groups(
         self,
         txn: LoggingTransaction,
         room_id: str,
-        state_groups_to_delete: Collection[int],
-    ) -> None:
+        state_groups_to_sequence_numbers: Mapping[int, int],
+    ) -> bool:
+        state_groups_to_delete = self._state_deletion_store.get_state_groups_ready_for_potential_deletion_txn(
+            txn, state_groups_to_sequence_numbers
+        )
+
+        if not state_groups_to_delete:
+            return False
+
         logger.info(
             "[purge] found %i state groups to delete", len(state_groups_to_delete)
         )
@@ -820,6 +832,8 @@ class StateGroupDataStore(StateBackgroundUpdateStore, SQLBaseStore):
             "DELETE FROM state_groups WHERE id = ?",
             [(sg,) for sg in state_groups_to_delete],
         )
+
+        return True
 
     @trace
     @tag_args

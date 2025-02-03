@@ -23,6 +23,7 @@ from twisted.test.proto_helpers import MemoryReactor
 from synapse.api.errors import NotFoundError, SynapseError
 from synapse.rest.client import room
 from synapse.server import HomeServer
+from synapse.types.state import StateFilter
 from synapse.util import Clock
 
 from tests.unittest import HomeserverTestCase
@@ -40,6 +41,8 @@ class PurgeTests(HomeserverTestCase):
         self.room_id = self.helper.create_room_as(self.user_id)
 
         self.store = hs.get_datastores().main
+        self.state_store = hs.get_datastores().state
+        self.state_deletion_store = hs.get_datastores().state_deletion
         self._storage_controllers = self.hs.get_storage_controllers()
 
     def test_purge_history(self) -> None:
@@ -128,3 +131,67 @@ class PurgeTests(HomeserverTestCase):
         self.store._invalidate_local_get_event_cache(create_event.event_id)
         self.get_failure(self.store.get_event(create_event.event_id), NotFoundError)
         self.get_failure(self.store.get_event(first["event_id"]), NotFoundError)
+
+    def test_purge_history_deletes_state_groups(self) -> None:
+        """Test that unreferenced state groups get cleaned up after purge"""
+
+        # Send four state changes to the room.
+        first = self.helper.send_state(
+            self.room_id, event_type="m.foo", body={"test": 1}
+        )
+        second = self.helper.send_state(
+            self.room_id, event_type="m.foo", body={"test": 2}
+        )
+        third = self.helper.send_state(
+            self.room_id, event_type="m.foo", body={"test": 3}
+        )
+        last = self.helper.send_state(
+            self.room_id, event_type="m.foo", body={"test": 4}
+        )
+
+        # Get references to the state groups
+        event_to_groups = self.get_success(
+            self.store._get_state_group_for_events(
+                [
+                    first["event_id"],
+                    second["event_id"],
+                    third["event_id"],
+                    last["event_id"],
+                ]
+            )
+        )
+
+        # Get the topological token
+        token = self.get_success(
+            self.store.get_topological_token_for_event(last["event_id"])
+        )
+        token_str = self.get_success(token.to_string(self.hs.get_datastores().main))
+
+        # Purge everything before this topological token
+        self.get_success(
+            self._storage_controllers.purge_events.purge_history(
+                self.room_id, token_str, True
+            )
+        )
+
+        # Advance so that the background jobs to delete the state groups runs
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
+
+        # We expect all the state groups associated with events above, except
+        # the last one, should return no state.
+        state_groups = self.get_success(
+            self.state_store._get_state_groups_from_groups(
+                list(event_to_groups.values()), StateFilter.all()
+            )
+        )
+        first_state = state_groups[event_to_groups[first["event_id"]]]
+        second_state = state_groups[event_to_groups[second["event_id"]]]
+        third_state = state_groups[event_to_groups[third["event_id"]]]
+        last_state = state_groups[event_to_groups[last["event_id"]]]
+
+        self.assertEqual(first_state, {})
+        self.assertEqual(second_state, {})
+        self.assertEqual(third_state, {})
+        self.assertNotEqual(last_state, {})

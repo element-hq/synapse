@@ -20,6 +20,7 @@ from typing import (
     AsyncIterator,
     Collection,
     Mapping,
+    Optional,
     Set,
     Tuple,
 )
@@ -307,6 +308,17 @@ class StateDeletionDataStore:
             desc="mark_state_groups_as_pending_deletion",
         )
 
+    async def mark_state_groups_as_used(self, state_groups: Collection[int]) -> None:
+        """Mark the given state groups as now being referenced"""
+
+        await self.db_pool.simple_delete_many(
+            table="state_groups_pending_deletion",
+            column="state_group",
+            iterable=state_groups,
+            keyvalues={},
+            desc="mark_state_groups_as_used",
+        )
+
     async def get_pending_deletions(
         self, state_groups: Collection[int]
     ) -> Mapping[int, int]:
@@ -444,3 +456,56 @@ class StateDeletionDataStore:
             can_be_deleted.difference_update(state_group for (state_group,) in txn)
 
         return can_be_deleted
+
+    async def get_next_state_group_collection_to_delete(
+        self,
+    ) -> Optional[Tuple[str, Mapping[int, int]]]:
+        """Get the next set of state groups to try and delete
+
+        Returns:
+            2-tuple of room_id and mapping of state groups to sequence number.
+        """
+        return await self.db_pool.runInteraction(
+            "get_next_state_group_collection_to_delete",
+            self._get_next_state_group_collection_to_delete_txn,
+        )
+
+    def _get_next_state_group_collection_to_delete_txn(
+        self,
+        txn: LoggingTransaction,
+    ) -> Optional[Tuple[str, Mapping[int, int]]]:
+        """Implementation of `get_next_state_group_collection_to_delete`"""
+
+        # We want to return chunks of state groups that were marked for deletion
+        # at the same time (this isn't necessary, just more efficient). We do
+        # this by looking for the oldest insertion_ts, and then pulling out all
+        # rows that have the same insertion_ts (and room ID).
+        now = self._clock.time_msec()
+
+        sql = """
+            SELECT room_id, insertion_ts
+            FROM state_groups_pending_deletion AS sd
+            INNER JOIN state_groups AS sg ON (id = sd.state_group)
+            LEFT JOIN state_groups_persisting AS sp USING (state_group)
+            WHERE insertion_ts < ? AND sp.state_group IS NULL
+            ORDER BY insertion_ts
+            LIMIT 1
+        """
+        txn.execute(sql, (now - self.DELAY_BEFORE_DELETION_MS,))
+        row = txn.fetchone()
+        if not row:
+            return None
+
+        (room_id, insertion_ts) = row
+
+        sql = """
+            SELECT state_group, sequence_number
+            FROM state_groups_pending_deletion AS sd
+            INNER JOIN state_groups AS sg ON (id = sd.state_group)
+            LEFT JOIN state_groups_persisting AS sp USING (state_group)
+            WHERE room_id = ? AND insertion_ts = ? AND sp.state_group IS NULL
+            ORDER BY insertion_ts
+        """
+        txn.execute(sql, (room_id, insertion_ts))
+
+        return room_id, dict(txn)
