@@ -42,6 +42,7 @@ class PurgeTests(HomeserverTestCase):
 
         self.store = hs.get_datastores().main
         self.state_store = hs.get_datastores().state
+        self.state_deletion_store = hs.get_datastores().state_deletion
         self._storage_controllers = self.hs.get_storage_controllers()
 
     def test_purge_history(self) -> None:
@@ -174,7 +175,9 @@ class PurgeTests(HomeserverTestCase):
         )
 
         # Advance so that the background jobs to delete the state groups runs
-        self.reactor.advance(10000)
+        self.reactor.advance(
+            1 + self.state_deletion_store.DELAY_BEFORE_DELETION_MS / 1000
+        )
 
         # We expect all the state groups associated with events above, except
         # the last one, should return no state.

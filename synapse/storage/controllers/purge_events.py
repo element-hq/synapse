@@ -41,7 +41,7 @@ class PurgeEventsStorageController:
 
         if hs.config.worker.run_background_tasks:
             self._delete_state_loop_call = hs.get_clock().looping_call(
-                self._delete_state_groups_loop, 60
+                self._delete_state_groups_loop, 60 * 1000
             )
 
     async def purge_room(self, room_id: str) -> None:
