@@ -1831,20 +1831,20 @@ properties:
       on the account the client is using.
     default:
       per_second: 0.2
-      burst_count: 10
+      burst_count: 10.0
     examples:
       - per_second: 0.5
-        burst_count: 15
+        burst_count: 15.0
   rc_registration:
     $ref: "#/$defs/rc"
     description: >-
       This option ratelimits registration requests based on the client's IP address.
     default:
       per_second: 0.17
-      burst_count: 3
+      burst_count: 3.0
     examples:
       - per_second: 0.15
-        burst_count: 2
+        burst_count: 2.0
   rc_registration_token_validity:
     $ref: "#/$defs/rc"
     description: >-
@@ -1852,10 +1852,10 @@ properties:
       requests based on the client's IP address.
     default:
       per_second: 0.1
-      burst_count: 5
+      burst_count: 5.0
     examples:
       - per_second: 0.3
-        burst_count: 6
+        burst_count: 6.0
   rc_login:
     type: object
     description: This option specifies several limits for login.
@@ -1865,7 +1865,7 @@ properties:
         description: Ratelimits login requests based on the client's IP address.
         default:
           per_second: 0.003
-          burst_count: 5
+          burst_count: 5.0
       account:
         $ref: "#/$defs/rc"
         description: >-
@@ -1873,7 +1873,7 @@ properties:
           attempting to log into.
         default:
           per_second: 0.003
-          burst_count: 5
+          burst_count: 5.0
       failed_attempts:
         $ref: "#/$defs/rc"
         description: >-
@@ -1882,17 +1882,17 @@ properties:
           for this account.
         default:
           per_second: 0.17
-          burst_count: 3
+          burst_count: 3.0
     examples:
       - address:
           per_second: 0.15
-          burst_count: 5
+          burst_count: 5.0
         account:
           per_second: 0.18
-          burst_count: 4
+          burst_count: 4.0
         failed_attempts:
           per_second: 0.19
-          burst_count: 7
+          burst_count: 7.0
   rc_admin_redaction:
     $ref: "#/$defs/rc"
     description: >-
@@ -1901,7 +1901,7 @@ properties:
       This is useful to allow room admins to deal with abuse quickly.
     examples:
       - per_second: 1.0
-        burst_count: 50
+        burst_count: 50.0
   rc_joins:
     type: object
     description: This option allows for ratelimiting number of rooms a user can join.
@@ -1911,7 +1911,7 @@ properties:
         description: Ratelimits when users are joining rooms the server is already in.
         default:
           per_second: 0.1
-          burst_count: 10
+          burst_count: 10.0
       remote:
         $ref: "#/$defs/rc"
         description: >-
@@ -1920,14 +1920,14 @@ properties:
           locally).
         default:
           per_second: 0.01
-          burst_count: 10
+          burst_count: 10.0
     examples:
       - local:
           per_second: 0.2
-          burst_count: 15
+          burst_count: 15.0
         remote:
           per_second: 0.03
-          burst_count: 12
+          burst_count: 12.0
   rc_joins_per_room:
     $ref: "#/$defs/rc"
     description: >-
@@ -1939,20 +1939,20 @@ properties:
       _Added in Synapse 1.64.0._
     default:
       per_second: 1.0
-      burst_count: 10
+      burst_count: 10.0
     examples:
       - per_second: 1.0
-        burst_count: 10
+        burst_count: 10.0
   rc_3pid_validation:
     $ref: "#/$defs/rc"
     description: >-
       This option ratelimits how often a user or IP can attempt to validate a 3PID.
     default:
       per_second: 0.003
-      burst_count: 5
+      burst_count: 5.0
     examples:
       - per_second: 0.003
-        burst_count: 5
+        burst_count: 5.0
   rc_invites:
     type: object
     description: >-
@@ -1981,7 +1981,7 @@ properties:
         description: Applies to the room of the invitation.
         default:
           per_second: 0.3
-          burst_count: 10
+          burst_count: 10.0
       per_user:
         $ref: "#/$defs/rc"
         description: >-
@@ -1991,7 +1991,7 @@ properties:
           time.
         default:
           per_second: 0.003
-          burst_count: 5
+          burst_count: 5.0
       per_issuer:
         $ref: "#/$defs/rc"
         description: >-
@@ -2000,17 +2000,17 @@ properties:
           cannot *send* more than a burst of 5 invites at a time.
         default:
           per_second: 0.3
-          burst_count: 10
+          burst_count: 10.0
     examples:
       - per_room:
           per_second: 0.5
-          burst_count: 5
+          burst_count: 5.0
         per_user:
           per_second: 0.004
-          burst_count: 3
+          burst_count: 3.0
         per_issuer:
           per_second: 0.5
-          burst_count: 5
+          burst_count: 5.0
   rc_third_party_invite:
     $ref: "#/$defs/rc"
     description: >-
@@ -2019,7 +2019,7 @@ properties:
       sending the invite.
     default:
       per_second: 0.2
-      burst_count: 10
+      burst_count: 10.0
   rc_media_create:
     $ref: "#/$defs/rc"
     description: >-
@@ -2028,7 +2028,7 @@ properties:
       the media.
     default:
       per_second: 10.0
-      burst_count: 50
+      burst_count: 50.0
   rc_federation:
     type: object
     description: Defines limits on federation requests.
@@ -5434,7 +5434,7 @@ $defs:
         type: number
         description: Maximum number of requests a client can send per second.
       burst_count:
-        type: integer
+        type: number
         description: >-
           Maximum number of requests a client can send before being throttled.
   database:

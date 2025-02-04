@@ -1477,20 +1477,20 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_message:
   per_second: 0.2
-  burst_count: 10
+  burst_count: 10.0
 ```
 
 Example configuration:
 ```yaml
 rc_message:
   per_second: 0.5
-  burst_count: 15
+  burst_count: 15.0
 ```
 ---
 ### `rc_registration`
@@ -1501,20 +1501,20 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_registration:
   per_second: 0.17
-  burst_count: 3
+  burst_count: 3.0
 ```
 
 Example configuration:
 ```yaml
 rc_registration:
   per_second: 0.15
-  burst_count: 2
+  burst_count: 2.0
 ```
 ---
 ### `rc_registration_token_validity`
@@ -1525,20 +1525,20 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_registration_token_validity:
   per_second: 0.1
-  burst_count: 5
+  burst_count: 5.0
 ```
 
 Example configuration:
 ```yaml
 rc_registration_token_validity:
   per_second: 0.3
-  burst_count: 6
+  burst_count: 6.0
 ```
 ---
 ### `rc_login`
@@ -1547,42 +1547,42 @@ rc_registration_token_validity:
 
 This setting has the following sub-options:
 
-* `address` (object): Ratelimits login requests based on the client's IP address. Defaults to `{"per_second": 0.003, "burst_count": 5}`.
+* `address` (object): Ratelimits login requests based on the client's IP address. Defaults to `{"per_second": 0.003, "burst_count": 5.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
-* `account` (object): Ratelimits login requests based on the account the client is attempting to log into. Defaults to `{"per_second": 0.003, "burst_count": 5}`.
-
-  This setting has the following sub-options:
-
-  * `per_second` (number): Maximum number of requests a client can send per second.
-
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
-
-* `failed_attempts` (object): Ratelimits login requests based on the account the client is attempting to log into, based on the amount of failed login attempts for this account. Defaults to `{"per_second": 0.17, "burst_count": 3}`.
+* `account` (object): Ratelimits login requests based on the account the client is attempting to log into. Defaults to `{"per_second": 0.003, "burst_count": 5.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+* `failed_attempts` (object): Ratelimits login requests based on the account the client is attempting to log into, based on the amount of failed login attempts for this account. Defaults to `{"per_second": 0.17, "burst_count": 3.0}`.
+
+  This setting has the following sub-options:
+
+  * `per_second` (number): Maximum number of requests a client can send per second.
+
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Example configuration:
 ```yaml
 rc_login:
   address:
     per_second: 0.15
-    burst_count: 5
+    burst_count: 5.0
   account:
     per_second: 0.18
-    burst_count: 4
+    burst_count: 4.0
   failed_attempts:
     per_second: 0.19
-    burst_count: 7
+    burst_count: 7.0
 ```
 ---
 ### `rc_admin_redaction`
@@ -1593,13 +1593,13 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Example configuration:
 ```yaml
 rc_admin_redaction:
   per_second: 1.0
-  burst_count: 50
+  burst_count: 50.0
 ```
 ---
 ### `rc_joins`
@@ -1608,31 +1608,31 @@ rc_admin_redaction:
 
 This setting has the following sub-options:
 
-* `local` (object): Ratelimits when users are joining rooms the server is already in. Defaults to `{"per_second": 0.1, "burst_count": 10}`.
+* `local` (object): Ratelimits when users are joining rooms the server is already in. Defaults to `{"per_second": 0.1, "burst_count": 10.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
-* `remote` (object): Ratelimits when users are trying to join rooms not on the server (which can be more computationally expensive than restricting locally). Defaults to `{"per_second": 0.01, "burst_count": 10}`.
+* `remote` (object): Ratelimits when users are trying to join rooms not on the server (which can be more computationally expensive than restricting locally). Defaults to `{"per_second": 0.01, "burst_count": 10.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Example configuration:
 ```yaml
 rc_joins:
   local:
     per_second: 0.2
-    burst_count: 15
+    burst_count: 15.0
   remote:
     per_second: 0.03
-    burst_count: 12
+    burst_count: 12.0
 ```
 ---
 ### `rc_joins_per_room`
@@ -1645,20 +1645,20 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_joins_per_room:
   per_second: 1.0
-  burst_count: 10
+  burst_count: 10.0
 ```
 
 Example configuration:
 ```yaml
 rc_joins_per_room:
   per_second: 1.0
-  burst_count: 10
+  burst_count: 10.0
 ```
 ---
 ### `rc_3pid_validation`
@@ -1669,20 +1669,20 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_3pid_validation:
   per_second: 0.003
-  burst_count: 5
+  burst_count: 5.0
 ```
 
 Example configuration:
 ```yaml
 rc_3pid_validation:
   per_second: 0.003
-  burst_count: 5
+  burst_count: 5.0
 ```
 ---
 ### `rc_invites`
@@ -1697,42 +1697,42 @@ _Changed in version 1.63:_ added the `per_issuer` limit.
 
 This setting has the following sub-options:
 
-* `per_room` (object): Applies to the room of the invitation. Defaults to `{"per_second": 0.3, "burst_count": 10}`.
+* `per_room` (object): Applies to the room of the invitation. Defaults to `{"per_second": 0.3, "burst_count": 10.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
-* `per_user` (object): Applies to the *receiver* of the invite, rather than the sender, meaning that a `rc_invite.per_user.burst_count` of 5 mandates that a single user cannot *receive* more than a burst of 5 invites at a time. Defaults to `{"per_second": 0.003, "burst_count": 5}`.
-
-  This setting has the following sub-options:
-
-  * `per_second` (number): Maximum number of requests a client can send per second.
-
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
-
-* `per_issuer` (object): Applies to the *issuer* of the invite, meaning that a `rc_invite.per_issuer.burst_count` of 5 mandates that single user cannot *send* more than a burst of 5 invites at a time. Defaults to `{"per_second": 0.3, "burst_count": 10}`.
+* `per_user` (object): Applies to the *receiver* of the invite, rather than the sender, meaning that a `rc_invite.per_user.burst_count` of 5 mandates that a single user cannot *receive* more than a burst of 5 invites at a time. Defaults to `{"per_second": 0.003, "burst_count": 5.0}`.
 
   This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
+
+* `per_issuer` (object): Applies to the *issuer* of the invite, meaning that a `rc_invite.per_issuer.burst_count` of 5 mandates that single user cannot *send* more than a burst of 5 invites at a time. Defaults to `{"per_second": 0.3, "burst_count": 10.0}`.
+
+  This setting has the following sub-options:
+
+  * `per_second` (number): Maximum number of requests a client can send per second.
+
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Example configuration:
 ```yaml
 rc_invites:
   per_room:
     per_second: 0.5
-    burst_count: 5
+    burst_count: 5.0
   per_user:
     per_second: 0.004
-    burst_count: 3
+    burst_count: 3.0
   per_issuer:
     per_second: 0.5
-    burst_count: 5
+    burst_count: 5.0
 ```
 ---
 ### `rc_third_party_invite`
@@ -1743,13 +1743,13 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_third_party_invite:
   per_second: 0.2
-  burst_count: 10
+  burst_count: 10.0
 ```
 ---
 ### `rc_media_create`
@@ -1760,13 +1760,13 @@ This setting has the following sub-options:
 
 * `per_second` (number): Maximum number of requests a client can send per second.
 
-* `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+* `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_media_create:
   per_second: 10.0
-  burst_count: 50
+  burst_count: 50.0
 ```
 ---
 ### `rc_federation`
@@ -1810,14 +1810,14 @@ This setting has the following sub-options:
 
   * `per_second` (number): Maximum number of requests a client can send per second.
 
-  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+  * `burst_count` (number): Maximum number of requests a client can send before being throttled.
 
 Default configuration:
 ```yaml
 rc_presence:
   per_user:
     per_second: 0.1
-    burst_count: 1
+    burst_count: 1.0
 ```
 
 Example configuration:
