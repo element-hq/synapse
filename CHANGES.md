@@ -1,3 +1,10 @@
+# Synapse 1.123.0 (2025-01-28)
+
+No significant changes since 1.123.0rc1.
+
+
+
+
 # Synapse 1.123.0rc1 (2025-01-21)
 
 ### Features
