@@ -5417,7 +5417,7 @@ $defs:
     type: ["string", "integer"]
     io.element.type_name: byte size
   duration:
-    type: string
+    type: ["string", "integer"]
     io.element.type_name: duration
   size:
     type: ["string", "integer"]
