@@ -396,8 +396,12 @@
         },
         "enable_tls": {
           "type": "boolean",
-          "description": "By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `smtp_host`. If this option is set to false, TLS will not be used.",
+          "description": "By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `tlsname`. If this option is set to false, TLS will not be used.",
           "default": true
+        },
+        "tlsname": {
+          "type": "string",
+          "description": "The domain name the SMTP server's TLS certificate must be valid for, defaulting to `smtp_host`."
         },
         "notif_from": {
           "type": ["string", "null"],
@@ -505,6 +509,7 @@
           "force_tls": true,
           "require_transport_security": true,
           "enable_tls": false,
+          "tlsname": "mail.server.example.com",
           "notif_from": "Your Friendly %(app)s homeserver <noreply@example.com>",
           "app_name": "my_branded_matrix_server",
           "enable_notifs": true,
@@ -1225,6 +1230,18 @@
         }
       ]
     },
+    "rc_presence": {
+      "type": "object",
+      "description": "This option sets ratelimiting for presence.",
+      "properties": {
+        "per_user": {
+          "$ref": "#/$defs/rc",
+          "description": "Sets rate limits on how often a specific users' presence updates are evaluated. Ratelimited presence updates sent via sync are ignored, and no error is returned to the client. This option also sets the rate limit for the [`PUT /_matrix/client/v3/presence/{userId}/status`] endpoint.\n\n[`PUT /_matrix/client/v3/presence/{userId}/status`]:\n  <https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus>"
+        }
+      },
+      "default": {"per_user": {"per_second": 0.1, "burst_count": 1}},
+      "examples": [{"per_user": {"per_second": 0.05, "burst_count": 0.5}}]
+    },
     "federation_rr_transactions_per_room_per_second": {
       "type": "integer",
       "description": "Sets outgoing federation transaction frequency for sending read-receipts, per-room.\n\nIf we end up trying to send out more read-receipts, they will get buffered up into fewer transactions.",
@@ -1882,6 +1899,12 @@
       "description": "A secret which is used to sign\n- access token for guest users,\n- short-term login token used during SSO logins (OIDC or SAML2) and\n- token used for unsubscribing from email notifications.\n\nIf none is specified, the `registration_shared_secret` is used, if one is given; otherwise, a secret key is derived from the signing key.",
       "default": null,
       "examples": ["<PRIVATE STRING>"]
+    },
+    "macaroon_secret_key_path": {
+      "type": ["string", "null"],
+      "description": "An alternative to [`macaroon_secret_key`](#macaroon_secret_key): allows the secret key to be specified in an external file.\n\nThe file should be a plain text file, containing only the secret key. Synapse reads the secret key from the given file once at startup.\n\n_Added in Synapse 1.121.0._",
+      "default": null,
+      "examples": ["/path/to/secrets/file"]
     },
     "form_secret": {
       "type": ["string", "null"],
@@ -2909,7 +2932,8 @@
       "examples": [
         {
           "main": {"host": "localhost", "port": 8030},
-          "worker1": {"host": "localhost", "port": 8034}
+          "worker1": {"host": "localhost", "port": 8034},
+          "other": {"host": "localhost", "port": 8035, "tls": true}
         },
         {
           "main": {"path": "/run/synapse/main_replication.sock"},

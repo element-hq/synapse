@@ -509,6 +509,9 @@ class FederationV2InviteServlet(BaseFederationServerServlet):
         event = content["event"]
         invite_room_state = content.get("invite_room_state", [])
 
+        if not isinstance(invite_room_state, list):
+            invite_room_state = []
+
         # Synapse expects invite_room_state to be in unsigned, as it is in v1
         # API
 

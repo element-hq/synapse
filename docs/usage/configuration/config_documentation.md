@@ -607,7 +607,9 @@ This setting has the following sub-options:
 
 * `require_transport_security` (boolean): Set to true to require TLS transport security for SMTP. By default, Synapse will connect over plain text, and will then switch to TLS via STARTTLS *if the SMTP server supports it*. If this option is set, Synapse will refuse to connect unless the server supports STARTTLS. Defaults to `false`.
 
-* `enable_tls` (boolean): By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `smtp_host`. If this option is set to false, TLS will not be used. Defaults to `true`.
+* `enable_tls` (boolean): By default, if the server supports TLS, it will be used, and the server must present a certificate that is valid for `tlsname`. If this option is set to false, TLS will not be used. Defaults to `true`.
+
+* `tlsname` (string): The domain name the SMTP server's TLS certificate must be valid for, defaulting to `smtp_host`.
 
 * `notif_from` (string|null): Defines the "From" address to use when sending emails. It must be set if email sending is enabled. The placeholder `%(app)s` will be replaced by the application name, which is normally set in `app_name`, but may be overridden by the Matrix client application. Note that the placeholder must be written `%(app)s`, including the trailing 's'. Defaults to `null`.
 
@@ -663,6 +665,7 @@ email:
   force_tls: true
   require_transport_security: true
   enable_tls: false
+  tlsname: mail.server.example.com
   notif_from: Your Friendly %(app)s homeserver <noreply@example.com>
   app_name: my_branded_matrix_server
   enable_notifs: true
@@ -1792,6 +1795,39 @@ rc_federation:
   concurrent: 5
 ```
 ---
+### `rc_presence`
+
+*(object)* This option sets ratelimiting for presence.
+
+This setting has the following sub-options:
+
+* `per_user` (object): Sets rate limits on how often a specific users' presence updates are evaluated. Ratelimited presence updates sent via sync are ignored, and no error is returned to the client. This option also sets the rate limit for the [`PUT /_matrix/client/v3/presence/{userId}/status`] endpoint.
+
+  [`PUT /_matrix/client/v3/presence/{userId}/status`]:
+    <https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3presenceuseridstatus>
+
+  This setting has the following sub-options:
+
+  * `per_second` (number): Maximum number of requests a client can send per second.
+
+  * `burst_count` (integer): Maximum number of requests a client can send before being throttled.
+
+Default configuration:
+```yaml
+rc_presence:
+  per_user:
+    per_second: 0.1
+    burst_count: 1
+```
+
+Example configuration:
+```yaml
+rc_presence:
+  per_user:
+    per_second: 0.05
+    burst_count: 0.5
+```
+---
 ### `federation_rr_transactions_per_room_per_second`
 
 *(integer)* Sets outgoing federation transaction frequency for sending read-receipts, per-room.
@@ -2893,6 +2929,21 @@ Example configuration:
 macaroon_secret_key: <PRIVATE STRING>
 ```
 ---
+### `macaroon_secret_key_path`
+
+*(string|null)* An alternative to [`macaroon_secret_key`](#macaroon_secret_key): allows the secret key to be specified in an external file.
+
+The file should be a plain text file, containing only the secret key. Synapse reads the secret key from the given file once at startup.
+
+_Added in Synapse 1.121.0._
+
+Defaults to `null`.
+
+Example configuration:
+```yaml
+macaroon_secret_key_path: /path/to/secrets/file
+```
+---
 ### `form_secret`
 
 *(string|null)* A secret which is used to calculate HMACs for form values, to stop falsification of values. Must be specified for the User Consent forms to work. Defaults to `null`.
@@ -3986,6 +4037,10 @@ instance_map:
   worker1:
     host: localhost
     port: 8034
+  other:
+    host: localhost
+    port: 8035
+    tls: true
 ```
 
 ```yaml
