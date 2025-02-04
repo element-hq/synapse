@@ -391,7 +391,7 @@ class HomeServer(metaclass=abc.ABCMeta):
     def is_mine(self, domain_specific_string: DomainSpecificString) -> bool:
         return domain_specific_string.domain == self.hostname
 
-    def is_mine_id(self, string: str) -> bool:
+    def is_mine_id(self, user_id: str) -> bool:
         """Determines whether a user ID or room alias originates from this homeserver.
 
         Returns:
@@ -399,7 +399,7 @@ class HomeServer(metaclass=abc.ABCMeta):
             homeserver.
             `False` otherwise, or if the user ID or room alias is malformed.
         """
-        localpart_hostname = string.split(":", 1)
+        localpart_hostname = user_id.split(":", 1)
         if len(localpart_hostname) < 2:
             return False
         return localpart_hostname[1] == self.hostname

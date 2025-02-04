@@ -1169,12 +1169,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
             self.persistence.persist_event(join_rule_event, join_rule_context)
         )
 
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
-        )
-
         # Ensure that the state reset worked and only user2 is in the room now
         users_in_room = self.get_success(self.store.get_users_in_room(room_id1))
         self.assertIncludes(set(users_in_room), {user2_id}, exact=True)
@@ -1320,12 +1314,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
         _, join_rule_event_pos, _ = self.get_success(
             self.persistence.persist_event(join_rule_event, join_rule_context)
-        )
-
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
         )
 
         # Ensure that the state reset worked and only user2 is in the room now
@@ -1504,12 +1492,6 @@ class SlidingSyncTestCase(SlidingSyncBase):
         )
         _, join_rule_event_pos, _ = self.get_success(
             self.persistence.persist_event(join_rule_event, join_rule_context)
-        )
-
-        # FIXME: We're manually busting the cache since
-        # https://github.com/element-hq/synapse/issues/17368 is not solved yet
-        self.store._membership_stream_cache.entity_has_changed(
-            user1_id, join_rule_event_pos.stream
         )
 
         # Ensure that the state reset worked and only user2 is in the room now
