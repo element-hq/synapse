@@ -35,7 +35,10 @@ jobs:
           python-version: "3.x"
 
       - name: Regenerate config documentation
-        run: scripts-dev/gen_config_documentation.py schema/synapse-config.schema.json > docs/usage/configuration/config_documentation.md
+        run: |
+          scripts-dev/gen_config_documentation.py \
+            schema/synapse-config.schema.yaml \
+          > docs/usage/configuration/config_documentation.md
       - name: Log any differences
         run: git diff
       - name: Error in case of any differences

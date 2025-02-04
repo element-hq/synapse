@@ -474,7 +474,7 @@ def main() -> None:
         if not (filepath := (sys.argv[1:] or [""])[0]):
             exit(usage("No schema file provided."))
         with open(filepath) as f:
-            return json.load(f)
+            return yaml.safe_load(f)
 
     schema = read_json_file_arg()
     schema = resolve_local_refs(schema)
