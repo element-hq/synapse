@@ -19,6 +19,7 @@
 #
 #
 
+import functools
 import inspect
 import logging
 from typing import (
@@ -297,6 +298,7 @@ def load_legacy_spam_checkers(hs: "synapse.server.HomeServer") -> None:
                         "Bad signature for callback check_registration_for_spam",
                     )
 
+            @functools.wraps(wrapped_func)
             def run(*args: Any, **kwargs: Any) -> Awaitable:
                 # Assertion required because mypy can't prove we won't change `f`
                 # back to `None`. See
