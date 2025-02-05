@@ -34,9 +34,16 @@ These are mutually incompatible.
 class VoipConfig(Config):
     section = "voip"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         self.turn_uris = config.get("turn_uris", [])
         self.turn_shared_secret = config.get("turn_shared_secret")
+        if self.turn_shared_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("turn_shared_secret",),
+            )
         turn_shared_secret_path = config.get("turn_shared_secret_path")
         if turn_shared_secret_path:
             if self.turn_shared_secret:
