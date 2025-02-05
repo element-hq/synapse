@@ -1,3 +1,12 @@
+# Synapse 1.124.0rc2 (2025-02-05)
+
+### Bugfixes
+
+- Fix regression where persisting events in some rooms could fail after a previous unclean shutdown. Introduced in v1.124.0rc1. ([\#18137](https://github.com/element-hq/synapse/issues/18137))
+
+
+
+
 # Synapse 1.124.0rc1 (2025-02-04)
 
 ### Bugfixes
