@@ -1,1 +1,0 @@
-Fix rare race where on upgrade to v1.22.0 a long running database upgrade could lock out new events from being received or sent.
