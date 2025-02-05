@@ -95,8 +95,18 @@ class StateDeletionDataStore:
         self.db_pool = database
         self._instance_name = hs.get_instance_name()
 
-        # TODO: Clear from `state_groups_persisting` any holdovers from previous
-        # running instance.
+        with db_conn.cursor(txn_name="_clear_existing_persising") as txn:
+            self._clear_existing_persising(txn)
+
+    def _clear_existing_persising(self, txn: LoggingTransaction) -> None:
+        """On startup we clear any entries in `state_groups_persisting` that
+        match our instance name, in case of a previous unclean shutdown"""
+
+        self.db_pool.simple_delete_txn(
+            txn,
+            table="state_groups_persisting",
+            keyvalues={"instance_name": self._instance_name},
+        )
 
     async def check_state_groups_and_bump_deletion(
         self, state_groups: AbstractSet[int]
