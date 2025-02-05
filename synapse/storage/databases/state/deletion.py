@@ -95,7 +95,7 @@ class StateDeletionDataStore:
         self.db_pool = database
         self._instance_name = hs.get_instance_name()
 
-        with db_conn.cursor(txn_name="resolve_sliding_sync") as txn:
+        with db_conn.cursor(txn_name="_clear_existing_persising") as txn:
             self._clear_existing_persising(txn)
 
     def _clear_existing_persising(self, txn: LoggingTransaction) -> None:
