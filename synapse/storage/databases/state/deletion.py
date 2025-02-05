@@ -100,7 +100,7 @@ class StateDeletionDataStore:
 
     def _clear_existing_persising(self, txn: LoggingTransaction) -> None:
         """On startup we clear any entries in `state_groups_persisting` that
-        much our instance name, in case of a previous unclean shutdown"""
+        match our instance name, in case of a previous unclean shutdown"""
 
         self.db_pool.simple_delete_txn(
             txn,
