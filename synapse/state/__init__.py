@@ -359,6 +359,28 @@ class StateHandler:
                 await_full_state=False,
             )
 
+            # Ensure we still have the state groups we're relying on, and bump
+            # their usage time to avoid them being deleted from under us.
+            if entry.state_group:
+                missing_state_group = await self._state_deletion_store.check_state_groups_and_bump_deletion(
+                    {entry.state_group}
+                )
+                if missing_state_group:
+                    raise Exception(f"Missing state group: {entry.state_group}")
+            elif entry.prev_group:
+                # We only rely on the prev group when persisting the event if we
+                # don't have an `entry.state_group`.
+                missing_state_group = await self._state_deletion_store.check_state_groups_and_bump_deletion(
+                    {entry.prev_group}
+                )
+
+                if missing_state_group:
+                    # If we're missing the prev group then we can just clear the
+                    # entries, and rely on `entry._state` (which must exist if
+                    # `entry.state_group` is None)
+                    entry.prev_group = None
+                    entry.delta_ids = None
+
             state_group_before_event_prev_group = entry.prev_group
             deltas_to_state_group_before_event = entry.delta_ids
             state_ids_before_event = None
@@ -518,16 +540,6 @@ class StateHandler:
             ) = await self._state_storage_controller.get_state_group_delta(
                 state_group_id
             )
-
-            if prev_group:
-                # Ensure that we still have the prev group, and ensure we don't
-                # delete it while we're persisting the event.
-                missing_state_group = await self._state_deletion_store.check_state_groups_and_bump_deletion(
-                    {prev_group}
-                )
-                if missing_state_group:
-                    prev_group = None
-                    delta_ids = None
 
             return _StateCacheEntry(
                 state=None,

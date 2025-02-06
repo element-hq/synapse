@@ -123,12 +123,28 @@ class StateDeletionDataStore:
             "check_state_groups_and_bump_deletion",
             self._check_state_groups_and_bump_deletion_txn,
             state_groups,
+            # We don't need to lock if we're just doing a quick check, as the
+            # lock doesn't prevent any races here.
+            lock=False,
         )
 
     def _check_state_groups_and_bump_deletion_txn(
-        self, txn: LoggingTransaction, state_groups: AbstractSet[int]
+        self, txn: LoggingTransaction, state_groups: AbstractSet[int], lock: bool = True
     ) -> Collection[int]:
-        existing_state_groups = self._get_existing_groups_with_lock(txn, state_groups)
+        """Checks to make sure that the state groups haven't been deleted, and
+        if they're pending deletion we delay it (allowing time for any event
+        that will use them to finish persisting).
+
+        The `lock` flag sets if we should lock the `state_group` rows we're
+        checking, which we should do when storing new groups.
+
+        Returns:
+            The state groups that are missing, if any.
+        """
+
+        existing_state_groups = self._get_existing_groups_with_lock(
+            txn, state_groups, lock=lock
+        )
 
         self._bump_deletion_txn(txn, existing_state_groups)
 
@@ -188,18 +204,18 @@ class StateDeletionDataStore:
             )
 
     def _get_existing_groups_with_lock(
-        self, txn: LoggingTransaction, state_groups: Collection[int]
+        self, txn: LoggingTransaction, state_groups: Collection[int], lock: bool = True
     ) -> AbstractSet[int]:
         """Return which of the given state groups are in the database, and locks
         those rows with `KEY SHARE` to ensure they don't get concurrently
-        deleted."""
+        deleted (if `lock` is true)."""
         clause, args = make_in_list_sql_clause(self.db_pool.engine, "id", state_groups)
 
         sql = f"""
             SELECT id FROM state_groups
             WHERE {clause}
         """
-        if isinstance(self.db_pool.engine, PostgresEngine):
+        if lock and isinstance(self.db_pool.engine, PostgresEngine):
             # On postgres we add a row level lock to the rows to ensure that we
             # conflict with any concurrent DELETEs. `FOR KEY SHARE` lock will
             # not conflict with other read
