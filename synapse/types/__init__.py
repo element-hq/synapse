@@ -664,6 +664,12 @@ class RoomStreamToken(AbstractMultiWriterStreamToken):
 
     @classmethod
     async def parse(cls, store: "PurgeEventsStore", string: str) -> "RoomStreamToken":
+        # Check it looks like a Synapse token first. We do this so that
+        # we don't log exceptions for obviously incorrect tokens.
+        if not string or string[0] not in ("s", "t", "m"):
+            logger.warning("Invalid token %r", string)
+            raise SynapseError(400, f"Invalid room stream token {string:!r}")
+
         try:
             if string[0] == "s":
                 return cls(topological=None, stream=int(string[1:]))
