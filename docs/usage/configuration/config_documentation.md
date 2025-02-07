@@ -1873,8 +1873,8 @@ Ratelimiting settings for delayed event management.
 
 This is a ratelimiting option that ratelimits
 attempts to restart, cancel, or view delayed events
-based on the account the client is using.
-It defaults to: `per_second: 10`, `burst_count: 100`.
+based on the sending client's account and device ID.
+It defaults to: `per_second: 1`, `burst_count: 5`.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
@@ -1886,8 +1886,8 @@ without the risk of being ratelimited.
 Example configuration:
 ```yaml
 rc_delayed_event:
-  per_second: 5
-  burst_count: 50
+  per_second: 2
+  burst_count: 20
 ```
 ---
 ### `federation_rr_transactions_per_room_per_second`
