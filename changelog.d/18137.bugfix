@@ -1,1 +1,0 @@
-Fix regression where persisting events in some rooms could fail after a previous unclean shutdown. Introduced in v1.124.0rc1.
