@@ -19,6 +19,7 @@ from twisted.internet.interfaces import IDelayedCall
 
 from synapse.api.constants import EventTypes
 from synapse.api.errors import ShadowBanError
+from synapse.api.ratelimiting import Ratelimiter
 from synapse.config.workers import MAIN_PROCESS_INSTANCE_NAME
 from synapse.logging.opentracing import set_tag
 from synapse.metrics import event_processing_positions
