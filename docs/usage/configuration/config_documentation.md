@@ -1878,6 +1878,11 @@ It defaults to: `per_second: 10`, `burst_count: 100`.
 
 Attempts to create or send delayed events are ratelimited not by this setting, but by `rc_message`.
 
+Setting this to a high value allows clients to make delayed event management requests often
+(such as repeatedly restarting a delayed event with a short timeout,
+or restarting several different delayed events all at once)
+without the risk of being ratelimited.
+
 Example configuration:
 ```yaml
 rc_delayed_event:
