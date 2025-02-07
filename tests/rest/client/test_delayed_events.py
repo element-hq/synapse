@@ -109,7 +109,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @unittest.override_config({"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}})
+    @unittest.override_config(
+        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+    )
     def test_get_delayed_events_ratelimit(self) -> None:
         args = ("GET", PATH_PREFIX)
 
@@ -225,7 +227,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
             expect_code=HTTPStatus.NOT_FOUND,
         )
 
-    @unittest.override_config({"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}})
+    @unittest.override_config(
+        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+    )
     def test_cancel_delayed_event_ratelimit(self) -> None:
         delay_ids = []
         for _ in range(2):
@@ -404,7 +408,9 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @unittest.override_config({"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}})
+    @unittest.override_config(
+        {"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}}
+    )
     def test_restart_delayed_event_ratelimit(self) -> None:
         delay_ids = []
         for _ in range(2):
@@ -508,7 +514,6 @@ def _get_path_for_delayed_state(
 ) -> str:
     return f"rooms/{room_id}/state/{event_type}/{state_key}?org.matrix.msc4140.delay={delay_ms}"
 
-def _get_path_for_delayed_send(
-    room_id: str, event_type: str, delay_ms: int
-) -> str:
+
+def _get_path_for_delayed_send(room_id: str, event_type: str, delay_ms: int) -> str:
     return f"rooms/{room_id}/send/{event_type}?org.matrix.msc4140.delay={delay_ms}"

@@ -2382,10 +2382,12 @@ class RoomDelayedEventTestCase(RoomBase):
         )
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
 
-    @unittest.override_config({
-        "max_event_delay_duration": "24h",
-        "rc_message": {"per_second": 1, "burst_count": 2},
-    })
+    @unittest.override_config(
+        {
+            "max_event_delay_duration": "24h",
+            "rc_message": {"per_second": 1, "burst_count": 2},
+        }
+    )
     def test_add_delayed_event_ratelimit(self) -> None:
         """Test that requests to schedule new delayed events are ratelimited by a RateLimiter,
         which ratelimits them correctly, including by not limiting when the requester is
@@ -2414,7 +2416,6 @@ class RoomDelayedEventTestCase(RoomBase):
         # Test that the new delayed events aren't ratelimited anymore.
         channel = self.make_request(*args)
         self.assertEqual(HTTPStatus.OK, channel.code, channel.result)
-
 
 
 class RoomSearchTestCase(unittest.HomeserverTestCase):

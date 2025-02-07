@@ -299,7 +299,8 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._delayed_event_ratelimiter.ratelimit(
-            requester, (requester.user.to_string(), requester.device_id),
+            requester,
+            (requester.user.to_string(), requester.device_id),
         )
         await self._initialized_from_db
 
@@ -324,7 +325,8 @@ class DelayedEventsHandler:
         """
         assert self._is_master
         await self._delayed_event_ratelimiter.ratelimit(
-            requester, (requester.user.to_string(), requester.device_id),
+            requester,
+            (requester.user.to_string(), requester.device_id),
         )
         await self._initialized_from_db
 
@@ -435,7 +437,8 @@ class DelayedEventsHandler:
     async def get_all_for_user(self, requester: Requester) -> List[JsonDict]:
         """Return all pending delayed events requested by the given user."""
         await self._delayed_event_ratelimiter.ratelimit(
-            requester, (requester.user.to_string(), requester.device_id),
+            requester,
+            (requester.user.to_string(), requester.device_id),
         )
         return await self._store.get_all_delayed_events_for_user(
             requester.user.localpart
