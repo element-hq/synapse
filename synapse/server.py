@@ -936,14 +936,6 @@ class HomeServer(metaclass=abc.ABCMeta):
         )
 
     @cache_in_self
-    def get_delayed_event_ratelimiter(self) -> Ratelimiter:
-        return Ratelimiter(
-            store=self.get_datastores().main,
-            clock=self.get_clock(),
-            cfg=self.config.ratelimiting.rc_delayed_event,
-        )
-
-    @cache_in_self
     def get_common_usage_metrics_manager(self) -> CommonUsageMetricsManager:
         """Usage metrics shared between phone home stats and the prometheus exporter."""
         return CommonUsageMetricsManager(self)

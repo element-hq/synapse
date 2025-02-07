@@ -57,10 +57,18 @@ class DelayedEventsHandler:
         self._storage_controllers = hs.get_storage_controllers()
         self._config = hs.config
         self._clock = hs.get_clock()
-        self._request_ratelimiter = hs.get_request_ratelimiter()
-        self._delayed_event_ratelimiter = hs.get_delayed_event_ratelimiter()
         self._event_creation_handler = hs.get_event_creation_handler()
         self._room_member_handler = hs.get_room_member_handler()
+
+        self._request_ratelimiter = hs.get_request_ratelimiter()
+
+        # Ratelimiter for management of existing delayed events,
+        # keyed by the sending user ID.
+        self._delayed_event_ratelimiter = Ratelimiter(
+            store=self.get_datastores().main,
+            clock=self.get_clock(),
+            cfg=self.config.ratelimiting.rc_delayed_event,
+        )
 
         self._next_delayed_event_call: Optional[IDelayedCall] = None
 
