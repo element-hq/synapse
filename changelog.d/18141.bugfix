@@ -1,1 +1,0 @@
-Fix regression in performance of sending events due to superfluous reads and locks. Introduced in v1.124.0rc1.
