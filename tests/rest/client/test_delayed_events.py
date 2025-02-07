@@ -311,7 +311,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
         )
         self.assertEqual(setter_expected, content.get(setter_key), content)
 
-    @unittest.override_config({"rc_message": {"per_second": 3, "burst_count": 4}})
+    @unittest.override_config({"rc_message": {"per_second": 3.5, "burst_count": 4}})
     def test_send_delayed_event_ratelimit(self) -> None:
         delay_ids = []
         for _ in range(2):
