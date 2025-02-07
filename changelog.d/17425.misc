@@ -1,0 +1,1 @@
+Fix Docker image not building locally in some Windows environments.
