@@ -1,0 +1,1 @@
+Fix user directory search when using a legacy module with a `check_username_for_spam` callback. Broke in v1.122.0.

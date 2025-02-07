@@ -40,6 +40,7 @@ It returns a JSON body like the following:
     "erased": false,
     "shadow_banned": 0,
     "creation_ts": 1560432506,
+    "last_seen_ts": 1732919539393,
     "appservice_id": null,
     "consent_server_notice_sent": null,
     "consent_version": null,
@@ -477,9 +478,9 @@ with a body of:
 }
 ```
 
-## List room memberships of a user
+## List joined rooms of a user
 
-Gets a list of all `room_id` that a specific `user_id` is member.
+Gets a list of all `room_id` that a specific `user_id` is joined to and is a member of (participating in).
 
 The API is:
 
@@ -515,6 +516,73 @@ The following fields are returned in the JSON response body:
 
 - `joined_rooms` - An array of `room_id`.
 - `total` - Number of rooms.
+
+## Get the number of invites sent by the user
+
+Fetches the number of invites sent by the provided user ID across all rooms
+after the given timestamp.
+
+```
+GET /_synapse/admin/v1/users/$user_id/sent_invite_count
+```
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+* `user_id`: fully qualified: for example, `@user:server.com`
+
+The following should be set as query parameters in the URL:
+
+* `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
+   invites sent at or after the provided timestamp will be returned.
+   This works by comparing the provided timestamp to the `received_ts`
+   column in the `events` table.
+   Note: https://currentmillis.com/ is a useful tool for converting dates
+   into timestamps and vice versa.
+
+A response body like the following is returned:
+
+```json
+{
+  "invite_count": 30
+}
+```
+
+_Added in Synapse 1.122.0_
+
+## Get the cumulative number of rooms a user has joined after a given timestamp
+
+Fetches the number of rooms that the user joined after the given timestamp, even
+if they have subsequently left/been banned from those rooms.
+
+```
+GET /_synapse/admin/v1/users/$<user_id/cumulative_joined_room_count
+```
+
+**Parameters**
+
+The following parameters should be set in the URL:
+
+* `user_id`: fully qualified: for example, `@user:server.com`
+
+The following should be set as query parameters in the URL:
+
+* `from_ts`: int, required. A timestamp in ms from the unix epoch. Only
+   invites sent at or after the provided timestamp will be returned.
+   This works by comparing the provided timestamp to the `received_ts`
+   column in the `events` table.
+   Note: https://currentmillis.com/ is a useful tool for converting dates
+   into timestamps and vice versa.
+
+A response body like the following is returned:
+
+```json
+{
+  "cumulative_joined_room_count": 30
+}
+```
+_Added in Synapse 1.122.0_
 
 ## Account Data
 Gets information about account data for a specific `user_id`.
@@ -1445,3 +1513,5 @@ The following fields are returned in the JSON response body:
   the corresponding error that caused the redaction to fail
 
 _Added in Synapse 1.116.0._
+
+

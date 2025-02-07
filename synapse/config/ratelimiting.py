@@ -229,6 +229,12 @@ class RatelimitConfig(Config):
             ),
         )
 
+        self.rc_presence_per_user = RatelimitSettings.parse(
+            config,
+            "rc_presence.per_user",
+            defaults={"per_second": 0.1, "burst_count": 1},
+        )
+
         self.rc_delayed_event = RatelimitSettings.parse(
             config,
             "rc_delayed_event",

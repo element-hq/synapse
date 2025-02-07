@@ -275,6 +275,7 @@ class Ratelimiter:
         update: bool = True,
         n_actions: int = 1,
         _time_now_s: Optional[float] = None,
+        pause: Optional[float] = 0.5,
     ) -> None:
         """Checks if an action can be performed. If not, raises a LimitExceededError
 
@@ -298,6 +299,8 @@ class Ratelimiter:
                 at all.
             _time_now_s: The current time. Optional, defaults to the current time according
                 to self.clock. Only used by tests.
+            pause: Time in seconds to pause when an action is being limited. Defaults to 0.5
+                to stop clients from "tight-looping" on retrying their request.
 
         Raises:
             LimitExceededError: If an action could not be performed, along with the time in
@@ -316,9 +319,8 @@ class Ratelimiter:
         )
 
         if not allowed:
-            # We pause for a bit here to stop clients from "tight-looping" on
-            # retrying their request.
-            await self.clock.sleep(0.5)
+            if pause:
+                await self.clock.sleep(pause)
 
             raise LimitExceededError(
                 limiter_name=self._limiter_name,
