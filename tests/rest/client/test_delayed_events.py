@@ -228,7 +228,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
     @unittest.override_config({"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}})
     def test_cancel_delayed_event_ratelimit(self) -> None:
         delay_ids = []
-        for i in range(2):
+        for _ in range(2):
             channel = self.make_request(
                 "POST",
                 _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
@@ -310,7 +310,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
     @unittest.override_config({"rc_message": {"per_second": 3, "burst_count": 4}})
     def test_send_delayed_event_ratelimit(self) -> None:
         delay_ids = []
-        for i in range(2):
+        for _ in range(2):
             channel = self.make_request(
                 "POST",
                 _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
@@ -407,7 +407,7 @@ class DelayedEventsTestCase(HomeserverTestCase):
     @unittest.override_config({"rc_delayed_event": {"per_second": 0.5, "burst_count": 1}})
     def test_restart_delayed_event_ratelimit(self) -> None:
         delay_ids = []
-        for i in range(2):
+        for _ in range(2):
             channel = self.make_request(
                 "POST",
                 _get_path_for_delayed_send(self.room_id, _EVENT_TYPE, 100000),
