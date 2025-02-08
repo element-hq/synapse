@@ -43,7 +43,9 @@ You have configured both `registration_shared_secret` and
 class RegistrationConfig(Config):
     section = "registration"
 
-    def read_config(self, config: JsonDict, **kwargs: Any) -> None:
+    def read_config(
+        self, config: JsonDict, allow_secrets_in_config: bool, **kwargs: Any
+    ) -> None:
         self.enable_registration = strtobool(
             str(config.get("enable_registration", False))
         )
@@ -68,6 +70,11 @@ class RegistrationConfig(Config):
 
         # read the shared secret, either inline or from an external file
         self.registration_shared_secret = config.get("registration_shared_secret")
+        if self.registration_shared_secret and not allow_secrets_in_config:
+            raise ConfigError(
+                "Config options that expect an in-line secret as value are disabled",
+                ("registration_shared_secret",),
+            )
         registration_shared_secret_path = config.get("registration_shared_secret_path")
         if registration_shared_secret_path:
             if self.registration_shared_secret:
