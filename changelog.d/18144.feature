@@ -1,0 +1,1 @@
+Introduced the get_current_time method in ModuleApi to provide the current server time in milliseconds, as wrapper around self.module_api._clock.time_msec() to avoid accessing private variables
